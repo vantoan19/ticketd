@@ -67,21 +67,24 @@ impl Workspace {
             path: path.to_owned(),
             paths: vec![path.to_owned()],
         };
-        self.connection.execute(
+        let tx = self.connection.transaction()?;
+        tx.execute(
             "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
             params![project.id, project.name, project.path],
         )?;
-        self.connection.execute(
+        tx.execute(
             "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
             params![project.id, project.path],
         )?;
+        tx.commit()?;
         Ok(project)
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
         let old = self.show_project(id)?;
-        if self.connection.execute(
+        let tx = self.connection.transaction()?;
+        if tx.execute(
             "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
             params![name, path, id],
         )? == 0
@@ -89,15 +92,16 @@ impl Workspace {
             return Err(Error::ProjectNotFound(id.to_owned()));
         }
         if old.path != path {
-            self.connection.execute(
+            tx.execute(
                 "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
                 params![id, old.path],
             )?;
-            self.connection.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
                 params![id, path],
             )?;
         }
+        tx.commit()?;
         self.show_project(id)
     }
 
