@@ -1,4 +1,5 @@
 import { Hierarchy } from "./Hierarchy";
+import { Projects, TicketProject } from "./Projects";
 import { Dependencies } from "./Dependencies";
 import { Notes } from "./Notes";
 import {
@@ -9,11 +10,13 @@ import {
   type FormEvent,
 } from "react";
 import { History } from "./History";
-import { client, type Ticket } from "./client";
+import { client, type Project, type Ticket } from "./client";
 import { Tags } from "./Tags";
 import { TicketEditor } from "./TicketEditor";
 
 export function App() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [filter, setFilter] = useState("all");
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -30,7 +33,7 @@ export function App() {
     let timeout = 0;
     try {
       const result = await Promise.race([
-        client.listTickets(),
+        Promise.all([client.listTickets(), client.listProjects()]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
             () => reject(new Error("Timed out")),
@@ -39,7 +42,8 @@ export function App() {
         }),
       ]);
       if (request !== generation.current) return;
-      setTickets(result);
+      setTickets(result[0]);
+      setProjects(result[1]);
       setRevision((value) => value + 1);
       setError("");
     } catch (reason) {
@@ -67,7 +71,10 @@ export function App() {
     event.preventDefault();
     setSaving(true);
     try {
-      const ticket = await client.createTicket(title);
+      const ticket = await client.createTicket(
+        title,
+        filter === "all" || filter === "unlinked" ? null : filter,
+      );
       setTitle("");
       await refresh();
       setSelected(ticket.id);
@@ -118,6 +125,12 @@ export function App() {
           {error}
         </p>
       )}
+      <Projects
+        projects={projects}
+        filter={filter}
+        onFilter={setFilter}
+        onChange={refresh}
+      />
       <div className="grid gap-6 md:grid-cols-2">
         <section aria-labelledby="tickets-heading">
           <h2 id="tickets-heading" className="text-xl font-semibold">
@@ -131,30 +144,38 @@ export function App() {
             <p className="mt-3">No tickets yet.</p>
           ) : (
             <ul className="mt-3 divide-y divide-neutral-200">
-              {tickets.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(item.id)}
-                    aria-pressed={item.id === selected}
-                    className="w-full rounded p-3 text-left hover:bg-neutral-100 aria-pressed:bg-neutral-200"
-                  >
-                    <span className="mr-3 text-neutral-600">
-                      {item.reference}
-                    </span>
-                    {item.title}{" "}
-                    {item.parent && (
-                      <span> · Parent: {item.parent.reference}</span>
-                    )}
-                    {item.availability && <span> · {item.availability}</span>}
-                    {item.tags.length > 0 && (
-                      <span className="ml-2 text-sm text-neutral-600">
-                        {item.tags.join(", ")}
+              {tickets
+                .filter(
+                  (item) =>
+                    filter === "all" ||
+                    (filter === "unlinked"
+                      ? item.project_id === null
+                      : item.project_id === filter),
+                )
+                .map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelected(item.id)}
+                      aria-pressed={item.id === selected}
+                      className="w-full rounded p-3 text-left hover:bg-neutral-100 aria-pressed:bg-neutral-200"
+                    >
+                      <span className="mr-3 text-neutral-600">
+                        {item.reference}
                       </span>
-                    )}
-                  </button>
-                </li>
-              ))}
+                      {item.title}{" "}
+                      {item.parent && (
+                        <span> · Parent: {item.parent.reference}</span>
+                      )}
+                      {item.availability && <span> · {item.availability}</span>}
+                      {item.tags.length > 0 && (
+                        <span className="ml-2 text-sm text-neutral-600">
+                          {item.tags.join(", ")}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
             </ul>
           )}
         </section>
@@ -170,11 +191,17 @@ export function App() {
               {item.id === selected && (
                 <History
                   reference={item.reference}
+                  projects={projects}
                   status={item.status}
                   revision={revision}
                   onChange={refresh}
                 />
               )}
+              <TicketProject
+                ticket={item}
+                projects={projects}
+                onSaved={updateTicket}
+              />
               <TicketEditor ticket={item} onSaved={updateTicket} />
               {item.id === selected && (
                 <>

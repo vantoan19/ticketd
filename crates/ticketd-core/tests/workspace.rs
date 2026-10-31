@@ -402,3 +402,53 @@ fn concurrent_hierarchy_assignments_preserve_one_level() {
         1
     );
 }
+
+#[test]
+fn project_membership_preserves_ticket_identity_and_records_changes() {
+    use ticketd_core::TicketPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace.create_project("Alpha", "/repo/a").unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    let linked = workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(Some(project.id.clone())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(linked.id, ticket.id);
+    assert_eq!(linked.reference, ticket.reference);
+    workspace
+        .edit_project(&project.id, "Renamed", "/repo/b")
+        .unwrap();
+    assert_eq!(workspace.show_project(&project.id).unwrap().name, "Renamed");
+    let cleared = workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(cleared.id, ticket.id);
+    assert_eq!(cleared.project_id, None);
+    let history = workspace.ticket_history(&ticket.reference).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].to_value, project.id);
+    assert_eq!(history[1].to_value, "");
+}
+
+#[test]
+fn project_patch_distinguishes_omitted_and_null() {
+    use ticketd_core::TicketPatch;
+    let omitted: TicketPatch = serde_json::from_str("{}").unwrap();
+    let cleared: TicketPatch = serde_json::from_str(r#"{"project_id":null}"#).unwrap();
+    let assigned: TicketPatch = serde_json::from_str(r#"{"project_id":"project-id"}"#).unwrap();
+    assert_eq!(omitted.project_id, None);
+    assert_eq!(cleared.project_id, Some(None));
+    assert_eq!(assigned.project_id, Some(Some("project-id".into())));
+}
