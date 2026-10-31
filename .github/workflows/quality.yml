@@ -7,6 +7,10 @@ on:
         description: Build platform distributions
         type: boolean
         default: false
+      linux_only:
+        description: Build only the Linux distribution
+        type: boolean
+        default: false
       native_smoke:
         description: Run the Linux native desktop smoke test
         type: boolean
@@ -79,22 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-26
-            platform: macos-arm64
-            bundle: dmg
-            installer: target/release/bundle/dmg/*.dmg
-            cli: target/release/ticketd
-          - os: ubuntu-24.04
-            platform: ubuntu-24.04-x86_64
-            bundle: deb
-            installer: target/release/bundle/deb/*.deb
-            cli: target/release/ticketd
-          - os: windows-2025
-            platform: windows-x86_64
-            bundle: msi
-            installer: target/release/bundle/msi/*.msi
-            cli: target/release/ticketd.exe
+        include: ${{ fromJSON(inputs.linux_only && '[{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd"}]' || '[{"os":"macos-26","platform":"macos-arm64","bundle":"dmg","installer":"target/release/bundle/dmg/*.dmg","cli":"target/release/ticketd"},{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd"},{"os":"windows-2025","platform":"windows-x86_64","bundle":"msi","installer":"target/release/bundle/msi/*.msi","cli":"target/release/ticketd.exe"}]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
@@ -126,11 +115,11 @@ jobs:
           sudo apt-get install -y ./target/release/bundle/deb/*.deb
           package=$(dpkg-deb -f target/release/bundle/deb/*.deb Package)
           export XDG_DATA_HOME="$(mktemp -d)"
-          export TICKETD_SMOKE_CHECKOUT="$(mktemp -d)"
+          export TICKETD_SMOKE_CHECKOUT="$PWD"
           export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
-          trap 'rm -rf "$XDG_DATA_HOME" "$TICKETD_SMOKE_CHECKOUT"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs'
+          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs && XDG_DATA_HOME="$XDG_DATA_HOME/workflow" node tests/native/workflow.mjs'
           sudo apt-get remove -y "$package"
           "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
       - name: Assemble download
