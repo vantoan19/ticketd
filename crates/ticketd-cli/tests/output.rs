@@ -238,3 +238,55 @@ fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
     let saved = run(&["show", "T-3"], None);
     assert_eq!(saved["prerequisites"][0]["reference"], "T-2");
 }
+
+#[test]
+fn cli_batch_organizes_mixed_tickets_without_replacing_tags() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], input: Option<&str>| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "First"], None);
+    run(&["create", "Second"], None);
+    run(
+        &["write", "-"],
+        Some(
+            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-1","change":{"add_tags":["keep"]}},{"operation":"change","ticket":"T-2","change":{"add_tags":["remove"]}}]}"#,
+        ),
+    );
+    let result = run(
+        &["write", "-", "--request-id", "organize"],
+        Some(
+            r#"{"operation":"batch","operations":[{"operation":"change","ticket":"T-1","change":{"add_tags":["new"],"remove_tags":["remove"]}},{"operation":"change","ticket":"T-2","change":{"add_tags":["new"],"remove_tags":["remove"]}}]}"#,
+        ),
+    );
+    assert_eq!(
+        result["value"][0]["tags"],
+        serde_json::json!(["keep", "new"])
+    );
+    assert_eq!(result["value"][1]["tags"], serde_json::json!(["new"]));
+}

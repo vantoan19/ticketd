@@ -670,6 +670,9 @@ test("keeps keyboard selection and reports a failed bulk change for retry", asyn
   const checkbox = screen.getByRole("checkbox", { name: "Select T-1" });
   checkbox.focus();
   fireEvent.click(checkbox);
+  fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
+    target: { value: "Todo" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Apply status" }));
   await act(async () => {});
   expect(screen.getByRole("alert").textContent).toContain("ticket is trashed");
@@ -677,4 +680,97 @@ test("keeps keyboard selection and reports a failed bulk change for retry", asyn
   expect(screen.getByRole("button", { name: /First/ }).textContent).toContain(
     "Todo",
   );
+});
+
+test("applies a project to selected tickets without replacing other fields", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: ["existing"],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { references?: string[]; change?: { project_id?: string } },
+    ) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "list_projects")
+        return [{ id: "p1", name: "Project one", path: "/p", paths: ["/p"] }];
+      if (command === "bulk_change") {
+        expect(args?.references).toEqual(["T-1"]);
+        expect(args?.change).toEqual({ project_id: "p1" });
+        return [{ ...ticket, project_id: "p1" }];
+      }
+      return [];
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.change(screen.getByLabelText("Project for selected tickets"), {
+    target: { value: "p1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply project" }));
+  await act(async () => {});
+  expect(screen.getByText("0 selected")).toBeTruthy();
+});
+
+test("clears Effort and removes a tag with explicit bulk actions", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: ["keep", "old"],
+    project_id: null,
+    effort_id: "e1",
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  const changes: unknown[] = [];
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { change?: unknown }) => {
+      if (command === "find_tickets") return [ticket];
+      if (command === "bulk_change") {
+        changes.push(args?.change);
+        return [ticket];
+      }
+      return [];
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.change(screen.getByLabelText("Effort for selected tickets"), {
+    target: { value: "__clear__" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply Effort" }));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.change(screen.getByLabelText("Tag for selected tickets"), {
+    target: { value: "old" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Remove tag" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ effort_id: null }, { remove_tags: ["old"] }]);
 });

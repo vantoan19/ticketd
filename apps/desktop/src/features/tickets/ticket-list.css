@@ -86,8 +86,18 @@
   gap: 8px;
   padding: 8px 18px;
 }
-.bulk-controls select {
+.bulk-controls select,
+.bulk-controls input {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 4px;
+}
+
+.bulk-controls input {
+  width: 10rem;
+  max-width: 100%;
+}
+.bulk-controls > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
