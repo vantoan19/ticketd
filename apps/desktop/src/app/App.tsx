@@ -1,6 +1,7 @@
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TicketList } from "@/features/tickets/TicketList";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
-  CircleDot,
   Plus,
   Search,
   SlidersHorizontal,
@@ -379,50 +379,20 @@ export function App() {
                     )}
                   </div>
                 ) : (
-                  <ul className="mt-3 divide-y divide-neutral-200">
-                    {tickets
-                      .filter(
-                        (item) =>
-                          filter === "all" ||
-                          (filter === "unlinked"
-                            ? item.project_id === null
-                            : item.project_id === filter),
-                      )
-                      .map((item) => (
-                        <li key={item.id}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelected(item.reference);
-                              setNarrowDetail(true);
-                            }}
-                            aria-pressed={item.reference === selected}
-                            className="w-full rounded p-3 text-left hover:bg-neutral-100 aria-pressed:bg-neutral-200"
-                          >
-                            <CircleDot size={16} className="row-status" />
-                            <span className="ticket-ref">{item.reference}</span>
-                            <span className="ticket-title">
-                              {item.title}
-                            </span>{" "}
-                            {item.parent && (
-                              <span>
-                                {" "}
-                                · Parent: {item.parent.reference}
-                                {item.parent.trashed ? " (trashed)" : ""}
-                              </span>
-                            )}
-                            {item.availability && (
-                              <span> · {item.availability}</span>
-                            )}
-                            {item.tags.length > 0 && (
-                              <span className="ml-2 text-sm text-neutral-600">
-                                {item.tags.join(", ")}
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
+                  <TicketList
+                    tickets={tickets.filter(
+                      (item) =>
+                        filter === "all" ||
+                        (filter === "unlinked"
+                          ? item.project_id === null
+                          : item.project_id === filter),
+                    )}
+                    selected={selected}
+                    onOpen={(reference) => {
+                      setSelected(reference);
+                      setNarrowDetail(true);
+                    }}
+                  />
                 )}
                 {!trash && (offset > 0 || tickets.length === 50) && (
                   <div className="pagination">
