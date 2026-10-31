@@ -29,7 +29,7 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
         editing_agent: row.get(4)?,
     })
 }
-fn get(conn: &Connection, ticket: &str, id: &str) -> Result<Note, Error> {
+pub(crate) fn get(conn: &Connection, ticket: &str, id: &str) -> Result<Note, Error> {
     conn.query_row("SELECT id, content, created_at, updated_at, editing_agent FROM notes WHERE ticket_id = ?1 AND id = ?2", params![ticket,id], row).optional()?.ok_or_else(|| Error::NoteNotFound(id.to_owned()))
 }
 pub(crate) fn add(

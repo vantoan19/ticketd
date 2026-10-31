@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Effort, Error, Note, NotePatch, Project, Ticket, TicketChange, TicketPatch,
-    Workspace,
+    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project, Ticket,
+    TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,19 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    AddEvidence {
+        reference: String,
+        input: EvidenceInput,
+    },
+    EditEvidence {
+        reference: String,
+        id: String,
+        input: EvidenceInput,
+    },
+    DeleteEvidence {
+        reference: String,
+        id: String,
+    },
     SetFollowing {
         reference: String,
         following: bool,
@@ -144,6 +157,7 @@ pub enum WriteResult {
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
     Note(Note),
+    Evidence(Evidence),
     Project(Project),
     Effort(Effort),
     Deleted,
@@ -201,6 +215,18 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::AddEvidence { reference, input } => {
+                WriteResult::Evidence(self.add_evidence(&reference, input)?)
+            }
+            WriteRequest::EditEvidence {
+                reference,
+                id,
+                input,
+            } => WriteResult::Evidence(self.edit_evidence(&reference, &id, input)?),
+            WriteRequest::DeleteEvidence { reference, id } => {
+                self.delete_evidence(&reference, &id)?;
+                WriteResult::Deleted
+            }
             WriteRequest::SetFollowing {
                 reference,
                 following,

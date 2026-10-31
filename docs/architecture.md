@@ -111,3 +111,9 @@ For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived
 edges; a retained canceled prerequisite remains unresolved.
+Inbox entries for new notes retain the note ID and its original content in
+`from_value` and `to_value`; this snapshot remains meaningful after the note is
+edited or deleted. `editing_agent` is descriptive attribution. Relationship
+history kinds `parent`, `dependency`, and those prefixed `relationship:` also
+produce inbox entries for followed tickets, in the same transaction as the
+change. New relationship types use that prefix to participate.

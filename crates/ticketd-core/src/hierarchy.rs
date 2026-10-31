@@ -56,6 +56,7 @@ impl Workspace {
         )?;
         if changed != 0 {
             history::record(&tx, &child_id, "parent", parent, "", agent)?;
+            history::record(&tx, &parent_id, "relationship:child", child, "", agent)?;
         }
         tx.commit()?;
         self.show_ticket(parent)
@@ -96,11 +97,18 @@ impl Workspace {
                 "DELETE FROM ticket_parents WHERE child_id = ?1",
                 [&child_id],
             )?;
-            if let Some(parent_id) = parent_id {
+            if let Some(ref parent_id) = parent_id {
                 tx.execute(
                     "INSERT INTO ticket_parents (child_id, parent_id) VALUES (?1, ?2)",
                     params![child_id, parent_id],
                 )?;
+            }
+            if let Some(old_parent) = old.as_deref() {
+                let old_id = relationships::id(&tx, old_parent)?;
+                history::record(&tx, &old_id, "relationship:child", child, "", agent)?;
+            }
+            if let Some(parent_id) = parent_id {
+                history::record(&tx, &parent_id, "relationship:child", "", child, agent)?;
             }
             history::record(
                 &tx,

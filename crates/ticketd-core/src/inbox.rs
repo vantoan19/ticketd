@@ -15,6 +15,7 @@ pub struct InboxEntry {
     pub to_value: String,
     pub timestamp: String,
     pub read: bool,
+    pub editing_agent: Option<String>,
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
@@ -28,8 +29,9 @@ pub(crate) fn record(
     kind: &str,
     from: &str,
     to: &str,
+    agent: Option<&str>,
 ) -> Result<(), Error> {
-    connection.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, ?2, ?3, ?4 FROM ticket_follows WHERE ticket_id = ?1", params![ticket_id, kind, from, to])?;
+    connection.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent) SELECT person, ticket_id, ?2, ?3, ?4, ?5 FROM ticket_follows WHERE ticket_id = ?1", params![ticket_id, kind, from, to, agent])?;
     Ok(())
 }
 
@@ -76,7 +78,7 @@ impl Workspace {
         Ok(())
     }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
-        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(params![LOCAL_PERSON, limit.min(100), offset], |row| {
                 Ok(InboxEntry {
@@ -88,6 +90,7 @@ impl Workspace {
                     to_value: row.get(5)?,
                     timestamp: row.get(6)?,
                     read: row.get(7)?,
+                    editing_agent: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

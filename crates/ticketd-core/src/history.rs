@@ -68,8 +68,8 @@ pub(crate) fn record(
     agent: Option<&str>,
 ) -> Result<(), Error> {
     transaction.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, editing_agent) VALUES (?1, ?2, ?3, ?4, ?5)", params![ticket_id, kind, from, to, agent])?;
-    if kind == "status" || kind.starts_with("relationship:") {
-        crate::inbox::record(transaction, ticket_id, kind, from, to)?;
+    if matches!(kind, "status" | "parent" | "dependency") || kind.starts_with("relationship:") {
+        crate::inbox::record(transaction, ticket_id, kind, from, to, agent)?;
     }
     Ok(())
 }

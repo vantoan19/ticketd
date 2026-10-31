@@ -27,10 +27,14 @@ impl Workspace {
                 "ticket_history",
                 "number, ticket_id, kind, from_value, to_value, timestamp, editing_agent",
             ),
+            (
+                "evidence",
+                "number, id, ticket_id, kind, name, value, created_at, updated_at, editing_agent",
+            ),
             ("ticket_follows", "person, ticket_id"),
             (
                 "inbox_entries",
-                "id, person, ticket_id, kind, from_value, to_value, timestamp, read",
+                "id, person, ticket_id, kind, from_value, to_value, timestamp, read, editing_agent",
             ),
             ("tags", "name"),
             ("ticket_tags", "ticket_id, tag_name"),

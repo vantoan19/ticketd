@@ -66,6 +66,77 @@ fn cli_status_change_appears_in_followed_inbox() {
     assert_eq!(inbox[0]["reference"], "T-1");
     assert_eq!(inbox[0]["to_value"], "Done");
     assert_eq!(inbox[0]["read"], false);
+    run(
+        &["write", "-", "--request-id", "note"],
+        Some(
+            r#"{"operation":"add_note","reference":"T-1","content":"CLI finding","agent":"runner"}"#,
+        ),
+    );
+    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
+    assert_eq!(inbox[0]["kind"], "note");
+    assert_eq!(inbox[0]["to_value"], "CLI finding");
+    assert_eq!(inbox[0]["editing_agent"], "runner");
+}
+
+#[test]
+fn cli_manages_and_reads_named_evidence() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "Ship"]);
+    let added = run(&[
+        "evidence",
+        "add",
+        "T-1",
+        "--kind",
+        "verification",
+        "--name",
+        "Tests",
+        "--value",
+        "Unit tests passed",
+        "--agent",
+        "bot",
+    ]);
+    assert_eq!(added["editing_agent"], "bot");
+    assert_eq!(
+        run(&["context", "T-1", "--evidence"])["evidence"]["items"][0]["value"]["text"],
+        "Unit tests passed"
+    );
+    let id = added["id"].as_str().unwrap();
+    run(&[
+        "evidence",
+        "edit",
+        "T-1",
+        id,
+        "--kind",
+        "branch",
+        "--name",
+        "Branch",
+        "--value",
+        "feature/full",
+    ]);
+    assert_eq!(
+        run(&["evidence", "list", "T-1"])[0]["value"],
+        "feature/full"
+    );
+    run(&["evidence", "delete", "T-1", id]);
+    assert_eq!(
+        run(&["evidence", "list", "T-1"]).as_array().unwrap().len(),
+        0
+    );
 }
 
 #[test]

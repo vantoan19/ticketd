@@ -25,6 +25,11 @@ export function App() {
   const [view, setView] = useState<
     "tickets" | "projects" | "efforts" | "settings" | "inbox"
   >("tickets");
+  const [inboxTarget, setInboxTarget] = useState<{
+    reference: string;
+    id: string;
+    key: number;
+  } | null>(null);
   const [creating, setCreating] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState("Todo");
@@ -186,7 +191,10 @@ export function App() {
           {view === "inbox" && (
             <Inbox
               revision={revision}
-              select={(reference) => {
+              select={(reference, noteId) => {
+                setInboxTarget(
+                  noteId ? { reference, id: noteId, key: Date.now() } : null,
+                );
                 setSelected(reference);
                 setView("tickets");
               }}
@@ -455,6 +463,7 @@ export function App() {
                   focusPane.current = "list";
                 }}
                 selected={selected}
+                inboxTarget={inboxTarget}
                 setSelected={(value) => {
                   if (value === null) focusPane.current = "list";
                   setSelected(value);
