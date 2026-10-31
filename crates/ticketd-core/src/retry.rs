@@ -54,6 +54,15 @@ pub enum WriteRequest {
         reference: String,
         name: String,
     },
+    MarkDuplicate {
+        source: String,
+        canonical: String,
+        agent: Option<String>,
+    },
+    RemoveDuplicate {
+        source: String,
+        agent: Option<String>,
+    },
     AddDependency {
         blocker: String,
         dependent: String,
@@ -107,6 +116,8 @@ pub enum WriteRequest {
 }
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+// Results are owned at the public boundary; boxing tickets would complicate every caller.
+#[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
@@ -204,6 +215,14 @@ impl Workspace {
             }
             WriteRequest::RemoveTag { reference, name } => {
                 WriteResult::Ticket(self.remove_tag(&reference, &name)?)
+            }
+            WriteRequest::MarkDuplicate {
+                source,
+                canonical,
+                agent,
+            } => WriteResult::Ticket(self.mark_duplicate(&source, &canonical, agent.as_deref())?),
+            WriteRequest::RemoveDuplicate { source, agent } => {
+                WriteResult::Ticket(self.remove_duplicate(&source, agent.as_deref())?)
             }
             WriteRequest::AddDependency {
                 blocker,

@@ -5,6 +5,7 @@ import { type Project, type Ticket } from "@/lib/api/client";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
+import { Duplicates } from "@/features/tickets/Duplicates";
 import { Dependencies } from "@/features/tickets/Dependencies";
 import { Activity } from "@/features/tickets/Activity";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -104,6 +105,17 @@ export function TicketDetails({
               />
             </TicketEditor>
           )}
+          {item.duplicate_of && (
+            <p>
+              Duplicate of{" "}
+              <Button
+                variant="link"
+                onClick={() => setSelected(item.duplicate_of ?? null)}
+              >
+                {item.duplicate_of}
+              </Button>
+            </p>
+          )}
           {item.reference === selected && !item.trashed && (
             <>
               <details className="detail-disclosure">
@@ -131,6 +143,11 @@ export function TicketDetails({
                   </>
                 ) : (
                   <>
+                    <Duplicates
+                      ticket={item}
+                      refresh={refresh}
+                      select={setSelected}
+                    />
                     <Hierarchy
                       ticket={item}
                       refresh={refresh}

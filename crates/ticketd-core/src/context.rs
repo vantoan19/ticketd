@@ -56,6 +56,8 @@ pub struct ContextRelationships {
     pub children: ContextPage<ContextRelated>,
     pub prerequisites: ContextPage<ContextRelated>,
     pub blocking: ContextPage<ContextRelated>,
+    pub duplicate_of: Option<ContextRelated>,
+    pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
 pub struct ContextNote {
@@ -196,6 +198,8 @@ impl Workspace {
             let parent = related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
             Some(ContextRelationships {
                 parent,
+                duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children: related(
                     &tx,
                     "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",

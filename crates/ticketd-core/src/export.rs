@@ -29,6 +29,10 @@ impl Workspace {
             ),
             ("tags", "name"),
             ("ticket_tags", "ticket_id, tag_name"),
+            (
+                "duplicate_tickets",
+                "source_id, canonical_id, restore_status",
+            ),
             ("dependencies", "blocker_id, dependent_id"),
             ("ticket_parents", "child_id, parent_id"),
         ] {
