@@ -404,11 +404,16 @@ test("clears additional filters while preserving the selected Effort", async () 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (
-      ["list_projects", "list_efforts", "find_tickets", "search_tags"].includes(
-        command,
-      )
-    )
+    if (command === "list_projects")
+      return [
+        {
+          id: "p",
+          name: "Desktop app",
+          path: "/workspace",
+          paths: ["/workspace"],
+        },
+      ];
+    if (["list_efforts", "find_tickets", "search_tags"].includes(command))
       return [];
     if (command === "create_ticket") throw new Error("Creation failed");
     throw new Error(`unexpected ${command}`);
@@ -417,6 +422,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  fireEvent.click(screen.getByRole("button", { name: "Desktop app" }));
   fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
   fireEvent.change(screen.getByLabelText("New ticket title"), {
     target: { value: "Draft ticket" },
@@ -433,7 +439,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
       title: "Draft ticket",
       body: "Draft body",
       status: "Todo",
-      projectId: null,
+      projectId: "p",
       effortId: null,
       tags: [],
     }),
