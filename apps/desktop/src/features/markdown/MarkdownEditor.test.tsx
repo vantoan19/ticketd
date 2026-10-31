@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
 vi.mock("./MermaidDiagram", () => ({
@@ -22,6 +29,133 @@ describe("Markdown draft editor", () => {
       screen.getByRole("textbox", { name: "Markdown document rich text" }),
     ).toBe(editable);
     expect(onChange).not.toHaveBeenCalled();
+  });
+  it("announces the keyboard-selected slash option while retaining focus and cancels for composition", () => {
+    const onChange = vi.fn();
+    render(<MarkdownEditor value="" onChange={onChange} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    // jsdom does not implement the browser contenteditable property Slate checks.
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    editable.focus();
+    fireEvent.keyDown(editable, { key: "/" });
+    const combo = screen.getByRole("combobox", {
+      name: "Markdown document rich text",
+    });
+    const menu = screen.getByRole("listbox", { name: "Insert block" });
+    expect(combo.getAttribute("aria-controls")).toBe(menu.id);
+    expect(combo.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.textContent,
+    ).toBe("Paragraph");
+    fireEvent.keyDown(combo, { key: "ArrowDown" });
+    expect(
+      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.textContent,
+    ).toBe("Heading 1");
+    expect(document.activeElement).toBe(combo);
+    fireEvent.keyDown(combo, { key: "h" });
+    expect(
+      document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
+        ?.textContent,
+    ).toBe("Paragraph");
+    fireEvent.compositionStart(combo);
+    fireEvent.keyDown(combo, { key: "/", isComposing: true, keyCode: 229 });
+    expect(screen.queryByRole("listbox", { name: "Insert block" })).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("changes a code fence language without changing its source and retains unknown languages", async () => {
+    const onChange = vi.fn();
+    function Draft() {
+      const [value, setValue] = useState(
+        '```unknown-language\nconst message = "$& 日本語";\n```\n',
+      );
+      return (
+        <MarkdownEditor
+          value={value}
+          onChange={(next) => {
+            setValue(next);
+            onChange(next);
+          }}
+        />
+      );
+    }
+    render(<Draft />);
+    const language = screen.getByRole("combobox", { name: "Code language" });
+    expect(language).toHaveProperty("value", "unknown-language");
+    fireEvent.change(language, { target: { value: "typescript" } });
+    await vi.waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        '```typescript\nconst message = "$& 日本語";\n```\n',
+      ),
+    );
+    fireEvent.change(language, { target: { value: "my-dsl" } });
+    await vi.waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith(
+        '```my-dsl\nconst message = "$& 日本語";\n```\n',
+      ),
+    );
+    const calls = onChange.mock.calls.length;
+    fireEvent.change(language, { target: { value: "rust title=metadata" } });
+    fireEvent.change(language, { target: { value: "```" } });
+    expect(onChange).toHaveBeenCalledTimes(calls);
+    expect(language).toHaveProperty("value", "my-dsl");
+  });
+  it("rejects foreign and malformed block drag payloads without changing the draft", async () => {
+    const onChange = vi.fn();
+    render(<MarkdownEditor value={"First\n\nSecond\n"} onChange={onChange} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    const target = screen.getByText("Second");
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(true);
+    // jsdom has no pointer-to-caret API; the real DOM range is the drop target.
+    Object.defineProperty(document, "caretRangeFromPoint", {
+      configurable: true,
+      value: () => range,
+    });
+    for (const data of [
+      "0",
+      '{"editorId":"another-editor","index":0}',
+      '{"index":-1}',
+      "not-json",
+    ]) {
+      const event = new MouseEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 10,
+        clientY: 10,
+      });
+      Object.defineProperty(event, "dataTransfer", {
+        value: { getData: () => data, types: ["application/x-ticketd-block"] },
+      });
+      await act(async () => {
+        fireEvent(target, event);
+      });
+      expect(editable.textContent).toBe("FirstSecond");
+      expect(onChange).not.toHaveBeenCalled();
+    }
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
+  });
+  it("inserts a divider from the slash menu", async () => {
+    const onChange = vi.fn();
+    render(<MarkdownEditor value="" onChange={onChange} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    editable.focus();
+    fireEvent.keyDown(editable, { key: "/" });
+    fireEvent.click(screen.getByRole("option", { name: "Divider" }));
+    await vi.waitFor(() =>
+      expect(onChange).toHaveBeenCalledWith(
+        expect.stringMatching(/^\s*\*\*\*\s*$/),
+      ),
+    );
   });
   it("enforces read-only content and hides editing controls", () => {
     render(<MarkdownEditor value="View only" onChange={vi.fn()} readOnly />);

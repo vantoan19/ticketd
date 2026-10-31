@@ -37,6 +37,23 @@ describe("canonical Markdown rich-edit boundary", () => {
     const written = writeMarkdown(document.value);
     expect(written).toContain("```mermaid\ngraph TD;\r\n A --> \n```");
   });
+  it("preserves replacement tokens in loaded and edited Mermaid source", () => {
+    const original = 'graph TD\n A["$$ $& $` $\' 日本語"] --> B\r\n';
+    const loaded = readMarkdown(
+      `before\n\n\`\`\`mermaid\n${original}\n\`\`\`\n`,
+    );
+    expect(loaded.reasons).toEqual([]);
+    expect(readMarkdown(writeMarkdown(loaded.value)).value[1]?.source).toBe(
+      original,
+    );
+    const edited = original + ' B["$& $$ $\' $`"] --> C\n';
+    const diagram = loaded.value[1];
+    if (!diagram) throw new Error("Expected a Mermaid diagram");
+    diagram.source = edited;
+    expect(readMarkdown(writeMarkdown(loaded.value)).value[1]?.source).toBe(
+      edited,
+    );
+  });
   it("preserves an edited diagram's exact terminal newlines when reopened", () => {
     for (const source of [
       "graph TD\r\n A -->",

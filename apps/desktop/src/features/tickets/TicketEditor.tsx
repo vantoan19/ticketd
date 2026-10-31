@@ -193,6 +193,7 @@ export function TicketEditor({
                 value={draft.body}
                 onChange={(body) => edit({ ...draft, body })}
                 label="Description"
+                autoFocus={editingBody}
               />
             </Suspense>
           </div>
