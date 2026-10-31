@@ -175,7 +175,10 @@ export function App() {
               {item.id === selected && (
                 <>
                   <Dependencies ticket={item} refresh={refresh} />
-                  <Notes reference={item.reference} refreshRevision={revision} />
+                  <Notes
+                    reference={item.reference}
+                    refreshRevision={revision}
+                  />
                 </>
               )}
               <Tags
