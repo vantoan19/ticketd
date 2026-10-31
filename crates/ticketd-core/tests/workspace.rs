@@ -2612,8 +2612,10 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
         .unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;")
-        .unwrap();
+    db.execute_batch(
+        "DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;",
+    )
+    .unwrap();
     drop(db);
     std::fs::copy(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
