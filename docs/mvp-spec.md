@@ -1,9 +1,9 @@
 # ticketd — MVP Specification
 
-**Version:** 0.3 — Domain model reviewed; delivery details remain draft  
-**Date:** October 31, 2026  
-**Product name:** ticketd  
-**CLI command:** `ticketd`  
+**Version:** 0.3 — Domain model reviewed; delivery details remain draft\
+**Date:** October 31, 2026\
+**Product name:** ticketd\
+**CLI command:** `ticketd`\
 **Initial surface:** Local desktop application and agent-facing CLI.
 
 > ticketd is a local ticket workspace: a simple desktop UI for people and a fast CLI for agents, sharing the same work and context.
