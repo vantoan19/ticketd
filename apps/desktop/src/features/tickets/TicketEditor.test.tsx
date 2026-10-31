@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { test, vi, expect } from "vitest";
-import { TicketEditor } from "./TicketEditor";
+import { TicketEditor } from "@/features/tickets/TicketEditor";
 
 const mock = vi.hoisted(() => ({ changeTicket: vi.fn() }));
-vi.mock("./client", () => ({ client: mock }));
+vi.mock("@/lib/api/client", () => ({ client: mock }));
 vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
 vi.mock("react-markdown", () => ({ default: () => null }));
 

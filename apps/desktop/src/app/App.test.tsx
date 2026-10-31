@@ -5,13 +5,22 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { App } from "./App";
+import { App } from "@/app/App";
+
+Object.defineProperty(window, "matchMedia", {
+  value: () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }),
+});
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
-vi.mock("./DependencyGraph", () => ({ default: () => null }));
+vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
 
 afterEach(() => {
   cleanup();
@@ -101,7 +110,10 @@ test("refreshes clean content and preserves a draft when saved content changes",
 
 test("opens a related ticket outside the filtered list and preserves drafts when switching", async () => {
   vi.useFakeTimers();
-  const ticket = (id: string, title: string): import("./client").Ticket => ({
+  const ticket = (
+    id: string,
+    title: string,
+  ): import("@/lib/api/client").Ticket => ({
     id,
     reference: `T-${id}`,
     title,
@@ -188,4 +200,69 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished note",
   );
+});
+
+test("retains project drafts and clears filters when navigating scopes", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_efforts")
+      return [{ id: "e1", name: "Old effort", archived: true }];
+    if (command === "list_projects" || command === "find_tickets") return [];
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("button", { name: "Old effort" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
+    target: { value: "Draft" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
+    "value",
+    "Draft",
+  );
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Workspace views" }),
+    ).getByRole("button", { name: "All tickets" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug" },
+  });
+  expect(screen.getByRole("button", { name: /Filters • Active/ })).toBeTruthy();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Workspace views" }),
+    ).getByRole("button", { name: "All tickets" }),
+  );
+  expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
+});
+
+test("new ticket dialog focuses title and restores focus on Escape", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockResolvedValue([]);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  for (const name of ["New ticket", "Create your first ticket"]) {
+    const trigger = screen.getByRole("button", { name });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "New ticket title" }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  }
 });

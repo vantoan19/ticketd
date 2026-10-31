@@ -8,7 +8,7 @@ import {
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
-import { client, type DependencyGraph as Graph } from "./client";
+import { client, type DependencyGraph as Graph } from "@/lib/api/client";
 
 export default function DependencyGraph({
   reference,

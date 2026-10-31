@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { client, type Project, type Ticket } from "./client";
+import { client, type Project, type Ticket } from "@/lib/api/client";
 
 export function Projects({
   projects,
