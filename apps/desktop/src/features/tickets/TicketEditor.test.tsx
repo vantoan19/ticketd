@@ -11,7 +11,10 @@ import {
 import { test, vi, expect, afterEach } from "vitest";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 
-const mock = vi.hoisted(() => ({ changeTicket: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  changeTicket: vi.fn(),
+  showTicket: vi.fn(async () => ({ trashed: false })),
+}));
 vi.mock("@/lib/api/client", () => ({ client: mock }));
 vi.mock("@uiw/react-codemirror", () => ({
   default: ({
@@ -127,4 +130,26 @@ test("keeps a failed Unicode draft visible while adopting an untouched external 
   expect(screen.getByText("Second line 🌿")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   vi.useRealTimers();
+});
+
+test("navigates references in Markdown text while leaving code and links alone", async () => {
+  const select = vi.fn();
+  render(
+    <TicketEditor
+      ticket={
+        {
+          ...initial,
+          body: "See T-2 and `T-3` and [website](https://example.com/T-4)",
+        } as never
+      }
+      onSaved={vi.fn()}
+      select={select}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "T-2" }));
+  expect(select).toHaveBeenCalledWith("T-2");
+  expect(screen.queryByRole("button", { name: "T-3" })).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "website" }).getAttribute("href"),
+  ).toBe("https://example.com/T-4");
 });

@@ -178,6 +178,20 @@ export const client = {
   async deleteEvidence(reference: string, id: string) {
     await invoke("delete_evidence", { reference, id });
   },
+  async backlinks(reference: string, offset: number) {
+    return z
+      .array(
+        z.object({
+          source_reference: z.string(),
+          source_title: z.string(),
+          note_id: z.string().nullable(),
+          passage: z.string(),
+        }),
+      )
+      .parse(
+        await invoke("ticket_backlinks", { reference, limit: 20, offset }),
+      );
+  },
   async notes(reference: string, offset: number) {
     return z
       .array(noteSchema)

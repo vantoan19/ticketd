@@ -15,6 +15,7 @@ pub struct ContextOptions {
     pub notes: bool,
     #[serde(default)]
     pub evidence: bool,
+    pub backlinks: bool,
     pub offset: u32,
 }
 #[derive(Debug, Serialize)]
@@ -90,6 +91,8 @@ pub struct TicketContext {
     pub notes: Option<ContextPage<ContextNote>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ContextPage<ContextEvidence>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backlinks: Option<ContextPage<crate::Backlink>>,
 }
 fn text(value: String, limit: usize) -> BoundedText {
     let mut chars = value.chars();
@@ -268,6 +271,14 @@ impl Workspace {
         } else {
             None
         };
+        let backlinks = if options.backlinks {
+            Some(page(
+                crate::backlinks::query(&tx, reference, PAGE as u32 + 1, options.offset)?,
+                options.offset,
+            ))
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -285,6 +296,7 @@ impl Workspace {
             relationships,
             notes,
             evidence,
+            backlinks,
         })
     }
 }

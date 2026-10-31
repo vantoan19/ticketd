@@ -1,4 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod backlinks;
+pub use backlinks::Backlink;
 mod backup;
 mod context;
 mod evidence;
