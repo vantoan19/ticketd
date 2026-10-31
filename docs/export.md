@@ -8,7 +8,7 @@ in the desktop. When redirecting stdout yourself, a failed command may leave a
 partial file; use `--file` for safe publication.
 
 The root object has integer `format_version` 1 and arrays named `projects`,
-`project_checkouts`, `efforts`, `tickets`, `notes`, `ticket_history`, `tags`,
+`project_checkouts`, `efforts`, `tickets`, `notes`, `evidence`, `ticket_history`, `ticket_follows`, `inbox_entries`, `tags`,
 `ticket_tags`, `dependencies`, and `ticket_parents`. Each array contains objects
 with the corresponding record fields. IDs are strings; `ticket_id`, `project_id`,
 `effort_id`, `child_id`, `parent_id`, `blocker_id`, and `dependent_id` refer to
@@ -17,6 +17,7 @@ IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`. Ticket
 Optional values are null; `trashed` and `archived` are integers 0 or 1. History
 values are recorded strings, with their meaning determined by `kind`. Checkout
 paths describe the source machine and may need adjustment on another machine.
+Evidence preserves full values and optional editing-agent attribution. Follows and inbox entries use the stable `local-person` preference scope, which is not an account or editing-agent identity.
 All arrays represent the same SQLite read snapshot, including trash.
 
 This portable data export is for inspection and transfer, not a live write

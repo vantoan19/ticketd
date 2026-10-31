@@ -13,6 +13,8 @@ pub struct ContextOptions {
     pub effort: bool,
     pub relationships: bool,
     pub notes: bool,
+    #[serde(default)]
+    pub evidence: bool,
     pub offset: u32,
 }
 #[derive(Debug, Serialize)]
@@ -66,6 +68,16 @@ pub struct ContextNote {
     pub editing_agent: Option<BoundedText>,
 }
 #[derive(Debug, Serialize)]
+pub struct ContextEvidence {
+    pub id: String,
+    pub kind: String,
+    pub name: BoundedText,
+    pub value: BoundedText,
+    pub created_at: String,
+    pub updated_at: String,
+    pub editing_agent: Option<BoundedText>,
+}
+#[derive(Debug, Serialize)]
 pub struct TicketContext {
     pub ticket: ContextTicket,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,6 +88,8 @@ pub struct TicketContext {
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<ContextPage<ContextNote>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<ContextPage<ContextEvidence>>,
 }
 fn text(value: String, limit: usize) -> BoundedText {
     let mut chars = value.chars();
@@ -235,6 +249,25 @@ impl Workspace {
         } else {
             None
         };
+        let evidence = if options.evidence {
+            let mut stmt = tx.prepare("SELECT id,kind,name,value,created_at,updated_at,editing_agent FROM evidence WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+            let rows = stmt
+                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                    Ok(ContextEvidence {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        name: text(r.get(2)?, LABEL),
+                        value: text(r.get(3)?, TEXT),
+                        created_at: r.get(4)?,
+                        updated_at: r.get(5)?,
+                        editing_agent: r.get::<_, Option<String>>(6)?.map(|v| text(v, LABEL)),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(page(rows, options.offset))
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -251,6 +284,7 @@ impl Workspace {
             effort,
             relationships,
             notes,
+            evidence,
         })
     }
 }
