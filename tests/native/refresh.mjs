@@ -139,22 +139,69 @@ try {
   const beforePan = await viewport.getCSSProperty("transform");
   clock = Date.now();
   await pane.scrollIntoView({ block: "center", inline: "center" });
-  const rect = await browser.execute((element) => {
+  const gesture = await browser.execute((element) => {
     const box = element.getBoundingClientRect();
-    return { x: Math.max(0, box.left) + 10, y: Math.max(0, box.top) + 10 };
+    const left = Math.max(0, box.left);
+    const top = Math.max(0, box.top);
+    const right = Math.min(window.innerWidth, box.right);
+    const bottom = Math.min(window.innerHeight, box.bottom);
+    const events = [];
+    window.__graphPanEvents = events;
+    for (const type of [
+      "pointerdown",
+      "pointermove",
+      "pointerup",
+      "mousedown",
+      "mousemove",
+      "mouseup",
+    ]) {
+      document.addEventListener(
+        type,
+        (event) => {
+          events.push({
+            type,
+            x: event.clientX,
+            y: event.clientY,
+            target: event.target?.className?.toString(),
+          });
+        },
+        { capture: true, once: type.endsWith("down") || type.endsWith("up") },
+      );
+    }
+    // Leave room for the entire drag and verify the actual hit target, including
+    // overlays and clipping, rather than assuming the pane's corner is clear.
+    for (let y = Math.ceil(top + 10); y < bottom - 40; y += 10) {
+      for (let x = Math.ceil(left + 10); x < right - 80; x += 10) {
+        if (document.elementFromPoint(x, y) === element) {
+          return { x, y, box: { left, top, right, bottom } };
+        }
+      }
+    }
+    throw new Error(
+      `No unobstructed graph background: ${JSON.stringify({ left, top, right, bottom })}`,
+    );
   }, pane);
-  // Start on visible background and keep the full gesture within the viewport.
   await browser
     .action("pointer")
-    .move({ origin: "viewport", x: Math.round(rect.x), y: Math.round(rect.y) })
+    .move({ origin: "viewport", x: gesture.x, y: gesture.y })
     .down()
     .move({ duration: 300, x: 70, y: 30, origin: "pointer" })
     .up()
     .perform();
-  assert.notEqual(
-    (await viewport.getCSSProperty("transform")).value,
-    beforePan.value,
-  );
+  const afterPan = (await viewport.getCSSProperty("transform")).value;
+  if (afterPan === beforePan.value) {
+    const events = await browser.execute(() => window.__graphPanEvents);
+    console.error(
+      "Graph pan diagnostics:",
+      JSON.stringify({
+        gesture,
+        events,
+        before: beforePan.value,
+        after: afterPan,
+      }),
+    );
+  }
+  assert.notEqual(afterPan, beforePan.value);
   console.log(
     `Graph pan gesture: ${Date.now() - clock} ms (includes 300 ms gesture)`,
   );
