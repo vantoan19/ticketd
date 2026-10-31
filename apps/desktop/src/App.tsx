@@ -171,12 +171,27 @@ export function App() {
           {error}
         </p>
       )}
-      <form onSubmit={(event) => {
-        event.preventDefault();
-        setExportMessage("");
-        void client.exportWorkspace(exportPath).then(() => setExportMessage("Export saved.")).catch((reason: unknown) => setExportMessage(`Export failed: ${String(reason)}`));
-      }}>
-        <label>Export file path <input className="rounded border border-neutral-400 bg-white p-2" value={exportPath} onChange={(event) => setExportPath(event.target.value)} required /></label>{" "}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setExportMessage("");
+          void client
+            .exportWorkspace(exportPath)
+            .then(() => setExportMessage("Export saved."))
+            .catch((reason: unknown) =>
+              setExportMessage(`Export failed: ${String(reason)}`),
+            );
+        }}
+      >
+        <label>
+          Export file path{" "}
+          <input
+            className="rounded border border-neutral-400 bg-white p-2"
+            value={exportPath}
+            onChange={(event) => setExportPath(event.target.value)}
+            required
+          />
+        </label>{" "}
         <button type="submit">Export workspace</button>
         {exportMessage && <p role="status">{exportMessage}</p>}
       </form>
