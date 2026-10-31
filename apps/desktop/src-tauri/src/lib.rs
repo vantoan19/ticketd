@@ -2,7 +2,7 @@
 use ticketd_core::{
     BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
     InboxEntry, Note, NotePatch, Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
-    Workspace, WriteRequest, WriteResult,
+    Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -619,6 +619,12 @@ fn backup_workspace(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn workspace_info() -> Result<WorkspaceInfo, String> {
+    Workspace::open_default()
+        .and_then(|w| w.workspace_info())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn restore_workspace(path: String) -> Result<String, String> {
     Workspace::restore_default(path)
         .map(|safety| format!("Workspace restored. Safety backup: {}", safety.display()))
@@ -627,8 +633,10 @@ fn restore_workspace(path: String) -> Result<String, String> {
 
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
+            workspace_info,
             restore_workspace,
             export_workspace,
             list_efforts,
