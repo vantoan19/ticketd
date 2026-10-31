@@ -61,7 +61,8 @@ jobs:
       - run: rustup show active-toolchain
       - run: npm ci
       - run: npm run build
-      - run: cargo build --workspace --locked
+      - run: npm run desktop -- build --debug --no-bundle
+      - run: cargo build -p ticketd-cli --locked
       - run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Run real desktop refresh smoke test
         run: |
