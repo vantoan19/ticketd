@@ -146,6 +146,7 @@ export function TicketEditor({
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
       </label>
+      {children}
       <div className="editor-body">
         <div className="description-heading">
           <span id={`body-${ticket.id}`}>Description</span>
@@ -243,7 +244,6 @@ export function TicketEditor({
           </button>
         </p>
       )}
-      {children}
     </div>
   );
 }

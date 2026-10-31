@@ -1302,3 +1302,15 @@ fn concurrent_project_moves_remove_the_previous_checkout() {
     assert_eq!(result.path, "final");
     assert_eq!(result.paths, vec!["final"]);
 }
+
+#[test]
+fn tag_search_includes_unused_vocabulary_and_limits_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    workspace.add_tag(&ticket.reference, "Bug").unwrap();
+    workspace.add_tag(&ticket.reference, "Build").unwrap();
+    workspace.remove_tag(&ticket.reference, "bug").unwrap();
+    assert_eq!(workspace.search_tags("bu", 1).unwrap(), vec!["bug"]);
+    assert_eq!(workspace.search_tags("BUG", 50).unwrap(), vec!["bug"]);
+}

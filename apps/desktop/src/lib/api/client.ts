@@ -10,6 +10,7 @@ const ticketSchema = z.object({
   body: z.string(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
+  effort_id: z.string().nullable(),
   availability: z.string().nullable(),
   parent: z
     .object({ reference: z.string(), title: z.string(), trashed: z.boolean() })
@@ -83,12 +84,20 @@ export const client = {
   ) {
     await invoke(command, { blocker, dependent });
   },
+  async searchTags(query: string) {
+    return z.array(z.string()).parse(await invoke("search_tags", { query }));
+  },
   async changeTag(
     command: "add_tag" | "remove_tag",
     reference: string,
     tag: string,
   ) {
-    await invoke(command, { reference, tag });
+    return ticketSchema.parse(await invoke(command, { reference, tag }));
+  },
+  async setEffort(reference: string, effort: string | null) {
+    return ticketSchema.parse(
+      await invoke("set_effort", { reference, effort }),
+    );
   },
   async setParent(reference: string, parent: string | null) {
     await invoke("set_parent", { reference, parent });
@@ -185,7 +194,12 @@ export const client = {
   },
   async changeTicket(
     reference: string,
-    patch: { title?: string; body?: string; project_id?: string | null },
+    patch: {
+      title?: string;
+      body?: string;
+      project_id?: string | null;
+      status?: string;
+    },
   ) {
     return ticketSchema.parse(
       await invoke("change_ticket", { reference, patch }),

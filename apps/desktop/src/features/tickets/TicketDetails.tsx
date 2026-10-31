@@ -1,12 +1,12 @@
 import { lazy, Suspense } from "react";
 import { ArrowLeft, Maximize2, X } from "lucide-react";
-import { client, type Project, type Ticket } from "@/lib/api/client";
+import { type Project, type Ticket } from "@/lib/api/client";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
-import { TicketProject } from "@/features/projects/Projects";
+import { TicketProperties } from "@/features/tickets/TicketProperties";
+import type { Effort } from "@/lib/api/efforts";
 import { Dependencies } from "@/features/tickets/Dependencies";
 import { Notes } from "@/features/tickets/Notes";
-import { History, StatusControl } from "@/features/tickets/History";
-import { Tags } from "@/features/tickets/Tags";
+import { History } from "@/features/tickets/History";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 const DependencyGraph = lazy(
   () => import("@/features/tickets/DependencyGraph"),
@@ -19,10 +19,10 @@ export function TicketDetails({
   setSelected,
   details,
   projects,
+  efforts,
   revision,
   refresh,
   updateTicket,
-  setError,
   setTrash,
 }: {
   selected: string | null;
@@ -32,10 +32,10 @@ export function TicketDetails({
   setSelected: (value: string | null) => void;
   details: Record<string, Ticket>;
   projects: Project[];
+  efforts: Effort[];
   revision: number;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
-  setError: (error: string) => void;
   setTrash: (trash: boolean) => void;
 }) {
   return (
@@ -80,64 +80,27 @@ export function TicketDetails({
           hidden={item.reference !== selected}
         >
           {item.trashed ? (
-            <div className="detail-metadata">
-              {item.reference === selected && (
-                <StatusControl
-                  reference={item.reference}
-                  status={item.status}
-                  trashed={item.trashed}
-                  onChange={refresh}
-                />
-              )}
-              {!item.trashed && (
-                <TicketProject
-                  ticket={item}
-                  projects={projects}
-                  onSaved={updateTicket}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() =>
-                  void client
-                    .setTrashed(item.reference, !item.trashed)
-                    .then(refresh)
-                    .catch((reason: unknown) => setError(String(reason)))
-                }
-              >
-                {item.trashed ? "Restore" : "Move to trash"}
-              </button>
-            </div>
+            <>
+              <h3>
+                {item.reference} · {item.title}
+              </h3>
+              <TicketProperties
+                ticket={item}
+                projects={projects}
+                efforts={efforts}
+                onSaved={updateTicket}
+                refresh={refresh}
+              />
+            </>
           ) : (
             <TicketEditor ticket={item} onSaved={updateTicket}>
-              <div className="detail-metadata">
-                {item.reference === selected && (
-                  <StatusControl
-                    reference={item.reference}
-                    status={item.status}
-                    trashed={item.trashed}
-                    onChange={refresh}
-                  />
-                )}
-                {!item.trashed && (
-                  <TicketProject
-                    ticket={item}
-                    projects={projects}
-                    onSaved={updateTicket}
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    void client
-                      .setTrashed(item.reference, !item.trashed)
-                      .then(refresh)
-                      .catch((reason: unknown) => setError(String(reason)))
-                  }
-                >
-                  {item.trashed ? "Restore" : "Move to trash"}
-                </button>
-              </div>
+              <TicketProperties
+                ticket={item}
+                projects={projects}
+                efforts={efforts}
+                onSaved={updateTicket}
+                refresh={refresh}
+              />
             </TicketEditor>
           )}
           {item.reference === selected && !item.trashed && (
@@ -176,16 +139,6 @@ export function TicketDetails({
             <details className="detail-disclosure">
               <summary>Notes</summary>
               <Notes reference={item.reference} refreshRevision={revision} />
-            </details>
-          )}
-          {!item.trashed && (
-            <details className="detail-disclosure">
-              <summary>Tags</summary>
-              <Tags
-                reference={item.reference}
-                tags={item.tags}
-                refresh={refresh}
-              />
             </details>
           )}
         </div>

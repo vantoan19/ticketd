@@ -70,7 +70,6 @@ export function App() {
     title,
     setTitle,
     error,
-    setError,
     saving,
     loading,
     revision,
@@ -466,10 +465,10 @@ export function App() {
                 setSelected={setSelected}
                 details={details}
                 projects={projects}
+                efforts={efforts}
                 revision={revision}
                 refresh={refresh}
                 updateTicket={updateTicket}
-                setError={setError}
                 setTrash={setTrash}
               />
             </ResizablePanel>
