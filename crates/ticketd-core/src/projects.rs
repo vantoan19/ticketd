@@ -35,9 +35,10 @@ impl Workspace {
 
     pub fn remove_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
         find(&self.connection, id)?;
+        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
         self.connection.execute(
             "DELETE FROM project_checkouts WHERE project_id = ?1 AND path = ?2",
-            params![id, path],
+            params![id, normalized],
         )?;
         self.show_project(id)
     }
@@ -61,6 +62,8 @@ impl Workspace {
 
     pub fn create_project(&mut self, name: &str, path: &str) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
+        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
+        let path = normalized.as_str();
         let project = Project {
             id: Uuid::new_v4().to_string(),
             name: name.to_owned(),
@@ -82,6 +85,8 @@ impl Workspace {
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
+        let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
+        let path = normalized.as_str();
         let old = self.show_project(id)?;
         let tx = self.connection.transaction()?;
         if tx.execute(
