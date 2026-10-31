@@ -44,4 +44,25 @@ describe("Markdown draft editor", () => {
     await screen.findByText("Resolved external content");
     expect(onChange).not.toHaveBeenCalled();
   });
+  it("locks and unlocks an already-mounted document during submission", () => {
+    const onChange = vi.fn();
+    const view = render(
+      <MarkdownEditor value="Pending note" onChange={onChange} />,
+    );
+    view.rerender(
+      <MarkdownEditor value="Pending note" onChange={onChange} readOnly />,
+    );
+    expect(
+      screen
+        .getByLabelText("Markdown document rich text")
+        .getAttribute("contenteditable"),
+    ).toBe("false");
+    view.rerender(<MarkdownEditor value="Pending note" onChange={onChange} />);
+    expect(
+      screen
+        .getByLabelText("Markdown document rich text")
+        .getAttribute("contenteditable"),
+    ).toBe("true");
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });

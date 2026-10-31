@@ -204,7 +204,7 @@ function Diagram(props: PlateElementProps) {
             extensions={sourceExtensions}
             onChange={(next) => {
               const path = editor.api.findPath(props.element);
-              if (path && next !== source)
+              if (!readOnly && path && next !== source)
                 editor.tf.setNodes({ source: next }, { at: path });
             }}
           />
@@ -681,7 +681,7 @@ export function MarkdownEditor({
           aria-label={`${label} source`}
           extensions={sourceExtensions}
           onChange={(next) => {
-            if (next !== value) {
+            if (!readOnly && next !== value) {
               emitted.current = next;
               synchronizing.current = true;
               const parsed = readMarkdown(next).value;
@@ -697,7 +697,7 @@ export function MarkdownEditor({
           editor={editor}
           readOnly={readOnly}
           onValueChange={({ value: next }: { value: Value }) => {
-            if (synchronizing.current) return;
+            if (readOnly || synchronizing.current) return;
             // Selection, focus and initialization never emit a write.
             if (
               !editor.operations.some(
@@ -715,6 +715,7 @@ export function MarkdownEditor({
         >
           {!readOnly && <Toolbar />}
           <PlateContent
+            readOnly={readOnly}
             aria-label={`${label} rich text`}
             className="rich-document"
             onKeyDown={keyDown}
