@@ -41,6 +41,7 @@ export function Hierarchy({
             onClick={() => select(ticket.parent!.reference)}
           >
             {ticket.parent.reference} {ticket.parent.title}
+            {ticket.parent.trashed && " (trashed)"}
           </button>{" "}
           <button type="button" onClick={() => void change(null)}>
             Remove parent
@@ -53,7 +54,23 @@ export function Hierarchy({
           <li key={child.reference}>
             <button type="button" onClick={() => select(child.reference)}>
               {child.reference} {child.title}
+              {child.trashed && " (trashed)"}
             </button>
+            {child.trashed && (
+              <button
+                type="button"
+                onClick={() =>
+                  void invoke("detach_child", {
+                    child: child.reference,
+                    parent: ticket.reference,
+                  })
+                    .then(refresh)
+                    .catch((reason: unknown) => setError(String(reason)))
+                }
+              >
+                Remove {child.reference}
+              </button>
+            )}
           </li>
         ))}
       </ul>

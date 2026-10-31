@@ -22,6 +22,7 @@ const DependencyGraph = lazy(() => import("./DependencyGraph"));
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [filter, setFilter] = useState("all");
+  const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -38,7 +39,10 @@ export function App() {
     let timeout = 0;
     try {
       const result = await Promise.race([
-        Promise.all([client.listTickets(), client.listProjects()]),
+        Promise.all([
+          trash ? client.listTrash() : client.listTickets(),
+          client.listProjects(),
+        ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
             () => reject(new Error("Timed out")),
@@ -61,7 +65,7 @@ export function App() {
       refreshing.current = false;
       if (request === generation.current) setLoading(false);
     }
-  }, []);
+  }, [trash]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => void refresh(), 0);
@@ -139,8 +143,17 @@ export function App() {
       />
       <div className="grid gap-6 md:grid-cols-2">
         <section aria-labelledby="tickets-heading">
+          <button
+            type="button"
+            onClick={() => {
+              setTrash(!trash);
+              setSelected(null);
+            }}
+          >
+            {trash ? "Show tickets" : "Show trash"}
+          </button>
           <h2 id="tickets-heading" className="text-xl font-semibold">
-            Tickets
+            {trash ? "Trash" : "Tickets"}
           </h2>
           {loading ? (
             <p role="status" className="mt-3">
@@ -171,7 +184,11 @@ export function App() {
                       </span>
                       {item.title}{" "}
                       {item.parent && (
-                        <span> · Parent: {item.parent.reference}</span>
+                        <span>
+                          {" "}
+                          · Parent: {item.parent.reference}
+                          {item.parent.trashed ? " (trashed)" : ""}
+                        </span>
                       )}
                       {item.availability && <span> · {item.availability}</span>}
                       {item.tags.length > 0 && (
@@ -199,17 +216,33 @@ export function App() {
                   reference={item.reference}
                   projects={projects}
                   status={item.status}
+                  trashed={item.trashed}
                   revision={revision}
                   onChange={refresh}
                 />
               )}
-              <TicketProject
-                ticket={item}
-                projects={projects}
-                onSaved={updateTicket}
-              />
-              <TicketEditor ticket={item} onSaved={updateTicket} />
-              {item.id === selected && (
+              <button
+                type="button"
+                onClick={() =>
+                  void client
+                    .setTrashed(item.reference, !item.trashed)
+                    .then(refresh)
+                    .catch((reason: unknown) => setError(String(reason)))
+                }
+              >
+                {item.trashed ? "Restore" : "Move to trash"}
+              </button>
+              {!item.trashed && (
+                <TicketProject
+                  ticket={item}
+                  projects={projects}
+                  onSaved={updateTicket}
+                />
+              )}
+              {!item.trashed && (
+                <TicketEditor ticket={item} onSaved={updateTicket} />
+              )}
+              {item.id === selected && !item.trashed && (
                 <>
                   <Hierarchy
                     ticket={item}
@@ -227,13 +260,10 @@ export function App() {
                       key={item.reference}
                       reference={item.reference}
                       revision={revision}
-                      select={(reference) =>
-                        setSelected(
-                          tickets.find(
-                            (ticket) => ticket.reference === reference,
-                          )?.id ?? null,
-                        )
-                      }
+                      select={(id, trashed) => {
+                        setSelected(id);
+                        setTrash(trashed);
+                      }}
                     />
                   </Suspense>
                   <Notes
@@ -242,11 +272,13 @@ export function App() {
                   />
                 </>
               )}
-              <Tags
-                reference={item.reference}
-                tags={item.tags}
-                refresh={refresh}
-              />
+              {!item.trashed && (
+                <Tags
+                  reference={item.reference}
+                  tags={item.tags}
+                  refresh={refresh}
+                />
+              )}
             </div>
           ))}
         </section>

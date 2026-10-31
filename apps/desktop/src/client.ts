@@ -3,6 +3,7 @@ import { z } from "zod";
 
 const ticketSchema = z.object({
   id: z.string(),
+  trashed: z.boolean(),
   reference: z.string(),
   title: z.string(),
   status: z.string(),
@@ -10,15 +11,30 @@ const ticketSchema = z.object({
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
   availability: z.string().nullable(),
-  parent: z.object({ reference: z.string(), title: z.string() }).nullable(),
-  children: z.array(z.object({ reference: z.string(), title: z.string() })),
+  parent: z
+    .object({ reference: z.string(), title: z.string(), trashed: z.boolean() })
+    .nullable(),
+  children: z.array(
+    z.object({
+      reference: z.string(),
+      title: z.string(),
+      trashed: z.boolean(),
+    }),
+  ),
   prerequisites: z.array(
-    z.object({ reference: z.string(), title: z.string(), status: z.string() }),
+    z.object({
+      reference: z.string(),
+      title: z.string(),
+      status: z.string(),
+      trashed: z.boolean(),
+    }),
   ),
 });
 const graphSchema = z.object({
   nodes: z.array(
     z.object({
+      id: z.string(),
+      trashed: z.boolean(),
       reference: z.string(),
       title: z.string(),
       status: z.string(),
@@ -80,6 +96,14 @@ export const client = {
   },
   async listTickets() {
     return z.array(ticketSchema).parse(await invoke("list_tickets"));
+  },
+  async listTrash() {
+    return z.array(ticketSchema).parse(await invoke("list_trash"));
+  },
+  async setTrashed(reference: string, trashed: boolean) {
+    return ticketSchema.parse(
+      await invoke("set_trashed", { reference, trashed }),
+    );
   },
   async registerCheckout(id: string, path: string) {
     return projectSchema.parse(await invoke("register_checkout", { id, path }));

@@ -10,6 +10,8 @@ const MAX_DEPTH: usize = 2;
 
 #[derive(Debug, Serialize)]
 pub struct GraphNode {
+    pub id: String,
+    pub trashed: bool,
     pub reference: String,
     pub title: String,
     pub status: Status,
@@ -58,7 +60,7 @@ impl Workspace {
         }
         let mut nodes = Vec::new();
         for id in &ids {
-            let (number, title, status, blocked): (i64, String, String, bool) = tx.query_row("SELECT number, title, status, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = tickets.id AND b.status != 'Done') FROM tickets WHERE id = ?1", [id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+            let (number, title, status, blocked, trashed): (i64, String, String, bool, bool) = tx.query_row("SELECT number, title, status, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = tickets.id AND b.status != 'Done'), trashed FROM tickets WHERE id = ?1", [id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?;
             let status: Status = status.parse().map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
                     2,
@@ -67,6 +69,8 @@ impl Workspace {
                 )
             })?;
             nodes.push(GraphNode {
+                id: id.clone(),
+                trashed,
                 reference: format!("T-{number}"),
                 title,
                 status,

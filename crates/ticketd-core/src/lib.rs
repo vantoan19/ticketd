@@ -43,6 +43,8 @@ pub enum Error {
     InvalidHierarchy,
     #[error("tag name must not be empty")]
     EmptyTag,
+    #[error("ticket '{0}' is in trash; restore it before editing")]
+    Trashed(String),
     #[error("ticket title must not be empty")]
     EmptyTitle,
     #[error("ticket '{0}' was not found")]
@@ -62,6 +64,7 @@ pub enum Error {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
     pub id: String,
+    pub trashed: bool,
     pub reference: String,
     pub title: String,
     pub status: Status,
@@ -112,7 +115,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 10 {
+        if version > 11 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -150,6 +153,9 @@ impl Workspace {
             projects::migrate_checkouts(&transaction)?;
             transaction.pragma_update(None, "user_version", 10)?;
         }
+        if version < 11 {
+            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 11;")?;
+        }
         transaction.commit()?;
         Ok(Self { connection })
     }
@@ -185,6 +191,7 @@ impl Workspace {
         transaction.commit()?;
         Ok(Ticket {
             id,
+            trashed: false,
             reference: format!("T-{number}"),
             title: title.to_owned(),
             status: Status::Todo,
@@ -212,12 +219,13 @@ impl Workspace {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+        ensure_editable(&transaction, &ticket.id)?;
         if let Some(ref effort_id) = patch.effort_id {
             if let Some(id) = effort_id {
                 efforts::get(&transaction, id)?;
@@ -269,7 +277,7 @@ impl Workspace {
             )?;
         }
         let mut updated = transaction.query_row(
-            "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
+            "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
             [number],
             ticket_from_row,
         )?;
@@ -278,6 +286,38 @@ impl Workspace {
         hierarchy::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
+    }
+
+    pub fn set_trashed(
+        &mut self,
+        reference: &str,
+        trashed: bool,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id = relationships::id(&tx, reference)?;
+        let old: bool =
+            tx.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
+                row.get(0)
+            })?;
+        if old != trashed {
+            tx.execute(
+                "UPDATE tickets SET trashed = ?1 WHERE id = ?2",
+                params![trashed, id],
+            )?;
+            history::record(
+                &tx,
+                &id,
+                "trash",
+                if old { "trashed" } else { "active" },
+                if trashed { "trashed" } else { "active" },
+                agent,
+            )?;
+        }
+        tx.commit()?;
+        self.show_ticket(reference)
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
@@ -291,8 +331,14 @@ impl Workspace {
         content: &str,
         agent: Option<&str>,
     ) -> Result<Note, Error> {
-        let ticket = self.show_ticket(reference)?;
-        notes::add(&self.connection, &ticket.id, content, agent)
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id_ticket = relationships::id(&tx, reference)?;
+        ensure_editable(&tx, &id_ticket)?;
+        let result = notes::add(&tx, &id_ticket, content, agent)?;
+        tx.commit()?;
+        Ok(result)
     }
     pub fn edit_note(
         &mut self,
@@ -300,12 +346,24 @@ impl Workspace {
         id: &str,
         patch: NotePatch,
     ) -> Result<Note, Error> {
-        let ticket = self.show_ticket(reference)?;
-        notes::edit(&self.connection, &ticket.id, id, patch)
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id_ticket = relationships::id(&tx, reference)?;
+        ensure_editable(&tx, &id_ticket)?;
+        let result = notes::edit(&tx, &id_ticket, id, patch)?;
+        tx.commit()?;
+        Ok(result)
     }
     pub fn delete_note(&mut self, reference: &str, id: &str) -> Result<(), Error> {
-        let ticket = self.show_ticket(reference)?;
-        notes::delete(&self.connection, &ticket.id, id)
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let id_ticket = relationships::id(&tx, reference)?;
+        ensure_editable(&tx, &id_ticket)?;
+        notes::delete(&tx, &id_ticket, id)?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn notes(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Note>, Error> {
         let ticket = self.show_ticket(reference)?;
@@ -313,11 +371,19 @@ impl Workspace {
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
+        self.list_by_trash(false)
+    }
+
+    pub fn list_trash(&self) -> Result<Vec<Ticket>, Error> {
+        self.list_by_trash(true)
+    }
+
+    fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, number, title, status, body, project_id, effort_id FROM tickets ORDER BY number DESC",
+            "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
         )?;
         let mut tickets = statement
-            .query_map([], ticket_from_row)?
+            .query_map([trashed], ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
@@ -334,7 +400,7 @@ impl Workspace {
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -350,6 +416,7 @@ impl Workspace {
 fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
     Ok(Ticket {
         id: row.get(0)?,
+        trashed: row.get(7)?,
         reference: format!("T-{}", row.get::<_, i64>(1)?),
         title: row.get(2)?,
         status: row.get::<_, String>(3)?.parse().map_err(|error| {
@@ -368,4 +435,17 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         parent: None,
         children: Vec::new(),
     })
+}
+
+// All ticket mutations must check this inside the same write transaction.
+pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), Error> {
+    let (trashed, number): (bool, i64) = connection.query_row(
+        "SELECT trashed, number FROM tickets WHERE id = ?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if trashed {
+        return Err(Error::Trashed(format!("T-{number}")));
+    }
+    Ok(())
 }

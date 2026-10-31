@@ -40,6 +40,20 @@ enum Command {
         #[arg(long)]
         clear_project: bool,
     },
+    /// List trashed tickets
+    TrashList,
+    /// Move a ticket to trash
+    Trash {
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Restore a ticket from trash
+    Restore {
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Show ticket history
     History { reference: String },
     /// Manage ticket notes
@@ -303,6 +317,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 offset,
             } => serde_json::to_string(&workspace.notes(&reference, limit, offset)?)?,
         },
+        Command::TrashList => serde_json::to_string(&workspace.list_trash()?)?,
+        Command::Trash { reference, agent } => {
+            serde_json::to_string(&workspace.set_trashed(&reference, true, agent.as_deref())?)?
+        }
+        Command::Restore { reference, agent } => {
+            serde_json::to_string(&workspace.set_trashed(&reference, false, agent.as_deref())?)?
+        }
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
         }

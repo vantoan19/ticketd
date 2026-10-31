@@ -15,6 +15,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   vi.useFakeTimers();
   let saved = {
     id: "1",
+    trashed: false,
     reference: "T-1",
     title: "First",
     body: "Old",

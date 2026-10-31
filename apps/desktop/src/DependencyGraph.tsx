@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { ReactFlow, Background, Controls, MarkerType, Position } from "@xyflow/react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MarkerType,
+  Position,
+} from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { client, type DependencyGraph as Graph } from "./client";
@@ -11,7 +17,7 @@ export default function DependencyGraph({
 }: {
   reference: string;
   revision: number;
-  select: (reference: string) => void;
+  select: (id: string, trashed: boolean) => void;
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [error, setError] = useState("");
@@ -49,7 +55,7 @@ export default function DependencyGraph({
       targetPosition: Position.Left,
       position: { x: position.x - 90, y: position.y - 35 },
       data: {
-        label: `${node.reference} ${node.title}\n${node.status}${node.availability ? ` · ${node.availability}` : ""}`,
+        label: `${node.reference} ${node.title}\n${node.status}${node.trashed ? " · Trashed" : ""}${node.availability ? ` · ${node.availability}` : ""}`,
       },
       style: { width: 180, whiteSpace: "pre-wrap" as const },
     };
@@ -72,7 +78,12 @@ export default function DependencyGraph({
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodeClick={(_, node) => select(node.id)}
+          onNodeClick={(_, node) => {
+            const ticket = graph.nodes.find(
+              (item) => item.reference === node.id,
+            );
+            if (ticket) select(ticket.id, ticket.trashed);
+          }}
           fitView
           nodesDraggable={false}
           nodesConnectable={false}
@@ -87,9 +98,10 @@ export default function DependencyGraph({
             <button
               type="button"
               className="underline"
-              onClick={() => select(node.reference)}
+              onClick={() => select(node.id, node.trashed)}
             >
               {node.reference} {node.title} · {node.status}
+              {node.trashed && " · Trashed"}
               {node.availability && ` · ${node.availability}`}
             </button>
           </li>
