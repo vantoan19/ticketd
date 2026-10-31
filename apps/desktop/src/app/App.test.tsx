@@ -10,6 +10,13 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = ResizeObserverStub;
+
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
     matches: false,
@@ -26,6 +33,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   bridge.invoke.mockReset();
+  localStorage.clear();
 });
 
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
@@ -77,6 +85,18 @@ test("refreshes clean content and preserves a draft when saved content changes",
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "My draft" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My draft",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My draft",
+  );
   saved = { ...saved, title: "Another change" };
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);

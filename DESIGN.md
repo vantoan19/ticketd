@@ -18,3 +18,5 @@ The shared semantic variables in `apps/desktop/src/styles.css` are the source of
 Use a 4px spacing rhythm, 32–36px controls and approximately 46px ticket rows. Keep the list denser than the detail pane because people repeatedly scan tickets before opening one. Titles lead; references, metadata and supporting text remain subordinate but readable. Avoid text smaller than 11px except nonessential branding. Respect reduced-motion preferences for transitions.
 
 Do align comparable rows and keep actions near their context. Do use labels and visible focus for controls. Don't use color alone for status, add decorative panels to sparse states, or copy Vercel logos. The workspace currently follows the operating system theme rather than providing its own theme switch.
+
+The ticket workspace uses a resizable list and detail split with a keyboard-accessible divider. Expanding a ticket keeps the list and its scroll position in place for return; on narrow windows the list and detail take turns in the main area. Keep detail drafts mounted during these presentation changes.

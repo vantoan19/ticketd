@@ -1,11 +1,11 @@
 import { lazy, Suspense } from "react";
-import { X } from "lucide-react";
+import { ArrowLeft, Maximize2, X } from "lucide-react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProject } from "@/features/projects/Projects";
 import { Dependencies } from "@/features/tickets/Dependencies";
 import { Notes } from "@/features/tickets/Notes";
-import { History } from "@/features/tickets/History";
+import { History, StatusControl } from "@/features/tickets/History";
 import { Tags } from "@/features/tickets/Tags";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 const DependencyGraph = lazy(
@@ -13,6 +13,9 @@ const DependencyGraph = lazy(
 );
 export function TicketDetails({
   selected,
+  expanded,
+  onExpand,
+  onReturn,
   setSelected,
   details,
   projects,
@@ -23,6 +26,9 @@ export function TicketDetails({
   setTrash,
 }: {
   selected: string | null;
+  expanded: boolean;
+  onExpand: () => void;
+  onReturn: () => void;
   setSelected: (value: string | null) => void;
   details: Record<string, Ticket>;
   projects: Project[];
@@ -37,13 +43,31 @@ export function TicketDetails({
       <div className="detail-header">
         <h2 id="detail-heading">Ticket details</h2>
         {selected && (
-          <button
-            className="icon-button"
-            aria-label="Close ticket details"
-            onClick={() => setSelected(null)}
-          >
-            <X size={16} />
-          </button>
+          <div className="detail-actions">
+            <button
+              className="icon-button return-to-list"
+              aria-label="Return to ticket list"
+              onClick={onReturn}
+            >
+              <ArrowLeft size={16} />
+            </button>
+            {!expanded && (
+              <button
+                className="icon-button expand-ticket"
+                aria-label="Expand ticket"
+                onClick={onExpand}
+              >
+                <Maximize2 size={16} />
+              </button>
+            )}
+            <button
+              className="icon-button"
+              aria-label="Close ticket details"
+              onClick={() => setSelected(null)}
+            >
+              <X size={16} />
+            </button>
+          </div>
         )}
       </div>
       {selected === null && (
@@ -58,12 +82,10 @@ export function TicketDetails({
           {item.trashed ? (
             <div className="detail-metadata">
               {item.reference === selected && (
-                <History
+                <StatusControl
                   reference={item.reference}
-                  projects={projects}
                   status={item.status}
                   trashed={item.trashed}
-                  revision={revision}
                   onChange={refresh}
                 />
               )}
@@ -90,12 +112,10 @@ export function TicketDetails({
             <TicketEditor ticket={item} onSaved={updateTicket}>
               <div className="detail-metadata">
                 {item.reference === selected && (
-                  <History
+                  <StatusControl
                     reference={item.reference}
-                    projects={projects}
                     status={item.status}
                     trashed={item.trashed}
-                    revision={revision}
                     onChange={refresh}
                   />
                 )}
@@ -143,6 +163,14 @@ export function TicketDetails({
                 </Suspense>
               </details>
             </>
+          )}
+          {item.reference === selected && (
+            <History
+              reference={item.reference}
+              projects={projects}
+              status={item.status}
+              revision={revision}
+            />
           )}
           {!item.trashed && (
             <details className="detail-disclosure">
