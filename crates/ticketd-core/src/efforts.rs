@@ -86,13 +86,14 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?)
     }
     pub fn show_effort(&self, id: &str) -> Result<EffortView, Error> {
-        let effort = get(&self.connection, id)?;
-        let mut stmt = self
-            .connection
-            .prepare("SELECT number FROM tickets WHERE effort_id = ?1 ORDER BY number")?;
+        let tx = self.connection.unchecked_transaction()?;
+        let effort = get(&tx, id)?;
+        let mut stmt =
+            tx.prepare("SELECT number FROM tickets WHERE effort_id = ?1 ORDER BY number")?;
         let references = stmt
             .query_map([id], |r| Ok(format!("T-{}", r.get::<_, i64>(0)?)))?
             .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
         let mut counts = EffortCounts::default();
         let mut members = Vec::new();
         for reference in references {
@@ -106,6 +107,7 @@ impl Workspace {
             };
             members.push(ticket);
         }
+        tx.commit()?;
         Ok(EffortView {
             effort,
             members,
