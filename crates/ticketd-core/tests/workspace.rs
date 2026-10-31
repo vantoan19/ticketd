@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -2084,7 +2084,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+        "DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
     )
     .unwrap();
     drop(db);
@@ -2099,7 +2099,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 17);
+    assert_eq!(version, 19);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2462,4 +2462,177 @@ fn concurrent_inbox_reads_deliver_one_reminder_and_backup_restores_it() {
         Some("2020-01-01T00:00:00Z")
     );
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn contextual_relationships_are_symmetric_or_directed() {
+    use ticketd_core::{ContextOptions, RelationshipKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("Original work").unwrap();
+    let b = w.create_ticket("Discovered work").unwrap();
+    w.add_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    w.add_contextual_relationship(
+        &a.reference,
+        &b.reference,
+        RelationshipKind::Discovered,
+        None,
+    )
+    .unwrap();
+    let context = w
+        .ticket_context(
+            &b.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(context.related.items[0].reference, a.reference);
+    assert_eq!(context.discovered_while.items[0].reference, a.reference);
+    assert!(context.discoveries.items.is_empty());
+    assert_eq!(
+        w.show_ticket(&b.reference).unwrap().availability.as_deref(),
+        Some("Ready")
+    );
+}
+
+#[test]
+fn contextual_relationships_reject_self_links_and_deduplicate_and_detach_from_trash() {
+    use ticketd_core::{ContextOptions, RelationshipKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    assert!(
+        w.add_contextual_relationship(&a.reference, &a.reference, RelationshipKind::Related, None)
+            .is_err()
+    );
+    w.add_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    w.add_contextual_relationship(&b.reference, &a.reference, RelationshipKind::Related, None)
+        .unwrap();
+    assert_eq!(w.ticket_history(&a.reference).unwrap().len(), 1);
+    w.set_trashed(&b.reference, true, None).unwrap();
+    w.remove_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    let context = w
+        .ticket_context(
+            &a.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert!(context.related.items.is_empty());
+}
+
+#[test]
+fn contextual_relationship_retry_notifies_both_endpoints_and_exports() {
+    use ticketd_core::{RelationshipKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    w.set_following(&a.reference, true).unwrap();
+    w.set_following(&b.reference, true).unwrap();
+    let request = || WriteRequest::AddContextualRelationship {
+        source: a.reference.clone(),
+        target: b.reference.clone(),
+        kind: RelationshipKind::Discovered,
+        agent: Some("agent".into()),
+    };
+    w.write(Some("relationship-request"), request()).unwrap();
+    w.write(Some("relationship-request"), request()).unwrap();
+    let inbox = w.inbox(20, 0).unwrap();
+    assert_eq!(inbox.len(), 2);
+    assert!(
+        inbox
+            .iter()
+            .all(|entry| entry.kind.starts_with("relationship:"))
+    );
+    assert_eq!(
+        w.export().unwrap()["contextual_relationships"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn contextual_relationships_and_retry_survive_backup_restore() {
+    use ticketd_core::{ContextOptions, RelationshipKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut w = Workspace::open(&path).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    let request = || WriteRequest::AddContextualRelationship {
+        source: a.reference.clone(),
+        target: b.reference.clone(),
+        kind: RelationshipKind::Related,
+        agent: None,
+    };
+    let original = w.write(Some("link"), request()).unwrap();
+    w.backup(&backup).unwrap();
+    drop(w);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut w = Workspace::open(&path).unwrap();
+    assert_eq!(w.write(Some("link"), request()).unwrap(), original);
+    let links = w
+        .ticket_context(
+            &b.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(links.related.items[0].reference, a.reference);
+}
+
+#[test]
+fn version_eighteen_reminders_survive_contextual_relationship_migration_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("version-18.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember after migration").unwrap();
+    workspace
+        .set_reminder(&ticket.reference, Some("2030-01-01T00:00:00Z"))
+        .unwrap();
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE contextual_relationships; PRAGMA user_version = 18;")
+        .unwrap();
+    drop(db);
+    std::fs::copy(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2030-01-01T00:00:00Z")
+    );
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2030-01-01T00:00:00Z")
+    );
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 19);
+    assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }

@@ -125,6 +125,22 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Add a contextual relationship (kind: related or discovered; source is the work being done)
+    AddRelationship {
+        source: String,
+        target: String,
+        kind: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Remove a contextual relationship
+    RemoveRelationship {
+        source: String,
+        target: String,
+        kind: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Add a directed blocking dependency
     AddDependency {
         blocker: String,
@@ -640,6 +656,34 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::RemoveDuplicate { source, agent } => {
             serde_json::to_string(&workspace.remove_duplicate(&source, agent.as_deref())?)?
         }
+        Command::AddRelationship {
+            source,
+            target,
+            kind,
+            agent,
+        } => {
+            let kind = parse_relationship_kind(&kind)?;
+            serde_json::to_string(&workspace.add_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?)?
+        }
+        Command::RemoveRelationship {
+            source,
+            target,
+            kind,
+            agent,
+        } => {
+            let kind = parse_relationship_kind(&kind)?;
+            serde_json::to_string(&workspace.remove_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?)?
+        }
         Command::AddDependency {
             blocker,
             dependent,
@@ -741,5 +785,15 @@ fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
         eprintln!("error: {error}");
         std::process::exit(1);
+    }
+}
+
+fn parse_relationship_kind(
+    value: &str,
+) -> Result<ticketd_core::RelationshipKind, Box<dyn std::error::Error>> {
+    match value {
+        "related" => Ok(ticketd_core::RelationshipKind::Related),
+        "discovered" => Ok(ticketd_core::RelationshipKind::Discovered),
+        _ => Err("relationship kind must be related or discovered".into()),
     }
 }

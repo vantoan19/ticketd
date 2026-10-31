@@ -59,6 +59,9 @@ pub struct ContextRelationships {
     pub children: ContextPage<ContextRelated>,
     pub prerequisites: ContextPage<ContextRelated>,
     pub blocking: ContextPage<ContextRelated>,
+    pub related: ContextPage<ContextRelated>,
+    pub discovered_while: ContextPage<ContextRelated>,
+    pub discoveries: ContextPage<ContextRelated>,
     pub duplicate_of: Option<ContextRelated>,
     pub duplicates: ContextPage<ContextRelated>,
 }
@@ -215,6 +218,9 @@ impl Workspace {
             let parent = related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
             Some(ContextRelationships {
                 parent,
+                related: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discovered_while: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discoveries: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
                 duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children: related(

@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project, Ticket,
-    TicketChange, TicketPatch, Workspace,
+    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project,
+    RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,18 @@ pub enum WriteRequest {
     },
     RemoveDuplicate {
         source: String,
+        agent: Option<String>,
+    },
+    AddContextualRelationship {
+        source: String,
+        target: String,
+        kind: RelationshipKind,
+        agent: Option<String>,
+    },
+    RemoveContextualRelationship {
+        source: String,
+        target: String,
+        kind: RelationshipKind,
         agent: Option<String>,
     },
     AddDependency {
@@ -317,6 +329,28 @@ impl Workspace {
             WriteRequest::RemoveDuplicate { source, agent } => {
                 WriteResult::Ticket(self.remove_duplicate(&source, agent.as_deref())?)
             }
+            WriteRequest::AddContextualRelationship {
+                source,
+                target,
+                kind,
+                agent,
+            } => WriteResult::Ticket(self.add_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?),
+            WriteRequest::RemoveContextualRelationship {
+                source,
+                target,
+                kind,
+                agent,
+            } => WriteResult::Ticket(self.remove_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?),
             WriteRequest::AddDependency {
                 blocker,
                 dependent,
