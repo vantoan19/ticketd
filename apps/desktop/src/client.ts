@@ -63,9 +63,28 @@ const noteSchema = z.object({
 });
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
+export type FindFilter = {
+  query: string;
+  project: string | null;
+  unlinked: boolean;
+  effort: string | null;
+  status: string | null;
+  tags: string[];
+  availability: string | null;
+  family: string | null;
+  limit: number;
+  offset: number;
+};
 export const client = {
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
+  },
+  async listEfforts() {
+    return z
+      .array(
+        z.object({ id: z.string(), name: z.string(), archived: z.boolean() }),
+      )
+      .parse(await invoke("list_efforts"));
   },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
@@ -93,6 +112,11 @@ export const client = {
   },
   async deleteNote(reference: string, id: string) {
     await invoke("delete_note", { reference, id });
+  },
+  async findTickets(filter: FindFilter) {
+    return z
+      .array(ticketSchema)
+      .parse(await invoke("find_tickets", { filter }));
   },
   async listTickets() {
     return z.array(ticketSchema).parse(await invoke("list_tickets"));

@@ -6,6 +6,7 @@ pub use graph::{DependencyGraph, GraphEdge, GraphNode};
 mod projects;
 mod relationships;
 mod search;
+pub use search::{Availability, TicketFilter};
 mod tags;
 pub use efforts::{Effort, EffortCounts, EffortView};
 
