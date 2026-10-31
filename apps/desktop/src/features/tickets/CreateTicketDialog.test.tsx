@@ -65,7 +65,7 @@ test("editor modes and keyboard operations never create a ticket; explicit submi
     target: { value: "Draft ticket" },
   });
   expect(
-    screen.getByRole("textbox", { name: "Description rich text" }),
+    await screen.findByRole("textbox", { name: "Description rich text" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   const source = screen.getByRole("textbox", { name: "Description source" });

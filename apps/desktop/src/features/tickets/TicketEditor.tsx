@@ -1,21 +1,9 @@
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
-import {
-  lazy,
-  Suspense,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
-
-const MarkdownEditor = lazy(() =>
-  import("@/features/markdown/MarkdownEditor").then((module) => ({
-    default: module.MarkdownEditor,
-  })),
-);
 
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
@@ -186,16 +174,12 @@ export function TicketEditor({
         </div>
         {bodyMode !== "unopened" && (
           <div hidden={!editingBody}>
-            <Suspense
-              fallback={<p role="status">Loading description editor…</p>}
-            >
-              <MarkdownEditor
-                value={draft.body}
-                onChange={(body) => edit({ ...draft, body })}
-                label="Description"
-                autoFocus={editingBody}
-              />
-            </Suspense>
+            <LazyMarkdownEditor
+              value={draft.body}
+              onChange={(body) => edit({ ...draft, body })}
+              label="Description"
+              autoFocus={editingBody}
+            />
           </div>
         )}
         {!editingBody &&
