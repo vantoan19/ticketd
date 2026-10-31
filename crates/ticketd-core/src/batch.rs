@@ -76,7 +76,10 @@ impl Workspace {
             ));
         }
         self.connection.execute_batch("SAVEPOINT batch")?;
-        crate::transaction_write_lock(&self.connection)?;
+        if let Err(error) = crate::transaction_write_lock(&self.connection) {
+            let _ = self.connection.execute_batch("ROLLBACK TO batch; RELEASE batch");
+            return Err(error);
+        }
         let result = self.apply_batch_inner(operations);
         match result {
             Ok(tickets) => {
