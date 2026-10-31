@@ -34,6 +34,12 @@ pub use projects::Project;
 pub enum Error {
     #[error("backup or restore failed: {0}")]
     Backup(String),
+    #[error("workspace migration failed: {source}; the original data remains unchanged. Backup: {}. Restore it with `ticketd restore-workspace <backup>` or use the previous application version", backup.display())]
+    Migration {
+        backup: std::path::PathBuf,
+        #[source]
+        source: Box<Error>,
+    },
     #[error("request ID was already used for different content: {0}")]
     RequestConflict(String),
     #[error("request serialization error: {0}")]
@@ -140,17 +146,63 @@ impl Workspace {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let lock = backup::shared_lock(path.as_ref())?;
-        let mut connection = Connection::open(path)?;
-        connection.busy_timeout(Duration::from_secs(10))?;
+        use fs2::FileExt;
+        let path = path.as_ref();
+        loop {
+            let lock = backup::shared_lock(path)?;
+            let connection = Connection::open(path)?;
+            connection.busy_timeout(Duration::from_secs(10))?;
+            let version: i64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if version > 13 {
+                return Err(Error::NewerSchema(version));
+            }
+            if version == 13 {
+                connection.pragma_update(None, "foreign_keys", "ON")?;
+                return Ok(Self {
+                    connection,
+                    _lock: lock,
+                });
+            }
+            drop(connection);
+            drop(lock);
+            let lock = backup::lock_file(path)?;
+            FileExt::lock_exclusive(&lock)?;
+            let mut connection = Connection::open(path)?;
+            connection.busy_timeout(Duration::from_secs(10))?;
+            let version: i64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            if version > 13 {
+                return Err(Error::NewerSchema(version));
+            }
+            if version < 13 {
+                let backup = if version > 0 {
+                    Some(Self::migration_backup(&connection, path).map_err(|source| {
+                        Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
+                    })?)
+                } else {
+                    None
+                };
+                let result = Self::migrate(&mut connection, version);
+                if let Err(source) = result {
+                    return Err(match backup {
+                        Some(backup) => Error::Migration {
+                            backup,
+                            source: Box::new(source),
+                        },
+                        None => source,
+                    });
+                }
+            }
+            // Release exclusive ownership before acquiring the lifetime shared lock,
+            // then recheck: restore may have run in between.
+        }
+    }
+
+    fn migrate(connection: &mut Connection, version: i64) -> Result<(), Error> {
         connection.pragma_update(None, "foreign_keys", "ON")?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let version: i64 =
-            transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 12 {
-            return Err(Error::NewerSchema(version));
-        }
         if version == 0 {
             transaction.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); PRAGMA user_version = 1;")?;
         }
@@ -192,11 +244,11 @@ impl Workspace {
         if version < 12 {
             transaction.execute_batch("CREATE TABLE request_outcomes (id TEXT PRIMARY KEY, request TEXT NOT NULL, outcome TEXT NOT NULL); PRAGMA user_version = 12;")?;
         }
+        if version < 13 {
+            transaction.execute_batch("CREATE INDEX ticket_history_ticket_id ON ticket_history(ticket_id); PRAGMA user_version = 13;")?;
+        }
         transaction.commit()?;
-        Ok(Self {
-            connection,
-            _lock: lock,
-        })
+        Ok(())
     }
 
     pub fn create_ticket(&mut self, title: &str) -> Result<Ticket, Error> {
