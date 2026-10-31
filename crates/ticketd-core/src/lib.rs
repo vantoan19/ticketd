@@ -3,6 +3,8 @@ mod context;
 pub use context::{ContextOptions, TicketContext};
 
 mod efforts;
+mod retry;
+pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
@@ -27,6 +29,10 @@ pub use projects::Project;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("request ID was already used for different content: {0}")]
+    RequestConflict(String),
+    #[error("request serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
     #[error("batch operation {index}: {source}")]
     BatchOperation {
         index: usize,
@@ -98,9 +104,17 @@ pub struct TicketPatch {
     pub body: Option<String>,
     pub status: Option<Status>,
     pub editing_agent: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_project_patch")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_project_patch"
+    )]
     pub project_id: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_project_patch")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_project_patch"
+    )]
     pub effort_id: Option<Option<String>>,
 }
 
@@ -129,7 +143,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 11 {
+        if version > 12 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -169,6 +183,9 @@ impl Workspace {
         }
         if version < 11 {
             transaction.execute_batch("ALTER TABLE tickets ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 11;")?;
+        }
+        if version < 12 {
+            transaction.execute_batch("CREATE TABLE request_outcomes (id TEXT PRIMARY KEY, request TEXT NOT NULL, outcome TEXT NOT NULL); PRAGMA user_version = 12;")?;
         }
         transaction.commit()?;
         Ok(Self { connection })

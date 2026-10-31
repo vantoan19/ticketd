@@ -851,6 +851,134 @@ fn context_reads_one_snapshot_during_atomic_changes() {
 }
 
 #[test]
+fn request_retry_returns_original_ticket_and_rejects_changed_content() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("db")).unwrap();
+    let request = || WriteRequest::CreateTicket {
+        title: "Original".into(),
+        project_id: None,
+    };
+    let first = workspace.write(Some("request-1"), request()).unwrap();
+    let WriteResult::Ticket(ticket) = &first else {
+        panic!("expected ticket")
+    };
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                title: Some("Changed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.write(Some("request-1"), request()).unwrap(),
+        first
+    );
+    assert!(
+        workspace
+            .write(
+                Some("request-1"),
+                WriteRequest::CreateTicket {
+                    title: "Different".into(),
+                    project_id: None
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+}
+
+#[test]
+fn concurrent_duplicate_batch_is_applied_once() {
+    use std::sync::{Arc, Barrier};
+    use ticketd_core::{BatchOperation, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    Workspace::open(&path).unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let mut workspace = Workspace::open(path).unwrap();
+                barrier.wait();
+                workspace
+                    .write(
+                        Some("batch-1"),
+                        WriteRequest::Batch {
+                            operations: vec![BatchOperation::Create {
+                                name: "a".into(),
+                                title: "Once".into(),
+                                project_id: None,
+                            }],
+                        },
+                    )
+                    .unwrap()
+            })
+        })
+        .collect();
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(results[0], results[1]);
+    assert_eq!(
+        Workspace::open(path).unwrap().list_tickets().unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn failed_request_id_can_be_reused_and_clearing_is_distinct_from_omission() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("db")).unwrap();
+    assert!(
+        workspace
+            .write(
+                Some("retry"),
+                WriteRequest::CreateTicket {
+                    title: " ".into(),
+                    project_id: None
+                }
+            )
+            .is_err()
+    );
+    workspace
+        .write(
+            Some("retry"),
+            WriteRequest::CreateTicket {
+                title: "Valid".into(),
+                project_id: None,
+            },
+        )
+        .unwrap();
+    workspace
+        .write(
+            Some("patch"),
+            WriteRequest::ChangeTicket {
+                reference: "T-1".into(),
+                patch: TicketPatch::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .write(
+                Some("patch"),
+                WriteRequest::ChangeTicket {
+                    reference: "T-1".into(),
+                    patch: TicketPatch {
+                        project_id: Some(None),
+                        ..Default::default()
+                    }
+                }
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn search_tracks_note_deletion() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();

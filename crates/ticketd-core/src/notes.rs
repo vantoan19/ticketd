@@ -11,7 +11,7 @@ pub struct Note {
     pub updated_at: String,
     pub editing_agent: Option<String>,
 }
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct NotePatch {
     pub content: Option<String>,
     pub editing_agent: Option<String>,
