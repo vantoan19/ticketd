@@ -130,6 +130,14 @@ enum ProjectCommand {
         id: String,
     },
     List,
+    Register {
+        id: String,
+        path: String,
+    },
+    Unregister {
+        id: String,
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -193,10 +201,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.edit_project(&id, &name, &path)?)?
             }
             ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
+            ProjectCommand::Register { id, path } => {
+                serde_json::to_string(&workspace.register_checkout(&id, &path)?)?
+            }
+            ProjectCommand::Unregister { id, path } => {
+                serde_json::to_string(&workspace.remove_checkout(&id, &path)?)?
+            }
             ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
         },
         Command::Create { title, project } => {
-            serde_json::to_string(&workspace.create_ticket_in_project(&title, project.as_deref())?)?
+            let inferred = if project.is_none() {
+                workspace.resolve_project(&std::env::current_dir()?)?
+            } else {
+                None
+            };
+            let project = project
+                .as_deref()
+                .or_else(|| inferred.as_ref().map(|p| p.id.as_str()));
+            serde_json::to_string(&workspace.create_ticket_in_project(&title, project)?)?
         }
         Command::Change {
             reference,

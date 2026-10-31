@@ -491,3 +491,44 @@ fn effort_patch_combines_membership_and_status_atomically() {
     let clear: TicketPatch = serde_json::from_str(r#"{"effort_id":null}"#).unwrap();
     assert_eq!(clear.effort_id, Some(None));
 }
+
+#[test]
+fn checkout_context_is_local_and_ambiguous_matches_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    let nested = first.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let project = workspace
+        .create_project("one", first.to_str().unwrap())
+        .unwrap();
+    workspace
+        .register_checkout(&project.id, second.to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        workspace.resolve_project(&nested).unwrap().unwrap().id,
+        project.id
+    );
+    assert_eq!(
+        workspace.resolve_project(&second).unwrap().unwrap().id,
+        project.id
+    );
+    assert!(workspace.resolve_project(dir.path()).unwrap().is_none());
+    let other = workspace
+        .create_project("two", nested.to_str().unwrap())
+        .unwrap();
+    assert!(workspace.resolve_project(&nested).is_err());
+    let ticket = workspace
+        .create_ticket_in_project("override", Some(&other.id))
+        .unwrap();
+    assert_eq!(ticket.project_id.as_deref(), Some(other.id.as_str()));
+    workspace
+        .remove_checkout(&other.id, nested.to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        workspace.resolve_project(&nested).unwrap().unwrap().id,
+        project.id
+    );
+}
