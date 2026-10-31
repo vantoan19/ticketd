@@ -105,3 +105,10 @@ reflect intervening changes. Text objects contain `text` and `truncated`:
 ticket and note bodies are limited to 4096 Unicode characters, other user text
 to 256. Use `ticketd show T-1` for full ticket content and `ticketd note list
 T-1` for full notes. The bounded body must not be used as an editable draft.
+
+Search saved titles, bodies, and notes with `ticketd search QUERY`. The query is a
+literal substring (ASCII letters match without case); an empty query returns no
+matches. Results exclude trash and are ordered by descending ticket reference.
+Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
+or `--unlinked` to restrict results. The desktop search uses the same matching
+and pages through 50 results at a time.

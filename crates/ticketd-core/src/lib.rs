@@ -8,6 +8,7 @@ mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
 mod projects;
 mod relationships;
+mod search;
 mod tags;
 pub use efforts::{Effort, EffortCounts, EffortView};
 

@@ -22,14 +22,15 @@
     "check": "./scripts/check"
   },
   "devDependencies": {
-    "prettier": "^3",
-    "eslint": "^10.14.0",
     "@eslint/js": "^10",
-    "typescript-eslint": "^8",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^16",
-    "markdownlint-cli2": "0.24.0"
+    "markdownlint-cli2": "0.24.0",
+    "prettier": "^3",
+    "typescript-eslint": "^8",
+    "webdriverio": "^9.24.0"
   },
   "overrides": {
     "re2js": "^2.9.1"
