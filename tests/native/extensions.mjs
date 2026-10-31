@@ -105,9 +105,9 @@ try {
   ).waitForDisplayed({ timeout: 12000 });
   await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
-    await browser.$("p*=New note: Native finding")
+    await browser.$("span*=New note: Native finding")
   ).waitForDisplayed({ timeout: 12000 });
-  await click(await browser.$("button=Mark displayed read"));
+  await click(await browser.$("button=Mark shown as read"));
   await waitFor(
     () => run("inbox").every((item) => item.read),
     "Inbox entries were not marked read",
@@ -118,7 +118,7 @@ try {
   );
   await click(
     await browser.$(
-      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
@@ -160,9 +160,9 @@ try {
   );
   await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
-    await browser.$("p*=Reminder due")
+    await browser.$("span*=Your reminder is due")
   ).waitForDisplayed({ timeout: 10000 });
-  await click(await browser.$("button=Mark displayed read"));
+  await click(await browser.$("button=Mark shown as read"));
   await waitFor(
     () => run("inbox").every((item) => item.read),
     "Reminder not read",
@@ -200,7 +200,7 @@ try {
   );
   await click(
     await browser.$(
-      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "Reminder due")] and .//span[normalize-space()="Unread"]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "Your reminder is due")] and .//span[normalize-space()="Unread"]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });

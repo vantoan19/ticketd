@@ -2889,3 +2889,44 @@ fn sidebar_counts_follow_readiness_rules_and_unread_inbox() {
     w.set_inbox_read(&ids, true).unwrap();
     assert_eq!(w.sidebar_counts().unwrap().unread_inbox, 0);
 }
+
+#[test]
+fn unread_inbox_filter_pages_over_unread_entries_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Busy ticket").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    for status in [
+        Status::InProgress,
+        Status::InReview,
+        Status::Done,
+        Status::Canceled,
+    ] {
+        workspace
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let all = workspace.inbox(100, 0).unwrap();
+    assert_eq!(all.len(), 4);
+    // Read the first and third newest so unread and read entries interleave.
+    workspace
+        .set_inbox_read(&[all[0].id, all[2].id], true)
+        .unwrap();
+
+    let first = workspace.inbox_page(1, 0, true).unwrap();
+    let second = workspace.inbox_page(1, 1, true).unwrap();
+    let third = workspace.inbox_page(1, 2, true).unwrap();
+    assert_eq!(first.iter().map(|e| e.id).collect::<Vec<_>>(), [all[1].id]);
+    assert_eq!(second.iter().map(|e| e.id).collect::<Vec<_>>(), [all[3].id]);
+    assert!(third.is_empty());
+    assert!(first.iter().chain(&second).all(|entry| !entry.read));
+    let everything = workspace.inbox_page(100, 0, false).unwrap();
+    assert_eq!(everything.len(), 4);
+    assert_eq!(everything, workspace.inbox(100, 0).unwrap());
+}
