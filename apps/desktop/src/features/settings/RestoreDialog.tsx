@@ -139,7 +139,12 @@ function Comparison({
       </thead>
       <tbody>
         <tr>
-          <th scope="row">Last change</th>
+          <th
+            scope="row"
+            title="The latest ticket history, note, or evidence change. Edits to titles, descriptions, tags, follows and reminders are not dated."
+          >
+            Last recorded activity
+          </th>
           <td>{formatWhen(current.last_change)}</td>
           <td>{formatWhen(backup.last_change)}</td>
         </tr>

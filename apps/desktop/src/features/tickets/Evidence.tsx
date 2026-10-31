@@ -53,6 +53,11 @@ const typeNames = {
   verification: "Verification",
 } as const;
 
+/** A commit is read by its first characters; the full value stays in the tooltip and in Copy. */
+function shortCommit(value: string): string {
+  return /^[0-9a-f]{12,}$/i.test(value) ? value.slice(0, 10) : value;
+}
+
 export function Evidence({
   reference,
   revision,
@@ -262,8 +267,9 @@ export function Evidence({
             <p
               className="evidence-item-value"
               data-kind={item.kind === "verification" ? "text" : "code"}
+              title={item.kind === "commit" ? item.value : undefined}
             >
-              {item.value}
+              {item.kind === "commit" ? shortCommit(item.value) : item.value}
             </p>
           </li>
         ))}

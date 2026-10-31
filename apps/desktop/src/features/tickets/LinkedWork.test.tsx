@@ -291,3 +291,20 @@ test("a refused link shows the reason inline and keeps the dialog open", async (
   expect(await screen.findByText(/would create a cycle/)).toBeTruthy();
   expect(screen.getByRole("dialog")).toBeTruthy();
 });
+
+test("choosing a new parent says it replaces the current one", async () => {
+  bridge();
+  renderSection({
+    ...base,
+    parent: { reference: "T-3", title: "Epic", trashed: false },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Link ticket" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).queryByRole("status")).toBeNull();
+  fireEvent.change(within(dialog).getByLabelText("Relationship"), {
+    target: { value: "parent" },
+  });
+  expect(within(dialog).getByRole("status").textContent).toBe(
+    "This replaces the current parent T-3.",
+  );
+});

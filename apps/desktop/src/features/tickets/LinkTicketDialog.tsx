@@ -45,6 +45,14 @@ export function LinkTicketDialog({
   const [pending, setPending] = useState(false);
   const attempt = useRef<{ key: string; id: string } | null>(null);
 
+  // A ticket has one parent, so a link that gives it a new parent moves it.
+  const replacedParent =
+    kind === "parent"
+      ? ticket.parent?.reference
+      : kind === "subticket"
+        ? chosen?.parent?.reference
+        : undefined;
+
   useEffect(() => {
     const text = query.trim();
     if (!open || !text) return;
@@ -215,6 +223,11 @@ export function LinkTicketDialog({
               <FieldError>{error}</FieldError>
             </Field>
           </FieldGroup>
+          {replacedParent && (
+            <p role="status" className="link-ticket-note">
+              This replaces the current parent {replacedParent}.
+            </p>
+          )}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => change(false)}>
               Cancel

@@ -1,4 +1,5 @@
 import { startOfLocalDay } from "@/lib/format";
+import { describeChange } from "./history-sentence";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
 
@@ -13,44 +14,12 @@ export function entryNoun(entry: Entry): string {
 
 /** A plain-language summary. Internal event keys never appear in it. */
 export function summarize(entry: Entry): string {
-  const added = entry.to_value !== "";
-  const target = entry.to_value || entry.from_value;
-  const base = (() => {
-    switch (entry.kind) {
-      case "reminder":
-        return "Your reminder is due";
-      case "note":
-        return `New note: ${entry.to_value}`;
-      case "status":
-        return `Status changed from ${entry.from_value} to ${entry.to_value}`;
-      case "parent":
-        return added ? `Parent set to ${target}` : `Parent ${target} removed`;
-      case "dependency":
-        return added
-          ? `Now blocked by ${target}`
-          : `No longer blocked by ${target}`;
-      case "relationship:blocks":
-        return added ? `Now blocks ${target}` : `No longer blocks ${target}`;
-      case "relationship:related":
-        return added
-          ? `Related to ${target}`
-          : `No longer related to ${target}`;
-      case "relationship:discovery":
-        return added
-          ? `Discovered ${target} while working on this`
-          : `Discovery link to ${target} removed`;
-      case "relationship:discovered-while":
-        return added
-          ? `Discovered while working on ${target}`
-          : `Discovery source ${target} removed`;
-      case "relationship:duplicate":
-        return added
-          ? `Marked as a duplicate of ${target} and canceled`
-          : `No longer marked as a duplicate of ${target}`;
-      default:
-        return "A relationship changed";
-    }
-  })();
+  const base =
+    entry.kind === "reminder"
+      ? "Your reminder is due"
+      : entry.kind === "note"
+        ? `New note: ${entry.to_value}`
+        : describeChange(entry.kind, entry.from_value, entry.to_value);
   return entry.editing_agent ? `${base} · ${entry.editing_agent}` : base;
 }
 

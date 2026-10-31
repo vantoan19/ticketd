@@ -8,12 +8,29 @@ type Lookups = {
 
 const quote = (value: string) => `“${value}”`;
 
+const noLookups: Lookups = {
+  project: () => undefined,
+  effort: () => undefined,
+};
+
 /** Plain-language sentence for one recorded change, never an event key. */
 export function historySentence(entry: Entry, lookups: Lookups): string {
-  const { from_value: from, to_value: to } = entry;
+  return describeChange(entry.kind, entry.from_value, entry.to_value, lookups);
+}
+
+/**
+ * The one place that words a change of `kind` from one value to another. The
+ * ticket's Activity and the Inbox both read it, so they never disagree.
+ */
+export function describeChange(
+  kind: string,
+  from: string,
+  to: string,
+  lookups: Lookups = noLookups,
+): string {
   const addedOrRemoved = (added: string, removed: string) =>
     to ? `${added} ${to}` : `${removed} ${from}`;
-  switch (entry.kind) {
+  switch (kind) {
     case "status":
       return `Status changed from ${from} to ${to}`;
     case "project": {

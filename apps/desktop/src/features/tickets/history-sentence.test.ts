@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { historySentence } from "./history-sentence";
+import { summarize } from "./inboxModel";
 
 const lookups = {
   project: (id: string) => (id === "p1" ? "Platform" : undefined),
@@ -29,6 +30,26 @@ test("describes recorded changes as sentences without event keys", () => {
   );
   expect(sentence("evidence", "", "Review")).toBe("Added evidence “Review”");
   expect(sentence("trash", "active", "trashed")).toBe("Moved to trash");
+});
+
+test("words subticket changes, and the Inbox shares the same sentences", () => {
+  expect(sentence("relationship:child", "", "T-7")).toBe("Added subticket T-7");
+  expect(sentence("relationship:child", "T-7", "")).toBe(
+    "Removed subticket T-7",
+  );
+  expect(
+    summarize({
+      id: 1,
+      reference: "T-1",
+      title: "Parent",
+      kind: "relationship:child",
+      from_value: "",
+      to_value: "T-7",
+      timestamp: "",
+      read: false,
+      editing_agent: "codex",
+    }),
+  ).toBe("Added subticket T-7 · codex");
 });
 
 test("falls back to a generic sentence for unknown kinds", () => {

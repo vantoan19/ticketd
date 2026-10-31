@@ -11,8 +11,9 @@ use crate::{
 /// What a workspace holds, for comparing it with a backup before a restore.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceSummary {
-    /// Latest recorded change (ticket history, note or evidence edit), as an
-    /// RFC 3339 timestamp, or `None` when nothing has changed yet.
+    /// Latest recorded activity (ticket history, note or evidence edit), as an
+    /// RFC 3339 timestamp, or `None` when there is none yet. Edits that carry no
+    /// timestamp, such as title, tags, follows and reminders, are not counted.
     pub last_change: Option<String>,
     /// Tickets outside Trash.
     pub tickets: u64,

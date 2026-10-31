@@ -217,3 +217,33 @@ test("copies any evidence value on explicit request", async () => {
   view.unmount();
   Reflect.deleteProperty(navigator, "clipboard");
 });
+
+test("a full commit hash is shown short, with the whole value on hover", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const full = "0123456789abcdef0123456789abcdef01234567";
+  vi.mocked(invoke).mockImplementation(async (command: string) =>
+    command === "list_evidence"
+      ? [
+          {
+            id: "c1",
+            kind: "commit",
+            name: "Fix",
+            value: full,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            editing_agent: null,
+          },
+        ]
+      : undefined,
+  );
+  render(
+    <Evidence
+      reference="T-2"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  const value = await screen.findByText("0123456789");
+  expect(value.getAttribute("title")).toBe(full);
+});
