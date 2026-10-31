@@ -58,7 +58,7 @@ export function History({
   }, [reference, status]);
   async function changeStatus(value: string) {
     try {
-      await invoke("change_status", { reference, status: value });
+      await invoke("change_ticket", { reference, patch: { status: value } });
       await onChange();
       setError("");
     } catch (reason) {

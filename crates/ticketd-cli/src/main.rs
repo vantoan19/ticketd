@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
-use ticketd_core::{Status, Workspace};
+use std::io::Read;
+use ticketd_core::{Status, TicketPatch, Workspace};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -12,10 +13,17 @@ struct Arguments {
 enum Command {
     /// Create a ticket with a title
     Create { title: String },
-    /// Change a ticket status (Todo, In progress, In review, Done, Canceled)
-    Status {
+    /// Patch ticket content; use --body-file - to read stdin
+    Change {
         reference: String,
-        status: Status,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<String>,
+        #[arg(long)]
+        status: Option<Status>,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -32,15 +40,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
         Command::Create { title } => serde_json::to_string(&workspace.create_ticket(&title)?)?,
-        Command::Status {
+        Command::Change {
             reference,
+            title,
+            body,
+            body_file,
             status,
             agent,
-        } => serde_json::to_string(&workspace.change_status(
-            &reference,
-            status,
-            agent.as_deref(),
-        )?)?,
+        } => {
+            let body = match body_file {
+                Some(path) if path == "-" => {
+                    let mut content = String::new();
+                    std::io::stdin().read_to_string(&mut content)?;
+                    Some(content)
+                }
+                Some(path) => Some(std::fs::read_to_string(path)?),
+                None => body,
+            };
+            serde_json::to_string(&workspace.change_ticket(
+                &reference,
+                TicketPatch {
+                    title,
+                    body,
+                    status,
+                    editing_agent: agent,
+                },
+            )?)?
+        }
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
         }

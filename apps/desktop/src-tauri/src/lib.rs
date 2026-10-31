@@ -1,5 +1,5 @@
 //! Desktop adapter for the shared ticketd core.
-use ticketd_core::{HistoryEntry, Status, Ticket, Workspace};
+use ticketd_core::{HistoryEntry, Ticket, TicketPatch, Workspace};
 
 #[tauri::command]
 fn list_tickets() -> Result<Vec<Ticket>, String> {
@@ -16,9 +16,9 @@ fn create_ticket(title: String) -> Result<Ticket, String> {
 }
 
 #[tauri::command]
-fn change_status(reference: String, status: Status) -> Result<Ticket, String> {
+fn change_ticket(reference: String, patch: TicketPatch) -> Result<Ticket, String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.change_status(&reference, status, None))
+        .and_then(|mut workspace| workspace.change_ticket(&reference, patch))
         .map_err(|error| error.to_string())
 }
 
@@ -34,7 +34,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             list_tickets,
             create_ticket,
-            change_status,
+            change_ticket,
             ticket_history
         ])
         .run(tauri::generate_context!())

@@ -31,6 +31,15 @@ pub struct Ticket {
     pub reference: String,
     pub title: String,
     pub status: Status,
+    pub body: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TicketPatch {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub status: Option<Status>,
+    pub editing_agent: Option<String>,
 }
 
 pub struct Workspace {
@@ -51,13 +60,16 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 2 {
+        if version > 3 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
             transaction.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); PRAGMA user_version = 1;")?;
         }
         if version < 2 {
+            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN body TEXT NOT NULL DEFAULT ''; PRAGMA user_version = 2;")?;
+        }
+        if version < 3 {
             history::migrate(&transaction)?;
         }
         transaction.commit()?;
@@ -79,45 +91,48 @@ impl Workspace {
             reference: format!("T-{}", self.connection.last_insert_rowid()),
             title: title.to_owned(),
             status: Status::Todo,
+            body: String::new(),
         })
     }
 
-    pub fn change_status(
-        &mut self,
-        reference: &str,
-        status: Status,
-        editing_agent: Option<&str>,
-    ) -> Result<Ticket, Error> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
+        let title = patch.title.as_deref().map(str::trim);
+        if title == Some("") {
+            return Err(Error::EmptyTitle);
+        }
         let number = reference
             .strip_prefix("T-")
             .and_then(|value| value.parse::<i64>().ok());
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
-        if ticket.status != status {
-            transaction.execute(
-                "UPDATE tickets SET status = ?1 WHERE id = ?2",
-                params![status.to_string(), ticket.id],
-            )?;
+        let status = patch.status.unwrap_or(ticket.status);
+        transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
+        if status != ticket.status {
             history::record(
                 &transaction,
                 &ticket.id,
                 "status",
                 &ticket.status.to_string(),
                 &status.to_string(),
-                editing_agent,
+                patch.editing_agent.as_deref(),
             )?;
         }
+        let updated = transaction.query_row(
+            "SELECT id, number, title, status, body FROM tickets WHERE number = ?1",
+            [number],
+            ticket_from_row,
+        )?;
         transaction.commit()?;
-        Ok(Ticket { status, ..ticket })
+        Ok(updated)
     }
 
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
@@ -128,7 +143,7 @@ impl Workspace {
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         let mut statement = self
             .connection
-            .prepare("SELECT id, number, title, status FROM tickets ORDER BY number DESC")?;
+            .prepare("SELECT id, number, title, status, body FROM tickets ORDER BY number DESC")?;
         let tickets = statement
             .query_map([], ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -142,7 +157,7 @@ impl Workspace {
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -163,5 +178,6 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
                 Box::new(error),
             )
         })?,
+        body: row.get(4)?,
     })
 }

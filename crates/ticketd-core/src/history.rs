@@ -55,7 +55,7 @@ pub struct HistoryEntry {
 }
 
 pub(crate) fn migrate(transaction: &Transaction<'_>) -> Result<(), Error> {
-    transaction.execute_batch("CREATE TABLE ticket_history (number INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT); PRAGMA user_version = 2;")?;
+    transaction.execute_batch("CREATE TABLE ticket_history (number INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, from_value TEXT NOT NULL, to_value TEXT NOT NULL, timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), editing_agent TEXT); PRAGMA user_version = 3;")?;
     Ok(())
 }
 
