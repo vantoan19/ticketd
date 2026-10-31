@@ -199,3 +199,40 @@
   align-items: center;
   gap: 4px;
 }
+
+/* Location and About actions */
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workspace-path {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.workspace-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+.workspace-fact dt {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--muted-foreground);
+}
+.workspace-fact dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--foreground);
+}

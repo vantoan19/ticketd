@@ -7,6 +7,7 @@ export type SettingsGroup = "Preferences" | "Workspace" | "Help";
  */
 export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
+  { id: "location", label: "Location", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },
   { id: "keyboard-shortcuts", label: "Keyboard shortcuts", group: "Help" },
