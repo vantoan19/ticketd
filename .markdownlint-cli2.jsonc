@@ -1,0 +1,9 @@
+{
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules/**", "target/**", "dist/**"],
+  "config": {
+    "MD013": false,
+    "MD041": false,
+    "MD060": false
+  }
+}

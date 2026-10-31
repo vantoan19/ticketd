@@ -4,6 +4,10 @@ Keep durable product requirements, domain definitions, and architectural decisio
 
 ## Agent skills
 
+### Engineering quality
+
+Before implementing or reviewing code, read `docs/agents/quality.md`. Run `./scripts/check` before handing off changes; start with small, focused tests and expand only for meaningful risk.
+
 ### Issue tracker
 
 Before creating, reading, or updating work items, read `docs/agents/issue-tracker.md`. Use this repository's GitHub Issues through `gh`.

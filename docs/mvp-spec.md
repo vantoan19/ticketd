@@ -68,6 +68,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 ### 4.1. Workspace, projects, and Efforts
 
 - One default local workspace contains projects, Efforts, and tickets.
+- Store the default workspace in the operating system's application-data directory, outside repository checkouts. Multiple selectable workspaces are outside the MVP.
 - A project represents one repository, not a grouping of work. Its explicit identity survives repository moves and renames; multiple local checkouts may refer to the same project.
 - A ticket optionally links to one project. Tickets without a project are valid; no Inbox project is required.
 - Registered checkout paths locate projects without implying Git integration.
@@ -87,7 +88,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Short ticket references are unique across the workspace and remain unchanged when project or Effort links change.
 - Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
 - Acceptance criteria can be written in the body; no separate mandatory field is required.
-- Support editable, deletable, timestamped notes for progress and findings, with author/source when known.
+- Support editable, deletable, timestamped notes for progress and findings. Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
 - Keep automatic ticket history separate from notes: record status, relationship, project/Effort membership, and trash/restore changes. Full body revision history is outside the MVP.
 - Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
 - Priority, deadlines, attachments, and custom fields are not required for the MVP.
@@ -224,11 +225,14 @@ A board view and an agent/chat panel are outside the MVP.
 - Trash and restore tickets; edit/delete notes and read ticket history.
 - Query Ready/Blocked work and search with project, Effort, and other filter constraints.
 - Retrieve explicit context scopes with bounded, deterministic output.
-- Support batch creation and updates to reduce round trips; clearly define atomicity or per-item failures.
+- Support atomic batch creation and updates: all operations succeed or none persist. Identify invalid operations in errors. Allow batch-local names to reference newly created tickets before their permanent references are returned.
 - Provide help, structured JSON output, exit codes, and actionable errors.
 - Avoid interactive prompts in agent mode; keep diagnostics separate from JSON stdout.
 - Accept multiline content through files or stdin to avoid fragile shell quoting.
-- Detect stale-version updates. Support safe retry semantics for operations that could otherwise create duplicates.
+- Record versioning and stale-edit rejection are outside the MVP. Support safe retry semantics for operations that could otherwise create duplicates.
+- A caller may attach a request ID to a write or batch. Retrying the same request returns its original result without repeating changes; reusing its ID with different content fails. Persist the outcome atomically with the changes. Retain successful request IDs and original results indefinitely in the MVP, including in backups; a replay returns the original result rather than current ticket state.
+- Writes do not require caller-supplied record versions, including ticket, note, and relationship edits. Update only explicitly supplied fields; omitted fields remain unchanged and clearing is explicit. The last successful write to a field wins.
+- Writes may identify the editing agent when supplied, without human names or an account model. Missing agent attribution must not be treated as proof that a human performed the write.
 
 ### Context contents
 
@@ -275,13 +279,20 @@ Dependency versions are not pinned in this product specification. Select compati
 
 ## 10. Architecture direction and extensibility
 
+See [High-level architecture](architecture.md) for runtime structure, module responsibilities, and data flows.
+
 - UI and CLI share application core, business rules, and data.
+- Each process uses its own instance of the same Rust core library. Keep one public workflow interface and organize domain rules, writes, queries, and SQLite persistence internally. Test core behavior through that interface using temporary SQLite databases.
+- The core must offer a simple interface that hides validation, transaction handling, persistence, and history recording from callers. Its exact interface remains a design decision; a small method count alone does not establish simplicity.
+- Keep ticket creation distinct from a cohesive ticket-change operation. A change may combine field edits, an appended note, and relationship changes atomically, without requiring a record version and returning the updated ticket. Batches compose these same operations rather than defining another editing language.
+- Provide workflow-shaped reads for finding tickets, opening a ticket with selected context, and viewing a dependency graph. The core owns context assembly and output limits; callers do not assemble tables or use a general-purpose query language.
+- Dependencies and tags use explicit additions/removals rather than whole-list replacement. Parent changes use explicit assignment/removal. The core validates relationship changes and graph invariants atomically without version checks. Each context response is assembled from one consistent read snapshot; this does not reserve work or prevent subsequent changes.
 - Keep business logic independent of Tauri and SQLite so it can run in a server later.
 - The CLI calls the core directly; a running desktop UI, HTTP server, or MCP server is not required by the proposed architecture.
-- Proposed MVP topology: UI and CLI processes access the same SQLite database through the shared core. Validate concurrency in a technical spike before finalizing.
+- Selected MVP direction: UI and CLI processes access the same SQLite database through the shared core, without a required background daemon. Validate concurrency, migrations, and UI refresh in a technical spike before finalizing.
 - Detect external changes and refresh affected UI data.
-- Use short transactions, appropriate indexes, lock handling, and version-aware updates.
-- Use globally unique identities, schema migrations, and record versions to preserve future options.
+- Use short transactions, appropriate indexes, lock handling, and atomic updates.
+- Use globally unique identities and schema migrations to preserve future options.
 - Preserve workspace boundaries and necessary change metadata without building a universal database abstraction.
 - Future sync may retain SQLite locally and add a cloud database. Sync requires change propagation, conflict handling, deletion semantics, and authorization; it is not simply a database swap.
 - Placing a live database in a file-sync folder is not the product synchronization strategy.
@@ -313,7 +324,7 @@ Set latency budgets and representative dataset sizes after a benchmark spike. Ba
 
 ### Reliability and data ownership
 
-- Do not silently overwrite newer content when UI and CLI edit the same record.
+- Record-version conflict detection is deferred. External updates refresh saved information while preserving unsaved UI drafts, following familiar file-editor behavior. If saved content changes beneath a draft, indicate the change and let the user reload or save the draft over the current field value; do not automatically merge it.
 - Persist acknowledged writes across application restarts.
 - Provide an appropriate backup/recovery path for migrations.
 - Export projects, Efforts, tickets, notes, ticket history, tags, and relationships in a documented format.
@@ -339,7 +350,7 @@ These are draft verification criteria for review, not individually approved requ
 6. One context query retrieves the requested ticket context without repeated follow-up calls for included scopes.
 7. Content, checklists, and notes persist and are searchable.
 8. The CLI works while the UI is closed, and reopening the UI shows current data, subject to confirming distribution behavior.
-9. The UI reflects CLI changes and detects conflicting edits without silent overwrites.
+9. The UI reflects CLI changes; concurrent saves follow the agreed overwrite policy without requiring record versions.
 10. Export and backup/restore preserve data and relationships.
 11. One real repository project completes the full workflow: external planning, CLI ticket creation, UI review/editing, external execution, and CLI progress updates.
 12. Tickets can exist without project or Effort links; references survive membership changes.
@@ -358,7 +369,7 @@ These are draft verification criteria for review, not individually approved requ
 - Board, roadmap, calendar, time tracking, reporting, and gamification.
 - Full web/mobile clients, cloud hosting, account/auth, collaboration, and multi-device sync.
 - Plugin system, custom workflow engine, vector database, and MCP server.
-- Project archiving, permanent ticket/project deletion, and full ticket body revision history.
+- Project archiving, permanent ticket/project deletion, full ticket body revision history, and record-version conflict detection.
 
 These are possible future directions, not a committed roadmap.
 

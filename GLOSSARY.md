@@ -62,7 +62,10 @@ A ticket status indicating that its work is complete and no further review is re
 A ticket status indicating that its work will not continue. Cancellation does not satisfy its dependents' prerequisites.
 
 **Note**:
-An editable, deletable, timestamped progress update or finding attached to a ticket, with its author or source recorded when known.
+An editable, deletable, timestamped progress update or finding attached to a ticket. The editing agent is recorded when supplied; human names are not recorded in the MVP.
+
+**Editing agent**:
+The agent identified as the source of a write when supplied. This is descriptive attribution, not a verified identity or permission; absent attribution does not establish that a human made the change.
 
 **Ticket history**:
 An automatic record of changes to a ticket's status, relationships, project or Effort membership, and trash or restoration state. It is distinct from authored notes and does not imply a full history of body revisions.

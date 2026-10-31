@@ -1,0 +1,3 @@
+# Atomic writes with replayable request outcomes
+
+Ticket changes combine related edits in one atomic operation, and batches compose the same operations with all-or-nothing persistence rather than partial success. Callers may supply a request ID; the outcome is stored atomically with the changes so a retry returns the original result without duplicating tickets or notes, while reuse with different content fails. This makes recovery from a lost response predictable at the cost of storing request outcomes; successful request IDs and original outcomes are retained indefinitely in the MVP and included in backups. A replay returns the original outcome, which may differ from current ticket state.

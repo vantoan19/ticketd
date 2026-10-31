@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+npx --yes --package=markdownlint-cli2@0.24.0 -- markdownlint-cli2
+git diff --check
+git diff --cached --check
+
+if [[ -f Cargo.toml ]]; then
+  cargo fmt --all -- --check
+  cargo clippy --workspace --all-targets --locked -- \
+    -D warnings -D unsafe_code \
+    -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
+  cargo test --workspace --locked
+fi
+
+if [[ -f package.json ]]; then
+  npm run format:check
+  npm run lint
+  npm run typecheck
+  npm test -- --run
+fi

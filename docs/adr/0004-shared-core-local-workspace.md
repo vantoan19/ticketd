@@ -1,0 +1,3 @@
+# Shared Rust core with direct local database access
+
+The desktop and CLI use separate instances of one Rust core library to access a single SQLite workspace in the operating system's application-data directory, allowing the CLI to operate with the desktop closed without requiring a daemon. This simplifies runtime dependencies but requires validating cross-process writes, graph invariants, migrations, and UI refresh before finalizing the topology. The core exposes workflow operations and hides persistence coordination internally; multiple selectable workspaces and a generic storage framework are outside the MVP.
