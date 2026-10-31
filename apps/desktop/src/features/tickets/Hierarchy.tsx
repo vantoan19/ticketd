@@ -72,14 +72,14 @@ export function Hierarchy({
     reference: string,
     action: () => Promise<void>,
     section: "parent" | "child" = "parent",
+    clearDraft?: () => void,
   ) {
     setErrorSection(section);
     setPending(true);
     setError("");
     try {
       await action();
-      setParent("");
-      setChild("");
+      clearDraft?.();
       await refresh();
     } catch (reason) {
       setError(`Could not update ${reference}: ${String(reason)}`);
@@ -89,8 +89,11 @@ export function Hierarchy({
   }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void change(parent, () =>
-      client.setParent(ticket.reference, parent.trim()),
+    void change(
+      parent,
+      () => client.setParent(ticket.reference, parent.trim()),
+      "parent",
+      () => setParent(""),
     );
   }
   return (
@@ -188,6 +191,7 @@ export function Hierarchy({
               child,
               () => client.setParent(child.trim(), ticket.reference),
               "child",
+              () => setChild(""),
             );
           }}
           className="relationship-form"

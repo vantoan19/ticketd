@@ -10,7 +10,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { Plus, RefreshCw } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   ResizableHandle,
@@ -28,6 +28,19 @@ export function App() {
   const [narrowDetail, setNarrowDetail] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "ticketd.workspace",
+  });
+  const listRef = useRef<HTMLElement>(null);
+  const focusPane = useRef<"detail" | "list" | null>(null);
+  useLayoutEffect(() => {
+    if (focusPane.current === "detail")
+      document.getElementById("detail-heading")?.focus();
+    if (focusPane.current === "list") {
+      const target = listRef.current?.querySelector<HTMLButtonElement>(
+        '[aria-pressed="true"]',
+      );
+      (target ?? document.getElementById("tickets-heading"))?.focus();
+    }
+    focusPane.current = null;
   });
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const {
@@ -178,6 +191,7 @@ export function App() {
             >
               <section
                 className="ticket-list"
+                ref={listRef}
                 aria-labelledby="tickets-heading"
               >
                 {!trash && (
@@ -202,7 +216,7 @@ export function App() {
                     }}
                   />
                 )}
-                <h2 id="tickets-heading" className="list-heading">
+                <h2 id="tickets-heading" className="list-heading" tabIndex={-1}>
                   {trash ? "Deleted tickets" : "Tickets"}{" "}
                   <span>{tickets.length}</span>
                 </h2>
@@ -214,7 +228,7 @@ export function App() {
                       Retry
                     </Button>
                   </div>
-                ) : loading ? (
+                ) : loading && tickets.length === 0 ? (
                   <p role="status" className="mt-3">
                     Loading tickets…
                   </p>
@@ -284,6 +298,8 @@ export function App() {
                     onOpen={(reference) => {
                       setSelected(reference);
                       setNarrowDetail(true);
+                      if (window.matchMedia("(max-width: 950px)").matches)
+                        focusPane.current = "detail";
                     }}
                   />
                 )}
@@ -327,13 +343,20 @@ export function App() {
                 )}
               <TicketDetails
                 expanded={expanded}
-                onExpand={() => setExpanded(true)}
+                onExpand={() => {
+                  setExpanded(true);
+                  focusPane.current = "detail";
+                }}
                 onReturn={() => {
                   setExpanded(false);
                   setNarrowDetail(false);
+                  focusPane.current = "list";
                 }}
                 selected={selected}
-                setSelected={setSelected}
+                setSelected={(value) => {
+                  if (value === null) focusPane.current = "list";
+                  setSelected(value);
+                }}
                 details={details}
                 projects={projects}
                 efforts={efforts}

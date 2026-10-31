@@ -894,3 +894,9 @@ select option {
 .relationship-input input {
   min-width: 0;
 }
+
+#detail-heading:focus-visible,
+#tickets-heading:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

@@ -40,7 +40,9 @@ export function TicketDetails({
   return (
     <section className="ticket-detail" aria-labelledby="detail-heading">
       <div className="detail-header">
-        <h2 id="detail-heading">Ticket details</h2>
+        <h2 id="detail-heading" tabIndex={-1}>
+          Ticket details
+        </h2>
         {selected && (
           <div className="detail-actions">
             <button

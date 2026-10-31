@@ -17,9 +17,10 @@ class ResizeObserverStub {
 }
 window.ResizeObserver = ResizeObserverStub;
 
+let narrowViewport = false;
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
-    matches: false,
+    matches: narrowViewport,
     addEventListener() {},
     removeEventListener() {},
   }),
@@ -34,6 +35,7 @@ afterEach(() => {
   vi.useRealTimers();
   bridge.invoke.mockReset();
   localStorage.clear();
+  narrowViewport = false;
 });
 
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
@@ -450,4 +452,133 @@ test("preserves a creation draft when submission fails and the dialog is reopene
     "value",
     "Draft body",
   );
+});
+
+test("keeps ticket rows mounted while a filter refresh is pending", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: ["bug"],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  let resolveRefresh: ((value: unknown) => void) | undefined;
+  let calls = 0;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") {
+      if (calls++ === 0) return [ticket];
+      return new Promise((resolve) => {
+        resolveRefresh = resolve;
+      });
+    }
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  fireEvent.click(row);
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+  await act(async () => {
+    resolveRefresh?.([ticket]);
+  });
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+  expect(row.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("moves focus to the visible pane when expanding and returning", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  fireEvent.click(row);
+  const expand = screen.getByRole("button", { name: "Expand ticket" });
+  expand.focus();
+  fireEvent.click(expand);
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Ticket details" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(document.activeElement).toBe(row);
+});
+
+test("moves focus into the ticket on narrow screens and back to the row", async () => {
+  vi.useFakeTimers();
+  narrowViewport = true;
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "Enter" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Ticket details" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(document.activeElement).toBe(row);
 });
