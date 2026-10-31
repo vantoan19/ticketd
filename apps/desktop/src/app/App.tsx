@@ -12,13 +12,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import {
-  Plus,
-  Search,
-  SlidersHorizontal,
-  RefreshCw,
-  X,
-} from "lucide-react";
+import { Plus, Search, SlidersHorizontal, RefreshCw, X } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
 import { useRef, useState } from "react";

@@ -291,17 +291,59 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
 test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
   vi.useFakeTimers();
   let tickets = [
-    { id: "1", reference: "T-1", title: "A very long title that remains accessible even when the list truncates it", body: "", status: "Todo", trashed: false, tags: [], project_id: null, availability: "Ready", prerequisites: [], parent: null, children: [] },
-    { id: "2", reference: "T-2", title: "Second", body: "", status: "In progress", trashed: false, tags: [], project_id: null, availability: null, prerequisites: [], parent: null, children: [] },
+    {
+      id: "1",
+      reference: "T-1",
+      title:
+        "A very long title that remains accessible even when the list truncates it",
+      body: "",
+      status: "Todo",
+      trashed: false,
+      tags: [],
+      project_id: null,
+      effort_id: null,
+      availability: "Ready",
+      prerequisites: [],
+      parent: null,
+      children: [],
+    },
+    {
+      id: "2",
+      reference: "T-2",
+      title: "Second",
+      body: "",
+      status: "In progress",
+      trashed: false,
+      tags: [],
+      project_id: null,
+      effort_id: null,
+      availability: null,
+      prerequisites: [],
+      parent: null,
+      children: [],
+    },
   ];
-  bridge.invoke.mockImplementation(async (command: string, args?: { reference?: string }) => {
-    if (["list_projects", "list_efforts", "list_notes", "ticket_history"].includes(command)) return [];
-    if (command === "find_tickets") return tickets;
-    if (command === "show_ticket") return tickets.find((ticket) => ticket.reference === args?.reference);
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (
+        [
+          "list_projects",
+          "list_efforts",
+          "list_notes",
+          "ticket_history",
+        ].includes(command)
+      )
+        return [];
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args?.reference);
+      throw new Error(`unexpected ${command}`);
+    },
+  );
   render(<App />);
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
   const first = screen.getByRole("button", { name: /A very long title/ });
   const second = screen.getByRole("button", { name: /Second/ });
   first.focus();
@@ -309,10 +351,18 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   expect(document.activeElement).toBe(second);
   expect(second.getAttribute("aria-pressed")).toBe("false");
   fireEvent.keyDown(second, { key: "Enter" });
-  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
   expect(second.getAttribute("aria-pressed")).toBe("true");
   tickets = [tickets[0]!, { ...tickets[1]!, status: "Done" }];
-  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-  expect(screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain("Done");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(
+    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
+    "Done",
+  );
 });
