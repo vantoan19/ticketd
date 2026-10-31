@@ -1,7 +1,9 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod efforts;
 mod projects;
 mod relationships;
 mod tags;
+pub use efforts::{Effort, EffortCounts, EffortView};
 
 use std::{path::Path, time::Duration};
 
@@ -18,6 +20,10 @@ pub use projects::Project;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("effort name must not be empty")]
+    EmptyEffortName,
+    #[error("effort '{0}' was not found")]
+    EffortNotFound(String),
     #[error("project name and path must not be empty")]
     EmptyProject,
     #[error("project '{0}' was not found")]
@@ -50,6 +56,7 @@ pub struct Ticket {
     pub status: Status,
     pub body: String,
     pub tags: Vec<String>,
+    pub effort_id: Option<String>,
     pub project_id: Option<String>,
     pub availability: Option<String>,
     pub prerequisites: Vec<relationships::Prerequisite>,
@@ -63,6 +70,8 @@ pub struct TicketPatch {
     pub editing_agent: Option<String>,
     #[serde(default, deserialize_with = "deserialize_project_patch")]
     pub project_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_project_patch")]
+    pub effort_id: Option<Option<String>>,
 }
 
 fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
@@ -90,7 +99,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 7 {
+        if version > 8 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -115,6 +124,10 @@ impl Workspace {
         }
         if version < 7 {
             projects::migrate(&transaction)?;
+        }
+        if version < 8 {
+            efforts::migrate(&transaction)?;
+            transaction.pragma_update(None, "user_version", 8)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -156,6 +169,7 @@ impl Workspace {
             status: Status::Todo,
             body: String::new(),
             tags: Vec::new(),
+            effort_id: None,
             project_id: project_id.map(str::to_owned),
             availability: Some("Ready".into()),
             prerequisites: Vec::new(),
@@ -175,12 +189,31 @@ impl Workspace {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status, body, project_id FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+        if let Some(ref effort_id) = patch.effort_id {
+            if let Some(id) = effort_id {
+                efforts::get(&transaction, id)?;
+            }
+            if *effort_id != ticket.effort_id {
+                transaction.execute(
+                    "UPDATE tickets SET effort_id = ?1 WHERE number = ?2",
+                    params![effort_id, number],
+                )?;
+                history::record(
+                    &transaction,
+                    &ticket.id,
+                    "effort",
+                    ticket.effort_id.as_deref().unwrap_or(""),
+                    effort_id.as_deref().unwrap_or(""),
+                    patch.editing_agent.as_deref(),
+                )?;
+            }
+        }
         if let Some(ref project_id) = patch.project_id {
             if let Some(id) = project_id {
                 projects::find(&transaction, id)?;
@@ -213,7 +246,7 @@ impl Workspace {
             )?;
         }
         let mut updated = transaction.query_row(
-            "SELECT id, number, title, status, body, project_id FROM tickets WHERE number = ?1",
+            "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
             [number],
             ticket_from_row,
         )?;
@@ -257,7 +290,7 @@ impl Workspace {
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, number, title, status, body, project_id FROM tickets ORDER BY number DESC",
+            "SELECT id, number, title, status, body, project_id, effort_id FROM tickets ORDER BY number DESC",
         )?;
         let mut tickets = statement
             .query_map([], ticket_from_row)?
@@ -276,7 +309,7 @@ impl Workspace {
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status, body, project_id FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, effort_id FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -303,6 +336,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         body: row.get(4)?,
         tags: Vec::new(),
         project_id: row.get(5)?,
+        effort_id: row.get(6)?,
         availability: None,
         prerequisites: Vec::new(),
     })

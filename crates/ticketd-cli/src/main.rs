@@ -65,6 +65,11 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Manage Efforts
+    Effort {
+        #[command(subcommand)]
+        command: EffortCommand,
+    },
     /// List tickets
     List {
         #[arg(long, conflicts_with = "unlinked")]
@@ -76,6 +81,40 @@ enum Command {
     Show { reference: String },
 }
 
+#[derive(Subcommand)]
+enum EffortCommand {
+    Create {
+        name: String,
+    },
+    List {
+        #[arg(long)]
+        all: bool,
+    },
+    Show {
+        id: String,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
+    Archive {
+        id: String,
+    },
+    Reactivate {
+        id: String,
+    },
+    Add {
+        id: String,
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    Remove {
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+}
 #[derive(Subcommand)]
 enum ProjectCommand {
     Create {
@@ -185,6 +224,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     body,
                     status,
                     editing_agent: agent,
+                    effort_id: None,
                     project_id: if clear_project {
                         Some(None)
                     } else {
@@ -258,6 +298,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &dependent,
             agent.as_deref(),
         )?)?,
+        Command::Effort { command } => match command {
+            EffortCommand::Create { name } => {
+                serde_json::to_string(&workspace.create_effort(&name)?)?
+            }
+            EffortCommand::List { all } => serde_json::to_string(&workspace.list_efforts(all)?)?,
+            EffortCommand::Show { id } => serde_json::to_string(&workspace.show_effort(&id)?)?,
+            EffortCommand::Rename { id, name } => {
+                serde_json::to_string(&workspace.change_effort(&id, Some(&name), None)?)?
+            }
+            EffortCommand::Archive { id } => {
+                serde_json::to_string(&workspace.change_effort(&id, None, Some(true))?)?
+            }
+            EffortCommand::Reactivate { id } => {
+                serde_json::to_string(&workspace.change_effort(&id, None, Some(false))?)?
+            }
+            EffortCommand::Add {
+                id,
+                reference,
+                agent,
+            } => serde_json::to_string(&workspace.set_effort(
+                &reference,
+                Some(&id),
+                agent.as_deref(),
+            )?)?,
+            EffortCommand::Remove { reference, agent } => {
+                serde_json::to_string(&workspace.set_effort(&reference, None, agent.as_deref())?)?
+            }
+        },
         Command::List { project, unlinked } => {
             if let Some(ref id) = project {
                 workspace.show_project(id)?;
