@@ -36,12 +36,22 @@ fn validate(input: &EvidenceInput) -> Result<(), Error> {
             "name and value must not be empty".into(),
         ));
     }
-    if input.kind == EvidenceKind::PullRequest
-        && !(input.value.starts_with("https://") || input.value.starts_with("http://"))
-    {
-        return Err(Error::InvalidEvidence(
-            "pull request must be an HTTP(S) URL".into(),
-        ));
+    if input.kind == EvidenceKind::PullRequest {
+        let authority = input
+            .value
+            .strip_prefix("https://")
+            .or_else(|| input.value.strip_prefix("http://"));
+        if authority.is_none_or(|value| {
+            value
+                .split(['/', '?', '#'])
+                .next()
+                .is_none_or(str::is_empty)
+        }) || input.value.chars().any(char::is_whitespace)
+        {
+            return Err(Error::InvalidEvidence(
+                "pull request must be an HTTP(S) URL with a host".into(),
+            ));
+        }
     }
     Ok(())
 }

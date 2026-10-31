@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -1752,4 +1752,31 @@ fn backup_restores_evidence_and_its_retry_outcome() {
         ws.evidence(&ticket.reference, 50, 0).unwrap()[0].value,
         "abcdef0123456789"
     );
+}
+
+#[test]
+fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    for (name, value) in [
+        ("", "https://example.com/pr/1"),
+        ("PR", "https://"),
+        ("PR", "https://example.com/bad path"),
+    ] {
+        assert!(
+            ws.add_evidence(
+                &ticket.reference,
+                EvidenceInput {
+                    kind: EvidenceKind::PullRequest,
+                    name: name.into(),
+                    value: value.into(),
+                    editing_agent: None
+                }
+            )
+            .is_err()
+        );
+    }
+    assert!(ws.evidence(&ticket.reference, 50, 0).unwrap().is_empty());
 }
