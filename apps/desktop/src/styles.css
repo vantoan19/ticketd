@@ -411,7 +411,6 @@ select option {
   max-width: 100%;
 }
 .ticket-detail button:not(.icon-button):not([data-slot="button"]),
-.management button,
 .create-panel button:not(.icon-button) {
   color: var(--muted-foreground);
   background: var(--accent);
@@ -419,8 +418,7 @@ select option {
   padding: 5px 9px;
   border-radius: 5px;
 }
-.ticket-detail button:not([data-slot="button"]):hover,
-.management button:hover {
+.ticket-detail button:not([data-slot="button"]):hover {
   background: var(--accent);
 }
 .ticket-detail .detail-disclosure {
@@ -455,8 +453,6 @@ select option {
   padding: 36px 42px;
   max-width: 900px;
 }
-.management section,
-.management nav,
 .settings-card {
   margin-top: 24px;
   padding: 20px;
@@ -467,13 +463,6 @@ select option {
 .management h2 {
   font-size: 15px;
   font-weight: 600;
-}
-.management label {
-  color: var(--muted-foreground);
-}
-.management input,
-.management select {
-  margin: 5px;
 }
 .settings-card section {
   border: 0;
