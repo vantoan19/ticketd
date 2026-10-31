@@ -1,0 +1,100 @@
+.management-content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 680px;
+  padding: 20px 0 40px;
+}
+.management-content h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.management-content h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.management-content p {
+  color: var(--muted-foreground);
+}
+.management-section,
+.management-form,
+.management-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.management-section + .management-form,
+.management-form + .management-section {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+.management-content select {
+  min-height: 36px;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  padding: 0 12px;
+}
+.management-content select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.management-actions,
+.management-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.management-heading {
+  justify-content: space-between;
+}
+.management-heading span {
+  color: var(--muted-foreground);
+}
+.management-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.management-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.management-path {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+.management-path span,
+.management-path-text {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.management-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 8px 0 0;
+}
+.management-counts div {
+  min-width: 70px;
+}
+.management-counts dt {
+  color: var(--muted-foreground);
+}
+.management-counts dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+.management-content .management-error {
+  color: var(--destructive);
+  overflow-wrap: anywhere;
+}
