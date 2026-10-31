@@ -1,0 +1,36 @@
+.detail-title-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 48px;
+}
+.detail-header-message {
+  flex-basis: 100%;
+  padding-bottom: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.detail-header-message[role="alert"] {
+  color: var(--destructive);
+}
+.ticket-personal-actions {
+  flex-wrap: wrap;
+}
+.duplicate-dialog {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.ticket-properties[data-trashed] button:disabled,
+.ticket-properties[data-trashed] [data-slot="select-trigger"] {
+  opacity: 1;
+}
+.ticket-detail[data-expanded] .detail-content {
+  max-width: 864px;
+}
+.ticket-detail[data-expanded] .description-document,
+.ticket-detail[data-expanded] .description-document :is(p, li),
+.ticket-detail[data-expanded] .editor-body [role="textbox"] {
+  font-size: 16px;
+  line-height: 24px;
+}

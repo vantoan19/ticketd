@@ -48,3 +48,43 @@ test("trashed ticket descriptions remain readable without editing controls", () 
     screen.queryByRole("textbox", { name: "Description rich text" }),
   ).toBeNull();
 });
+
+test("the full-width view marks the reading column and drops the repeated heading", () => {
+  const ticket: Ticket = {
+    id: "wide",
+    reference: "T-3",
+    title: "Wide",
+    status: "Todo",
+    trashed: false,
+    body: "Readable",
+    project_id: null,
+    effort_id: null,
+    availability: null,
+    tags: [],
+    parent: null,
+    children: [],
+    prerequisites: [],
+  };
+  const { container } = render(
+    <TicketDetails
+      selected="T-3"
+      expanded
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      setSelected={vi.fn()}
+      details={{ "T-3": ticket }}
+      projects={[]}
+      efforts={[]}
+      revision={0}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+    />,
+  );
+  expect(
+    container.querySelector(".ticket-detail")?.getAttribute("data-expanded"),
+  ).toBe("true");
+  expect(screen.queryByText("Ticket details")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Show beside the list" }),
+  ).toBeTruthy();
+});

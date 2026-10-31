@@ -244,7 +244,7 @@ export function Follow({
         aria-pressed={following}
         onClick={() => void toggle()}
       >
-        {following ? "Unfollow" : "Follow"}
+        {following ? "Following" : "Follow"}
       </Button>
       {error && <p role="alert">{error}</p>}
     </>

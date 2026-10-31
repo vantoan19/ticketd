@@ -1,9 +1,7 @@
-import { Reminder } from "@/features/tickets/Reminder";
+import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { Evidence } from "@/features/tickets/Evidence";
-import { Follow } from "@/features/tickets/Inbox";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Maximize2, X } from "lucide-react";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { Backlinks } from "@/features/tickets/Backlinks";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
@@ -50,57 +48,32 @@ export function TicketDetails({
     (item) => item.reference === selected,
   );
   return (
-    <section className="ticket-detail" aria-labelledby="detail-heading">
-      <div className="detail-header">
-        <h2
-          id="detail-heading"
-          tabIndex={-1}
-          className={selected ? "detail-reference" : undefined}
-        >
-          {selected ?? "Ticket details"}
-        </h2>
-        {ticket && (
-          <div className="ticket-personal-actions">
-            <Follow
-              key={`follow-${ticket.reference}`}
-              reference={ticket.reference}
-              revision={revision}
-            />
-            <Reminder
-              key={`reminder-${ticket.reference}`}
-              reference={ticket.reference}
-              revision={revision}
-            />
-          </div>
-        )}
-        {selected && (
-          <div className="detail-actions">
-            <button
-              className="icon-button return-to-list"
-              aria-label="Return to ticket list"
-              onClick={onReturn}
-            >
-              <ArrowLeft size={16} />
-            </button>
-            {!expanded && (
-              <button
-                className="icon-button expand-ticket"
-                aria-label="Expand ticket"
-                onClick={onExpand}
-              >
-                <Maximize2 size={16} />
-              </button>
-            )}
-            <button
-              className="icon-button"
-              aria-label="Close ticket details"
-              onClick={() => setSelected(null)}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
-      </div>
+    <section
+      className="ticket-detail"
+      data-expanded={expanded || undefined}
+      aria-labelledby="detail-heading"
+    >
+      <TicketHeader
+        selected={selected}
+        ticket={ticket}
+        expanded={expanded}
+        revision={revision}
+        onExpand={onExpand}
+        onReturn={onReturn}
+        onClose={() => setSelected(null)}
+        onOpenGraph={() => {
+          if (!selected) return;
+          setGraphReference(selected);
+          window.requestAnimationFrame(() =>
+            document
+              .getElementById(`relationships-${selected}`)
+              ?.scrollIntoView?.({ block: "start" }),
+          );
+        }}
+        select={setSelected}
+        refresh={refresh}
+        updateTicket={updateTicket}
+      />
       {selected === null && (
         <div className="detail-empty">
           <strong>Select a ticket</strong>
@@ -162,7 +135,11 @@ export function TicketDetails({
             </p>
           )}
           {item.reference === selected && !item.trashed && (
-            <section className="relationships" aria-label="Relationships">
+            <section
+              id={`relationships-${item.reference}`}
+              className="relationships"
+              aria-label="Relationships"
+            >
               <div className="detail-section-heading">
                 <h3>Relationships</h3>
                 <Button
