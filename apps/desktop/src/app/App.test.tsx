@@ -582,3 +582,99 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   );
   expect(document.activeElement).toBe(row);
 });
+
+test("selects tickets independently and applies one bulk status change", async () => {
+  vi.useFakeTimers();
+  let tickets = ["First", "Second"].map((title, index) => ({
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+    title,
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  }));
+  bridge.invoke.mockImplementation(
+    async (
+      command: string,
+      args?: { references?: string[]; status?: string },
+    ) => {
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket") return tickets[0];
+      if (command === "bulk_status") {
+        tickets = tickets.map((ticket) =>
+          args?.references?.includes(ticket.reference)
+            ? { ...ticket, status: args.status! }
+            : ticket,
+        );
+        return tickets;
+      }
+      return [];
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  expect(screen.getByText("2 selected")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
+    target: { value: "Done" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply status" }));
+  await act(async () => {});
+  expect(
+    screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
+    "Done",
+  );
+  expect(screen.getByText("0 selected")).toBeTruthy();
+});
+
+test("keeps keyboard selection and reports a failed bulk change for retry", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "bulk_status")
+      throw new Error("batch operation 0: ticket is trashed");
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const checkbox = screen.getByRole("checkbox", { name: "Select T-1" });
+  checkbox.focus();
+  fireEvent.click(checkbox);
+  fireEvent.click(screen.getByRole("button", { name: "Apply status" }));
+  await act(async () => {});
+  expect(screen.getByRole("alert").textContent).toContain("ticket is trashed");
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /First/ }).textContent).toContain(
+    "Todo",
+  );
+});
