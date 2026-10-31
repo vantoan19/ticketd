@@ -7,6 +7,7 @@ const ticketSchema = z.object({
   title: z.string(),
   status: z.string(),
   body: z.string(),
+  tags: z.array(z.string()),
 });
 export type Ticket = z.infer<typeof ticketSchema>;
 export const client = {

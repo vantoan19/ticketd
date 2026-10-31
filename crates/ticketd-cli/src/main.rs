@@ -29,6 +29,10 @@ enum Command {
     },
     /// Show ticket history
     History { reference: String },
+    /// Add a tag (trimmed and lowercased; duplicates are ignored)
+    AddTag { reference: String, tag: String },
+    /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
+    RemoveTag { reference: String, tag: String },
     /// List tickets
     List,
     /// Show a ticket by its reference
@@ -69,6 +73,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
+        }
+        Command::AddTag { reference, tag } => {
+            serde_json::to_string(&workspace.add_tag(&reference, &tag)?)?
+        }
+        Command::RemoveTag { reference, tag } => {
+            serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
         }
         Command::List => serde_json::to_string(&workspace.list_tickets()?)?,
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
