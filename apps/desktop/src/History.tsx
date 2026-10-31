@@ -79,7 +79,7 @@ export function History({
       : "Unlinked";
   }
   return (
-    <div className="mt-4">
+    <div className="history-block">
       <label>
         Status{" "}
         <select
@@ -95,21 +95,23 @@ export function History({
           )}
         </select>
       </label>
-      <h4 className="mt-4 font-semibold">History</h4>
-      {error && <p role="alert">{error}</p>}
-      {entries.length === 0 ? (
-        <p>No recorded changes.</p>
-      ) : (
-        <ol>
-          {entries.map((entry, index) => (
-            <li key={index}>
-              {entry.kind}: {historyValue(entry, entry.from_value)} →{" "}
-              {historyValue(entry, entry.to_value)} · {entry.timestamp} ·{" "}
-              {entry.editing_agent ?? "Unknown"}
-            </li>
-          ))}
-        </ol>
-      )}
+      <details className="detail-disclosure">
+        <summary>Activity & history</summary>
+        {error && <p role="alert">{error}</p>}
+        {entries.length === 0 ? (
+          <p>No recorded changes.</p>
+        ) : (
+          <ol>
+            {entries.map((entry, index) => (
+              <li key={index}>
+                {entry.kind}: {historyValue(entry, entry.from_value)} →{" "}
+                {historyValue(entry, entry.to_value)} · {entry.timestamp} ·{" "}
+                {entry.editing_agent ?? "Unknown"}
+              </li>
+            ))}
+          </ol>
+        )}
+      </details>
     </div>
   );
 }

@@ -1,19 +1,22 @@
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { client, type Ticket } from "./client";
 
-const extensions = [markdown()];
+const extensions = [markdown(), EditorView.lineWrapping];
 
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
   ticket,
   onSaved,
+  children,
 }: {
   ticket: Ticket;
   onSaved: (ticket: Ticket) => void;
+  children?: ReactNode;
 }) {
   const [draft, setDraft] = useState<Content>({
     title: ticket.title,
@@ -87,7 +90,7 @@ export function TicketEditor({
   }
   return (
     <div className="mt-3">
-      <p className="text-neutral-600">
+      <p className="editor-reference">
         {ticket.reference} · {ticket.status}
       </p>
       {externalChange && dirty && (
@@ -116,16 +119,20 @@ export function TicketEditor({
           </button>
         </p>
       )}
-      <label className="mt-3 flex flex-col gap-1">
-        Title
-        <input
+      <label className="editor-title">
+        <span className="sr-only">Title</span>
+        <textarea
+          rows={2}
           className="rounded border border-neutral-400 bg-white p-2"
           value={draft.title}
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
       </label>
-      <div className="mt-3">
-        <span id={`body-${ticket.id}`}>Markdown content</span>
+      {children}
+      <div className="editor-body">
+        <span id={`body-${ticket.id}`}>
+          Description <small>Markdown supported</small>
+        </span>
         <CodeMirror
           value={draft.body}
           onChange={(body) => edit({ ...draft, body })}
@@ -156,10 +163,14 @@ export function TicketEditor({
           </button>
         </p>
       )}
-      <h3 className="mt-4 font-semibold">Preview</h3>
-      <div className="markdown-preview">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.body}</ReactMarkdown>
-      </div>
+      <details className="detail-disclosure">
+        <summary>Preview</summary>
+        <div className="markdown-preview">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {draft.body}
+          </ReactMarkdown>
+        </div>
+      </details>
     </div>
   );
 }

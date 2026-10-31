@@ -4,7 +4,9 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { remote } from "webdriverio";
 
-const cli = path.resolve("target/debug/ticketd");
+const cli = path.resolve(
+  process.env.TICKETD_SMOKE_CLI ?? "target/debug/ticketd",
+);
 const runCli = (...args) =>
   JSON.parse(execFileSync(cli, args, { encoding: "utf8" }));
 const browser = await remote({
@@ -13,15 +15,19 @@ const browser = await remote({
   logLevel: "error",
   capabilities: {
     "tauri:options": {
-      application: path.resolve("target/debug/ticketd-desktop"),
+      application: path.resolve(
+        process.env.TICKETD_SMOKE_DESKTOP ?? "target/debug/ticketd-desktop",
+      ),
     },
   },
 });
 
 const detail = () =>
-  browser.$('section[aria-labelledby="detail-heading"] > div:not([hidden])');
+  browser.$(
+    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+  );
 try {
-  const empty = await browser.$("p=No tickets match the active filters.");
+  const empty = await browser.$("button=Create your first ticket");
   await empty.waitForDisplayed({ timeout: 15000 });
   const started = Date.now();
   const ticket = runCli("create", "Created by CLI");
@@ -30,7 +36,7 @@ try {
   console.log(`CLI creation appeared after ${Date.now() - started} ms`);
   await row.click();
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  const title = await (await detail()).$("label=Title").$("input");
+  const title = await (await detail()).$("label=Title").$("textarea");
   await title.waitForDisplayed();
   runCli("change", ticket.reference, "--title", "Changed by CLI");
   const changed = Date.now();
@@ -47,7 +53,7 @@ try {
   // Commit first, then edit and request refresh before the debounce can save.
   runCli("change", ticket.reference, "--title", "External content");
   await title.setValue("My unsaved draft");
-  await (await browser.$("button=Refresh")).click();
+  await (await browser.$('[aria-label="Refresh"]')).click();
   const notice = await browser.$("button=Reload saved content");
   await notice.waitForDisplayed({ timeout: 10000 });
   assert.equal(await title.getValue(), "My unsaved draft");
@@ -88,7 +94,7 @@ try {
       },
     ]),
   });
-  await (await browser.$("button=Refresh")).click();
+  await (await browser.$('[aria-label="Refresh"]')).click();
   const projectButton = await browser.$("button=Benchmark project");
   await projectButton.waitForDisplayed({ timeout: 10000 });
   let clock = Date.now();
@@ -114,10 +120,11 @@ try {
   await browser.waitUntil(
     async () =>
       (await (
-        await (await detail()).$("label=Title").$("input")
+        await (await detail()).$("label=Title").$("textarea")
       ).getValue()) === "Benchmark ticket 999",
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);
+  await (await (await detail()).$("summary=Relationships & graph")).click();
   await browser.waitUntil(
     async () =>
       (await (await detail()).$$("[aria-label='Graph tickets'] li")).length ===
@@ -129,15 +136,15 @@ try {
   const viewport = await (await detail()).$(".react-flow__viewport");
   const beforePan = await viewport.getCSSProperty("transform");
   clock = Date.now();
-  const paneSize = await pane.getSize();
-  // The center can be covered by a graph node; start on empty pane background.
+  await pane.scrollIntoView({ block: "center", inline: "center" });
+  const rect = await browser.execute((element) => {
+    const box = element.getBoundingClientRect();
+    return { x: Math.max(0, box.left) + 10, y: Math.max(0, box.top) + 10 };
+  }, pane);
+  // Start on visible background and keep the full gesture within the viewport.
   await browser
     .action("pointer")
-    .move({
-      origin: pane,
-      x: -Math.floor(paneSize.width / 2) + 10,
-      y: -Math.floor(paneSize.height / 2) + 10,
-    })
+    .move({ origin: "viewport", x: Math.round(rect.x), y: Math.round(rect.y) })
     .down()
     .move({ duration: 300, x: 70, y: 30, origin: "pointer" })
     .up()

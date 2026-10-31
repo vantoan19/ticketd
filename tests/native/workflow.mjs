@@ -84,7 +84,9 @@ const browser = await remote({
   capabilities: { "tauri:options": { application } },
 });
 const detail = () =>
-  browser.$('section[aria-labelledby="detail-heading"] > div:not([hidden])');
+  browser.$(
+    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
+  );
 try {
   const row = await browser.$(
     "button*=Exercise installed desktop and CLI together",
@@ -92,7 +94,7 @@ try {
   await row.waitForDisplayed({ timeout: 15000 });
   await row.click();
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  const title = await (await detail()).$("label=Title").$("input");
+  const title = await (await detail()).$("label=Title").$("textarea");
   await title.waitForDisplayed();
   await title.click();
   await browser.keys(["End"]);
@@ -113,10 +115,14 @@ try {
   await search.setValue("Exercise installed desktop");
   await browser.waitUntil(
     async () =>
-      (await browser.$$("button*=Record native workflow evidence")).length ===
-      0,
+      (
+        await (
+          await browser.$(".ticket-list")
+        ).$$("button*=Record native workflow evidence")
+      ).length === 0,
   );
   await search.clearValue();
+  await (await (await detail()).$("summary=Relationships & graph")).click();
   const graphNode = await (
     await (await detail()).$('[aria-label="Graph tickets"]')
   ).$(`button*=${evidence.reference}`);
@@ -125,7 +131,7 @@ try {
   await browser.waitUntil(
     async () =>
       (await (
-        await (await detail()).$("label=Title").$("input")
+        await (await detail()).$("label=Title").$("textarea")
       ).getValue()) === evidence.title,
   );
   console.log(
@@ -176,7 +182,7 @@ try {
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
   await (await (await detail()).$("button=Move to trash")).click();
-  await (await browser.$("button=Show trash")).click();
+  await (await browser.$("button=Trash")).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
   await (await (await detail()).$("button=Restore")).click();
   assert.equal(run("show", evidence.reference).trashed, false);

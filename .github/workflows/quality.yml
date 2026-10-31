@@ -128,6 +128,7 @@ jobs:
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
           xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'
+          XDG_DATA_HOME="$XDG_DATA_HOME/refresh" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
           XDG_DATA_HOME="$XDG_DATA_HOME/workflow" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/workflow.mjs'
           sudo apt-get remove -y "$package"
           "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
