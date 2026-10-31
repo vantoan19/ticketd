@@ -22,6 +22,8 @@ const DependencyGraph = lazy(() => import("./DependencyGraph"));
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -31,16 +33,17 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
-  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
-    if (refreshing.current) return;
-    refreshing.current = true;
     const request = ++generation.current;
     let timeout = 0;
     try {
       const result = await Promise.race([
         Promise.all([
-          trash ? client.listTrash() : client.listTickets(),
+          trash
+            ? client.listTrash()
+            : query
+              ? client.searchTickets(query, filter, offset)
+              : client.listTickets(),
           client.listProjects(),
         ]),
         new Promise<never>((_, reject) => {
@@ -62,10 +65,9 @@ export function App() {
       );
     } finally {
       window.clearTimeout(timeout);
-      refreshing.current = false;
       if (request === generation.current) setLoading(false);
     }
-  }, [trash]);
+  }, [trash, query, filter, offset]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => void refresh(), 0);
@@ -138,7 +140,10 @@ export function App() {
       <Projects
         projects={projects}
         filter={filter}
-        onFilter={setFilter}
+        onFilter={(value) => {
+          setFilter(value);
+          setOffset(0);
+        }}
         onChange={refresh}
       />
       <div className="grid gap-6 md:grid-cols-2">
@@ -152,6 +157,20 @@ export function App() {
           >
             {trash ? "Show tickets" : "Show trash"}
           </button>
+          {!trash && (
+            <label className="flex flex-col gap-1">
+              Search tickets
+              <input
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setOffset(0);
+                  setSelected(null);
+                }}
+                className="rounded border border-neutral-400 bg-white p-2"
+              />
+            </label>
+          )}
           <h2 id="tickets-heading" className="text-xl font-semibold">
             {trash ? "Trash" : "Tickets"}
           </h2>
@@ -160,7 +179,9 @@ export function App() {
               Loading tickets…
             </p>
           ) : tickets.length === 0 ? (
-            <p className="mt-3">No tickets yet.</p>
+            <p className="mt-3">
+              {query && !trash ? "No matching tickets." : "No tickets yet."}
+            </p>
           ) : (
             <ul className="mt-3 divide-y divide-neutral-200">
               {tickets
@@ -200,6 +221,31 @@ export function App() {
                   </li>
                 ))}
             </ul>
+          )}
+          {query && !trash && (
+            <div>
+              <button
+                type="button"
+                disabled={offset === 0}
+                onClick={() => {
+                  setOffset(Math.max(0, offset - 50));
+                  setSelected(null);
+                }}
+              >
+                Previous
+              </button>
+              <span> Page {Math.floor(offset / 50) + 1} </span>
+              <button
+                type="button"
+                disabled={tickets.length < 50}
+                onClick={() => {
+                  setOffset(offset + 50);
+                  setSelected(null);
+                }}
+              >
+                Next
+              </button>
+            </div>
           )}
         </section>
         <section aria-labelledby="detail-heading">

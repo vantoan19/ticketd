@@ -56,3 +56,10 @@ nested directories. `--project PROJECT_ID` overrides inference. Multiple matchin
 projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
+
+Search saved titles, bodies, and notes with `ticketd search QUERY`. The query is a
+literal substring (ASCII letters match without case); an empty query returns no
+matches. Results exclude trash and are ordered by descending ticket reference.
+Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
+or `--unlinked` to restrict results. The desktop search uses the same matching
+and pages through 50 results at a time.

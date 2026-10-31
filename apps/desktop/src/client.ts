@@ -97,6 +97,17 @@ export const client = {
   async listTickets() {
     return z.array(ticketSchema).parse(await invoke("list_tickets"));
   },
+  async searchTickets(query: string, filter: string, offset: number) {
+    return z.array(ticketSchema).parse(
+      await invoke("search_tickets", {
+        query,
+        project: filter === "all" || filter === "unlinked" ? null : filter,
+        unlinked: filter === "unlinked",
+        limit: 50,
+        offset,
+      }),
+    );
+  },
   async listTrash() {
     return z.array(ticketSchema).parse(await invoke("list_trash"));
   },

@@ -38,6 +38,18 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
 }
 
 #[tauri::command]
+fn search_tickets(
+    query: String,
+    project: Option<String>,
+    unlinked: bool,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<Ticket>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.search_tickets(&query, project.as_deref(), unlinked, limit, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn list_trash() -> Result<Vec<Ticket>, String> {
     Workspace::open_default()
         .and_then(|w| w.list_trash())
@@ -199,6 +211,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_project,
             edit_project,
             list_tickets,
+            search_tickets,
             dependency_graph,
             list_trash,
             set_trashed,
