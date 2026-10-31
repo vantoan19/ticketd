@@ -649,3 +649,46 @@ select option {
   background: #29292f;
   border: 1px solid #484850;
 }
+
+.sidebar-header,
+.sidebar-body,
+.sidebar-footer,
+.sidebar-group {
+  padding: 0;
+  gap: 0;
+}
+.sidebar-body {
+  flex: 1;
+  overflow: hidden;
+}
+.sidebar-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+}
+.sidebar-nav li {
+  width: 100%;
+}
+
+.status-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-trigger {
+  background: #242429;
+  border: 1px solid #3b3b43;
+  color: #e8e8ed;
+  min-width: 104px;
+}
+.status-options {
+  background: #29292f;
+  color: #e8e8ed;
+  border: 1px solid #484850;
+  z-index: 60;
+}
+.status-options [role="option"]:focus {
+  background: #41414b;
+  color: white;
+}

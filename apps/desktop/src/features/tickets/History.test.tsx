@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { History } from "./History";
+Element.prototype.scrollIntoView = () => {};
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 afterEach(() => {
@@ -29,9 +30,8 @@ test("shows a failed status save while history is closed", async () => {
       onChange={async () => {}}
     />,
   );
-  fireEvent.change(screen.getByLabelText("Status"), {
-    target: { value: "Done" },
-  });
+  fireEvent.keyDown(screen.getByLabelText("Status"), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("option", { name: "Done" }));
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain(
       "Database busy; retry",

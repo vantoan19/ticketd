@@ -1,3 +1,10 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import type { Project } from "@/lib/api/client";
@@ -80,21 +87,27 @@ export function History({
   }
   return (
     <div className="history-block">
-      <label>
-        Status{" "}
-        <select
-          className="ml-2 rounded border p-1"
+      <div className="status-control">
+        <span>Status</span>
+        <Select
           value={status}
           disabled={trashed}
-          onChange={(event) => void changeStatus(event.target.value)}
+          onValueChange={(value) => void changeStatus(value)}
         >
-          {["Todo", "In progress", "In review", "Done", "Canceled"].map(
-            (value) => (
-              <option key={value}>{value}</option>
-            ),
-          )}
-        </select>
-      </label>
+          <SelectTrigger aria-label="Status" className="status-trigger">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="status-options">
+            {["Todo", "In progress", "In review", "Done", "Canceled"].map(
+              (value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ),
+            )}
+          </SelectContent>
+        </Select>
+      </div>
       {error && <p role="alert">{error}</p>}
       <details className="detail-disclosure">
         <summary>Activity & history</summary>

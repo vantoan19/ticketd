@@ -8,7 +8,17 @@ import {
   Folder,
   Layers,
 } from "lucide-react";
-import { Sidebar } from "@/components/ui/sidebar";
+import {
+  Sidebar,
+  SidebarHeader,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+} from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/api/client";
 import type { RefObject } from "react";
 
@@ -46,118 +56,150 @@ export function WorkspaceSidebar({
 }) {
   return (
     <Sidebar collapsible="none" className="sidebar">
-      <div className="brand">
-        <span className="brand-mark">◈</span>
-        <strong>ticketd</strong>
-        <span className="brand-label">WORKSPACE</span>
-      </div>
-      <button
-        className="new-ticket"
-        onClick={(event) => {
-          createTriggerRef.current = event.currentTarget;
-          setView("tickets");
-          setCreating(true);
-        }}
-      >
-        <Plus size={16} /> New ticket
-      </button>
-      <nav aria-label="Workspace views" className="sidebar-nav">
-        <button
-          className={
-            !trash &&
-            filter === "all" &&
-            !effort &&
-            !status &&
-            !availability &&
-            view === "tickets"
-              ? "active"
-              : ""
-          }
-          onClick={() => scope("all")}
-        >
-          <Inbox size={16} /> All tickets
-        </button>
-        <button
-          className={
-            availability === "Ready" && view === "tickets" ? "active" : ""
-          }
-          onClick={() => scope("ready")}
-        >
-          <CheckCircle2 size={16} /> Ready
-        </button>
-        <button
-          className={
-            status === "In progress" && view === "tickets" ? "active" : ""
-          }
-          onClick={() => scope("progress")}
-        >
-          <CircleDot size={16} /> In progress
-        </button>
-        <button
-          className={trash && view === "tickets" ? "active" : ""}
-          onClick={() => scope("trash")}
-        >
-          <Trash2 size={16} /> Trash
-        </button>
-      </nav>
-      <div className="sidebar-scroll">
-        <div className="sidebar-heading">
-          Projects{" "}
-          <button
-            aria-label="Manage projects"
-            onClick={() => setView("projects")}
-          >
-            <Plus size={15} />
-          </button>
+      <SidebarHeader className="sidebar-header">
+        <div className="brand">
+          <span className="brand-mark">◈</span>
+          <strong>ticketd</strong>
+          <span className="brand-label">WORKSPACE</span>
         </div>
-        <nav aria-label="Project scopes" className="sidebar-nav">
-          <button
-            className={
-              filter === "unlinked" && view === "tickets" ? "active" : ""
-            }
-            onClick={() => scope("all", "unlinked")}
-          >
-            <Folder size={15} /> Unlinked
-          </button>
-          {projects.map((p) => (
-            <button
-              key={p.id}
-              aria-pressed={filter === p.id && view === "tickets"}
-              className={filter === p.id && view === "tickets" ? "active" : ""}
-              onClick={() => scope("all", p.id)}
-            >
-              <Folder size={15} /> {p.name}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-heading">
-          Efforts{" "}
-          <button
-            aria-label="Manage Efforts"
-            onClick={() => setView("efforts")}
-          >
-            <Plus size={15} />
-          </button>
-        </div>
-        <nav aria-label="Effort scopes" className="sidebar-nav">
-          {efforts
-            .filter((e) => !e.archived)
-            .map((e) => (
-              <button
-                key={e.id}
+        <Button
+          className="new-ticket"
+          onClick={(event) => {
+            createTriggerRef.current = event.currentTarget;
+            setView("tickets");
+            setCreating(true);
+          }}
+        >
+          <Plus size={16} /> New ticket
+        </Button>
+      </SidebarHeader>
+      <SidebarContent className="sidebar-body">
+        <nav aria-label="Workspace views" className="sidebar-nav">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 className={
-                  effort === e.id && view === "tickets" ? "active" : ""
+                  !trash &&
+                  filter === "all" &&
+                  !effort &&
+                  !status &&
+                  !availability &&
+                  view === "tickets"
+                    ? "active"
+                    : ""
                 }
-                onClick={() => scope("all", "all", e.id)}
+                onClick={() => scope("all")}
               >
-                <Layers size={15} /> {e.name}
-              </button>
-            ))}
+                <Inbox size={16} /> All tickets
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className={
+                  availability === "Ready" && view === "tickets" ? "active" : ""
+                }
+                onClick={() => scope("ready")}
+              >
+                <CheckCircle2 size={16} /> Ready
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className={
+                  status === "In progress" && view === "tickets" ? "active" : ""
+                }
+                onClick={() => scope("progress")}
+              >
+                <CircleDot size={16} /> In progress
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className={trash && view === "tickets" ? "active" : ""}
+                onClick={() => scope("trash")}
+              >
+                <Trash2 size={16} /> Trash
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </nav>
-      </div>
-      <button className="settings-link" onClick={() => setView("settings")}>
-        <Settings size={16} /> Workspace settings
-      </button>
+        <div className="sidebar-scroll">
+          <SidebarGroup className="sidebar-group">
+            <div className="sidebar-heading">
+              Projects{" "}
+              <button
+                aria-label="Manage projects"
+                onClick={() => setView("projects")}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+            <nav aria-label="Project scopes" className="sidebar-nav">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    className={
+                      filter === "unlinked" && view === "tickets"
+                        ? "active"
+                        : ""
+                    }
+                    onClick={() => scope("all", "unlinked")}
+                  >
+                    <Folder size={15} /> Unlinked
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                {projects.map((p) => (
+                  <SidebarMenuItem key={p.id}>
+                    <SidebarMenuButton
+                      aria-pressed={filter === p.id && view === "tickets"}
+                      className={
+                        filter === p.id && view === "tickets" ? "active" : ""
+                      }
+                      onClick={() => scope("all", p.id)}
+                    >
+                      <Folder size={15} /> {p.name}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroup>
+          <SidebarGroup className="sidebar-group">
+            <div className="sidebar-heading">
+              Efforts{" "}
+              <button
+                aria-label="Manage Efforts"
+                onClick={() => setView("efforts")}
+              >
+                <Plus size={15} />
+              </button>
+            </div>
+            <nav aria-label="Effort scopes" className="sidebar-nav">
+              <SidebarMenu>
+                {efforts
+                  .filter((e) => !e.archived)
+                  .map((e) => (
+                    <SidebarMenuItem key={e.id}>
+                      <SidebarMenuButton
+                        className={
+                          effort === e.id && view === "tickets" ? "active" : ""
+                        }
+                        onClick={() => scope("all", "all", e.id)}
+                      >
+                        <Layers size={15} /> {e.name}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroup>
+        </div>
+      </SidebarContent>
+      <SidebarFooter className="sidebar-footer">
+        <button className="settings-link" onClick={() => setView("settings")}>
+          <Settings size={16} /> Workspace settings
+        </button>
+      </SidebarFooter>
     </Sidebar>
   );
 }

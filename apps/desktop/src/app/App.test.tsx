@@ -250,17 +250,19 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const trigger = screen.getByRole("button", { name: "New ticket" });
-  trigger.focus();
-  fireEvent.click(trigger);
-  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
-  expect(document.activeElement).toBe(
-    screen.getByRole("textbox", { name: "New ticket title" }),
-  );
-  fireEvent.keyDown(document, { key: "Escape" });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(document.activeElement).toBe(trigger);
+  for (const name of ["New ticket", "Create your first ticket"]) {
+    const trigger = screen.getByRole("button", { name });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "New ticket title" }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  }
 });
