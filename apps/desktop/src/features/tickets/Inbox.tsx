@@ -79,6 +79,10 @@ export function Inbox({
       active = false;
     };
   }, [offset, revision]);
+  useEffect(() => {
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [load]);
   async function mark(ids: number[], read: boolean) {
     try {
       await invoke("set_inbox_read", {

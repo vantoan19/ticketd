@@ -101,3 +101,10 @@ and `--offset` for bounded pages). Personal writes use the retryable `write`
 workflow: `set_following` takes a ticket `reference` and `following` boolean;
 `set_inbox_read` takes explicit entry `ids` and a `read` boolean. Supplying the
 IDs actually displayed avoids marking later arrivals read.
+
+Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
+`ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
+Set and snooze take an RFC 3339 instant with an explicit offset; show displays
+local time and UTC. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+occurrences; reopening the inbox catches up after downtime without a daemon.

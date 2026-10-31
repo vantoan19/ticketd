@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; DROP TABLE ticket_reminders; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; DROP TABLE ticket_reminders;",
     )
     .unwrap();
     drop(db);
@@ -1976,4 +1976,72 @@ fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
         );
     }
     assert!(ws.evidence(&ticket.reference, 50, 0).unwrap().is_empty());
+}
+
+#[test]
+fn reminder_on_unfollowed_ticket_is_delivered_once_after_reopening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember this").unwrap();
+    workspace
+        .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2020-01-01T00:00:00Z")
+    );
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    assert!(!workspace.is_following(&ticket.reference).unwrap());
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().status,
+        Status::Todo
+    );
+}
+
+#[test]
+fn reminder_rescheduling_retries_and_invalid_times_are_safe() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember again").unwrap();
+    let request = || WriteRequest::SetReminder {
+        reference: ticket.reference.clone(),
+        due_at: Some("2020-01-01T07:00:00+07:00".into()),
+    };
+    workspace.write(Some("reminder-1"), request()).unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    workspace.write(Some("reminder-1"), request()).unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    assert!(
+        workspace
+            .set_reminder(&ticket.reference, Some("2030-01-01T10:00:00"))
+            .is_err()
+    );
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2020-01-01T00:00:00Z")
+    );
+    workspace
+        .set_reminder(&ticket.reference, Some("2021-01-01T00:00:00Z"))
+        .unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 2);
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 2);
+    workspace.set_reminder(&ticket.reference, None).unwrap();
+    assert_eq!(workspace.reminder(&ticket.reference).unwrap(), None);
+    assert_eq!(
+        workspace.ticket_history(&ticket.reference).unwrap().len(),
+        0
+    );
+    assert_eq!(
+        workspace.export().unwrap()["ticket_reminders"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
 }

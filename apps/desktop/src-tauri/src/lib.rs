@@ -6,6 +6,28 @@ use ticketd_core::{
 };
 
 #[tauri::command]
+fn reminder(reference: String) -> Result<Option<String>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.reminder(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_reminder(
+    reference: String,
+    due_at: Option<String>,
+    request_id: String,
+) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetReminder { reference, due_at },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
     Workspace::open_default()
         .and_then(|w| w.inbox(100, offset))
@@ -436,6 +458,8 @@ pub fn run() -> Result<(), tauri::Error> {
             change_ticket,
             bulk_status,
             ticket_history,
+            reminder,
+            set_reminder,
             inbox,
             is_following,
             set_following,
