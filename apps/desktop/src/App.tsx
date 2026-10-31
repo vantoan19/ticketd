@@ -1,3 +1,4 @@
+import { Hierarchy } from "./Hierarchy";
 import { Efforts } from "./Efforts";
 import { Projects, TicketProject } from "./Projects";
 import { Dependencies } from "./Dependencies";
@@ -165,6 +166,9 @@ export function App() {
                         {item.reference}
                       </span>
                       {item.title}{" "}
+                      {item.parent && (
+                        <span> · Parent: {item.parent.reference}</span>
+                      )}
                       {item.availability && <span> · {item.availability}</span>}
                       {item.tags.length > 0 && (
                         <span className="ml-2 text-sm text-neutral-600">
@@ -203,6 +207,16 @@ export function App() {
               <TicketEditor ticket={item} onSaved={updateTicket} />
               {item.id === selected && (
                 <>
+                  <Hierarchy
+                    ticket={item}
+                    refresh={refresh}
+                    select={(reference) =>
+                      setSelected(
+                        tickets.find((ticket) => ticket.reference === reference)
+                          ?.id ?? null,
+                      )
+                    }
+                  />
                   <Dependencies ticket={item} refresh={refresh} />
                   <Notes
                     reference={item.reference}

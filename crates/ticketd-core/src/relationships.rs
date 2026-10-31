@@ -52,7 +52,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     Ok(())
 }
 
-fn id(connection: &Connection, reference: &str) -> Result<String, Error> {
+pub(crate) fn id(connection: &Connection, reference: &str) -> Result<String, Error> {
     let number = reference
         .strip_prefix("T-")
         .and_then(|n| n.parse::<i64>().ok());
