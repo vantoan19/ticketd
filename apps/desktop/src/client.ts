@@ -10,6 +10,8 @@ const ticketSchema = z.object({
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
   availability: z.string().nullable(),
+  parent: z.object({ reference: z.string(), title: z.string() }).nullable(),
+  children: z.array(z.object({ reference: z.string(), title: z.string() })),
   prerequisites: z.array(
     z.object({ reference: z.string(), title: z.string(), status: z.string() }),
   ),

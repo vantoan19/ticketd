@@ -104,6 +104,13 @@ fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, Strin
 }
 
 #[tauri::command]
+fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut workspace| workspace.set_parent(&reference, parent.as_deref(), None))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_efforts() -> Result<Vec<Effort>, String> {
     Workspace::open_default()
         .and_then(|w| w.list_efforts(true))
@@ -160,7 +167,8 @@ pub fn run() -> Result<(), tauri::Error> {
             add_tag,
             remove_tag,
             add_dependency,
-            remove_dependency
+            remove_dependency,
+            set_parent
         ])
         .run(tauri::generate_context!())
 }
