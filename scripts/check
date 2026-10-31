@@ -3,6 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 npm exec --no -- markdownlint-cli2
+# The app, CLI check, and About page read the version from different files; keep them equal.
+node scripts/check-versions.mjs
 git diff --check
 git diff --cached --check
 

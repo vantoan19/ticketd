@@ -3,6 +3,7 @@ import { z } from "zod";
 
 const cliStatusSchema = z.object({
   found: z.boolean(),
+  on_path: z.boolean(),
   path: z.string().nullable(),
   version: z.string().nullable(),
   version_matches: z.boolean().nullable(),

@@ -1,10 +1,10 @@
-#![allow(clippy::unwrap_used)]
-
 use rusqlite::Connection;
 use ticketd_core::{
     BackupCheck, EvidenceInput, EvidenceKind, SafetyBackupKind, Workspace, WorkspaceSummary,
 };
 
+// Clippy only exempts #[test] functions from the unwrap lint, not their helpers.
+#[allow(clippy::unwrap_used)]
 fn populated(path: &std::path::Path) -> Workspace {
     let mut workspace = Workspace::open(path).unwrap();
     let first = workspace.create_ticket("First").unwrap();
@@ -101,7 +101,11 @@ fn a_newer_format_names_both_versions() {
     let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let newer = dir.path().join("newer.sqlite3");
     let connection = Connection::open(&newer).unwrap();
-    connection.pragma_update(None, "user_version", 21).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE tickets (number INTEGER PRIMARY KEY); PRAGMA user_version = 21;",
+        )
+        .unwrap();
     drop(connection);
     assert_eq!(
         workspace.inspect_backup(&newer).unwrap().check,
@@ -124,12 +128,18 @@ fn files_that_are_not_ticketd_backups_are_named_as_such() {
         .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = 20;")
         .unwrap();
     drop(connection);
+    // An unrelated database from a newer program is not "a newer ticketd".
+    let unrelated_newer = dir.path().join("unrelated-newer.sqlite3");
+    Connection::open(&unrelated_newer)
+        .unwrap()
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = 30;")
+        .unwrap();
     let blank = dir.path().join("blank.sqlite3");
     Connection::open(&blank)
         .unwrap()
         .execute_batch("PRAGMA user_version = 0; CREATE TABLE t (x);")
         .unwrap();
-    for file in [&text, &unrelated, &blank] {
+    for file in [&text, &unrelated, &unrelated_newer, &blank] {
         assert_eq!(
             workspace.inspect_backup(file).unwrap().check,
             BackupCheck::NotTicketd,
@@ -213,4 +223,40 @@ fn safety_backups_list_restore_and_migration_copies_newest_first() {
     assert!(listed[0].saved_at > listed[1].saved_at);
     assert!(listed[0].size_bytes > 0);
     assert!(listed[0].saved_at.ends_with('Z'));
+}
+
+#[test]
+fn a_truncated_backup_is_never_called_valid_or_newer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = populated(&path);
+    workspace.backup(&backup).unwrap();
+    let bytes = std::fs::read(&backup).unwrap();
+    let truncated = dir.path().join("truncated.sqlite3");
+    std::fs::write(&truncated, &bytes[..bytes.len() / 3]).unwrap();
+    let check = workspace.inspect_backup(&truncated).unwrap().check;
+    assert!(
+        matches!(check, BackupCheck::Damaged { .. } | BackupCheck::NotTicketd),
+        "{check:?}"
+    );
+}
+
+#[test]
+fn restore_accepts_what_inspection_calls_valid_and_refuses_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let unrelated = dir.path().join("other.sqlite3");
+    Connection::open(&unrelated)
+        .unwrap()
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = 30;")
+        .unwrap();
+    let workspace = populated(&path);
+    assert_eq!(
+        workspace.inspect_backup(&unrelated).unwrap().check,
+        BackupCheck::NotTicketd
+    );
+    drop(workspace);
+    let error = Workspace::restore(&path, &unrelated).unwrap_err();
+    assert!(error.to_string().contains("not a ticketd"), "{error}");
 }

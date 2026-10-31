@@ -291,15 +291,19 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
         extension: "sqlite3",
       });
       if (path === null) return;
+      let recorded: boolean;
       try {
-        await client.backupWorkspace(path);
+        recorded = await client.backupWorkspace(path);
       } catch (reason) {
-        setFailure(
-          `The backup was not saved, and nothing was left at ${path}: ${String(reason)}`,
-        );
+        // The core says what happened, such as an existing file at the path.
+        setFailure(`The backup was not saved: ${String(reason)}`);
         return;
       }
-      setMessage("Backup saved and checked.");
+      setMessage(
+        recorded
+          ? "Backup saved and checked."
+          : "Backup saved and checked, but the Last backup status could not be updated.",
+      );
       try {
         setLast(await workspaceClient.lastBackup());
       } catch {

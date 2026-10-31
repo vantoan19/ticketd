@@ -207,7 +207,7 @@ enum Command {
     },
     /// View a bounded dependency graph around a ticket
     Graph { reference: String },
-    /// Print the workspace path and format version as JSON
+    /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
     /// Show a ticket by its reference
     Show { reference: String },
@@ -446,6 +446,24 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             output,
             "Restored workspace. Safety backup: {}",
             safety.display()
+        )?;
+        return Ok(());
+    }
+    // A status probe reads the file as it is. Opening the workspace would create
+    // a missing one or migrate an older one past the version the desktop app supports.
+    if matches!(args.command, Command::Workspace) {
+        let file = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+            Some(workspace) => ticketd_core::workspace_file(workspace)?,
+            None => ticketd_core::default_workspace_file()?,
+        };
+        writeln!(
+            output,
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "path": file.path,
+                "format_version": file.format_version,
+                "supported_format_version": ticketd_core::FORMAT_VERSION,
+            }))?
         )?;
         return Ok(());
     }
@@ -785,13 +803,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }
-        Command::Workspace => {
-            let info = workspace.workspace_info()?;
-            serde_json::to_string(&serde_json::json!({
-                "path": info.path,
-                "format_version": info.format_version,
-            }))?
-        }
+        Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };
     writeln!(output, "{text}")?;

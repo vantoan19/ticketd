@@ -13,6 +13,7 @@ afterEach(() => {
 
 const base = {
   found: true,
+  on_path: true,
   path: "/Users/a/.local/bin/ticketd",
   version: "0.1.0",
   version_matches: true,
@@ -39,7 +40,7 @@ test("reports a version mismatch and a different workspace distinctly", async ()
   });
   const view = render(<CommandLineCard />);
   expect(await screen.findByText(/does not match this app/)).toBeTruthy();
-  expect(screen.queryByText(/different workspace/)).toBeNull();
+  expect(screen.queryByText(/It uses a different workspace/)).toBeNull();
   view.unmount();
 
   invoke.mockResolvedValueOnce({
@@ -48,7 +49,7 @@ test("reports a version mismatch and a different workspace distinctly", async ()
     workspace_path: "/other.sqlite3",
   });
   render(<CommandLineCard />);
-  expect(await screen.findByText(/different workspace/)).toBeTruthy();
+  expect(await screen.findByText(/It uses a different workspace/)).toBeTruthy();
   expect(screen.queryByText(/does not match this app/)).toBeNull();
 });
 
@@ -83,7 +84,40 @@ test("copies a quick-reference command", async () => {
     screen.getByRole("button", { name: /Copy: List Ready tickets/ }),
   );
   expect(writeText).toHaveBeenCalledWith(
-    "ticketd list --project PROJECT --availability ready",
+    "ticketd list --project PROJECT_ID --availability ready",
   );
   expect(await screen.findByText("Copied")).toBeTruthy();
+});
+
+test("a ticketd found only in a fallback folder is not called installed", async () => {
+  invoke.mockResolvedValue({ ...base, on_path: false });
+  render(<CommandLineCard />);
+  expect(await screen.findByText("Found, but not on your PATH")).toBeTruthy();
+  expect(screen.queryByText("Installed")).toBeNull();
+  expect(screen.getByText(/that folder isn.t on your PATH/)).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Installation guide" }),
+  ).toBeTruthy();
+});
+
+test("a different workspace is named, and a version mismatch links the guide", async () => {
+  invoke.mockResolvedValueOnce({
+    ...base,
+    workspace_matches: false,
+    workspace_path: "/other.sqlite3",
+  });
+  const view = render(<CommandLineCard />);
+  expect(await screen.findByText("Uses a different workspace")).toBeTruthy();
+  expect(screen.queryByText("Not confirmed")).toBeNull();
+  view.unmount();
+  invoke.mockResolvedValueOnce({
+    ...base,
+    version: "0.0.9",
+    version_matches: false,
+  });
+  render(<CommandLineCard />);
+  await screen.findByText(/does not match this app/);
+  expect(
+    screen.getByRole("button", { name: "Installation guide" }),
+  ).toBeTruthy();
 });

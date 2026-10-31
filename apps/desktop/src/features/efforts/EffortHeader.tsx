@@ -85,7 +85,7 @@ export function EffortHeader({
               {current.name}
             </h1>
             <span className="effort-state">
-              <StatusDot tone={current.archived ? "neutral" : "ready"} />
+              <StatusDot tone={current.archived ? "neutral" : "positive"} />
               {current.archived ? "Archived" : "Active"}
             </span>
           </div>

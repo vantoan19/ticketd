@@ -18,7 +18,7 @@ mod export;
 mod location;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
-pub use location::WorkspaceInfo;
+pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspace_file};
 
 mod efforts;
 mod retry;
@@ -53,6 +53,10 @@ mod notes;
 pub use history::{HistoryEntry, Status};
 pub use notes::{Note, NotePatch};
 pub use projects::Project;
+
+/// The workspace format version this application reads and writes. The next
+/// format change bumps this and adds one migration step; nothing else holds the number.
+pub const FORMAT_VERSION: i64 = 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -135,6 +139,8 @@ pub enum Error {
     NoteNotFound(String),
     #[error("could not determine the application data directory")]
     NoDataDirectory,
+    #[error("a file already exists at {}; ticketd never replaces an existing file, so choose a new name", .0.display())]
+    FileExists(std::path::PathBuf),
     #[error("could not access workspace directory: {0}")]
     Directory(#[from] std::io::Error),
     #[error("workspace database error: {0}")]
@@ -228,10 +234,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 20 {
+            if version > FORMAT_VERSION {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 20 {
+            if version == FORMAT_VERSION {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -252,10 +258,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 20 {
+            if version > FORMAT_VERSION {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 20 {
+            if version < FORMAT_VERSION {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -664,8 +670,16 @@ fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
 mod batch;
 pub use batch::{BatchOperation, TicketChange};
 
-fn default_path() -> Result<std::path::PathBuf, Error> {
+/// Where the default workspace lives, without creating anything.
+fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {
     let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
-    std::fs::create_dir_all(dirs.data_dir())?;
     Ok(dirs.data_dir().join("workspace.sqlite3"))
+}
+
+fn default_path() -> Result<std::path::PathBuf, Error> {
+    let path = default_path_unchecked()?;
+    if let Some(directory) = path.parent() {
+        std::fs::create_dir_all(directory)?;
+    }
+    Ok(path)
 }

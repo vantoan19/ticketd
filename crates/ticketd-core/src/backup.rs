@@ -4,7 +4,11 @@ use std::{
     time::Duration,
 };
 
-use crate::{Error, Workspace, default_path};
+use crate::{
+    Error, FORMAT_VERSION, Workspace,
+    backup_review::{BackupCheck, check_backup},
+    default_path,
+};
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags, backup::Backup};
 use serde::{Deserialize, Serialize};
@@ -93,40 +97,49 @@ pub(crate) fn missing_tables(
     Ok(missing)
 }
 
+/// The marker in the file name of a copy saved before a restore replaced the workspace.
+pub(crate) const SAFETY_MARKER: &str = ".safety-";
+/// The marker in the file name of a copy saved before a format migration.
+pub(crate) const PRE_MIGRATION_MARKER: &str = ".pre-migration-";
+
+/// Restore accepts exactly the files that inspecting a backup calls valid.
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
-    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 20 {
-        return Err(Error::NewerSchema(version));
+    match check_backup(connection)? {
+        BackupCheck::Valid { .. } => Ok(()),
+        BackupCheck::NewerFormat { backup_version, .. } => {
+            Err(Error::NewerSchema(i64::from(backup_version)))
+        }
+        BackupCheck::NotTicketd => Err(Error::Backup("not a ticketd workspace backup".into())),
+        BackupCheck::MissingTables { tables } => Err(Error::Backup(format!(
+            "missing table {}",
+            tables.join(", ")
+        ))),
+        BackupCheck::Damaged { reason } => Err(Error::Backup(reason)),
+        BackupCheck::CurrentWorkspace => {
+            Err(Error::Backup("backup is the current workspace".into()))
+        }
     }
-    if !(1..=20).contains(&version) {
-        return Err(Error::Backup(format!(
-            "unsupported backup schema version {version}"
-        )));
-    }
-    let integrity: String =
-        connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
-    if integrity != "ok" {
-        return Err(Error::Backup(format!(
-            "integrity check failed: {integrity}"
-        )));
-    }
-    let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
-    if statement.query([])?.next()?.is_some() {
-        return Err(Error::Backup("foreign key check failed".into()));
-    }
-    // Verify this is a ticketd database, not an unrelated database with a matching version.
-    if let Some(table) = missing_tables(connection, version)?.first() {
-        return Err(Error::Backup(format!("missing table {table}")));
-    }
-    Ok(())
+}
+
+/// Opens a new file, refusing to replace one that already exists.
+fn create_new(path: &Path) -> Result<File, Error> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::AlreadyExists => Error::FileExists(path.to_path_buf()),
+            _ => error.into(),
+        })
 }
 
 impl Workspace {
     /// Create a consistent backup without overwriting an existing file.
-    pub fn backup(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+    /// Returns whether the backup was also recorded as the last backup; the
+    /// backup itself is saved either way.
+    pub fn backup(&self, path: impl AsRef<Path>) -> Result<bool, Error> {
         let path = path.as_ref();
-        let file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        drop(file);
+        drop(create_new(path)?);
         let result = (|| {
             let mut dest = Connection::open(path)?;
             copy(&self.connection, &mut dest)?;
@@ -134,7 +147,7 @@ impl Workspace {
         })();
         if result.is_err() {
             let _ = std::fs::remove_file(path);
-            return result;
+            return result.map(|()| false);
         }
         // The backup is already saved and checked, so a failure to note it
         // must not discard it; the previous record simply stays.
@@ -142,17 +155,23 @@ impl Workspace {
             .canonicalize()
             .map(|absolute| absolute.display().to_string())
             .unwrap_or_else(|_| path.display().to_string());
-        let _ = self.connection.execute(
-            "INSERT INTO last_backup (id, path, completed_at) VALUES (1, ?1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
-             ON CONFLICT(id) DO UPDATE SET path = excluded.path, completed_at = excluded.completed_at",
-            [recorded],
-        );
-        Ok(())
+        Ok(self
+            .connection
+            .execute(
+                "INSERT INTO last_backup (id, path, completed_at) VALUES (1, ?1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+                 ON CONFLICT(id) DO UPDATE SET path = excluded.path, completed_at = excluded.completed_at",
+                [recorded],
+            )
+            .is_ok())
     }
 
     /// The last successful backup, or `None` when none was recorded.
     pub fn last_backup(&self) -> Result<Option<BackupRecord>, Error> {
-        match self.connection.query_row(
+        Self::read_last_backup(&self.connection)
+    }
+
+    fn read_last_backup(connection: &Connection) -> Result<Option<BackupRecord>, Error> {
+        match connection.query_row(
             "SELECT path, completed_at FROM last_backup WHERE id = 1",
             [],
             |row| {
@@ -173,13 +192,9 @@ impl Workspace {
         workspace: &Path,
     ) -> Result<PathBuf, Error> {
         let mut name = workspace.as_os_str().to_os_string();
-        name.push(format!(".pre-migration-{}.sqlite3", Uuid::new_v4()));
+        name.push(format!("{PRE_MIGRATION_MARKER}{}.sqlite3", Uuid::new_v4()));
         let path = PathBuf::from(name);
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        drop(file);
+        drop(create_new(&path)?);
         let result = (|| {
             let mut destination = Connection::open(&path)?;
             copy(connection, &mut destination)?;
@@ -221,24 +236,32 @@ impl Workspace {
         current.busy_timeout(Duration::from_secs(10))?;
         let current_version: i64 =
             current.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_version > 20 {
+        if current_version > FORMAT_VERSION {
             return Err(Error::NewerSchema(current_version));
         }
         let mut name = workspace.as_os_str().to_os_string();
-        name.push(format!(".safety-{}.sqlite3", Uuid::new_v4()));
+        name.push(format!("{SAFETY_MARKER}{}.sqlite3", Uuid::new_v4()));
         let safety = PathBuf::from(name);
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&safety)?;
-        drop(file);
+        drop(create_new(&safety)?);
         let mut safety_db = Connection::open(&safety)?;
         copy(&current, &mut safety_db)?;
         drop(safety_db);
+        // The restored file brings its own, older record. The last backup is a
+        // fact about this computer, so keep the one from before the restore.
+        let last_backup = Self::read_last_backup(&current).ok().flatten();
         copy(&source, &mut current).map_err(|source| Error::Restore {
             safety: safety.clone(),
             source: Box::new(source),
         })?;
+        if let Some(record) = last_backup {
+            // Only a restored workspace of the current format has the table; an
+            // older one gets an empty record when it is migrated.
+            let _ = current.execute(
+                "INSERT INTO last_backup (id, path, completed_at) VALUES (1, ?1, ?2) \
+                 ON CONFLICT(id) DO UPDATE SET path = excluded.path, completed_at = excluded.completed_at",
+                [record.path, record.completed_at],
+            );
+        }
         Ok(safety)
     }
 }

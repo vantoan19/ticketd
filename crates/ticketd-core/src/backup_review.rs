@@ -4,12 +4,9 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Error, Workspace,
-    backup::{missing_tables, table_exists},
+    Error, FORMAT_VERSION, Workspace,
+    backup::{PRE_MIGRATION_MARKER, SAFETY_MARKER, missing_tables, table_exists},
 };
-
-/// The format version this application reads and writes.
-const SUPPORTED_VERSION: u32 = 20;
 
 /// What a workspace holds, for comparing it with a backup before a restore.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,28 +127,20 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     })
 }
 
-fn is_not_a_database(error: &rusqlite::Error) -> bool {
-    matches!(
-        error,
-        rusqlite::Error::SqliteFailure(failure, _)
-            if matches!(
-                failure.code,
-                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
-            )
-    )
-}
-
-fn check_backup(connection: &Connection) -> Result<BackupCheck, Error> {
+/// Checks a database file. It must be a ticketd workspace before its format
+/// version means anything, because many unrelated databases use `user_version`.
+pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error> {
+    if !table_exists(connection, "tickets")? {
+        return Ok(BackupCheck::NotTicketd);
+    }
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > i64::from(SUPPORTED_VERSION) {
+    if version > FORMAT_VERSION {
         return Ok(BackupCheck::NewerFormat {
             backup_version: u32::try_from(version).unwrap_or(u32::MAX),
-            supported_version: SUPPORTED_VERSION,
+            supported_version: supported_version(),
         });
     }
-    if !(1..=i64::from(SUPPORTED_VERSION)).contains(&version)
-        || !table_exists(connection, "tickets")?
-    {
+    if !(1..=FORMAT_VERSION).contains(&version) {
         return Ok(BackupCheck::NotTicketd);
     }
     let missing = missing_tables(connection, version)?;
@@ -174,9 +163,13 @@ fn check_backup(connection: &Connection) -> Result<BackupCheck, Error> {
         });
     }
     Ok(BackupCheck::Valid {
-        format_version: u32::try_from(version).unwrap_or(SUPPORTED_VERSION),
+        format_version: u32::try_from(version).unwrap_or_default(),
         summary: summarize(connection)?,
     })
+}
+
+fn supported_version() -> u32 {
+    u32::try_from(FORMAT_VERSION).unwrap_or_default()
 }
 
 impl Workspace {
@@ -203,7 +196,20 @@ impl Workspace {
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?;
             match check_backup(&connection) {
-                Err(Error::Database(error)) if is_not_a_database(&error) => BackupCheck::NotTicketd,
+                // Text or another format entirely, so there is nothing of ours to name.
+                Err(Error::Database(rusqlite::Error::SqliteFailure(failure, _)))
+                    if failure.code == rusqlite::ErrorCode::NotADatabase =>
+                {
+                    BackupCheck::NotTicketd
+                }
+                // A SQLite file that cannot be read through; keep SQLite's reason.
+                Err(Error::Database(rusqlite::Error::SqliteFailure(failure, message)))
+                    if failure.code == rusqlite::ErrorCode::DatabaseCorrupt =>
+                {
+                    BackupCheck::Damaged {
+                        reason: message.unwrap_or_else(|| failure.to_string()),
+                    }
+                }
                 other => other?,
             }
         };
@@ -235,9 +241,9 @@ impl Workspace {
             let Some(rest) = file.strip_prefix(&name) else {
                 continue;
             };
-            let kind = if rest.starts_with(".safety-") {
+            let kind = if rest.starts_with(SAFETY_MARKER) {
                 SafetyBackupKind::Safety
-            } else if rest.starts_with(".pre-migration-") {
+            } else if rest.starts_with(PRE_MIGRATION_MARKER) {
                 SafetyBackupKind::PreMigration
             } else {
                 continue;

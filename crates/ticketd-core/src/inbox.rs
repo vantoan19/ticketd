@@ -124,6 +124,21 @@ impl Workspace {
         tx.commit()?;
         Ok(())
     }
+    /// Due reminders become inbox entries when someone looks, so every read of
+    /// the inbox or its counts delivers them first. Insertion and marking
+    /// delivered commit together, including across processes.
+    pub(crate) fn deliver_due_reminders(&self) -> Result<(), Error> {
+        let tx = self.connection.unchecked_transaction()?;
+        super::transaction_write_lock(&tx)?;
+        let now: String =
+            tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+                row.get(0)
+            })?;
+        tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+        tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
         self.inbox_page(limit, offset, false)
     }
@@ -135,16 +150,7 @@ impl Workspace {
         offset: u32,
         unread_only: bool,
     ) -> Result<Vec<InboxEntry>, Error> {
-        // Insertion and marking delivered commit together, including across processes.
-        let tx = self.connection.unchecked_transaction()?;
-        super::transaction_write_lock(&tx)?;
-        let now: String =
-            tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
-                row.get(0)
-            })?;
-        tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
-        tx.commit()?;
+        self.deliver_due_reminders()?;
         let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(
@@ -165,15 +171,6 @@ impl Workspace {
             )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
-    }
-    /// Materialize due reminders and report whether any inbox entry is unread.
-    pub fn has_unread_inbox(&self) -> Result<bool, Error> {
-        self.inbox(0, 0)?;
-        Ok(self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM inbox_entries WHERE person = ?1 AND read = 0)",
-            [LOCAL_PERSON],
-            |row| row.get(0),
-        )?)
     }
     pub fn set_inbox_read(&mut self, ids: &[i64], read: bool) -> Result<(), Error> {
         if ids.len() > 100 {

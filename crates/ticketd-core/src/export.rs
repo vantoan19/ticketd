@@ -104,7 +104,11 @@ impl Workspace {
         serde_json::to_writer_pretty(&mut temp, &data).map_err(std::io::Error::other)?;
         writeln!(temp)?;
         temp.as_file().sync_all()?;
-        temp.persist_noclobber(path).map_err(|error| error.error)?;
+        temp.persist_noclobber(path)
+            .map_err(|error| match error.error.kind() {
+                std::io::ErrorKind::AlreadyExists => Error::FileExists(path.to_path_buf()),
+                _ => error.error.into(),
+            })?;
         Ok(())
     }
 }

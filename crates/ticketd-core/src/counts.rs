@@ -15,8 +15,7 @@ impl Workspace {
     /// Ready matches the Ready list: Todo tickets with no unsatisfied prerequisite, where
     /// only Done satisfies one. Trashed tickets are excluded from both ticket counts.
     pub fn sidebar_counts(&self) -> Result<SidebarCounts, Error> {
-        // Due reminders become inbox entries on read, so materialize them first.
-        self.inbox(0, 0)?;
+        self.deliver_due_reminders()?;
         let counts = self.connection.query_row(
             "SELECT \
                (SELECT COUNT(*) FROM inbox_entries WHERE person = ?1 AND read = 0), \

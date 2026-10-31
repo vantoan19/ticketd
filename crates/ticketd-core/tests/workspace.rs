@@ -2882,20 +2882,20 @@ fn unread_observation_delivers_reminders_once_across_reopen() {
     let path = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Remember").unwrap();
-    assert!(!workspace.has_unread_inbox().unwrap());
+    assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 0);
     workspace
         .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
         .unwrap();
     drop(workspace);
     let mut workspace = Workspace::open(&path).unwrap();
-    assert!(workspace.has_unread_inbox().unwrap());
-    assert!(workspace.has_unread_inbox().unwrap());
+    assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 1);
+    assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 1);
     let entries = workspace.inbox(100, 0).unwrap();
     assert_eq!(entries.len(), 1);
     workspace.set_inbox_read(&[entries[0].id], true).unwrap();
     drop(workspace);
     let workspace = Workspace::open(&path).unwrap();
-    assert!(!workspace.has_unread_inbox().unwrap());
+    assert_eq!(workspace.sidebar_counts().unwrap().unread_inbox, 0);
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
 
@@ -3070,4 +3070,45 @@ fn last_backup_records_successes_and_ignores_failures() {
         workspace.last_backup().unwrap().unwrap().path,
         second.canonicalize().unwrap().display().to_string()
     );
+}
+
+#[test]
+fn backup_and_export_name_an_existing_file_instead_of_blaming_the_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let existing = dir.path().join("existing.sqlite3");
+    std::fs::write(&existing, b"keep me").unwrap();
+    for error in [
+        workspace.backup(&existing).unwrap_err().to_string(),
+        workspace.export_file(&existing).unwrap_err().to_string(),
+    ] {
+        assert!(error.contains("a file already exists at"), "{error}");
+        assert!(error.contains("existing.sqlite3"), "{error}");
+        assert!(!error.contains("workspace directory"), "{error}");
+    }
+    assert_eq!(std::fs::read(&existing).unwrap(), b"keep me");
+}
+
+#[test]
+fn backup_reports_that_it_was_recorded() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert!(workspace.backup(dir.path().join("b.sqlite3")).unwrap());
+}
+
+#[test]
+fn restoring_keeps_the_last_backup_record_from_before_the_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let older = dir.path().join("older.sqlite3");
+    let newer = dir.path().join("newer.sqlite3");
+    let workspace = Workspace::open(&path).unwrap();
+    workspace.backup(&older).unwrap();
+    workspace.backup(&newer).unwrap();
+    let recorded = workspace.last_backup().unwrap().unwrap();
+    drop(workspace);
+    // The older file holds a record that predates the newer backup.
+    Workspace::restore(&path, &older).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.last_backup().unwrap().unwrap(), recorded);
 }

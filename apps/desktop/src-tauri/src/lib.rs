@@ -41,12 +41,6 @@ fn inbox(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn has_unread_inbox() -> Result<bool, String> {
-    Workspace::open_default()
-        .and_then(|w| w.has_unread_inbox())
-        .map_err(|e| e.to_string())
-}
-#[tauri::command]
 fn sidebar_counts() -> Result<SidebarCounts, String> {
     Workspace::open_default()
         .and_then(|w| w.sidebar_counts())
@@ -81,7 +75,9 @@ fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+// `async` commands run off the main thread, so a slow integrity check or copy
+// of a large workspace file does not freeze the window.
+#[tauri::command(async)]
 fn export_workspace(path: String) -> Result<(), String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.export_file(path))
@@ -630,11 +626,11 @@ fn set_effort(reference: String, effort: Option<String>) -> Result<Ticket, Strin
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn backup_workspace(path: String) -> Result<String, String> {
+/// Saves a backup. Returns whether it was also recorded as the last backup.
+#[tauri::command(async)]
+fn backup_workspace(path: String) -> Result<bool, String> {
     Workspace::open_default()
         .and_then(|w| w.backup(&path))
-        .map(|()| format!("Backup saved: {path}"))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -649,13 +645,13 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
         .and_then(|w| w.workspace_info())
         .map_err(|e| e.to_string())
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn restore_workspace(path: String) -> Result<String, String> {
     Workspace::restore_default(path)
         .map(|safety| safety.display().to_string())
         .map_err(|e| e.to_string())
 }
-#[tauri::command]
+#[tauri::command(async)]
 fn inspect_backup(path: String) -> Result<BackupInspection, String> {
     Workspace::open_default()
         .and_then(|w| w.inspect_backup(path))
@@ -710,7 +706,6 @@ pub fn run() -> Result<(), tauri::Error> {
             is_following,
             set_following,
             set_inbox_read,
-            has_unread_inbox,
             sidebar_counts,
             list_evidence,
             add_evidence,

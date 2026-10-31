@@ -20,8 +20,10 @@ fn run(dir: &Path, args: &[&str]) -> String {
 }
 
 #[test]
-fn workspace_prints_its_path_and_format_version_as_json() {
+fn workspace_prints_its_path_and_both_format_versions_as_json() {
     let dir = tempfile::tempdir().unwrap();
+    // Create the workspace at the CLI's own format, the way any other command would.
+    run(dir.path(), &["create", "First"]);
     let printed: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["workspace"])).unwrap();
     assert_eq!(
@@ -32,8 +34,44 @@ fn workspace_prints_its_path_and_format_version_as_json() {
             .to_str()
             .unwrap()
     );
-    assert!(printed["format_version"].as_i64().unwrap() >= 19);
-    assert_eq!(printed.as_object().unwrap().len(), 2);
+    assert_eq!(printed["format_version"], 20);
+    assert_eq!(printed["supported_format_version"], 20);
+    assert_eq!(printed.as_object().unwrap().len(), 3);
+}
+
+#[test]
+fn workspace_does_not_create_a_missing_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let printed: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["workspace"])).unwrap();
+    assert_eq!(printed["format_version"], serde_json::Value::Null);
+    assert_eq!(printed["supported_format_version"], 20);
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn workspace_does_not_migrate_an_older_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("workspace.sqlite3");
+    run(dir.path(), &["create", "First"]);
+    // Rewrite the "user version" field of the SQLite header (bytes 60..64) to 19.
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes[60..64].copy_from_slice(&19_u32.to_be_bytes());
+    std::fs::write(&file, &bytes).unwrap();
+    let printed: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["workspace"])).unwrap();
+    assert_eq!(printed["format_version"], 19);
+    assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    // No pre-migration copy was made either.
+    let files: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert!(files.iter().all(|entry| {
+        !entry
+            .as_ref()
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains("pre-migration")
+    }));
 }
 
 /// The Settings quick reference shows these forms with placeholders filled in.

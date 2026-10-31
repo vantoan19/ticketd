@@ -256,7 +256,8 @@ export const client = {
     await invoke("detach_child", { child, parent });
   },
   async backupWorkspace(path: string) {
-    return z.string().parse(await invoke("backup_workspace", { path }));
+    // Whether the backup was also recorded as the last backup.
+    return z.boolean().parse(await invoke("backup_workspace", { path }));
   },
   async restoreWorkspace(path: string) {
     return z.string().parse(await invoke("restore_workspace", { path }));

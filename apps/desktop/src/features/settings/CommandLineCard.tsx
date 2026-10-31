@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
@@ -9,11 +9,11 @@ import { SettingsCard } from "@/features/settings/SettingsCard";
 const INSTALL_GUIDE_URL =
   "https://github.com/vantoan19/ticketd/blob/main/docs/install.md";
 
-/** Commands use the CLI's real flags; replace the capitalized placeholders. */
+/** Commands use the CLI's real flags; the capitalized words are placeholders. */
 const QUICK_REFERENCE = [
   {
     label: "List Ready tickets for a project",
-    command: "ticketd list --project PROJECT --availability ready",
+    command: "ticketd list --project PROJECT_ID --availability ready",
   },
   {
     label: "Read a ticket with relationships, notes, and evidence",
@@ -59,14 +59,42 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   );
 }
 
+function InstallGuideLink() {
+  return (
+    <Button
+      type="button"
+      variant="link"
+      size="xs"
+      onClick={() =>
+        void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
+      }
+    >
+      Installation guide
+    </Button>
+  );
+}
+
 /** What is wrong with an installed executable, most important first. */
-function problems(status: CliStatus): string[] {
-  const found: string[] = [];
+function problems(status: CliStatus): ReactNode[] {
+  const found: ReactNode[] = [];
+  if (!status.on_path && status.path !== null)
+    found.push(
+      <>
+        Found at <code>{status.path}</code>, but that folder isn&apos;t on your
+        PATH, so agents and terminals can&apos;t run <code>ticketd</code> by
+        name. Move it to a folder on your PATH, such as{" "}
+        <code>{status.suggested_directory}</code> after adding that folder to
+        PATH, then check again. <InstallGuideLink />
+      </>,
+    );
   if (status.version === null)
     found.push("ticketd was found but did not report a version.");
   else if (status.version_matches === false)
     found.push(
-      `Its version ${status.version} does not match this app (${status.app_version}). Replace it with the ticketd executable from this app's download, then check again.`,
+      <>
+        {`Its version ${status.version} does not match this app (${status.app_version}). Replace it with the ticketd executable from this app's download, then check again.`}{" "}
+        <InstallGuideLink />
+      </>,
     );
   if (status.workspace_matches === false)
     found.push(
@@ -103,36 +131,30 @@ function Summary({ check }: { check: Check }) {
     return (
       <>
         <p className="settings-label">
-          <StatusDot tone="blocked" /> Not found
+          <StatusDot tone="attention" /> Not found
         </p>
         <p className="settings-hint">
           ticketd is not on your PATH or in the usual install folders. Copy the
           ticketd executable from this app&apos;s download into a folder on your
           PATH, such as <code>{status.suggested_directory}</code>, then choose
-          Check again.{" "}
-          <Button
-            type="button"
-            variant="link"
-            size="xs"
-            onClick={() =>
-              void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
-            }
-          >
-            Installation guide
-          </Button>
+          Check again. <InstallGuideLink />
         </p>
       </>
     );
   const issues = problems(status);
-  const tone: StatusDotTone = issues.length === 0 ? "ready" : "blocked";
+  const tone: StatusDotTone = issues.length === 0 ? "positive" : "attention";
   return (
     <>
       <p className="settings-label">
         <StatusDot tone={tone} />{" "}
-        {issues.length === 0 ? "Installed" : "Installed, needs attention"}
+        {issues.length === 0
+          ? "Installed"
+          : status.on_path
+            ? "Installed, needs attention"
+            : "Found, but not on your PATH"}
       </p>
-      {issues.map((issue) => (
-        <p key={issue} className="settings-hint">
+      {issues.map((issue, index) => (
+        <p key={index} className="settings-hint">
           {issue}
         </p>
       ))}
@@ -148,7 +170,11 @@ function Summary({ check }: { check: Check }) {
         </dd>
         <dt>Workspace</dt>
         <dd>
-          {status.workspace_matches ? "Uses this workspace" : "Not confirmed"}
+          {status.workspace_matches === null
+            ? "Not confirmed"
+            : status.workspace_matches
+              ? "Uses this workspace"
+              : "Uses a different workspace"}
         </dd>
       </dl>
     </>
@@ -186,6 +212,10 @@ export function CommandLineCard() {
         </Button>
       </div>
       <h3 className="cli-reference-heading">Quick reference for agents</h3>
+      <p className="settings-hint">
+        Replace the capitalized parts (PROJECT_ID, TICKET, AGENT) with your own
+        values.
+      </p>
       <ul className="cli-reference">
         {QUICK_REFERENCE.map((item) => (
           <li key={item.command}>

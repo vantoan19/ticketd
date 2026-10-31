@@ -164,7 +164,7 @@ test("Back up now saves to the chosen file and shows it as the checked last back
   vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(lastBackup.path);
   vi.mocked(client.backupWorkspace).mockImplementation(async () => {
     vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
-    return "saved";
+    return true;
   });
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
   expect(screen.queryByLabelText(/Backup file path/)).toBeNull();
@@ -204,12 +204,15 @@ test("a refused backup explains itself and keeps the previous status", async () 
   vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(
     "/tmp/taken.sqlite3",
   );
-  vi.mocked(client.backupWorkspace).mockRejectedValue(new Error("File exists"));
+  vi.mocked(client.backupWorkspace).mockRejectedValue(
+    "a file already exists at /tmp/taken.sqlite3; ticketd never replaces an existing file, so choose a new name",
+  );
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
   await screen.findByLabelText("Last backup path");
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   const alert = await screen.findByText(/The backup was not saved/);
-  expect(alert.textContent).toContain("File exists");
+  expect(alert.textContent).toContain("a file already exists at");
+  expect(alert.textContent).not.toContain("nothing was left");
   expect(screen.getByLabelText("Last backup path").textContent).toBe(
     lastBackup.path,
   );
