@@ -4,8 +4,8 @@ import { client, type Project, type Ticket } from "@/lib/api/client";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProject } from "@/features/projects/Projects";
 import { Dependencies } from "@/features/tickets/Dependencies";
-import { Notes } from "@/features/tickets/Notes";
-import { History, StatusControl } from "@/features/tickets/History";
+import { Activity } from "@/features/tickets/Activity";
+import { StatusControl } from "@/features/tickets/History";
 import { Tags } from "@/features/tickets/Tags";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 const DependencyGraph = lazy(
@@ -164,20 +164,14 @@ export function TicketDetails({
               </details>
             </>
           )}
-          {item.reference === selected && (
-            <History
-              reference={item.reference}
-              projects={projects}
-              status={item.status}
-              revision={revision}
-            />
-          )}
-          {!item.trashed && (
-            <details className="detail-disclosure">
-              <summary>Notes</summary>
-              <Notes reference={item.reference} refreshRevision={revision} />
-            </details>
-          )}
+          <Activity
+            reference={item.reference}
+            projects={projects}
+            status={item.status}
+            revision={revision}
+            active={item.reference === selected}
+            trashed={item.trashed}
+          />
           {!item.trashed && (
             <details className="detail-disclosure">
               <summary>Tags</summary>
