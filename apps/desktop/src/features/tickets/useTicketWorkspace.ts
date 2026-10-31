@@ -16,6 +16,12 @@ export function useTicketWorkspace(
     { id: string; name: string; archived: boolean }[]
   >([]);
   const [filter, setFilter] = useState("all");
+  const [navigation, setNavigation] = useState<{
+    kind: "all" | "ready" | "progress" | "trash";
+    project: string;
+    effort: string;
+  }>({ kind: "all", project: "all", effort: "" });
+  const [queryError, setQueryError] = useState(false);
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [effort, setEffort] = useState("");
@@ -69,6 +75,7 @@ export function useTicketWorkspace(
         }),
       ]);
       if (request !== generation.current) return;
+      setQueryError(false);
       setTickets(result[0]);
       setProjects(result[1]);
       setEfforts(result[2]);
@@ -76,6 +83,7 @@ export function useTicketWorkspace(
       setError("");
     } catch (reason) {
       if (request !== generation.current) return;
+      setQueryError(true);
       setError(
         `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
       );
@@ -96,7 +104,10 @@ export function useTicketWorkspace(
   ]);
   useEffect(() => {
     const generationRef = generation;
-    const timer = window.setTimeout(() => void refresh(), 0);
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void refresh();
+    }, 0);
     const interval = window.setInterval(() => void refresh(), 2000);
     return () => {
       window.clearTimeout(timer);
@@ -150,19 +161,37 @@ export function useTicketWorkspace(
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
   }, []);
-  const scopeName = trash
-    ? "Trash"
-    : filter === "unlinked"
-      ? "Unlinked"
-      : (projects.find((p) => p.id === filter)?.name ??
-        (effort
-          ? efforts.find((e) => e.id === effort)?.name
-          : status || availability || "All tickets"));
+  const scopeName =
+    navigation.kind === "trash"
+      ? "Trash"
+      : navigation.project === "unlinked"
+        ? "Unlinked"
+        : navigation.project !== "all"
+          ? (projects.find((p) => p.id === navigation.project)?.name ??
+            "Project")
+          : navigation.effort
+            ? (efforts.find((e) => e.id === navigation.effort)?.name ??
+              "Effort")
+            : navigation.kind === "ready"
+              ? "Ready"
+              : navigation.kind === "progress"
+                ? "In progress"
+                : "All tickets";
+  function clearFilters() {
+    setQuery("");
+    setEffort(navigation.effort);
+    setStatus(navigation.kind === "progress" ? "In progress" : "");
+    setAvailability(navigation.kind === "ready" ? "Ready" : "");
+    setTags("");
+    setFamily("");
+    setOffset(0);
+  }
   function scope(
     next: "all" | "ready" | "progress" | "trash",
     project = "all",
     effortId = "",
   ) {
+    setNavigation({ kind: next, project, effort: effortId });
     setView("tickets");
     setTrash(next === "trash");
     setFilter(project);
@@ -173,7 +202,6 @@ export function useTicketWorkspace(
     setFamily("");
     setQuery("");
     setOffset(0);
-    setSelected(null);
   }
   return {
     projects,
@@ -213,5 +241,8 @@ export function useTicketWorkspace(
     updateTicket,
     scopeName,
     scope,
+    navigation,
+    clearFilters,
+    queryError,
   };
 }

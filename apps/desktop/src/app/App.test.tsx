@@ -176,6 +176,9 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
+  expect(
+    screen.getByText("This ticket is outside the current results."),
+  ).toBeTruthy();
   listVisible = true;
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {
@@ -266,4 +269,31 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   }
+});
+
+test("clears additional filters while preserving the selected Effort", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_efforts")
+      return [{ id: "e1", name: "Launch", archived: false }];
+    if (command === "list_projects" || command === "find_tickets") return [];
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug" },
+  });
+  expect(screen.getByRole("button", { name: "Remove Tag: bug" })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByLabelText("Active filters")).getByRole("button", {
+      name: "Clear filters",
+    }),
+  );
+  expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
 });
