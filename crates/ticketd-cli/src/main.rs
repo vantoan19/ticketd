@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
-use ticketd_core::{BatchOperation, NotePatch, Status, TicketPatch, Workspace};
+use ticketd_core::{BatchOperation, NotePatch, Status, TicketPatch, Workspace, WriteRequest};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -11,6 +11,12 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Execute a JSON write request from a file or stdin; retain its result for safe retries
+    Write {
+        file: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Apply a JSON array of operations from a file or - for stdin
     Batch { file: String },
     /// Manage repository projects
@@ -219,6 +225,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
+        Command::Write { file, request_id } => {
+            let input = read_content(None, Some(file))?.ok_or("missing request")?;
+            let request: WriteRequest = serde_json::from_str(&input)?;
+            serde_json::to_string(&workspace.write(request_id.as_deref(), request)?)?
+        }
         Command::Batch { file } => {
             let reader: Box<dyn Read> = if file == "-" {
                 Box::new(std::io::stdin())
