@@ -73,7 +73,7 @@ export function Backlinks({
       <h3>
         Mentioned in{" "}
         <span className="text-muted-foreground">
-          {offset === 0 && links.length < 20 ? links.length : ""}
+          {offset === 0 ? (links.length < 20 ? links.length : "20+") : ""}
         </span>
       </h3>
       {error && <p role="alert">{error}</p>}

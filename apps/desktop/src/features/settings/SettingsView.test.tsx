@@ -114,7 +114,7 @@ test("the Location card shows the path, counts, size, and format version", async
   expect(text).toContain("Projects3");
   expect(text).toContain("Active Efforts2");
   expect(text).toContain("File size2.5 MB");
-  expect(text).toContain("Format version20");
+  expect(text).toContain("Workspace format version20");
 });
 
 test("Copy path puts the workspace path on the clipboard", async () => {

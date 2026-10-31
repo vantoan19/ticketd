@@ -37,10 +37,12 @@ export function PropertyPicker({
   allowCreate = false,
   onSearch,
   compact = false,
+  readOnly = false,
   icon: Icon,
 }: {
   label: string;
   compact?: boolean;
+  readOnly?: boolean;
   icon?: LucideIcon;
   value: string;
   choices: Choice[];
@@ -63,6 +65,7 @@ export function PropertyPicker({
         <Button
           variant={compact ? "ghost" : "outline"}
           size="sm"
+          readOnly={readOnly}
           disabled={disabled}
           aria-label={`${label}: ${value}`}
         >
@@ -242,6 +245,7 @@ export function TicketProperties({
           <SelectTrigger
             size="sm"
             variant="ghost"
+            readOnly={ticket.trashed}
             aria-label={`Status: ${ticket.status}`}
             title="Status"
           >
@@ -274,6 +278,7 @@ export function TicketProperties({
         "Project",
         <PropertyPicker
           compact
+          readOnly={ticket.trashed}
           icon={Folder}
           label="Project"
           value={projectName}
@@ -295,6 +300,7 @@ export function TicketProperties({
         "Effort",
         <PropertyPicker
           compact
+          readOnly={ticket.trashed}
           icon={Layers}
           label="Effort"
           value={effortName}
@@ -316,6 +322,7 @@ export function TicketProperties({
         "Tags",
         <PropertyPicker
           compact
+          readOnly={ticket.trashed}
           icon={Tag}
           label="Tags"
           value={ticket.tags.length ? ticket.tags.join(", ") : "No tags"}

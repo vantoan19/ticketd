@@ -79,7 +79,13 @@ export function TicketDetails({
       aria-labelledby="detail-heading"
     >
       {graphOpen && selected && (
-        <Suspense fallback={<p role="status">Loading graph…</p>}>
+        <Suspense
+          fallback={
+            <p role="status" className="graph-loading">
+              Loading graph…
+            </p>
+          }
+        >
           <DependencyGraph
             key={selected}
             reference={selected}

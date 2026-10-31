@@ -25,17 +25,21 @@ function SelectTrigger({
   className,
   size = "default",
   variant = "default",
+  readOnly = false,
   children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default";
   variant?: "default" | "ghost";
+  /** Shows a disabled control at full strength, for content that is viewable but locked. */
+  readOnly?: boolean;
 }) {
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       data-size={size}
       data-variant={variant}
+      data-readonly={readOnly || undefined}
       className={cn(
         "ui-select flex w-fit max-w-full items-center justify-between gap-2 px-3 py-2 whitespace-nowrap disabled:cursor-not-allowed data-[placeholder]:text-muted-foreground data-[size=default]:h-10 data-[size=sm]:h-8 *:data-[slot=select-value]:truncate *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4 [&_svg]:text-muted-foreground",
         className,

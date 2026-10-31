@@ -315,6 +315,10 @@
   background: var(--recessed);
   box-shadow: none;
 }
+.ui-button[data-readonly]:disabled,
+.ui-select[data-readonly]:disabled {
+  opacity: 1;
+}
 .ui-input,
 .ui-select {
   color: var(--foreground);
@@ -1311,6 +1315,9 @@
   }
 }
 @media (max-width: 440px) {
+  .management {
+    padding-inline: 16px;
+  }
   .detail-header,
   .detail-content {
     padding-inline: 16px;

@@ -38,10 +38,13 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  readOnly = false,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
+    /** Shows a disabled control at full strength, for content that is viewable but locked. */
+    readOnly?: boolean;
   }) {
   const Comp = asChild ? Slot.Root : "button";
 
@@ -50,6 +53,7 @@ function Button({
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      data-readonly={readOnly || undefined}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
     />

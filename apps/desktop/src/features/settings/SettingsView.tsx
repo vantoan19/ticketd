@@ -190,7 +190,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
     ["Projects", String(info.projects)],
     ["Active Efforts", String(info.active_efforts)],
     ["File size", formatSize(info.size_bytes)],
-    ["Format version", String(info.format_version)],
+    ["Workspace format version", String(info.format_version)],
   ];
   return (
     <SettingsCard id="location" title="Location">
@@ -490,11 +490,6 @@ function ExportCard() {
   }
   return (
     <SettingsCard id="export" title="Export">
-      <p className="settings-hint">
-        An export is a readable JSON snapshot (format version 1) that includes
-        Trash. It cannot be imported and is not a full backup; use Backups to
-        keep a restorable copy. Exports never replace an existing file.
-      </p>
       <div className="settings-actions">
         <Button
           type="button"
@@ -506,20 +501,6 @@ function ExportCard() {
           Export…
         </Button>
       </div>
-      <p className="settings-hint">From the command line:</p>
-      <div className="settings-actions">
-        <code className="workspace-path">{EXPORT_COMMAND}</code>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          aria-label="Copy export command"
-          onClick={() => void copyCommand()}
-        >
-          <Copy aria-hidden="true" />
-          Copy
-        </Button>
-      </div>
       {failure && (
         <p role="alert" className="settings-failure">
           {failure}
@@ -528,6 +509,28 @@ function ExportCard() {
       <p role="status" className="settings-hint">
         {message}
       </p>
+      <div className="backup-footer">
+        <p className="settings-hint">
+          An export is a readable JSON snapshot (workspace export format 1) that
+          includes Trash. It cannot be imported and is not a full backup; use
+          Backups to keep a restorable copy. Exports never replace an existing
+          file.
+        </p>
+        <p className="settings-hint">From the command line:</p>
+        <div className="settings-actions">
+          <code className="workspace-path">{EXPORT_COMMAND}</code>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Copy export command"
+            onClick={() => void copyCommand()}
+          >
+            <Copy aria-hidden="true" />
+            Copy
+          </Button>
+        </div>
+      </div>
     </SettingsCard>
   );
 }

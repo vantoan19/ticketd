@@ -335,7 +335,7 @@ Description autosave and explicit Add note submission remain different interacti
 
 Use rows with a consistent grid: unread indicator, ticket reference/title, event summary, then time and read-state action. Title and summary are separate lines. Show human language such as “Status changed to In review”; never expose event keys such as `relationship:discovered-while`.
 
-Unread rows have stronger title emphasis and an explicit state. Read rows remain legible. Keep Mark displayed read near the view heading; per-row controls appear on focus as well as hover. Navigation to a note reveals and focuses the relevant content without silently changing ticket status. Follow and reminder settings remain personal to the local person.
+Unread rows have stronger title emphasis and an explicit state. Read rows remain legible. Keep Mark shown as read near the view heading; per-row controls appear on focus as well as hover. Navigation to a note reveals and focuses the relevant content without silently changing ticket status. Follow and reminder settings remain personal to the local person.
 
 ### Reminders
 

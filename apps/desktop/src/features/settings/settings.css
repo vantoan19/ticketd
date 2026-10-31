@@ -45,7 +45,8 @@
   font-size: 12px;
   font-weight: 500;
   line-height: 20px;
-  color: var(--disabled-foreground);
+  /* Text, so it needs the secondary-text role, not the disabled gray. */
+  color: var(--muted-foreground);
 }
 
 /* The shell stacks the section list above the content on narrow windows. */
