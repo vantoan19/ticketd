@@ -1,0 +1,25 @@
+.filter-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.filter-chips button {
+  height: 26px;
+}
+.selection-context {
+  padding: 8px 16px;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.filters-content [data-slot="field-group"] {
+  gap: 12px;
+}
+.filters-content [data-slot="field"] {
+  gap: 4px;
+}
