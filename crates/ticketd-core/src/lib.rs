@@ -25,6 +25,12 @@ pub enum Error {
     EmptyEffortName,
     #[error("effort '{0}' was not found")]
     EffortNotFound(String),
+    #[error(
+        "checkout matches multiple projects; specify --project explicitly or remove a registration"
+    )]
+    AmbiguousProject,
+    #[error("checkout path must be valid Unicode")]
+    InvalidCheckoutPath,
     #[error("project name and path must not be empty")]
     EmptyProject,
     #[error("project '{0}' was not found")]
@@ -107,7 +113,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 10 {
+        if version > 11 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -142,7 +148,11 @@ impl Workspace {
             transaction.pragma_update(None, "user_version", 9)?;
         }
         if version < 10 {
-            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 10;")?;
+            projects::migrate_checkouts(&transaction)?;
+            transaction.pragma_update(None, "user_version", 10)?;
+        }
+        if version < 11 {
+            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0; PRAGMA user_version = 11;")?;
         }
         transaction.commit()?;
         Ok(Self { connection })

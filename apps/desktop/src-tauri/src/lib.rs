@@ -42,6 +42,20 @@ fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn register_checkout(id: String, path: String) -> Result<Project, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.register_checkout(&id, &path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_checkout(id: String, path: String) -> Result<Project, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.remove_checkout(&id, &path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn create_ticket(title: String, project_id: Option<String>) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.create_ticket_in_project(&title, project_id.as_deref()))
@@ -172,6 +186,8 @@ pub fn run() -> Result<(), tauri::Error> {
             change_effort,
             set_effort,
             list_projects,
+            register_checkout,
+            remove_checkout,
             create_project,
             edit_project,
             list_tickets,

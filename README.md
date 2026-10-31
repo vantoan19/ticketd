@@ -47,3 +47,12 @@ npm run build                    # Frontend production build
 Build the frontend before running `cargo build --workspace --locked`. For a packaged desktop build, use `npm run desktop -- build`. The scaffold has no ticket operations or database yet, and no placeholder behavior tests.
 
 The layout follows [Cargo workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html) and [Tauri's project structure](https://v2.tauri.app/start/project-structure/).
+
+Checkout registrations use native filesystem paths. Register each existing checkout
+with `ticketd project register PROJECT_ID PATH` and remove obsolete registrations
+with `ticketd project unregister PROJECT_ID PATH`; project identity is unchanged.
+Ticket creation infers context from the invocation's current directory, including
+nested directories. `--project PROJECT_ID` overrides inference. Multiple matching
+projects produce an error; an unmatched directory creates an unlinked ticket.
+Paths are interpreted by the native operating system; interoperability with WSL
+has not been validated.
