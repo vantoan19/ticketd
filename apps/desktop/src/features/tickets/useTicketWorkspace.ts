@@ -135,6 +135,7 @@ export function useTicketWorkspace(
     project: string | null,
     effortId: string | null,
     tags: string[],
+    keepOpen = false,
   ) {
     const ticket = await client.createTicket(
       title,
@@ -145,9 +146,12 @@ export function useTicketWorkspace(
       tags,
     );
     setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
-    setCreating(false);
-    setSelected(ticket.reference);
+    if (!keepOpen) {
+      setCreating(false);
+      setSelected(ticket.reference);
+    }
     await refresh();
+    return ticket.reference;
   }
   const updateTicket = useCallback((updated: Ticket) => {
     generation.current++;
