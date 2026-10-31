@@ -8,6 +8,7 @@ import {
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
+import { Button } from "@/components/ui/button";
 import { client, type DependencyGraph as Graph } from "@/lib/api/client";
 
 export default function DependencyGraph({
@@ -57,7 +58,13 @@ export default function DependencyGraph({
       data: {
         label: `${node.reference} ${node.title}\n${node.status}${node.trashed ? " · Trashed" : ""}${node.availability ? ` · ${node.availability}` : ""}`,
       },
-      style: { width: 180, whiteSpace: "pre-wrap" as const },
+      style: {
+        width: 180,
+        whiteSpace: "pre-wrap" as const,
+        background: "var(--surface)",
+        color: "var(--foreground)",
+        borderColor: "var(--border)",
+      },
     };
   });
   const edges = graph.edges.map((edge) => ({
@@ -95,15 +102,16 @@ export default function DependencyGraph({
       <ul aria-label="Graph tickets">
         {graph.nodes.map((node) => (
           <li key={node.reference}>
-            <button
+            <Button
               type="button"
-              className="underline"
+              variant="link"
+              className="relationship-link"
               onClick={() => select(node.reference, node.trashed)}
             >
               {node.reference} {node.title} · {node.status}
               {node.trashed && " · Trashed"}
               {node.availability && ` · ${node.availability}`}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

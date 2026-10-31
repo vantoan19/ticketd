@@ -380,7 +380,6 @@ export function App() {
                 revision={revision}
                 refresh={refresh}
                 updateTicket={updateTicket}
-                setTrash={setTrash}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
