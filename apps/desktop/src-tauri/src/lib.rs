@@ -1,8 +1,8 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
     BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
-    InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
-    Workspace, WriteRequest, WriteResult,
+    InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket, TicketChange,
+    TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
