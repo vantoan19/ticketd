@@ -14,6 +14,7 @@ ticketd-core = { path = "crates/ticketd-core" }
 clap = { version = "4", features = ["derive"] }
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
+tauri-plugin-opener = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
