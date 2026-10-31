@@ -129,6 +129,7 @@ const original = {
 };
 
 test("rejects blank notes and adds canonical Markdown only on explicit submission", async () => {
+  const scoped = { ...props, reference: "T-10" };
   let saved: (typeof original)[] = [];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { content: string }) => {
@@ -142,7 +143,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
       throw new Error(`Unexpected ${command}`);
     },
   );
-  render(<Activity {...props} />);
+  render(<Activity {...scoped} />);
   expect(screen.queryByRole("textbox")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
   const add = screen.getByRole("button", { name: "Add note" });
@@ -176,6 +177,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
 });
 
 test("preserves new and edited drafts across hidden navigation, external refresh and failed edits, then cancels back to the new draft", async () => {
+  const scoped = { ...props, reference: "T-11" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_notes") return [saved];
@@ -183,7 +185,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     if (command === "edit_note") throw new Error("Disk full");
     throw new Error(`Unexpected ${command}`);
   });
-  const view = render(<Activity {...props} />);
+  const view = render(<Activity {...scoped} />);
   await screen.findByText("Agent: cli-agent");
   fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
   fireEvent.click(
@@ -192,7 +194,11 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
     target: { value: "Unsubmitted new draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: /Edit note from/ }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
   expect(
     screen.getByRole("textbox", { name: "Edit note rich text" }).textContent,
   ).toContain("Original note");
@@ -202,9 +208,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
     target: { value: "My edited **draft**" },
   });
-  view.rerender(<Activity {...props} active={false} />);
+  view.rerender(<Activity {...scoped} active={false} />);
   saved = { ...saved, content: "An external update" };
-  view.rerender(<Activity {...props} revision={1} />);
+  view.rerender(<Activity {...scoped} revision={1} />);
   await screen.findByText(/The saved note changed while you were editing/);
   expect(
     screen.getByRole("textbox", { name: "Edit note source" }),
@@ -223,12 +229,13 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   expect(
     screen.getByRole("textbox", { name: "New note source" }),
   ).toHaveProperty("value", "Unsubmitted new draft");
-  view.rerender(<Activity {...props} revision={1} trashed />);
+  view.rerender(<Activity {...scoped} revision={1} trashed />);
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Add note" })).toBeNull();
 });
 
 test("explicitly saves an edited note and returns to the untouched new draft", async () => {
+  const scoped = { ...props, reference: "T-12" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch: { content: string } }) => {
@@ -241,9 +248,13 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
       throw new Error(`Unexpected ${command}`);
     },
   );
-  render(<Activity {...props} />);
+  render(<Activity {...scoped} />);
   await screen.findByText("Agent: cli-agent");
-  fireEvent.click(screen.getByRole("button", { name: /Edit note from/ }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );

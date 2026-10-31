@@ -871,8 +871,7 @@
   gap: 8px;
   margin-bottom: 8px;
 }
-.detail-section-heading h3,
-.evidence-heading h3 {
+.detail-section-heading h3 {
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -1008,54 +1007,6 @@
 }
 .relationship-input select {
   max-width: 100%;
-}
-.evidence-section {
-  margin-top: 24px;
-}
-.evidence-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.evidence-label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 14px;
-  line-height: 20px;
-}
-.evidence-section form {
-  margin-top: 16px;
-}
-.evidence-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
-  padding: 8px 0;
-}
-.evidence-item-heading,
-.evidence-item-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.evidence-item-heading > span,
-.evidence-item-meta {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
-}
-.evidence-item-value {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
 }
 .reminder-popover {
   display: flex;

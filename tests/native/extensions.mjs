@@ -250,9 +250,10 @@ try {
       ).getValue()) === target.title,
     "Inline reference did not navigate",
   );
-  await disclosure("Backlinks");
   await (
-    await (await detail()).$(`p*=See ${target.reference} for context.`)
+    await (
+      await (await detail()).$('section[aria-label="Mentioned in"]')
+    ).$("span*=for context.")
   ).waitForDisplayed({ timeout: 10000 });
   await disclosure("Related work");
   let section = await (
@@ -278,9 +279,12 @@ try {
     await detail()
   ).$('section[aria-label="Implementation evidence"]');
   await click(await evidence.$("button=Add evidence"));
-  await (await evidence.$("input[required]")).setValue("Native check");
-  await (await evidence.$("textarea")).setValue("https://example.com/pull/1");
-  await click(await evidence.$("button=Add evidence"));
+  const evidenceForm = await browser.$('[role="dialog"]');
+  await (await evidenceForm.$("input[required]")).setValue("Native check");
+  await (
+    await evidenceForm.$("textarea")
+  ).setValue("https://example.com/pull/1");
+  await click(await evidenceForm.$("button=Add evidence"));
   await waitFor(
     () =>
       run("evidence", "list", target.reference).some(

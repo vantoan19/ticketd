@@ -47,6 +47,61 @@
   color: var(--foreground);
   font-weight: 500;
 }
+.activity-menu {
+  margin-inline-start: auto;
+  margin-block: -6px;
+}
+.activity-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+.activity-history > span:first-child {
+  color: var(--foreground);
+}
+.activity-mention {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-inline-start: 2px solid var(--ring);
+  overflow-wrap: anywhere;
+}
+.activity-mention-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.activity-mention mark {
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 600;
+}
+.activity-compact-composer {
+  align-self: stretch;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  text-align: start;
+  cursor: text;
+}
+.activity-compact-composer:hover {
+  border-color: var(--ring);
+}
+.activity-compact-composer:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 .activity-note {
   margin: 0;
 }

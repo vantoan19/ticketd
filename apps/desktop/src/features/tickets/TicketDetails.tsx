@@ -3,7 +3,7 @@ import { Evidence } from "@/features/tickets/Evidence";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type Project, type Ticket } from "@/lib/api/client";
-import { Backlinks } from "@/features/tickets/Backlinks";
+import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
@@ -44,6 +44,9 @@ export function TicketDetails({
   updateTicket: (ticket: Ticket) => void;
 }) {
   const [graphReference, setGraphReference] = useState<string | null>(null);
+  const [mention, setMention] = useState<
+    (MentionTarget & { key: number }) | null
+  >(null);
   const ticket = Object.values(details).find(
     (item) => item.reference === selected,
   );
@@ -245,15 +248,28 @@ export function TicketDetails({
             <Backlinks
               reference={item.reference}
               revision={revision}
-              select={setSelected}
+              select={(target) => {
+                setMention({ ...target, key: Date.now() });
+                setSelected(target.reference);
+              }}
             />
           )}
           <Activity
             reference={item.reference}
             target={
-              inboxTarget?.reference === item.reference ? inboxTarget : null
+              inboxTarget?.reference === item.reference
+                ? inboxTarget
+                : mention?.reference === item.reference && mention.noteId
+                  ? { id: mention.noteId, key: mention.key }
+                  : null
+            }
+            mention={
+              mention?.reference === item.reference && !mention.noteId
+                ? mention
+                : null
             }
             projects={projects}
+            efforts={efforts}
             status={item.status}
             revision={revision}
             active={item.reference === selected}
