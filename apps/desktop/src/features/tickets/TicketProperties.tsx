@@ -7,20 +7,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  MoreHorizontal,
-  Folder,
-  Layers,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
+import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusIcon, ticketStatuses } from "./StatusIcon";
 import {
@@ -182,12 +169,7 @@ export function TicketProperties({
       if (!returnFocus) return;
       requestAnimationFrame(() => {
         if (document.activeElement !== document.body) return;
-        const selector =
-          key === "Action"
-            ? '[aria-label="Ticket actions"]'
-            : key === "Status"
-              ? '[aria-label="Status"]'
-              : `[aria-label^="${key}:"]`;
+        const selector = `[aria-label^="${key}:"]`;
         propertiesRef.current?.querySelector<HTMLElement>(selector)?.focus();
       });
     }
@@ -240,6 +222,7 @@ export function TicketProperties({
     <div
       ref={propertiesRef}
       className="ticket-properties ticket-properties-inline"
+      data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
     >
       {property(
@@ -256,7 +239,7 @@ export function TicketProperties({
           <SelectTrigger
             size="sm"
             variant="ghost"
-            aria-label="Status"
+            aria-label={`Status: ${ticket.status}`}
             title="Status"
           >
             <StatusIcon status={ticket.status} decorative />
@@ -340,37 +323,9 @@ export function TicketProperties({
           }
         />,
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Ticket actions"
-            disabled={!!pending}
-          >
-            <MoreHorizontal />
-          </Button>
-        </DropdownMenuTrigger>
-
-        <DropdownMenuContent align="end" sideOffset={4}>
-          <DropdownMenuGroup>
-            <DropdownMenuItem
-              onSelect={() =>
-                void save("Action", () =>
-                  client.setTrashed(ticket.reference, !ticket.trashed),
-                )
-              }
-            >
-              {ticket.trashed ? "Restore" : "Move to trash"}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
       {vocabularyError && !ticket.trashed && (
         <small role="status">{vocabularyError}</small>
       )}
-      {pending === "Action" && <small role="status">Saving…</small>}
-      {errors.Action && <small role="alert">{errors.Action}</small>}
     </div>
   );
 }

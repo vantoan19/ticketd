@@ -437,6 +437,25 @@
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
+  background: var(--background);
+}
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-menu);
+  font-size: 14px;
+  transform: translateY(-200%);
+}
+.skip-link:focus {
+  transform: none;
+  outline: none;
+  box-shadow: var(--shadow-menu), var(--focus-ring);
 }
 .sidebar {
   width: 208px;
@@ -456,7 +475,15 @@
 }
 .sidebar-body {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
+}
+.sidebar-footer {
+  flex: none;
+  padding-top: 8px;
+}
+.sidebar-footer .sidebar-nav {
+  margin-top: 0;
 }
 .brand {
   display: flex;
@@ -468,10 +495,6 @@
 .brand strong {
   font-size: 16px;
   font-weight: 500;
-}
-.brand-mark {
-  font-size: 20px;
-  line-height: 1;
 }
 .new-ticket {
   margin-left: auto;
@@ -490,8 +513,7 @@
 .sidebar-nav li {
   width: 100%;
 }
-.sidebar-nav button,
-.settings-link {
+.sidebar-nav button {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -505,17 +527,15 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.sidebar-nav button svg,
-.settings-link svg {
+.sidebar-nav button svg {
   flex: none;
 }
-.sidebar-nav button:hover,
-.settings-link:hover {
-  background: var(--accent);
+.sidebar-nav button:hover {
+  background: var(--recessed);
   color: var(--foreground);
 }
 .sidebar-nav button[data-active="true"] {
-  background: var(--recessed);
+  background: var(--accent);
   color: var(--foreground);
 }
 .sidebar-scroll {
@@ -541,48 +561,34 @@
   color: var(--muted-foreground);
 }
 .sidebar-heading button:hover {
-  background: var(--accent);
+  background: var(--recessed);
   color: var(--foreground);
 }
 .sidebar-heading + .sidebar-nav {
   margin-top: 8px;
 }
-.settings-link {
-  margin-top: 16px;
-}
-.main-area {
+/* One inset, elevated panel holds every view; the canvas shows around it. */
+.content-panel {
   display: flex;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
+  margin: 8px 8px 8px 0;
+  border-radius: 12px;
+  overflow: hidden;
   background: var(--surface);
-  box-shadow: -1px 0 var(--border);
+  box-shadow: var(--shadow-small);
 }
-.topbar {
+.content-panel:focus {
+  outline: none;
+}
+.mobile-nav-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   height: 48px;
   flex: none;
-  padding: 0 24px;
-  color: var(--muted-foreground);
-  font-size: 14px;
-  box-shadow: 0 1px 0 0 var(--header-boundary);
-}
-.topbar strong {
-  color: var(--foreground);
-}
-.topbar > div {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.slash {
-  padding: 0 12px;
-  color: var(--disabled-foreground);
+  padding-inline: 8px;
 }
 .icon-button {
   display: inline-flex;
@@ -597,6 +603,10 @@
 .icon-button:hover {
   background: var(--accent);
   color: var(--foreground);
+}
+.list-refresh {
+  margin-left: auto;
+  color: var(--muted-foreground);
 }
 .ticket-workspace {
   display: flex;
@@ -620,8 +630,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 46px;
-  padding: 8px 20px;
+  height: 48px;
+  padding: 0 12px 0 20px;
 }
 .management h1 {
   font-size: 24px;
@@ -734,8 +744,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  min-height: 46px;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  min-height: 48px;
   padding: 0 24px;
   background: var(--surface);
   color: var(--muted-foreground);
@@ -821,9 +832,9 @@
   letter-spacing: -0.6px;
 }
 .editor-title textarea:focus-visible {
-  outline: 1px solid var(--input-focus);
-  outline-offset: 8px;
-  border-radius: 2px;
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 .editor-save-state {
   margin-top: 12px;
@@ -1061,9 +1072,6 @@
 .ticket-workspace.expanded #detail {
   flex: 1 1 0 !important;
 }
-.ticket-workspace.expanded .return-to-list {
-  display: inline-flex;
-}
 #detail-heading:focus-visible,
 #tickets-heading:focus-visible {
   outline: 2px solid var(--ring);
@@ -1142,19 +1150,11 @@
   color: var(--muted-foreground);
 }
 .global-error {
+  flex: none;
   padding: 12px 24px;
   background: var(--error-surface);
   color: var(--error-foreground);
   font-size: 14px;
-}
-.unread-attention {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  white-space: nowrap;
-}
-.mobile-sidebar-trigger {
-  display: none;
 }
 
 /* Description and note content share a readable document surface. */
@@ -1349,22 +1349,12 @@
   }
 }
 @media (max-width: 767px) {
-  .mobile-sidebar-trigger {
-    display: inline-flex;
-  }
   [data-mobile="true"].sidebar {
-    width: min(280px, 85vw);
+    width: min(280px, calc(100vw - 32px));
     padding: 0 12px 12px;
   }
-  .topbar {
-    padding: 0 24px;
-    gap: 8px;
-  }
-  .topbar .slash {
-    padding-inline: 8px;
-  }
-  .list-header {
-    padding-top: 8px;
+  .content-panel {
+    margin: 8px;
   }
   .detail-reference-row {
     align-items: start;
@@ -1375,21 +1365,18 @@
 }
 @media (max-width: 440px) {
   .detail-header,
-  .detail-content,
-  .topbar {
+  .detail-content {
     padding-inline: 16px;
   }
   .detail-header {
     gap: 4px;
   }
-  .list-header,
+  .list-header {
+    padding-inline: 16px 8px;
+  }
   .list-controls,
   .list-heading {
     padding-inline: 16px;
-  }
-  .topbar > div > span:first-child,
-  .topbar .slash {
-    display: none;
   }
   .create-actions {
     flex-wrap: wrap;

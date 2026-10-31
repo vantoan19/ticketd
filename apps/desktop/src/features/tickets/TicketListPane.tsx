@@ -1,9 +1,10 @@
 import type { RefObject } from "react";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { TicketList } from "@/features/tickets/TicketList";
+import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
@@ -70,6 +71,15 @@ export function TicketListPane({
           {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
           {tickets.length === PAGE_SIZE ? " shown" : ""}
         </p>
+        <Button
+          className="list-refresh"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={() => void refresh()}
+        >
+          <RefreshCw />
+        </Button>
       </div>
       {!trash && (
         <TicketFilters
@@ -106,9 +116,7 @@ export function TicketListPane({
           </Button>
         </div>
       ) : loading && tickets.length === 0 ? (
-        <p role="status" className="mt-3">
-          Loading tickets…
-        </p>
+        <TicketRowsSkeleton />
       ) : tickets.length === 0 ? (
         <div className="empty-state">
           {trash ? (
@@ -116,7 +124,17 @@ export function TicketListPane({
           ) : filtered ? (
             <>
               <strong>No matching tickets</strong>
-              <p>Try clearing your search and filters.</p>
+              {query ? (
+                <p>
+                  Nothing matches <q>{query}</q>
+                  {tags || status || availability || family || effort
+                    ? " with the current filters"
+                    : ""}
+                  .
+                </p>
+              ) : (
+                <p>Nothing matches the current filters.</p>
+              )}
               <Button variant="outline" onClick={clearFilters}>
                 Clear filters
               </Button>
@@ -153,6 +171,12 @@ export function TicketListPane({
                 ? item.project_id === null
                 : item.project_id === filter),
           )}
+          scope={{
+            showEffort: !navigation.effort,
+            showProject: navigation.project === "all",
+            efforts,
+            projects,
+          }}
           selected={selected}
           selectable={!trash}
           selectionDisabled={bulk.pending}

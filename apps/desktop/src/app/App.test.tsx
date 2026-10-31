@@ -272,7 +272,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
     target: { value: "Draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
   expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
     "value",
@@ -288,7 +288,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
   fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
     target: { value: "bug" },
   });
-  expect(screen.getByRole("button", { name: /Filters • Active/ })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Filters, 1 active" }),
+  ).toBeTruthy();
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Workspace views" }),
@@ -423,10 +425,41 @@ test("clears additional filters while preserving the selected Effort", async () 
       name: "Clear filters",
     }),
   );
-  expect(
-    screen.getByText("Launch", { selector: "header strong" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+});
+
+test("removes one filter chip and shows the query when nothing matches", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_efforts" || command === "list_projects") return [];
+    if (command === "find_tickets") return [];
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+    target: { value: "zebra" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug, ui" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByText("No matching tickets")).toBeTruthy();
+  expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
+  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
+  );
+  expect(screen.queryByText("zebra", { selector: "q" })).toBeNull();
+  expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -713,9 +746,11 @@ test("keeps keyboard selection and reports a failed bulk change for retry", asyn
   await act(async () => {});
   expect(screen.getByRole("alert").textContent).toContain("ticket is trashed");
   expect(screen.getByText("1 selected")).toBeTruthy();
-  expect(screen.getByRole("button", { name: /First/ }).textContent).toContain(
-    "Todo",
-  );
+  expect(
+    within(screen.getByRole("button", { name: /First/ })).getByRole("img", {
+      name: "Todo",
+    }),
+  ).toBeTruthy();
 });
 
 test("applies a project to selected tickets without replacing other fields", async () => {
@@ -840,12 +875,12 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(screen.getByRole("button", { name: "Unread inbox" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inbox, unread" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
   app.unmount();
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByRole("button", { name: "Unread inbox" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inbox, unread" })).toBeTruthy();
 });
