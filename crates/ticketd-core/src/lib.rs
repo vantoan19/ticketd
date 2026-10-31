@@ -1,4 +1,7 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod context;
+pub use context::{ContextOptions, TicketContext};
+
 mod efforts;
 mod graph;
 mod hierarchy;
@@ -53,6 +56,8 @@ pub enum Error {
     EmptyTag,
     #[error("ticket '{0}' is in trash; restore it before editing")]
     Trashed(String),
+    #[error("a related ticket is missing from the workspace")]
+    MissingRelatedTicket,
     #[error("ticket title must not be empty")]
     EmptyTitle,
     #[error("ticket '{0}' was not found")]

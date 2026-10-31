@@ -86,3 +86,22 @@ JSON ticket snapshots in operation order. Failures identify the zero-based
 operation index and roll back the entire request. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
 between operations.
+
+### Bounded ticket context
+
+`ticketd context T-1` returns JSON with the ticket, derived availability, and
+its tags. Add `--project`, `--effort`, `--relationships`, or `--notes` to
+select those scopes. An omitted scope is absent; a selected but unlinked project,
+Effort, or parent is `null`. Related tickets include status and `trashed`; only
+Done satisfies a prerequisite. A missing root or a missing linked project or
+Effort produces an error on stderr and a nonzero exit code, with no JSON on
+stdout.
+
+Each list is ordered by ticket reference number, tag name, or note insertion
+order, and contains at most 20 items. A non-null `next_offset` means to repeat
+the command with `--offset` set to that value; the offset applies independently
+to every list in the response. Each call reads one snapshot, but later pages can
+reflect intervening changes. Text objects contain `text` and `truncated`:
+ticket and note bodies are limited to 4096 Unicode characters, other user text
+to 256. Use `ticketd show T-1` for full ticket content and `ticketd note list
+T-1` for full notes. The bounded body must not be used as an editable draft.

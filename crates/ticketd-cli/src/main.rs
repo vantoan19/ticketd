@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
-use ticketd_core::{BatchOperation, NotePatch, Status, TicketPatch, Workspace};
+use ticketd_core::{BatchOperation, ContextOptions, NotePatch, Status, TicketPatch, Workspace};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -100,6 +100,20 @@ enum Command {
         project: Option<String>,
         #[arg(long)]
         unlinked: bool,
+    },
+    /// Retrieve bounded context; select related scopes explicitly
+    Context {
+        reference: String,
+        #[arg(long)]
+        project: bool,
+        #[arg(long)]
+        effort: bool,
+        #[arg(long)]
+        relationships: bool,
+        #[arg(long)]
+        notes: bool,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
     },
     /// View a bounded dependency graph around a ticket
     Graph { reference: String },
@@ -423,6 +437,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
             serde_json::to_string(&tickets)?
         }
+        Command::Context {
+            reference,
+            project,
+            effort,
+            relationships,
+            notes,
+            offset,
+        } => serde_json::to_string(&workspace.ticket_context(
+            &reference,
+            ContextOptions {
+                project,
+                effort,
+                relationships,
+                notes,
+                offset,
+            },
+        )?)?,
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }

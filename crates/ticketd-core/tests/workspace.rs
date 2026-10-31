@@ -760,3 +760,92 @@ fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
         history_before
     );
 }
+
+#[test]
+fn context_is_bounded_and_reports_related_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let ticket = ws.create_ticket("Main").unwrap();
+    let blocker = ws.create_ticket("Blocker").unwrap();
+    ws.add_dependency(&blocker.reference, &ticket.reference, None)
+        .unwrap();
+    ws.set_trashed(&blocker.reference, true, None).unwrap();
+    ws.change_ticket(
+        &ticket.reference,
+        TicketPatch {
+            body: Some("x".repeat(5000)),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    ws.add_note(&ticket.reference, "Finding", None).unwrap();
+    let context = ws
+        .ticket_context(
+            &ticket.reference,
+            ticketd_core::ContextOptions {
+                relationships: true,
+                notes: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(context.ticket.body.truncated);
+    assert_eq!(context.ticket.body.text.len(), 4096);
+    let relationships = context.relationships.unwrap();
+    assert_eq!(
+        relationships.prerequisites.items[0].reference,
+        blocker.reference
+    );
+    assert!(relationships.prerequisites.items[0].trashed);
+    assert!(relationships.prerequisites.items[0].unresolved);
+    assert_eq!(context.notes.unwrap().items[0].content.text, "Finding");
+    assert_eq!(context.ticket.availability.as_deref(), Some("Blocked"));
+}
+
+#[test]
+fn context_reads_one_snapshot_during_atomic_changes() {
+    use ticketd_core::{BatchOperation, ContextOptions, TicketChange};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut writer = Workspace::open(&path).unwrap();
+    let ticket = writer.create_ticket("old").unwrap();
+    let reader = Workspace::open(&path).unwrap();
+    let reference = ticket.reference.clone();
+    let handle = std::thread::spawn(move || {
+        for i in 0..40 {
+            let value = if i % 2 == 0 { "new" } else { "old" };
+            writer
+                .apply_batch(vec![BatchOperation::Change {
+                    ticket: reference.clone(),
+                    change: Box::new(TicketChange {
+                        patch: TicketPatch {
+                            title: Some(value.into()),
+                            ..Default::default()
+                        },
+                        add_tags: if value == "new" {
+                            vec!["new".into()]
+                        } else {
+                            vec![]
+                        },
+                        remove_tags: if value == "old" {
+                            vec!["new".into()]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    }),
+                }])
+                .unwrap();
+        }
+    });
+    for _ in 0..40 {
+        let result = reader
+            .ticket_context(&ticket.reference, ContextOptions::default())
+            .unwrap();
+        assert_eq!(
+            result.ticket.title.text == "new",
+            !result.ticket.tags.items.is_empty()
+        );
+    }
+    handle.join().unwrap();
+}
