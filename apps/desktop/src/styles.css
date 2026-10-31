@@ -532,6 +532,15 @@
 .sidebar-nav button svg {
   flex: none;
 }
+.sidebar-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
 .sidebar-nav button:hover {
   background: var(--recessed);
   color: var(--foreground);
@@ -1157,37 +1166,6 @@
   background: var(--error-surface);
   color: var(--error-foreground);
   font-size: 14px;
-}
-.inbox-entries {
-  list-style: none;
-  padding: 0;
-  margin: 24px 0;
-}
-.inbox-entry {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px;
-  margin-block: 8px;
-  background: var(--surface);
-  border-radius: 6px;
-}
-.inbox-entry > div {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.inbox-entry p {
-  margin: 8px 0;
-}
-.inbox-ticket {
-  font-weight: 500;
-  text-align: left;
-}
-.inbox-meta {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
 }
 
 /* Description and note content share a readable document surface. */

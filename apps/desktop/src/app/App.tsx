@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -32,13 +32,18 @@ export function App() {
     id: string;
     key: number;
   } | null>(null);
-  const [unread, setUnread] = useState(false);
+  const [counts, setCounts] = useState<SidebarCounts>({
+    unread_inbox: 0,
+    ready: 0,
+    in_progress: 0,
+  });
   useEffect(() => {
     let active = true;
     const poll = () =>
-      void invoke("has_unread_inbox")
+      void countsClient
+        .sidebar()
         .then((value) => {
-          if (active && typeof value === "boolean") setUnread(value);
+          if (active) setCounts(value);
         })
         .catch(() => {});
     poll();
@@ -94,7 +99,7 @@ export function App() {
           <SettingsNav onBack={() => setView(viewBeforeSettings)} />
         ) : (
           <WorkspaceSidebar
-            unread={unread}
+            counts={counts}
             view={view}
             setView={openView}
             filter={filter}

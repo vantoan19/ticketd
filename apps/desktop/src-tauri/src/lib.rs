@@ -1,8 +1,8 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
     BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
-    InboxEntry, Note, NotePatch, Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
-    Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket, TicketChange,
+    TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -28,15 +28,25 @@ fn set_reminder(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
+fn inbox(
+    offset: u32,
+    limit: Option<u32>,
+    unread_only: Option<bool>,
+) -> Result<Vec<InboxEntry>, String> {
     Workspace::open_default()
-        .and_then(|w| w.inbox(100, offset))
+        .and_then(|w| w.inbox_page(limit.unwrap_or(100), offset, unread_only.unwrap_or(false)))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn has_unread_inbox() -> Result<bool, String> {
     Workspace::open_default()
         .and_then(|w| w.has_unread_inbox())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn sidebar_counts() -> Result<SidebarCounts, String> {
+    Workspace::open_default()
+        .and_then(|w| w.sidebar_counts())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -668,6 +678,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_following,
             set_inbox_read,
             has_unread_inbox,
+            sidebar_counts,
             list_evidence,
             add_evidence,
             edit_evidence,

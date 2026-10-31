@@ -38,7 +38,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod counts;
 mod history;
+pub use counts::SidebarCounts;
 mod inbox;
 pub use inbox::InboxEntry;
 mod notes;
