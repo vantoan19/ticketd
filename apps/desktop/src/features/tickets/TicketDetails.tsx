@@ -1,3 +1,4 @@
+import { Evidence } from "@/features/tickets/Evidence";
 import { Follow } from "@/features/tickets/Inbox";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -183,6 +184,14 @@ export function TicketDetails({
                 )}
               </details>
             </>
+          )}
+          {item.reference === selected && (
+            <Evidence
+              reference={item.reference}
+              revision={revision}
+              trashed={item.trashed}
+              refresh={refresh}
+            />
           )}
           {item.reference === selected && (
             <Backlinks

@@ -4,8 +4,10 @@ pub use backlinks::Backlink;
 mod backup;
 mod context;
 mod duplicates;
+mod evidence;
 mod export;
 pub use context::{ContextOptions, TicketContext};
+pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
 
 mod efforts;
 mod retry;
@@ -107,6 +109,10 @@ pub enum Error {
     EmptyTitle,
     #[error("ticket '{0}' was not found")]
     NotFound(String),
+    #[error("invalid evidence: {0}")]
+    InvalidEvidence(String),
+    #[error("evidence '{0}' was not found")]
+    EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
     #[error("could not determine the application data directory")]
@@ -204,10 +210,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 15 {
+            if version > 16 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 15 {
+            if version == 16 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -228,10 +234,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 15 {
+            if version > 16 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 15 {
+            if version < 16 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -308,6 +314,9 @@ impl Workspace {
         }
         if version < 15 {
             duplicates::migrate(&transaction)?;
+        }
+        if version < 16 {
+            transaction.execute_batch("CREATE TABLE evidence (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), editing_agent TEXT); PRAGMA user_version = 16;")?;
         }
         transaction.commit()?;
         Ok(())

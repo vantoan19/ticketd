@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    Availability, BatchOperation, ContextOptions, NotePatch, Status, TicketFilter, TicketPatch,
-    Workspace, WriteRequest,
+    Availability, BatchOperation, ContextOptions, EvidenceInput, EvidenceKind, NotePatch, Status,
+    TicketFilter, TicketPatch, Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -83,6 +83,11 @@ enum Command {
     },
     /// Show ticket history
     History { reference: String },
+    /// Manage implementation evidence
+    Evidence {
+        #[command(subcommand)]
+        command: EvidenceCommand,
+    },
     /// Manage ticket notes
     Note {
         #[command(subcommand)]
@@ -156,6 +161,8 @@ enum Command {
         relationships: bool,
         #[arg(long)]
         notes: bool,
+        #[arg(long)]
+        evidence: bool,
         #[arg(long)]
         backlinks: bool,
         #[arg(long, default_value_t = 0)]
@@ -281,6 +288,71 @@ enum ProjectCommand {
     },
 }
 
+#[derive(Clone, ValueEnum)]
+enum EvidenceType {
+    PullRequest,
+    Commit,
+    Branch,
+    Worktree,
+    Verification,
+}
+impl From<EvidenceType> for EvidenceKind {
+    fn from(value: EvidenceType) -> Self {
+        match value {
+            EvidenceType::PullRequest => Self::PullRequest,
+            EvidenceType::Commit => Self::Commit,
+            EvidenceType::Branch => Self::Branch,
+            EvidenceType::Worktree => Self::Worktree,
+            EvidenceType::Verification => Self::Verification,
+        }
+    }
+}
+#[derive(Args)]
+struct EvidenceFields {
+    #[arg(long, value_enum)]
+    kind: EvidenceType,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    value: String,
+    #[arg(long)]
+    agent: Option<String>,
+}
+impl From<EvidenceFields> for EvidenceInput {
+    fn from(fields: EvidenceFields) -> Self {
+        Self {
+            kind: fields.kind.into(),
+            name: fields.name,
+            value: fields.value,
+            editing_agent: fields.agent,
+        }
+    }
+}
+#[derive(Subcommand)]
+enum EvidenceCommand {
+    Add {
+        reference: String,
+        #[command(flatten)]
+        fields: EvidenceFields,
+    },
+    Edit {
+        reference: String,
+        id: String,
+        #[command(flatten)]
+        fields: EvidenceFields,
+    },
+    Delete {
+        reference: String,
+        id: String,
+    },
+    List {
+        reference: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+}
 #[derive(Subcommand)]
 enum NoteCommand {
     /// Append a note, reading --file - from stdin
@@ -439,6 +511,27 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 },
             )?)?
         }
+        Command::Evidence { command } => match command {
+            EvidenceCommand::Add { reference, fields } => {
+                serde_json::to_string(&workspace.add_evidence(&reference, fields.into())?)?
+            }
+            EvidenceCommand::Edit {
+                reference,
+                id,
+                fields,
+            } => {
+                serde_json::to_string(&workspace.edit_evidence(&reference, &id, fields.into())?)?
+            }
+            EvidenceCommand::Delete { reference, id } => {
+                workspace.delete_evidence(&reference, &id)?;
+                "null".into()
+            }
+            EvidenceCommand::List {
+                reference,
+                limit,
+                offset,
+            } => serde_json::to_string(&workspace.evidence(&reference, limit, offset)?)?,
+        },
         Command::Note { command } => match command {
             NoteCommand::Add {
                 reference,
@@ -577,6 +670,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             effort,
             relationships,
             notes,
+            evidence,
             backlinks,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
@@ -586,6 +680,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 effort,
                 relationships,
                 notes,
+                evidence,
                 backlinks,
                 offset,
             },

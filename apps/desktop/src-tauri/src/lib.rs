@@ -1,8 +1,8 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
-    BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, InboxEntry, Note, NotePatch,
-    Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WriteRequest,
-    WriteResult,
+    BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
+    InboxEntry, Note, NotePatch, Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
+    Workspace, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -225,6 +225,30 @@ fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, String> {
 }
 
 #[tauri::command]
+fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.evidence(&reference, 50, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn add_evidence(reference: String, input: EvidenceInput) -> Result<Evidence, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.add_evidence(&reference, input))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn edit_evidence(reference: String, id: String, input: EvidenceInput) -> Result<Evidence, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.edit_evidence(&reference, &id, input))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn delete_evidence(reference: String, id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.delete_evidence(&reference, &id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn list_notes(reference: String, limit: u32, offset: u32) -> Result<Vec<Note>, String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.notes(&reference, limit, offset))
@@ -416,6 +440,10 @@ pub fn run() -> Result<(), tauri::Error> {
             is_following,
             set_following,
             set_inbox_read,
+            list_evidence,
+            add_evidence,
+            edit_evidence,
+            delete_evidence,
             ticket_backlinks,
             list_notes,
             add_note,

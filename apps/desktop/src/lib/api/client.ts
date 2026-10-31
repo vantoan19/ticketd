@@ -64,6 +64,26 @@ const noteSchema = z.object({
   updated_at: z.string(),
   editing_agent: z.string().nullable(),
 });
+const evidenceSchema = z.object({
+  id: z.string(),
+  kind: z.enum([
+    "pull_request",
+    "commit",
+    "branch",
+    "worktree",
+    "verification",
+  ]),
+  name: z.string(),
+  value: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  editing_agent: z.string().nullable(),
+});
+export type Evidence = z.infer<typeof evidenceSchema>;
+export type EvidenceInput = Pick<
+  Evidence,
+  "kind" | "name" | "value" | "editing_agent"
+>;
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export type FindFilter = {
@@ -151,6 +171,24 @@ export const client = {
     return projectSchema.parse(
       await invoke("edit_project", { id, name, path }),
     );
+  },
+  async evidence(reference: string, offset: number) {
+    return z
+      .array(evidenceSchema)
+      .parse(await invoke("list_evidence", { reference, offset }));
+  },
+  async addEvidence(reference: string, input: EvidenceInput) {
+    return evidenceSchema.parse(
+      await invoke("add_evidence", { reference, input }),
+    );
+  },
+  async editEvidence(reference: string, id: string, input: EvidenceInput) {
+    return evidenceSchema.parse(
+      await invoke("edit_evidence", { reference, id, input }),
+    );
+  },
+  async deleteEvidence(reference: string, id: string) {
+    await invoke("delete_evidence", { reference, id });
   },
   async backlinks(reference: string, offset: number) {
     return z

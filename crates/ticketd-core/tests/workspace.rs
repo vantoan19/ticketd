@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -1834,4 +1834,146 @@ fn duplicate_relationship_survives_export_and_backup_restore() {
         workspace.show_ticket(&source.reference).unwrap().status,
         Status::Todo
     );
+}
+
+#[test]
+fn named_evidence_survives_reopening_and_can_be_edited_and_removed() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    let input = EvidenceInput {
+        kind: EvidenceKind::Verification,
+        name: "Tests".into(),
+        value: "cargo test: passed".into(),
+        editing_agent: Some("agent".into()),
+    };
+    let evidence = workspace.add_evidence(&ticket.reference, input).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.evidence(&ticket.reference, 20, 0).unwrap(),
+        vec![evidence.clone()]
+    );
+    let revised = EvidenceInput {
+        kind: EvidenceKind::Branch,
+        name: "Branch".into(),
+        value: "feature/full-name".into(),
+        editing_agent: None,
+    };
+    let edited = workspace
+        .edit_evidence(&ticket.reference, &evidence.id, revised)
+        .unwrap();
+    assert_eq!(edited.value, "feature/full-name");
+    workspace
+        .delete_evidence(&ticket.reference, &evidence.id)
+        .unwrap();
+    assert!(
+        workspace
+            .evidence(&ticket.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn evidence_retry_context_export_and_trash_rules() {
+    use ticketd_core::{ContextOptions, EvidenceInput, EvidenceKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Check").unwrap();
+    let request = || WriteRequest::AddEvidence {
+        reference: ticket.reference.clone(),
+        input: EvidenceInput {
+            kind: EvidenceKind::Worktree,
+            name: "Checkout".into(),
+            value: "/missing/full/path".into(),
+            editing_agent: Some("agent".into()),
+        },
+    };
+    assert_eq!(
+        ws.write(Some("evidence-retry"), request()).unwrap(),
+        ws.write(Some("evidence-retry"), request()).unwrap()
+    );
+    assert_eq!(ws.evidence(&ticket.reference, 50, 0).unwrap().len(), 1);
+    let context = ws
+        .ticket_context(
+            &ticket.reference,
+            ContextOptions {
+                evidence: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        context.evidence.unwrap().items[0].value.text,
+        "/missing/full/path"
+    );
+    assert_eq!(
+        ws.export().unwrap()["evidence"][0]["editing_agent"],
+        "agent"
+    );
+    ws.set_trashed(&ticket.reference, true, None).unwrap();
+    assert!(ws.write(None, request()).is_err());
+    assert_eq!(ws.evidence(&ticket.reference, 50, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn backup_restores_evidence_and_its_retry_outcome() {
+    use ticketd_core::{EvidenceInput, EvidenceKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    let request = || WriteRequest::AddEvidence {
+        reference: ticket.reference.clone(),
+        input: EvidenceInput {
+            kind: EvidenceKind::Commit,
+            name: "Commit".into(),
+            value: "abcdef0123456789".into(),
+            editing_agent: None,
+        },
+    };
+    let original = ws.write(Some("save-evidence"), request()).unwrap();
+    ws.backup(&backup).unwrap();
+    drop(ws);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    assert_eq!(
+        ws.write(Some("save-evidence"), request()).unwrap(),
+        original
+    );
+    assert_eq!(
+        ws.evidence(&ticket.reference, 50, 0).unwrap()[0].value,
+        "abcdef0123456789"
+    );
+}
+
+#[test]
+fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    for (name, value) in [
+        ("", "https://example.com/pr/1"),
+        ("PR", "https://"),
+        ("PR", "https://example.com/bad path"),
+    ] {
+        assert!(
+            ws.add_evidence(
+                &ticket.reference,
+                EvidenceInput {
+                    kind: EvidenceKind::PullRequest,
+                    name: name.into(),
+                    value: value.into(),
+                    editing_agent: None
+                }
+            )
+            .is_err()
+        );
+    }
+    assert!(ws.evidence(&ticket.reference, 50, 0).unwrap().is_empty());
 }
