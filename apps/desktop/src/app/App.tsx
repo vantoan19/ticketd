@@ -221,6 +221,12 @@ export function App() {
                 className="ticket-list"
                 aria-labelledby="tickets-heading"
               >
+                <div className="list-header">
+                  <div>
+                    <h1>{scopeName}</h1>
+                    <p>Your workspace tickets, in one place.</p>
+                  </div>
+                </div>
                 {!trash && (
                   <TicketFilters
                     {...{
