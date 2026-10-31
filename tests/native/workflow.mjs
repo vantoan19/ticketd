@@ -110,6 +110,20 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
+  const noteEditor = await (
+    await detail()
+  ).$('[role="textbox"][aria-label="New note rich text"]');
+  await noteEditor.click();
+  await browser.keys("Reviewed rich notes in the installed desktop.");
+  assert.equal(run("note", "list", harness.reference).length, 0);
+  await (await (await detail()).$("button=Add note")).click();
+  await browser.waitUntil(
+    () =>
+      run("note", "list", harness.reference).some((note) =>
+        note.content.includes("Reviewed rich notes in the installed desktop."),
+      ),
+    { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
+  );
   const search = await browser.$('input[aria-label="Search tickets"]');
   await search.setValue("Exercise installed desktop");
   await browser.waitUntil(
