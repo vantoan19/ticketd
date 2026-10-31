@@ -9,6 +9,7 @@ import {
   Plus,
   Folder,
   Layers,
+  Archive,
 } from "lucide-react";
 import {
   Sidebar,
@@ -42,7 +43,13 @@ function SidebarCount({ value }: { value: number }) {
   );
 }
 
-type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
+type View =
+  | "tickets"
+  | "projects"
+  | "efforts"
+  | "archived-efforts"
+  | "settings"
+  | "inbox";
 export function WorkspaceSidebar({
   view,
   counts,
@@ -79,6 +86,7 @@ export function WorkspaceSidebar({
 }) {
   const isMobile = useIsMobile();
   const unread = counts.unread_inbox > 0;
+  const archivedEfforts = efforts.filter((e) => e.archived).length;
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -228,6 +236,17 @@ export function WorkspaceSidebar({
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "archived-efforts"}
+                    onClick={() => setView("archived-efforts")}
+                  >
+                    <Archive size={15} /> Archived
+                    {archivedEfforts > 0 && (
+                      <SidebarCount value={archivedEfforts} />
+                    )}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </nav>
           </SidebarGroup>

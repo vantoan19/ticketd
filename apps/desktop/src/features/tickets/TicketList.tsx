@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   Tooltip,
@@ -25,6 +25,7 @@ export function TicketList({
   selectable,
   selectionDisabled = false,
   scope,
+  rowAction,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -34,6 +35,8 @@ export function TicketList({
   selectable: boolean;
   selectionDisabled?: boolean;
   scope: RowScope;
+  /** An optional control after each row, revealed on hover and keyboard focus. */
+  rowAction?: (ticket: Ticket) => ReactNode;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   return (
@@ -91,6 +94,9 @@ export function TicketList({
                 </span>
                 <RowDetails ticket={ticket} scope={scope} />
               </button>
+              {rowAction && (
+                <span className="ticket-row-action">{rowAction(ticket)}</span>
+              )}
             </li>
           );
         })}

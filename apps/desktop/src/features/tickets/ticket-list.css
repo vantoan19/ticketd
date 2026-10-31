@@ -193,6 +193,23 @@
   gap: 16px;
 }
 
+.ticket-row-action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 32px;
+  margin-top: 8px;
+  padding-right: 4px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ticket-row-action {
+    opacity: 0;
+  }
+  .ticket-rows li:hover .ticket-row-action,
+  .ticket-rows li:focus-within .ticket-row-action {
+    opacity: 1;
+  }
+}
 /* Reveal selection without moving the identifier or title columns. */
 @media (hover: hover) and (pointer: fine) {
   .ticket-select input:not(:checked) {
