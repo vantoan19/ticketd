@@ -64,6 +64,9 @@ const noteSchema = z.object({
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export const client = {
+  async exportWorkspace(path: string) {
+    await invoke("export_workspace", { path });
+  },
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },

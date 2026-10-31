@@ -11,6 +11,11 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Export a portable JSON snapshot to stdout or a new file
+    Export {
+        #[arg(long)]
+        file: Option<String>,
+    },
     /// Apply a JSON array of operations from a file or - for stdin
     Batch { file: String },
     /// Manage repository projects
@@ -245,6 +250,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
+        Command::Export { file } => {
+            if let Some(path) = file {
+                workspace.export_file(path)?;
+                return Ok(());
+            }
+            serde_json::to_string_pretty(&workspace.export()?)?
+        }
         Command::Batch { file } => {
             let reader: Box<dyn Read> = if file == "-" {
                 Box::new(std::io::stdin())
