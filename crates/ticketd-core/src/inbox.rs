@@ -1,5 +1,5 @@
 use crate::{Error, Workspace};
-use rusqlite::{Connection, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 // A stable scope for the one local person, independent of editing attribution.
@@ -23,6 +23,11 @@ pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn migrate_reminders(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch("CREATE TABLE ticket_reminders (person TEXT NOT NULL, ticket_id TEXT NOT NULL REFERENCES tickets(id), due_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(person, ticket_id)); PRAGMA user_version = 18;")?;
+    Ok(())
+}
+
 pub(crate) fn record(
     connection: &Connection,
     ticket_id: &str,
@@ -36,6 +41,48 @@ pub(crate) fn record(
 }
 
 impl Workspace {
+    /// Return the scheduled instant in UTC, independent of following.
+    pub fn reminder(&self, reference: &str) -> Result<Option<String>, Error> {
+        let ticket = self.show_ticket(reference)?;
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT due_at FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                params![LOCAL_PERSON, ticket.id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Set or dismiss a reminder. Every set schedules a new occurrence.
+    pub fn set_reminder(&mut self, reference: &str, due_at: Option<&str>) -> Result<(), Error> {
+        let due_at = due_at
+            .map(|value| {
+                chrono::DateTime::parse_from_rfc3339(value)
+                    .map(|date| {
+                        date.with_timezone(&chrono::Utc)
+                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+                    })
+                    .map_err(|_| {
+                        Error::InvalidBatch(
+                            "reminder time must be an RFC 3339 instant with an explicit offset"
+                                .into(),
+                        )
+                    })
+            })
+            .transpose()?;
+        let ticket = self.show_ticket(reference)?;
+        if let Some(due_at) = due_at {
+            self.connection.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket.id, due_at])?;
+        } else {
+            self.connection.execute(
+                "DELETE FROM ticket_reminders WHERE person = ?1 AND ticket_id = ?2",
+                params![LOCAL_PERSON, ticket.id],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn is_following(&self, reference: &str) -> Result<bool, Error> {
         let ticket = self.show_ticket(reference)?;
         Ok(self.connection.query_row(
@@ -78,6 +125,16 @@ impl Workspace {
         Ok(())
     }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
+        // Insertion and marking delivered commit together, including across processes.
+        let tx = self.connection.unchecked_transaction()?;
+        super::transaction_write_lock(&tx)?;
+        let now: String =
+            tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+                row.get(0)
+            })?;
+        tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+        tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
+        tx.commit()?;
         let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(params![LOCAL_PERSON, limit.min(100), offset], |row| {

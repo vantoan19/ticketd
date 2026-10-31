@@ -6,6 +6,28 @@ use ticketd_core::{
 };
 
 #[tauri::command]
+fn reminder(reference: String) -> Result<Option<String>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.reminder(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_reminder(
+    reference: String,
+    due_at: Option<String>,
+    request_id: String,
+) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetReminder { reference, due_at },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
     Workspace::open_default()
         .and_then(|w| w.inbox(100, offset))
@@ -434,6 +456,57 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String
 }
 
 #[tauri::command]
+fn contextual_relationships(
+    reference: String,
+    offset: u32,
+) -> Result<ticketd_core::TicketContext, String> {
+    Workspace::open_default()
+        .and_then(|w| {
+            w.ticket_context(
+                &reference,
+                ticketd_core::ContextOptions {
+                    relationships: true,
+                    offset,
+                    ..Default::default()
+                },
+            )
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn change_contextual_relationship(
+    source: String,
+    target: String,
+    kind: ticketd_core::RelationshipKind,
+    add: bool,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let request = if add {
+        WriteRequest::AddContextualRelationship {
+            source,
+            target,
+            kind,
+            agent: None,
+        }
+    } else {
+        WriteRequest::RemoveContextualRelationship {
+            source,
+            target,
+            kind,
+            agent: None,
+        }
+    };
+    match Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), request))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
 fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.add_dependency(&blocker, &dependent, None))
@@ -537,6 +610,8 @@ pub fn run() -> Result<(), tauri::Error> {
             bulk_status,
             bulk_change,
             ticket_history,
+            reminder,
+            set_reminder,
             inbox,
             is_following,
             set_following,
@@ -559,6 +634,8 @@ pub fn run() -> Result<(), tauri::Error> {
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,
             remove_duplicate,
+            contextual_relationships,
+            change_contextual_relationship,
             add_dependency,
             remove_dependency,
             set_parent,
