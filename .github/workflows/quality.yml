@@ -3,6 +3,10 @@ name: Quality
 on:
   workflow_dispatch:
     inputs:
+      distribution:
+        description: Build platform distributions
+        type: boolean
+        default: false
       native_smoke:
         description: Run the Linux native desktop smoke test
         type: boolean
@@ -16,7 +20,7 @@ permissions:
 
 jobs:
   quality:
-    if: github.event_name != 'workflow_dispatch' || !inputs.native_smoke
+    if: github.event_name != 'workflow_dispatch' || (!inputs.native_smoke && !inputs.distribution)
     name: Quality checks
     strategy:
       fail-fast: false
@@ -46,7 +50,7 @@ jobs:
         run: cargo build --workspace --locked
 
   native-smoke:
-    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke && !inputs.distribution
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -69,3 +73,77 @@ jobs:
           export XDG_DATA_HOME="$(mktemp -d)"
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
           xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/refresh.mjs'
+
+  distribution:
+    if: github.event_name == 'workflow_dispatch' && inputs.distribution
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            platform: macos-arm64
+            bundle: dmg
+            installer: target/release/bundle/dmg/*.dmg
+            cli: target/release/ticketd
+          - os: ubuntu-24.04
+            platform: ubuntu-24.04-x86_64
+            bundle: deb
+            installer: target/release/bundle/deb/*.deb
+            cli: target/release/ticketd
+          - os: windows-2025
+            platform: windows-x86_64
+            bundle: msi
+            installer: target/release/bundle/msi/*.msi
+            cli: target/release/ticketd.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.14.0"
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: rustup show active-toolchain
+      - run: npm ci
+      - name: Check package versions
+        run: node scripts/check-versions.mjs
+      - name: Build CLI
+        run: cargo build --release --locked -p ticketd-cli
+      - name: Build desktop installer
+        run: npm run desktop -- build --bundles ${{ matrix.bundle }} -- --locked
+      - name: Smoke-test installed Linux package
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y webkit2gtk-driver xvfb
+          cargo install tauri-driver --version 2.1.0 --locked
+          sudo apt-get install -y ./target/release/bundle/deb/*.deb
+          package=$(dpkg-deb -f target/release/bundle/deb/*.deb Package)
+          export XDG_DATA_HOME="$(mktemp -d)"
+          export TICKETD_SMOKE_CHECKOUT="$(mktemp -d)"
+          export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
+          export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
+          trap 'rm -rf "$XDG_DATA_HOME" "$TICKETD_SMOKE_CHECKOUT"' EXIT
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs'
+          sudo apt-get remove -y "$package"
+          "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
+      - name: Assemble download
+        run: |
+          mkdir -p distribution
+          cp ${{ matrix.installer }} distribution/
+          cp ${{ matrix.cli }} distribution/
+          cp docs/install.md distribution/INSTALL.md
+      - name: Smoke-test CLI installation and discovery
+        run: node tests/native/cli-install.mjs ${{ matrix.cli }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ticketd-${{ matrix.platform }}
+          path: distribution/
+          if-no-files-found: error
+          retention-days: 7
