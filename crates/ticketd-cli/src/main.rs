@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use std::io::Read;
+use std::io::{Read, Write};
 use ticketd_core::{
     Availability, BatchOperation, ContextOptions, NotePatch, Status, TicketFilter, TicketPatch,
     Workspace, WriteRequest,
@@ -300,15 +300,19 @@ fn read_content(
     })
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     if let Command::RestoreWorkspace { path } = &args.command {
         let safety = Workspace::restore_default(path)?;
-        println!("Restored workspace. Safety backup: {}", safety.display());
+        writeln!(
+            output,
+            "Restored workspace. Safety backup: {}",
+            safety.display()
+        )?;
         return Ok(());
     }
     let mut workspace = Workspace::open_default()?;
-    let output = match args.command {
+    let text = match args.command {
         Command::Backup { path } => {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
@@ -540,12 +544,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };
-    println!("{output}");
+    writeln!(output, "{text}")?;
     Ok(())
 }
 
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run(&mut std::io::stdout().lock()) {
         eprintln!("error: {error}");
         std::process::exit(1);
     }

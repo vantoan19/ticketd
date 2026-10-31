@@ -37,6 +37,19 @@ pub use projects::Project;
 pub enum Error {
     #[error("backup or restore failed: {0}")]
     Backup(String),
+    #[error(
+        "backup or restore failed: workspace is in use; close other ticketd operations and retry: {source}"
+    )]
+    RestoreLock {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("backup or restore failed: restore failed: {source}; safety backup: {}", safety.display())]
+    Restore {
+        safety: std::path::PathBuf,
+        #[source]
+        source: Box<Error>,
+    },
     #[error("workspace migration failed: {source}; the original data remains unchanged. Backup: {}. Restore it with `ticketd restore-workspace <backup>` or use the previous application version", backup.display())]
     Migration {
         backup: std::path::PathBuf,

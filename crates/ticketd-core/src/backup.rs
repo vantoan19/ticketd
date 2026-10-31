@@ -142,10 +142,12 @@ impl Workspace {
         let workspace = workspace.as_ref();
         let backup = backup.as_ref();
         let lock = lock_file(workspace)?;
-        FileExt::try_lock_exclusive(&lock).map_err(|e| {
-            Error::Backup(format!(
-                "workspace is in use; close other ticketd operations and retry: {e}"
-            ))
+        FileExt::try_lock_exclusive(&lock).map_err(|source| {
+            if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+                Error::RestoreLock { source }
+            } else {
+                Error::Directory(source)
+            }
         })?;
         let source = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         source.execute_batch("BEGIN")?;
@@ -171,11 +173,9 @@ impl Workspace {
         let mut safety_db = Connection::open(&safety)?;
         copy(&current, &mut safety_db)?;
         drop(safety_db);
-        copy(&source, &mut current).map_err(|e| {
-            Error::Backup(format!(
-                "restore failed: {e}; safety backup: {}",
-                safety.display()
-            ))
+        copy(&source, &mut current).map_err(|source| Error::Restore {
+            safety: safety.clone(),
+            source: Box::new(source),
         })?;
         Ok(safety)
     }

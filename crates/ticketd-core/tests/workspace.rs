@@ -1159,7 +1159,8 @@ fn restore_rejects_open_workspace_and_invalid_backup_without_changing_data() {
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Keep me").unwrap();
     workspace.backup(&backup).unwrap();
-    assert!(Workspace::restore(&path, &backup).is_err());
+    let error = Workspace::restore(&path, &backup).unwrap_err();
+    assert!(std::error::Error::source(&error).is_some());
     drop(workspace);
     std::fs::write(&backup, b"not a database").unwrap();
     assert!(Workspace::restore(&path, &backup).is_err());
