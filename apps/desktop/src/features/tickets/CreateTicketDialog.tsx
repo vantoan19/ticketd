@@ -5,7 +5,7 @@ import {
   type FormEvent,
   type RefObject,
 } from "react";
-import { X } from "lucide-react";
+import { Layers, Folder, Tag, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Field,
@@ -17,6 +17,8 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -28,6 +30,7 @@ import {
 import { client, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import { PropertyPicker } from "./TicketProperties";
+import "./create-ticket.css";
 
 type Draft = {
   title: string;
@@ -36,6 +39,7 @@ type Draft = {
   project: string;
   effort: string;
   tags: string[];
+  restored: boolean;
 };
 export function CreateTicketDialog({
   open,
@@ -59,7 +63,8 @@ export function CreateTicketDialog({
     project: string | null,
     effort: string | null,
     tags: string[],
-  ) => Promise<void>;
+    keepOpen: boolean,
+  ) => Promise<string>;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
@@ -68,6 +73,10 @@ export function CreateTicketDialog({
   const lock = useRef(false);
   const [tagQuery, setTagQuery] = useState("");
   const [vocabulary, setVocabulary] = useState<string[]>([]);
+  const [createMore, setCreateMore] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const titleRef = useRef<HTMLInputElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
   if (open && !draft)
     setDraft({
       title: "",
@@ -79,6 +88,7 @@ export function CreateTicketDialog({
           : navigation.project,
       effort: navigation.effort,
       tags: [],
+      restored: false,
     });
   useEffect(() => {
     if (!open) return;
@@ -101,11 +111,25 @@ export function CreateTicketDialog({
   if (!draft) return null;
   const update = (patch: Partial<Draft>) =>
     setDraft((old) => old && { ...old, ...patch });
+  function close() {
+    const dirty = !!(draft!.title.trim() || draft!.body.trim());
+    if (dirty) update({ restored: true });
+    else setDraft(null);
+    setAnnouncement("");
+    onOpenChange(false);
+  }
+  function addTag(raw: string) {
+    const tag = raw.trim().toLowerCase();
+    setTagQuery("");
+    if (tag && !draft!.tags.includes(tag))
+      update({ tags: [...draft!.tags, tag] });
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (event.target !== event.currentTarget || lock.current) return;
     if (!draft!.title.trim()) {
-      setTitleError("Enter a title.");
+      setTitleError("Enter a title");
+      titleRef.current?.focus();
       return;
     }
     setTitleError("");
@@ -113,15 +137,20 @@ export function CreateTicketDialog({
     lock.current = true;
     setPending(true);
     try {
-      await create(
+      const reference = await create(
         draft!.title,
         draft!.body,
         draft!.status,
         draft!.project || null,
         draft!.effort || null,
         draft!.tags,
+        createMore,
       );
-      setDraft(null);
+      if (createMore) {
+        update({ title: "", body: "", restored: false });
+        setAnnouncement(`Created ${reference}`);
+        titleRef.current?.focus();
+      } else setDraft(null);
     } catch (reason) {
       setError(`Could not create ticket: ${String(reason)}`);
     } finally {
@@ -129,6 +158,9 @@ export function CreateTicketDialog({
       setPending(false);
     }
   }
+  const suggestions = vocabulary
+    .filter((tag) => !draft.tags.includes(tag))
+    .slice(0, 6);
   const projectName =
     projects.find((p) => p.id === draft.project)?.name ??
     (draft.project || "Unlinked");
@@ -136,7 +168,10 @@ export function CreateTicketDialog({
     efforts.find((e) => e.id === draft.effort)?.name ??
     (draft.effort || "No Effort");
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+    >
       <DialogContent
         className="create-panel"
         showCloseButton={false}
@@ -152,7 +187,7 @@ export function CreateTicketDialog({
             variant="ghost"
             size="icon-sm"
             aria-label="Close new ticket"
-            onClick={() => onOpenChange(false)}
+            onClick={close}
           >
             <X />
           </Button>
@@ -170,10 +205,12 @@ export function CreateTicketDialog({
         >
           <FieldGroup>
             <Field data-invalid={!!titleError} data-disabled={pending}>
-              <FieldLabel htmlFor="create-title">New ticket title</FieldLabel>
+              <FieldLabel htmlFor="create-title">Title</FieldLabel>
               <Input
                 id="create-title"
+                ref={titleRef}
                 autoFocus
+                placeholder="e.g. Export fails on large workspaces"
                 disabled={pending}
                 value={draft.title}
                 onChange={(event) => {
@@ -189,7 +226,10 @@ export function CreateTicketDialog({
             </Field>
             <Field data-disabled={pending}>
               <FieldLabel asChild>
-                <span>Description</span>
+                <span>
+                  Description{" "}
+                  <small>Optional. Markdown and checklists work.</small>
+                </span>
               </FieldLabel>
               <div onKeyDown={(event) => event.stopPropagation()}>
                 <LazyMarkdownEditor
@@ -201,8 +241,28 @@ export function CreateTicketDialog({
               </div>
             </Field>
           </FieldGroup>
-          <div className="ticket-properties" aria-label="Initial properties">
-            <div className="ticket-property">
+          {draft.restored && (
+            <p className="create-restored" role="status">
+              Draft restored.{" "}
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                onClick={() => {
+                  update({ title: "", body: "", restored: false });
+                  titleRef.current?.focus();
+                }}
+              >
+                Discard draft
+              </Button>
+            </p>
+          )}
+          <div
+            className="create-properties"
+            role="group"
+            aria-label="Initial properties"
+          >
+            <div className="create-property">
               <span>Status</span>
               <Select
                 value={draft.status}
@@ -229,10 +289,11 @@ export function CreateTicketDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="ticket-property">
+            <div className="create-property">
               <span>Project</span>
               <PropertyPicker
                 label="Project"
+                icon={Folder}
                 value={projectName}
                 disabled={pending}
                 choices={[
@@ -242,10 +303,11 @@ export function CreateTicketDialog({
                 onChoose={(project) => update({ project })}
               />
             </div>
-            <div className="ticket-property">
+            <div className="create-property">
               <span>Effort</span>
               <PropertyPicker
                 label="Effort"
+                icon={Layers}
                 value={effortName}
                 disabled={pending}
                 choices={[
@@ -257,28 +319,68 @@ export function CreateTicketDialog({
                 onChoose={(effort) => update({ effort })}
               />
             </div>
-            <div className="ticket-property">
+            <div className="create-property create-tags">
               <span>Tags</span>
-              <PropertyPicker
-                label="Tags"
-                value={draft.tags.length ? draft.tags.join(", ") : "No tags"}
-                disabled={pending}
-                allowCreate
-                onSearch={setTagQuery}
-                choices={[...new Set([...vocabulary, ...draft.tags])].map(
-                  (tag) => ({
-                    value: tag,
-                    label: draft.tags.includes(tag) ? `✓ ${tag}` : tag,
-                  }),
-                )}
-                onChoose={(tag) =>
-                  update({
-                    tags: draft.tags.includes(tag)
-                      ? draft.tags.filter((t) => t !== tag)
-                      : [...draft.tags, tag],
-                  })
-                }
-              />
+              <div className="create-tag-chips">
+                {draft.tags.map((tag) => (
+                  <span key={tag} className="create-tag-chip">
+                    <Tag aria-hidden />
+                    {tag}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${tag}`}
+                      disabled={pending}
+                      onClick={() =>
+                        update({ tags: draft.tags.filter((t) => t !== tag) })
+                      }
+                    >
+                      <X aria-hidden />
+                    </button>
+                  </span>
+                ))}
+                <Input
+                  ref={tagInputRef}
+                  className="create-tag-input"
+                  aria-label="Add tag"
+                  placeholder="Add a tag"
+                  disabled={pending}
+                  value={tagQuery}
+                  onChange={(event) => setTagQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === ",") {
+                      if (event.ctrlKey || event.metaKey) return;
+                      event.preventDefault();
+                      addTag(tagQuery);
+                    } else if (
+                      event.key === "Backspace" &&
+                      !tagQuery &&
+                      draft.tags.length
+                    )
+                      update({ tags: draft.tags.slice(0, -1) });
+                  }}
+                />
+              </div>
+              {suggestions.length > 0 && (
+                <ul
+                  className="create-tag-suggestions"
+                  aria-label="Tag suggestions"
+                >
+                  {suggestions.map((tag) => (
+                    <li key={tag}>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          addTag(tag);
+                          tagInputRef.current?.focus();
+                        }}
+                      >
+                        {tag}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
           {error && (
@@ -286,8 +388,26 @@ export function CreateTicketDialog({
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
+          <p className="sr-only" role="status" aria-live="polite">
+            {announcement}
+          </p>
           <div className="create-actions">
-            <small>Ctrl/⌘ + Enter to create</small>
+            <label className="create-more">
+              <Switch
+                checked={createMore}
+                onCheckedChange={setCreateMore}
+                disabled={pending}
+                aria-label="Create more"
+              />
+              <span>Create more</span>
+            </label>
+            <small className="create-hint">
+              <Kbd>{modifierKeyLabel()}</Kbd>
+              <Kbd>Enter</Kbd> to create
+            </small>
+            <Button type="button" variant="ghost" onClick={close}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={pending}>
               {pending ? "Creating…" : "Create ticket"}
             </Button>

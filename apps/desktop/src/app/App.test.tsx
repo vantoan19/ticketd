@@ -310,7 +310,7 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
     expect(document.activeElement).toBe(
-      screen.getByRole("textbox", { name: "New ticket title" }),
+      screen.getByRole("textbox", { name: "Title" }),
     );
     fireEvent.keyDown(document, { key: "Escape" });
     await act(async () => {
@@ -452,7 +452,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   });
   fireEvent.click(screen.getByRole("button", { name: "Desktop app" }));
   fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
-  fireEvent.change(screen.getByLabelText("New ticket title"), {
+  fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "Draft ticket" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
