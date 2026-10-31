@@ -1,4 +1,5 @@
 import { Dependencies } from "./Dependencies";
+import { Notes } from "./Notes";
 import {
   useCallback,
   useEffect,
@@ -172,7 +173,10 @@ export function App() {
               )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
               {item.id === selected && (
-                <Dependencies ticket={item} refresh={refresh} />
+                <>
+                  <Dependencies ticket={item} refresh={refresh} />
+                  <Notes reference={item.reference} refreshRevision={revision} />
+                </>
               )}
               <Tags
                 reference={item.reference}
