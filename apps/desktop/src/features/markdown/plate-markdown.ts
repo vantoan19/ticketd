@@ -317,7 +317,7 @@ export function writeMarkdown(value: Value): string {
     const fence = "`".repeat(longest + 1);
     result = result.replace(
       `\`\`\`mermaid\nTICKETD_DIAGRAM_${index}_SOURCE\n\`\`\``,
-      `${fence}mermaid\n${source}\n${fence}`,
+      () => `${fence}mermaid\n${source}\n${fence}`,
     );
   });
   return result;

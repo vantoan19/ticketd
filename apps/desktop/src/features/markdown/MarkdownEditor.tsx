@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -67,6 +68,7 @@ import { toggleCodeBlock, CodeBlockRules } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Popover,
@@ -188,6 +190,53 @@ function Element(props: PlateElementProps) {
   );
 }
 
+function CodeFence(props: PlateElementProps) {
+  const editor = useEditorRef();
+  const readOnly = useEditorReadOnly();
+  const languageId = useId();
+  return (
+    <PlateElement {...props} as="div">
+      <FieldGroup contentEditable={false}>
+        <Field orientation="horizontal">
+          <FieldLabel htmlFor={languageId}>Code language</FieldLabel>
+          <Input
+            id={languageId}
+            list={`${languageId}-languages`}
+            value={String(props.element.lang ?? "")}
+            placeholder="Plain text"
+            readOnly={readOnly}
+            onChange={(event) => {
+              const lang = event.target.value;
+              const path = editor.api.findPath(props.element);
+              // Fence info strings accept a single language token; metadata
+              // stays available through the document's Markdown source editor.
+              if (!readOnly && path && !/[\s`~]/.test(lang))
+                editor.tf.setNodes({ lang }, { at: path });
+            }}
+          />
+          <datalist id={`${languageId}-languages`}>
+            {[
+              "typescript",
+              "javascript",
+              "json",
+              "rust",
+              "python",
+              "bash",
+              "sql",
+              "html",
+              "css",
+              "markdown",
+            ].map((lang) => (
+              <option key={lang} value={lang} />
+            ))}
+          </datalist>
+        </Field>
+      </FieldGroup>
+      <pre>{props.children}</pre>
+    </PlateElement>
+  );
+}
+
 function Diagram(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
@@ -239,6 +288,7 @@ const insertions = [
   ["task", "Checklist"],
   ["blockquote", "Quote"],
   ["code_block", "Code fence"],
+  ["hr", "Divider"],
   ["table", "Table"],
   ["mermaid", "Mermaid diagram"],
 ] as const;
@@ -259,6 +309,13 @@ function insert(editor: PlateEditor, type: string) {
   }
   if (type === "task") {
     editor.getTransforms(ListPlugin).toggle.taskList();
+    return;
+  }
+  if (type === "hr") {
+    editor.tf.insertNodes([
+      { type: "hr", children: [{ text: "" }] },
+      { type: "p", children: [{ text: "" }] },
+    ]);
     return;
   }
   if (type === "mermaid") {
@@ -282,7 +339,7 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar() {
+function Toolbar({ editorId }: { editorId: string }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -419,7 +476,7 @@ function Toolbar() {
           if (index !== undefined)
             event.dataTransfer.setData(
               "application/x-ticketd-block",
-              String(index),
+              JSON.stringify({ editorId, index }),
             );
         }}
       >
@@ -479,6 +536,8 @@ export function MarkdownEditor({
   }
   const [sourceMode, setSourceMode] = useState(false);
   const [slash, setSlash] = useState(false);
+  const editorId = useId();
+  const slashMenuId = `${editorId}-slash-menu`;
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
   const source = sourceMode || document.reasons.length > 0;
@@ -552,7 +611,7 @@ export function MarkdownEditor({
       td: Element,
       th: Element,
       a: Element,
-      code_block: Element,
+      code_block: CodeFence,
       code_line: Element,
       hr: Element,
       br: Element,
@@ -568,7 +627,12 @@ export function MarkdownEditor({
     const frame = window.requestAnimationFrame(() => {
       if (source)
         container.current?.querySelector<HTMLElement>(".cm-content")?.focus();
-      else editor.tf.focus();
+      else {
+        editor.tf.focus();
+        container.current
+          ?.querySelector<HTMLElement>(".rich-document")
+          ?.focus();
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [autoFocus, readOnly, source, editor]);
@@ -596,7 +660,8 @@ export function MarkdownEditor({
     setSlashQuery("");
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.nativeEvent.isComposing || readOnly) return;
+    if (event.nativeEvent.isComposing || event.keyCode === 229 || readOnly)
+      return;
     if (
       event.altKey &&
       (event.key === "ArrowUp" || event.key === "ArrowDown")
@@ -731,10 +796,21 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar />}
+          {!readOnly && <Toolbar editorId={editorId} />}
           <PlateContent
             readOnly={readOnly}
             aria-label={`${label} rich text`}
+            role={slash ? "combobox" : "textbox"}
+            aria-autocomplete={slash ? "list" : undefined}
+            aria-haspopup={slash ? "listbox" : undefined}
+            aria-expanded={slash ? true : undefined}
+            aria-controls={slash ? slashMenuId : undefined}
+            aria-activedescendant={
+              slash && choices[slashIndex]
+                ? `${slashMenuId}-${choices[slashIndex][0]}`
+                : undefined
+            }
+            onCompositionStart={() => setSlash(false)}
             className="rich-document"
             onKeyDown={keyDown}
             onPaste={(event) => {
@@ -773,20 +849,37 @@ export function MarkdownEditor({
               if (!data || readOnly) return;
               event.preventDefault();
               event.stopPropagation();
+              let payload: unknown;
+              try {
+                payload = JSON.parse(data);
+              } catch {
+                return;
+              }
+              if (
+                typeof payload !== "object" ||
+                payload === null ||
+                !("editorId" in payload) ||
+                payload.editorId !== editorId ||
+                !("index" in payload) ||
+                typeof payload.index !== "number" ||
+                !Number.isInteger(payload.index) ||
+                payload.index < 0 ||
+                payload.index >= editor.children.length
+              )
+                return;
               const range = editor.api.findEventRange(event);
               const destination = range?.anchor.path[0];
-              const origin = Number(data);
               if (
                 destination !== undefined &&
-                Number.isInteger(origin) &&
-                origin >= 0 &&
-                origin < editor.children.length
+                destination >= 0 &&
+                destination < editor.children.length
               )
-                editor.tf.moveNodes({ at: [origin], to: [destination] });
+                editor.tf.moveNodes({ at: [payload.index], to: [destination] });
             }}
           />
           {slash && !readOnly && (
             <div
+              id={slashMenuId}
               className="slash-menu"
               role="listbox"
               aria-label="Insert block"
@@ -795,6 +888,7 @@ export function MarkdownEditor({
                 choices.map(([type, title], index) => (
                   <Button
                     key={type}
+                    id={`${slashMenuId}-${type}`}
                     type="button"
                     role="option"
                     aria-selected={index === slashIndex}
