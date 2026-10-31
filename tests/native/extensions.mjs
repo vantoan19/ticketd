@@ -255,14 +255,17 @@ try {
       await (await detail()).$('section[aria-label="Mentioned in"]')
     ).$("span*=for context.")
   ).waitForDisplayed({ timeout: 10000 });
-  await disclosure("Related work");
-  let section = await (
-    await detail()
-  ).$('section[aria-label="Contextual relationships"]');
+  await click(
+    await (
+      await detail()
+    ).$('section[aria-label="Linked work"] button=Link ticket'),
+  );
+  const dialog = await browser.$('[role="dialog"]');
   await (
-    await section.$('input[id^="context-target-"]')
+    await dialog.$('input[id^="link-search-"]')
   ).setValue(source.reference);
-  await click(await section.$("button=Add relationship"));
+  await click(await dialog.$(`button*=${source.reference}`));
+  await click(await dialog.$("button=Link ticket"));
   await waitFor(
     () =>
       run(
@@ -296,11 +299,10 @@ try {
   // Bulk organization and status through UI, then verify an invalid batch is atomic.
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected status"]'));
-  await (
-    await browser.$('[aria-label="Status for selected tickets"]')
-  ).selectByVisibleText("In review");
-  await click(await browser.$("button=Apply status"));
+  await click(
+    await browser.$('[aria-label="Change status of selected tickets"]'),
+  );
+  await click(await browser.$('[role="menuitem"]=In review'));
   await waitFor(
     () => run("show", target.reference).status === "In review",
     "Bulk status did not persist",
@@ -308,11 +310,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected project"]'));
-  await (
-    await browser.$('[aria-label="Project for selected tickets"]')
-  ).selectByVisibleText(project.name);
-  await click(await browser.$("button=Apply project"));
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Move to project'));
+  await click(await browser.$(`[role="menuitem"]=${project.name}`));
   await waitFor(
     () =>
       run("show", source.reference).project_id === project.id &&
@@ -322,11 +322,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected effort"]'));
-  await (
-    await browser.$('[aria-label="Effort for selected tickets"]')
-  ).selectByVisibleText(effort.name);
-  await click(await browser.$("button=Apply Effort"));
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Set Effort'));
+  await click(await browser.$(`[role="menuitem"]*=${effort.name}`));
   await waitFor(
     () =>
       run("show", source.reference).effort_id === effort.id &&
@@ -336,10 +334,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected tags"]'));
-  await (
-    await browser.$('[aria-label="Tag for selected tickets"]')
-  ).setValue("native");
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Add or remove tags…'));
+  await (await browser.$('[aria-label="Tag name"]')).setValue("native");
   await click(await browser.$("button=Add tag"));
   await waitFor(
     () =>
@@ -366,8 +363,11 @@ try {
 
   // Review the blocker replacement, then undo the duplicate designation.
   await open(source.title);
-  await disclosure("Duplicates");
-  section = await (await detail()).$('section[aria-label="Duplicates"]');
+  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
+  let section = await browser.$(
+    '[role="dialog"] section[aria-label="Duplicates"]',
+  );
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
   await click(await section.$("button=Preview dependencies"));
   const choice = await section.$("select");
@@ -383,7 +383,13 @@ try {
     target.reference,
   );
   assert.equal(run("show", dependent.reference).availability, "Blocked");
-  await click(await section.$("button=Remove duplicate designation"));
+  await click(
+    await (
+      await detail()
+    ).$(
+      `button[aria-label="Remove relationship: Duplicate of ${target.reference}"]`,
+    ),
+  );
   await waitFor(
     () => run("show", source.reference).duplicate_of === null,
     "Duplicate undo failed",
@@ -392,6 +398,9 @@ try {
     run("show", dependent.reference).prerequisites[0].reference,
     target.reference,
   );
+  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
+  section = await browser.$('[role="dialog"] section[aria-label="Duplicates"]');
   await click(await section.$("button=Review separate dependency changes"));
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
   await click(await section.$("button=Preview dependencies"));

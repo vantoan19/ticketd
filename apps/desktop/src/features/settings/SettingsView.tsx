@@ -1,7 +1,16 @@
-import { useState, type ReactNode } from "react";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  Copy,
+  ExternalLink,
+  FolderOpen,
+  Monitor,
+  Moon,
+  Sun,
+} from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { client } from "@/lib/api/client";
+import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
+import { Button } from "@/components/ui/button";
 import { APP_VERSION } from "@/lib/app-version";
 import {
   setPreference,
@@ -142,6 +151,123 @@ function AppearanceCard() {
   );
 }
 
+function fileManagerName() {
+  const platform =
+    typeof navigator === "undefined" ? "" : navigator.platform || "";
+  if (/mac/i.test(platform)) return "Finder";
+  if (/win/i.test(platform)) return "Explorer";
+  return "File Manager";
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+function LocationCard() {
+  const [info, setInfo] = useState<WorkspaceInfo | null>(null);
+  const [loadFailure, setLoadFailure] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    let current = true;
+    workspaceClient
+      .info()
+      .then((value) => {
+        if (current) setInfo(value);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setLoadFailure(`Could not read the workspace: ${String(reason)}`);
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+  async function copyPath(path: string) {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(path);
+      setMessage("Path copied.");
+    } catch (reason) {
+      setMessage(`Could not copy the path: ${String(reason)}`);
+    }
+  }
+  async function reveal(path: string) {
+    try {
+      await workspaceClient.reveal(path);
+      setMessage("");
+    } catch (reason) {
+      setMessage(`Could not show the file: ${String(reason)}`);
+    }
+  }
+  const manager = fileManagerName();
+  const facts = info && [
+    ["Tickets", String(info.tickets)],
+    ["Projects", String(info.projects)],
+    ["Active Efforts", String(info.active_efforts)],
+    ["File size", formatSize(info.size_bytes)],
+    ["Format version", String(info.format_version)],
+  ];
+  return (
+    <SettingsCard id="location" title="Location">
+      <p className="settings-hint">
+        The desktop app and the ticketd command line read and write this same
+        workspace for your user.
+      </p>
+      {loadFailure && (
+        <p role="alert" className="settings-failure">
+          {loadFailure}
+        </p>
+      )}
+      {info && facts && (
+        <>
+          <p className="workspace-path" aria-label="Workspace path">
+            {info.path}
+          </p>
+          <div className="settings-actions">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void copyPath(info.path)}
+            >
+              <Copy aria-hidden="true" />
+              Copy path
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void reveal(info.path)}
+            >
+              <FolderOpen aria-hidden="true" />
+              Show in {manager}
+            </Button>
+          </div>
+          <dl className="workspace-facts">
+            {facts.map(([name, value]) => (
+              <div key={name} className="workspace-fact">
+                <dt>{name}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+      <p role="status" className="settings-hint">
+        {message}
+      </p>
+    </SettingsCard>
+  );
+}
+
 function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
   const [backupPath, setBackupPath] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -276,7 +402,19 @@ function KeyboardShortcutsCard() {
   );
 }
 
+const DOCUMENTATION_URL = "https://github.com/vantoan19/ticketd#readme";
+const ISSUES_URL = "https://github.com/vantoan19/ticketd/issues";
+
 function AboutCard() {
+  const [failure, setFailure] = useState("");
+  const open = (url: string, what: string) => {
+    setFailure("");
+    workspaceClient
+      .openLink(url)
+      .catch((reason: unknown) =>
+        setFailure(`Could not open ${what}: ${String(reason)}`),
+      );
+  };
   return (
     <SettingsCard id="about" title="About">
       <p className="settings-label">ticketd {APP_VERSION}</p>
@@ -284,6 +422,31 @@ function AboutCard() {
         Your workspace stays on this computer. ticketd has no account and works
         offline.
       </p>
+      <div className="settings-actions">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => open(DOCUMENTATION_URL, "the documentation")}
+        >
+          <ExternalLink aria-hidden="true" />
+          Documentation
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => open(ISSUES_URL, "the issue tracker")}
+        >
+          <ExternalLink aria-hidden="true" />
+          Report an issue
+        </Button>
+      </div>
+      {failure && (
+        <p role="alert" className="settings-failure">
+          {failure}
+        </p>
+      )}
     </SettingsCard>
   );
 }
@@ -302,6 +465,7 @@ export function SettingsView({
         <h1>Settings</h1>
         <p>Changes apply right away.</p>
         <AppearanceCard />
+        <LocationCard />
         <BackupsCard onRestore={onRestore} />
         <ExportCard />
         <KeyboardShortcutsCard />

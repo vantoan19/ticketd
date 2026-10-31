@@ -1,15 +1,11 @@
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { Evidence } from "@/features/tickets/Evidence";
 import { lazy, Suspense, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
-import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
-import { ContextualRelationships } from "@/features/tickets/ContextualRelationships";
-import { Duplicates } from "@/features/tickets/Duplicates";
-import { Dependencies } from "@/features/tickets/Dependencies";
+import { LinkedWork } from "@/features/tickets/LinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -69,7 +65,7 @@ export function TicketDetails({
           setGraphReference(selected);
           window.requestAnimationFrame(() =>
             document
-              .getElementById(`relationships-${selected}`)
+              .getElementById(`linked-work-${selected}`)
               ?.scrollIntoView?.({ block: "start" }),
           );
         }}
@@ -126,40 +122,19 @@ export function TicketDetails({
               />
             </TicketEditor>
           )}
-          {item.duplicate_of && (
-            <p>
-              Duplicate of{" "}
-              <Button
-                variant="link"
-                onClick={() => setSelected(item.duplicate_of ?? null)}
-              >
-                {item.duplicate_of}
-              </Button>
-            </p>
-          )}
           {item.reference === selected && !item.trashed && (
-            <section
-              id={`relationships-${item.reference}`}
-              className="relationships"
-              aria-label="Relationships"
-            >
-              <div className="detail-section-heading">
-                <h3>Relationships</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setGraphReference(
-                      graphReference === item.reference ? null : item.reference,
-                    )
-                  }
-                >
-                  {graphReference === item.reference
-                    ? "Back to relationships"
-                    : "Open dependency graph"}
-                </Button>
-              </div>
-              {graphReference === item.reference ? (
+            <LinkedWork
+              ticket={item}
+              revision={revision}
+              refresh={refresh}
+              select={setSelected}
+              graphOpen={graphReference === item.reference}
+              onToggleGraph={() =>
+                setGraphReference(
+                  graphReference === item.reference ? null : item.reference,
+                )
+              }
+              graph={
                 <Suspense fallback={<p role="status">Loading graph…</p>}>
                   <DependencyGraph
                     key={item.reference}
@@ -171,70 +146,8 @@ export function TicketDetails({
                     }}
                   />
                 </Suspense>
-              ) : (
-                <div className="relationships-grid">
-                  <details className="detail-disclosure">
-                    <summary aria-label="Related work">Related work</summary>
-                    <ContextualRelationships
-                      key={item.reference}
-                      ticket={item}
-                      refresh={refresh}
-                      revision={revision}
-                      select={setSelected}
-                    />
-                  </details>
-                  <details className="detail-disclosure">
-                    <summary aria-label="Duplicates">
-                      Duplicates
-                      {!!(item.duplicate_of || item.duplicates?.length) && (
-                        <span>{item.duplicates?.length || 1}</span>
-                      )}
-                    </summary>
-                    <Duplicates
-                      ticket={item}
-                      refresh={refresh}
-                      select={setSelected}
-                    />
-                  </details>
-                  <details className="detail-disclosure">
-                    <summary aria-label="Parent and subtickets">
-                      Parent and subtickets
-                      {!!(item.parent || item.children.length) && (
-                        <span>
-                          {item.children.length + (item.parent ? 1 : 0)}
-                        </span>
-                      )}
-                    </summary>
-                    <Hierarchy
-                      ticket={item}
-                      refresh={refresh}
-                      revision={revision}
-                      select={(reference) => {
-                        setSelected(reference);
-                      }}
-                    />
-                  </details>
-                  <details
-                    className="detail-disclosure"
-                    open={item.prerequisites.length > 0 || undefined}
-                  >
-                    <summary aria-label="Blocking dependencies">
-                      Blocking dependencies
-                      {item.prerequisites.length > 0 && (
-                        <span>{item.prerequisites.length}</span>
-                      )}
-                    </summary>
-                    <Dependencies
-                      ticket={item}
-                      refresh={refresh}
-                      select={(reference) => {
-                        setSelected(reference);
-                      }}
-                    />
-                  </details>
-                </div>
-              )}
-            </section>
+              }
+            />
           )}
           {item.reference === selected && (
             <Evidence
