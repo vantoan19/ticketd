@@ -1,0 +1,67 @@
+.ticket-properties {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 12px 0;
+  border-block: 1px solid var(--border);
+}
+.ticket-property {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+.ticket-property > span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.ticket-property small[role="alert"],
+.ticket-properties > small[role="alert"] {
+  color: var(--destructive);
+  max-width: 220px;
+}
+.property-popover {
+  width: 240px;
+  padding: 8px;
+}
+.property-choices {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+.property-choices button {
+  justify-content: start;
+}
+.property-choices p {
+  color: var(--muted-foreground);
+  padding: 8px;
+}
+.ticket-action-menu {
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 4px 12px #0002;
+  z-index: 50;
+}
+.ticket-action-item {
+  padding: 7px 8px;
+  border-radius: 4px;
+  outline: none;
+  cursor: default;
+}
+.ticket-action-item:focus {
+  background: var(--accent);
+  outline: 2px solid var(--ring);
+}
+.ticket-properties > [data-slot="dropdown-menu-trigger"] {
+  margin-left: auto;
+}

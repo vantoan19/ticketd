@@ -181,14 +181,20 @@ try {
       ).includes("Ready"),
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
-  await (await (await detail()).$("button=Move to trash")).click();
+  await (
+    await (await detail()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
   await (
     await (
       await browser.$('nav[aria-label="Workspace views"]')
     ).$("button=Trash")
   ).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
-  await (await (await detail()).$("button=Restore")).click();
+  await (
+    await (await detail()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,

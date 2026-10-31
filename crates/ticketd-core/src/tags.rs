@@ -31,6 +31,18 @@ fn normalize(name: &str) -> Result<String, Error> {
 }
 
 impl Workspace {
+    /// Search the workspace tag vocabulary, including tags without current members.
+    pub fn search_tags(&self, query: &str, limit: u32) -> Result<Vec<String>, Error> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT name FROM tags WHERE instr(name, ?1) > 0 ORDER BY name LIMIT ?2")?;
+        Ok(statement
+            .query_map(params![query.trim().to_lowercase(), limit.min(50)], |row| {
+                row.get(0)
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
     /// Add a normalized workspace tag without replacing other memberships.
     pub fn add_tag(&mut self, reference: &str, name: &str) -> Result<Ticket, Error> {
         let name = normalize(name)?;

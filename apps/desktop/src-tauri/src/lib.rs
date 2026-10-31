@@ -142,6 +142,13 @@ fn delete_note(reference: String, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn search_tags(query: String) -> Result<Vec<String>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.search_tags(&query, 50))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn add_tag(reference: String, tag: String) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.add_tag(&reference, &tag))
@@ -261,6 +268,7 @@ pub fn run() -> Result<(), tauri::Error> {
             add_note,
             edit_note,
             delete_note,
+            search_tags,
             add_tag,
             remove_tag,
             add_dependency,
