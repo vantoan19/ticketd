@@ -1314,3 +1314,127 @@ fn tag_search_includes_unused_vocabulary_and_limits_results() {
     assert_eq!(workspace.search_tags("bu", 1).unwrap(), vec!["bug"]);
     assert_eq!(workspace.search_tags("BUG", 50).unwrap(), vec!["bug"]);
 }
+
+#[test]
+fn backlinks_follow_markdown_content_and_note_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "See {} here.\n\n`{}` and [link](https://example.com/{})",
+                    target.reference, target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let note = workspace
+        .add_note(
+            &source.reference,
+            &format!("A note about {}", target.reference),
+            None,
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].source_reference, source.reference);
+    assert_eq!(links[0].passage, "See T-1 here.");
+    assert_eq!(links[1].note_id.as_deref(), Some(note.id.as_str()));
+    workspace.delete_note(&source.reference, &note.id).unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn backlinks_ignore_fenced_code_and_reference_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "```\n{}\n```\n\n{}0",
+                    target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn backlink_pages_follow_edits_and_trash_visibility() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let first = workspace
+        .add_note(&source.reference, "T-1 first", None)
+        .unwrap();
+    workspace
+        .add_note(&source.reference, "T-1 second", None)
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 1, 1).unwrap()[0].passage,
+        "T-1 second"
+    );
+    workspace
+        .edit_note(
+            &source.reference,
+            &first.id,
+            ticketd_core::NotePatch {
+                content: Some("Changed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+    workspace
+        .set_trashed(&source.reference, true, None)
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn long_backlink_passage_keeps_the_reference_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!("{} T-1 context", "x".repeat(600))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert!(links[0].passage.contains("T-1"));
+    assert!(links[0].passage.chars().count() <= 512);
+}

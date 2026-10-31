@@ -45,6 +45,17 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
 }
 
 #[tauri::command]
+fn ticket_backlinks(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::Backlink>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn show_ticket(reference: String) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|w| w.show_ticket(&reference))
@@ -295,6 +306,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_ticket,
             change_ticket,
             ticket_history,
+            ticket_backlinks,
             list_notes,
             add_note,
             edit_note,
