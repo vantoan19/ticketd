@@ -52,6 +52,14 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Assign or remove a parent (omit --parent to remove)
+    SetParent {
+        reference: String,
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// List tickets
     List,
     /// Show a ticket by its reference
@@ -202,6 +210,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => serde_json::to_string(&workspace.remove_dependency(
             &blocker,
             &dependent,
+            agent.as_deref(),
+        )?)?,
+        Command::SetParent {
+            reference,
+            parent,
+            agent,
+        } => serde_json::to_string(&workspace.set_parent(
+            &reference,
+            parent.as_deref(),
             agent.as_deref(),
         )?)?,
         Command::List => serde_json::to_string(&workspace.list_tickets()?)?,

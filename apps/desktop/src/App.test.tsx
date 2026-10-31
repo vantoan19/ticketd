@@ -22,6 +22,8 @@ test("refreshes clean content and preserves a draft when saved content changes",
     tags: [],
     availability: "Ready",
     prerequisites: [],
+    parent: null,
+    children: [],
   };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch?: { title?: string } }) => {

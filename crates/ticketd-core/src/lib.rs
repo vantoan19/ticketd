@@ -1,4 +1,5 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod hierarchy;
 mod relationships;
 mod tags;
 
@@ -18,6 +19,8 @@ pub use notes::{Note, NotePatch};
 pub enum Error {
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
+    #[error("parent assignment would create a cycle or more than one level of subtickets")]
+    InvalidHierarchy,
     #[error("tag name must not be empty")]
     EmptyTag,
     #[error("ticket title must not be empty")]
@@ -46,6 +49,8 @@ pub struct Ticket {
     pub tags: Vec<String>,
     pub availability: Option<String>,
     pub prerequisites: Vec<relationships::Prerequisite>,
+    pub parent: Option<hierarchy::RelatedTicket>,
+    pub children: Vec<hierarchy::RelatedTicket>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -75,7 +80,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 6 {
+        if version > 7 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -97,6 +102,10 @@ impl Workspace {
         if version < 6 {
             relationships::migrate(&transaction)?;
             transaction.pragma_update(None, "user_version", 6)?;
+        }
+        if version < 7 {
+            hierarchy::migrate(&transaction)?;
+            transaction.pragma_update(None, "user_version", 7)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -121,6 +130,8 @@ impl Workspace {
             tags: Vec::new(),
             availability: Some("Ready".into()),
             prerequisites: Vec::new(),
+            parent: None,
+            children: Vec::new(),
         })
     }
 
@@ -162,6 +173,7 @@ impl Workspace {
         )?;
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
         relationships::populate(&transaction, &mut updated)?;
+        hierarchy::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -208,6 +220,7 @@ impl Workspace {
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
             relationships::populate(&self.connection, ticket)?;
+            hierarchy::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -227,6 +240,7 @@ impl Workspace {
         let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
         ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
         relationships::populate(&self.connection, &mut ticket)?;
+        hierarchy::populate(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -247,5 +261,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         tags: Vec::new(),
         availability: None,
         prerequisites: Vec::new(),
+        parent: None,
+        children: Vec::new(),
     })
 }

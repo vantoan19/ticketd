@@ -327,3 +327,78 @@ fn concurrent_opposing_dependencies_cannot_form_cycle() {
         1
     );
 }
+
+#[test]
+fn hierarchy_rejects_grandchildren_and_records_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    workspace
+        .set_parent(&b.reference, Some(&a.reference), None)
+        .unwrap();
+    assert!(
+        workspace
+            .set_parent(&c.reference, Some(&b.reference), None)
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_ticket(&a.reference).unwrap().children[0].reference,
+        b.reference
+    );
+    assert_eq!(
+        workspace
+            .show_ticket(&b.reference)
+            .unwrap()
+            .parent
+            .unwrap()
+            .reference,
+        a.reference
+    );
+    workspace.set_parent(&b.reference, None, None).unwrap();
+    assert_eq!(
+        workspace
+            .ticket_history(&b.reference)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.kind == "parent")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn concurrent_hierarchy_assignments_preserve_one_level() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [
+        (b.reference.clone(), a.reference),
+        (c.reference, b.reference),
+    ]
+    .into_iter()
+    .map(|(child, parent)| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut workspace = Workspace::open(path).unwrap();
+            barrier.wait();
+            workspace.set_parent(&child, Some(&parent), None).is_ok()
+        })
+    })
+    .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .filter(|result| *result)
+            .count(),
+        1
+    );
+}
