@@ -222,7 +222,10 @@ fn search_directories() -> Vec<PathBuf> {
 #[tauri::command]
 pub async fn check_cli() -> Result<CliStatus, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let workspace = ticketd_core::default_workspace_path().ok();
+        let workspace = ticketd_core::Workspace::open_default()
+            .and_then(|workspace| workspace.workspace_info())
+            .ok()
+            .map(|info| PathBuf::from(info.path));
         detect(
             &search_directories(),
             env!("CARGO_PKG_VERSION"),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { workspaceClient } from "@/lib/api/workspace";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 
@@ -109,9 +110,16 @@ function Summary({ check }: { check: Check }) {
           ticketd executable from this app&apos;s download into a folder on your
           PATH, such as <code>{status.suggested_directory}</code>, then choose
           Check again.{" "}
-          <a href={INSTALL_GUIDE_URL} target="_blank" rel="noreferrer">
+          <Button
+            type="button"
+            variant="link"
+            size="xs"
+            onClick={() =>
+              void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
+            }
+          >
             Installation guide
-          </a>
+          </Button>
         </p>
       </>
     );

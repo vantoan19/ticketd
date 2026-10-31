@@ -451,12 +451,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     }
     // Integration tests run the real executable against a private database on every OS.
     // ProjectDirs on Windows uses known folders and ignores HOME and XDG_DATA_HOME.
-    let (mut workspace, workspace_path) = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
-        Some(path) => (Workspace::open(&path)?, std::path::PathBuf::from(path)),
-        None => (
-            Workspace::open_default()?,
-            ticketd_core::default_workspace_path()?,
-        ),
+    let mut workspace = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+        Some(path) => Workspace::open(path)?,
+        None => Workspace::open_default()?,
     };
     let text = match args.command {
         Command::Reminder { command } => match command {
@@ -788,10 +785,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }
-        Command::Workspace => serde_json::to_string(&serde_json::json!({
-            "path": workspace_path,
-            "format_version": workspace.format_version()?,
-        }))?,
+        Command::Workspace => {
+            let info = workspace.workspace_info()?;
+            serde_json::to_string(&serde_json::json!({
+                "path": info.path,
+                "format_version": info.format_version,
+            }))?
+        }
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };
     writeln!(output, "{text}")?;

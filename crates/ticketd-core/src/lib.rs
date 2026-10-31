@@ -9,8 +9,10 @@ pub use duplicates::{
 };
 mod evidence;
 mod export;
+mod location;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
+pub use location::WorkspaceInfo;
 
 mod efforts;
 mod retry;
@@ -652,8 +654,6 @@ fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
 
 mod batch;
 pub use batch::{BatchOperation, TicketChange};
-mod location;
-pub use location::default_workspace_path;
 
 fn default_path() -> Result<std::path::PathBuf, Error> {
     let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;

@@ -1,43 +1,65 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { client, type BulkChange } from "@/lib/api/client";
 
+const NOTICE_MS = 4000;
+
+type Change =
+  | { kind: "status"; status: string; summary: string }
+  | { kind: "organization"; change: BulkChange; summary: string };
+
+export type BulkFailure = {
+  /** The ticket that prevented the batch, when the core named one. */
+  reference: string | null;
+  message: string;
+};
+
 /**
- * Bulk edit state for the ticket list: the selection, the open action, form
- * drafts, and request submission. A retry of the same selection and change
- * reuses its request ID so the core can deduplicate it.
+ * Bulk edit state for the ticket list: the selection, the last failure or
+ * confirmation, and request submission. A retry of the same selection and
+ * change reuses its request ID so the core can deduplicate it. A batch applies
+ * to every selected ticket or to none.
  */
 export function useBulkEdit(refresh: () => Promise<void>) {
   const [selection, setSelection] = useState<string[]>([]);
-  const [status, setStatus] = useState("");
-  const [project, setProject] = useState("");
-  const [effort, setEffort] = useState("");
-  const [tag, setTag] = useState("");
-  const [error, setError] = useState("");
-  const [action, setAction] = useState<string | null>(null);
+  const [failure, setFailure] = useState<BulkFailure | null>(null);
+  const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const request = useRef<{ key: string; id: string } | null>(null);
+  const lastChange = useRef<Change | null>(null);
 
-  async function submit(
-    change: unknown,
-    send: (requestId: string) => Promise<unknown>,
-    clearDrafts: () => void,
-  ) {
-    const key = JSON.stringify([selection, change]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  function select(next: string[]) {
+    setSelection(next);
+    setFailure(null);
+    lastChange.current = null;
+  }
+
+  async function submit(change: Change) {
+    const payload = change.kind === "status" ? change.status : change.change;
+    const key = JSON.stringify([selection, change.kind, payload]);
     if (request.current?.key !== key)
       request.current = { key, id: crypto.randomUUID() };
+    const requestId = request.current.id;
+    lastChange.current = change;
     setPending(true);
-    setError("");
+    setFailure(null);
+    setNotice("");
     try {
-      await send(request.current.id);
+      if (change.kind === "status")
+        await client.bulkStatus(selection, change.status, requestId);
+      else await client.bulkChange(selection, change.change, requestId);
       request.current = null;
+      lastChange.current = null;
       setSelection([]);
-      setAction(null);
-      clearDrafts();
+      setNotice(change.summary);
       await refresh();
     } catch (reason) {
-      setError(
-        `Could not change selected tickets: ${String(reason)}. Check the selection and retry.`,
-      );
+      setFailure(describeFailure(reason, selection));
     } finally {
       setPending(false);
     }
@@ -45,52 +67,49 @@ export function useBulkEdit(refresh: () => Promise<void>) {
 
   return {
     selection,
-    status,
-    setStatus,
-    project,
-    setProject,
-    effort,
-    setEffort,
-    tag,
-    setTag,
-    error,
-    action,
-    setAction,
+    failure,
+    notice,
     pending,
     toggle(reference: string) {
-      const next = selection.includes(reference)
-        ? selection.filter((item) => item !== reference)
-        : [...selection, reference];
-      setSelection(next);
-      if (next.length === 0) setAction(null);
+      select(
+        selection.includes(reference)
+          ? selection.filter((item) => item !== reference)
+          : [...selection, reference],
+      );
+    },
+    selectAll(references: string[]) {
+      select([...new Set([...selection, ...references])]);
     },
     clearSelection() {
-      setSelection([]);
-      setAction(null);
+      select([]);
     },
     /** Drops the selection and any pending retry, e.g. after a restore. */
     reset() {
-      setSelection([]);
-      setAction(null);
+      select([]);
+      setNotice("");
       request.current = null;
     },
-    applyStatus: () =>
-      submit(
-        status,
-        (id) => client.bulkStatus(selection, status, id),
-        () => setStatus(""),
-      ),
-    applyOrganization: (change: BulkChange) =>
-      submit(
-        change,
-        (id) => client.bulkChange(selection, change, id),
-        () => {
-          setProject("");
-          setEffort("");
-          setTag("");
-        },
-      ),
+    applyStatus: (status: string, summary: string) =>
+      submit({ kind: "status", status, summary }),
+    applyOrganization: (change: BulkChange, summary: string) =>
+      submit({ kind: "organization", change, summary }),
+    /** Resends the failed change; the same selection reuses its request ID. */
+    retry: () => (lastChange.current ? submit(lastChange.current) : undefined),
   };
 }
 
 export type BulkEdit = ReturnType<typeof useBulkEdit>;
+
+/** Names the ticket the core rejected (`batch operation <index>: <reason>`). */
+function describeFailure(reason: unknown, selection: string[]): BulkFailure {
+  const text = reason instanceof Error ? reason.message : String(reason);
+  const match = /batch operation (\d+): (.*)/s.exec(text);
+  const reference = match ? (selection[Number(match[1])] ?? null) : null;
+  const detail = (match?.[2] ?? text).trim().replace(/\.$/, "");
+  return {
+    reference,
+    message: reference
+      ? `Nothing changed. ${reference} could not be updated: ${detail}.`
+      : `Nothing changed. ${detail}.`,
+  };
+}

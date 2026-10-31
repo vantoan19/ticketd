@@ -64,7 +64,9 @@ test("a missing CLI shows guidance, and Check again finds a later install", asyn
   });
   render(<CommandLineCard />);
   expect(await screen.findByText("Not found")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Installation guide" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Installation guide" }),
+  ).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 
   invoke.mockResolvedValueOnce(base);

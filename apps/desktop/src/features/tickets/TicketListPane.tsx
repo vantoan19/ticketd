@@ -57,6 +57,16 @@ export function TicketListPane({
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family);
+  const visibleTickets = tickets.filter(
+    (item) =>
+      filter === "all" ||
+      (filter === "unlinked"
+        ? item.project_id === null
+        : item.project_id === filter),
+  );
+  const showBulk =
+    !trash &&
+    (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
   return (
     <section
       className="ticket-list"
@@ -104,9 +114,6 @@ export function TicketListPane({
         />
       )}
 
-      {!trash && (bulk.selection.length > 0 || bulk.error) && (
-        <BulkControls bulk={bulk} projects={projects} efforts={efforts} />
-      )}
       {queryError ? (
         <div className="empty-state" role="alert">
           <strong>Could not load tickets</strong>
@@ -164,13 +171,7 @@ export function TicketListPane({
         </div>
       ) : (
         <TicketList
-          tickets={tickets.filter(
-            (item) =>
-              filter === "all" ||
-              (filter === "unlinked"
-                ? item.project_id === null
-                : item.project_id === filter),
-          )}
+          tickets={visibleTickets}
           scope={{
             showEffort: !navigation.effort,
             showProject: navigation.project === "all",
@@ -207,6 +208,14 @@ export function TicketListPane({
             Next
           </button>
         </div>
+      )}
+      {showBulk && (
+        <BulkControls
+          bulk={bulk}
+          visible={visibleTickets}
+          projects={projects}
+          efforts={efforts}
+        />
       )}
     </section>
   );

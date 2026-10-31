@@ -2834,6 +2834,36 @@ fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
 }
 
 #[test]
+fn workspace_info_reports_location_counts_size_and_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.create_ticket("Kept").unwrap();
+    let trashed = workspace.create_ticket("Trashed").unwrap();
+    workspace
+        .set_trashed(&trashed.reference, true, None)
+        .unwrap();
+    workspace.create_project("Core", "/tmp/core").unwrap();
+    workspace.create_effort("Active").unwrap();
+    let archived = workspace.create_effort("Old").unwrap();
+    workspace
+        .change_effort(&archived.id, None, Some(true))
+        .unwrap();
+
+    let info = workspace.workspace_info().unwrap();
+    assert_eq!(
+        std::path::Path::new(&info.path),
+        path.canonicalize().unwrap()
+    );
+    assert_eq!(info.tickets, 1);
+    assert_eq!(info.projects, 1);
+    assert_eq!(info.active_efforts, 1);
+    assert_eq!(info.format_version, 19);
+    assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
+    assert!(info.size_bytes > 0);
+}
+
+#[test]
 fn sidebar_counts_follow_readiness_rules_and_unread_inbox() {
     let dir = tempfile::tempdir().unwrap();
     let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

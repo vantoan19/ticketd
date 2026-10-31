@@ -139,65 +139,58 @@
   margin-block: 3px;
 }
 .bulk-controls {
+  position: sticky;
+  bottom: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: 0 auto 16px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: var(--shadow-menu);
+}
+.bulk-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin: 0 24px 12px;
-  padding: 12px;
-  border-radius: 6px;
-  color: var(--foreground);
-  background: var(--surface);
-  box-shadow: var(--shadow-small);
-}
-.bulk-controls > span {
-  min-width: 0;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-}
-.bulk-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
 }
-.bulk-controls > [role="alert"] {
-  width: 100%;
-  color: var(--destructive);
-  font-size: 12px;
-  line-height: 16px;
-}
-.bulk-action-error {
-  color: var(--error-foreground);
-  font-size: 12px;
-  line-height: 16px;
-}
-.bulk-action-popover {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 280px;
-}
-.bulk-action-popover h3 {
+.bulk-count {
+  padding-inline: 8px;
   font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.28px;
   font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
 }
-.bulk-action-popover label {
+.bulk-message {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  margin: 0;
+  padding-inline: 8px;
+  font-size: 12px;
+  line-height: 16px;
 }
-.bulk-action-popover :is(input, select) {
-  width: 100%;
+.bulk-error {
+  color: var(--error-foreground);
 }
-
-@container (max-width: 440px) {
-  .bulk-actions {
-    flex: 1;
-  }
+.bulk-menu-count {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.bulk-tag-form {
+  display: grid;
+  gap: 16px;
 }
 
 /* Reveal selection without moving the identifier or title columns. */
