@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,20 +11,12 @@ import {
 } from "@/components/ui/dialog";
 import { CopySourceButton } from "./CopySourceButton";
 import { renderDiagram } from "./mermaid-renderer";
-
-function subscribeTheme(changed: () => void) {
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  media.addEventListener("change", changed);
-  return () => media.removeEventListener("change", changed);
-}
-function currentTheme() {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
-}
+import { useDarkTheme } from "@/lib/preferences";
 
 type Result = { source: string; dark: boolean; svg: string; error: string };
 
 export function MermaidDiagram({ source }: { source: string }) {
-  const dark = useSyncExternalStore(subscribeTheme, currentTheme, () => false);
+  const dark = useDarkTheme();
   const [result, setResult] = useState<Result | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [expanded, setExpanded] = useState(false);

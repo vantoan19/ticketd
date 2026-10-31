@@ -49,9 +49,6 @@
 }
 
 /* The shell stacks the section list above the content on narrow windows. */
-.workspace.settings-open .mobile-sidebar-trigger {
-  display: none;
-}
 @media (max-width: 767px) {
   .workspace.settings-open {
     flex-direction: column;

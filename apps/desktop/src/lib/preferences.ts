@@ -109,17 +109,22 @@ function subscribeToSystemTheme(listener: () => void) {
   return () => media.removeEventListener("change", listener);
 }
 
-/** Keeps the document root in step with the choice and the operating system. */
-export function useThemeSync() {
+/** True when the resolved theme is dark (the choice, else the operating system). */
+export function useDarkTheme(): boolean {
   const { theme } = usePreferences();
   const systemDark = useSyncExternalStore(
     subscribeToSystemTheme,
     systemPrefersDark,
     () => false,
   );
-  const resolved = resolveTheme(theme, systemDark);
+  return resolveTheme(theme, systemDark) === "dark";
+}
+
+/** Keeps the document root in step with the choice and the operating system. */
+export function useThemeSync() {
+  const dark = useDarkTheme();
   // main.tsx applies the stored theme before the first paint.
-  useEffect(() => applyTheme(resolved), [resolved]);
+  useEffect(() => applyTheme(dark ? "dark" : "light"), [dark]);
 }
 
 /** Applies the stored theme before the first render. */

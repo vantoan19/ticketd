@@ -9,10 +9,11 @@ import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { RefreshCw } from "lucide-react";
+import { Menu } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function App() {
   const [view, setView] = useState<
@@ -67,14 +68,24 @@ export function App() {
     revision,
     refresh,
     create,
-    scopeName,
     scope,
     navigation,
   } = workspace;
   const bulk = useBulkEdit(refresh);
+  const isMobile = useIsMobile();
   return (
     <SidebarProvider>
-      <main
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus();
+        }}
+      >
+        Skip to content
+      </a>
+      <div
         className={
           view === "settings" ? "workspace settings-open" : "workspace"
         }
@@ -99,42 +110,19 @@ export function App() {
             createTriggerRef={createTriggerRef}
           />
         )}
-        <div className="main-area">
-          <header className="topbar">
-            <SidebarTrigger className="mobile-sidebar-trigger" />
-            <div>
-              <span>Workspace</span>
-              <span className="slash">/</span>
-              <strong>
-                {view === "tickets"
-                  ? scopeName
-                  : view === "inbox"
-                    ? "Attention inbox"
-                    : view === "projects"
-                      ? "Projects"
-                      : view === "efforts"
-                        ? "Efforts"
-                        : "Settings"}
-              </strong>
+        <main id="main-content" tabIndex={-1} className="content-panel">
+          {isMobile && view !== "settings" && (
+            <div className="mobile-nav-bar">
+              <SidebarTrigger
+                className="mobile-nav-trigger"
+                variant="ghost"
+                size="sm"
+                aria-label="Open navigation"
+              >
+                <Menu /> Navigation
+              </SidebarTrigger>
             </div>
-            <span aria-live="polite">
-              {unread && (
-                <button
-                  className="unread-attention"
-                  onClick={() => setView("inbox")}
-                >
-                  Unread inbox
-                </button>
-              )}
-            </span>
-            <button
-              aria-label="Refresh"
-              className="icon-button"
-              onClick={() => void refresh()}
-            >
-              <RefreshCw size={16} />
-            </button>
-          </header>
+          )}
           {error && (
             <p role="alert" className="global-error">
               {error}
@@ -203,8 +191,8 @@ export function App() {
               setCreating(true);
             }}
           />
-        </div>
-      </main>
+        </main>
+      </div>
     </SidebarProvider>
   );
 }

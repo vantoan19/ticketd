@@ -1,0 +1,90 @@
+.create-form .create-properties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px 16px;
+}
+.create-property {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+.create-property > span {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.create-property > button,
+.create-property > [data-slot="select-trigger"] {
+  width: 100%;
+  justify-content: start;
+}
+.create-property > button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.create-tags {
+  grid-column: 1 / -1;
+}
+.create-tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.create-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--recessed);
+  color: var(--foreground);
+  font-size: 14px;
+}
+.create-tag-chip svg {
+  width: 14px;
+  height: 14px;
+}
+.create-tag-chip button {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+.create-tag-input {
+  width: 160px;
+  height: 28px;
+}
+.create-tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.create-tag-suggestions button {
+  padding: 0 8px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  box-shadow: var(--shadow-border);
+  font-size: 13px;
+}
+.create-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+}
+.create-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.create-restored {
+  color: var(--muted-foreground);
+  font-size: 14px;
+}
