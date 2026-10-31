@@ -4,6 +4,8 @@ import { Projects, TicketProject } from "./Projects";
 import { Dependencies } from "./Dependencies";
 import { Notes } from "./Notes";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -14,6 +16,8 @@ import { History } from "./History";
 import { client, type Project, type Ticket } from "./client";
 import { Tags } from "./Tags";
 import { TicketEditor } from "./TicketEditor";
+
+const DependencyGraph = lazy(() => import("./DependencyGraph"));
 
 export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -251,6 +255,17 @@ export function App() {
                     }
                   />
                   <Dependencies ticket={item} refresh={refresh} />
+                  <Suspense fallback={<p>Loading graph…</p>}>
+                    <DependencyGraph
+                      key={item.reference}
+                      reference={item.reference}
+                      revision={revision}
+                      select={(id, trashed) => {
+                        setSelected(id);
+                        setTrash(trashed);
+                      }}
+                    />
+                  </Suspense>
                   <Notes
                     reference={item.reference}
                     refreshRevision={revision}

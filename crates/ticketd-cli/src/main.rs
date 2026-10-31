@@ -99,6 +99,8 @@ enum Command {
         #[arg(long)]
         unlinked: bool,
     },
+    /// View a bounded dependency graph around a ticket
+    Graph { reference: String },
     /// Show a ticket by its reference
     Show { reference: String },
 }
@@ -404,6 +406,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect();
             serde_json::to_string(&tickets)?
+        }
+        Command::Graph { reference } => {
+            serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };
