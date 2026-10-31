@@ -1,0 +1,346 @@
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkStringify from "remark-stringify";
+import remarkGfm from "remark-gfm";
+import { TextApi, type Descendant, type TElement, type Value } from "platejs";
+import type { Root, RootContent, PhrasingContent } from "mdast";
+
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkStringify, {
+    bullet: "-",
+    fences: true,
+    listItemIndent: "one",
+  });
+const supported = new Set([
+  "root",
+  "paragraph",
+  "heading",
+  "text",
+  "strong",
+  "emphasis",
+  "delete",
+  "inlineCode",
+  "link",
+  "list",
+  "listItem",
+  "blockquote",
+  "code",
+  "table",
+  "tableRow",
+  "tableCell",
+  "thematicBreak",
+  "break",
+]);
+
+function meaning(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(meaning);
+  if (node && typeof node === "object") {
+    return Object.fromEntries(
+      Object.entries(node)
+        .filter(
+          ([key, value]) =>
+            !["position", "spread", "data"].includes(key) &&
+            value !== null &&
+            value !== undefined,
+        )
+        .map(([key, value]) => [key, meaning(value)]),
+    );
+  }
+  return node;
+}
+
+function scan(
+  node: Root | RootContent | PhrasingContent,
+  reasons: Set<string>,
+) {
+  if (!supported.has(node.type))
+    reasons.add(
+      `This document contains ${node.type}; edit its Markdown source to preserve it.`,
+    );
+  if (
+    node.type === "list" &&
+    node.children.some((child) => typeof child.checked === "boolean") &&
+    !node.children.every((child) => typeof child.checked === "boolean")
+  )
+    reasons.add(
+      "Mixed checklists and bullet items require Markdown source editing.",
+    );
+  if (node.type === "code" && node.meta)
+    reasons.add("Code fence metadata requires Markdown source editing.");
+  if ("children" in node)
+    node.children.forEach((child) => scan(child, reasons));
+}
+
+function convert(
+  node: RootContent | PhrasingContent,
+  source: string,
+): Descendant {
+  switch (node.type) {
+    case "text":
+      return { text: node.value };
+    case "inlineCode":
+      return { text: node.value, code: true };
+    case "strong":
+    case "emphasis":
+    case "delete": {
+      const key = {
+        strong: "bold",
+        emphasis: "italic",
+        delete: "strikethrough",
+      }[node.type];
+      const children = inline(node.children, source);
+      // Nested inline marks apply to every leaf, including leaves in links.
+      function mark(child: Descendant): Descendant {
+        return TextApi.isText(child)
+          ? { ...child, [key]: true }
+          : { ...child, children: child.children.map(mark) };
+      }
+      return { type: "inline-group", children: children.map(mark) };
+    }
+    case "link":
+      return {
+        type: "a",
+        url: node.url,
+        title: node.title ?? "",
+        children: inline(node.children, source),
+      };
+    case "break":
+      return { type: "br", children: [{ text: "" }] };
+    case "code": {
+      if (node.lang === "mermaid") {
+        const raw = source.slice(
+          node.position?.start.offset,
+          node.position?.end.offset,
+        );
+        const firstNewline = raw.indexOf("\n");
+        const body = firstNewline < 0 ? "" : raw.slice(firstNewline + 1);
+        const opening = raw.match(/^[ \t]*(`{3,}|~{3,})/);
+        const fence = opening?.[1] ?? "```";
+        const closing = new RegExp(
+          `(?:\\r?\\n|^)[ \\t]*${fence[0]}{${fence.length},}[ \\t]*$`,
+        );
+        // One final newline separates the code from its closing fence; it is
+        // Markdown syntax, not part of the editable Mermaid source.
+        const exact = body.replace(closing, "");
+        return { type: "mermaid", source: exact, children: [{ text: "" }] };
+      }
+      return {
+        type: "code_block",
+        lang: node.lang ?? "",
+        children: node.value
+          .split("\n")
+          .map((text) => ({ type: "code_line", children: [{ text }] })),
+      };
+    }
+    case "paragraph":
+      return { type: "p", children: inline(node.children, source) };
+    case "heading":
+      return {
+        type: `h${node.depth}`,
+        children: inline(node.children, source),
+      };
+    case "blockquote":
+      return {
+        type: "blockquote",
+        children: node.children.map((child) => convert(child, source)),
+      };
+    case "list":
+      return {
+        type: node.ordered
+          ? "ol"
+          : node.children.every((child) => typeof child.checked === "boolean")
+            ? "taskList"
+            : "ul",
+        start: node.start ?? 1,
+        children: node.children.map((child) => convert(child, source)),
+      };
+    case "listItem":
+      return {
+        type: "li",
+        ...(node.checked === null || node.checked === undefined
+          ? {}
+          : { checked: node.checked }),
+        children: node.children.map((child) =>
+          child.type === "paragraph"
+            ? { type: "lic", children: inline(child.children, source) }
+            : convert(child, source),
+        ),
+      };
+    case "table":
+      return {
+        type: "table",
+        align: node.align ?? [],
+        children: node.children.map((row, index) => ({
+          type: "tr",
+          children: row.children.map((cell) => ({
+            type: index === 0 ? "th" : "td",
+            children: [{ type: "p", children: inline(cell.children, source) }],
+          })),
+        })),
+      };
+    case "thematicBreak":
+      return { type: "hr", children: [{ text: "" }] };
+    default:
+      return { type: "p", children: [{ text: "" }] };
+  }
+}
+
+function inline(nodes: PhrasingContent[], source: string): Descendant[] {
+  const result = nodes.flatMap((node) => {
+    const converted = convert(node, source);
+    return !TextApi.isText(converted) && converted.type === "inline-group"
+      ? converted.children
+      : [converted];
+  });
+  return result.length ? result : [{ text: "" }];
+}
+
+function phrasing(nodes: Descendant[]): PhrasingContent[] {
+  return nodes.flatMap((node): PhrasingContent[] => {
+    if (TextApi.isText(node)) {
+      let result: PhrasingContent = node.code
+        ? { type: "inlineCode", value: node.text }
+        : { type: "text", value: node.text };
+      if (node.bold) result = { type: "strong", children: [result] };
+      if (node.italic) result = { type: "emphasis", children: [result] };
+      if (node.strikethrough) result = { type: "delete", children: [result] };
+      return [result];
+    }
+    if (node.type === "br") return [{ type: "break" }];
+    if (node.type === "a")
+      return [
+        {
+          type: "link",
+          url: String(node.url ?? ""),
+          title: String(node.title ?? "") || null,
+          children: phrasing(node.children),
+        },
+      ];
+    return phrasing(node.children);
+  });
+}
+
+function block(node: TElement, diagrams: string[]): RootContent {
+  const children = () =>
+    node.children
+      .filter((child): child is TElement => !TextApi.isText(child))
+      .map((child) => block(child, diagrams));
+  if (/^h[1-6]$/.test(node.type))
+    return {
+      type: "heading",
+      depth: Number(node.type[1]) as 1 | 2 | 3 | 4 | 5 | 6,
+      children: phrasing(node.children),
+    };
+  switch (node.type) {
+    case "blockquote":
+      return {
+        type: "blockquote",
+        children: children() as import("mdast").BlockContent[],
+      };
+    case "ul":
+    case "taskList":
+    case "ol":
+      return {
+        type: "list",
+        ordered: node.type === "ol",
+        start: node.type === "ol" ? Number(node.start ?? 1) : null,
+        spread: false,
+        children: children() as import("mdast").ListItem[],
+      };
+    case "li":
+      return {
+        type: "listItem",
+        checked: typeof node.checked === "boolean" ? node.checked : null,
+        spread: false,
+        children: children() as import("mdast").BlockContent[],
+      };
+    case "code_block":
+      return {
+        type: "code",
+        lang: String(node.lang ?? "") || null,
+        value: node.children
+          .map((child) =>
+            TextApi.isText(child)
+              ? child.text
+              : child.children
+                  .map((leaf) => (TextApi.isText(leaf) ? leaf.text : ""))
+                  .join(""),
+          )
+          .join("\n"),
+      };
+    case "mermaid": {
+      const index = diagrams.push(String(node.source ?? "")) - 1;
+      return {
+        type: "code",
+        lang: "mermaid",
+        value: `TICKETD_DIAGRAM_${index}_SOURCE`,
+      };
+    }
+    case "hr":
+      return { type: "thematicBreak" };
+    case "table":
+      return {
+        type: "table",
+        align: Array.isArray(node.align) ? node.align : [],
+        children: node.children
+          .filter((child): child is TElement => !TextApi.isText(child))
+          .map((row) => ({
+            type: "tableRow",
+            children: row.children
+              .filter((child): child is TElement => !TextApi.isText(child))
+              .map((cell) => ({
+                type: "tableCell",
+                children: phrasing(cell.children),
+              })),
+          })),
+      };
+    default:
+      return { type: "paragraph", children: phrasing(node.children) };
+  }
+}
+
+/** The sole rich-to-storage boundary: emits CommonMark/GFM, never editor JSON/MDX. */
+export function writeMarkdown(value: Value): string {
+  const diagrams: string[] = [];
+  const tree: Root = {
+    type: "root",
+    children: value.map((node) => block(node, diagrams)),
+  };
+  let result = processor.stringify(tree);
+  diagrams.forEach((source, index) => {
+    const longest = Math.max(
+      2,
+      ...Array.from(source.matchAll(/`+/g), (match) => match[0].length),
+    );
+    const fence = "`".repeat(longest + 1);
+    result = result.replace(
+      `\`\`\`mermaid\nTICKETD_DIAGRAM_${index}_SOURCE\n\`\`\``,
+      `${fence}mermaid\n${source}\n${fence}`,
+    );
+  });
+  return result;
+}
+
+export function readMarkdown(source: string) {
+  const tree = processor.parse(source);
+  const reasons = new Set<string>();
+  scan(tree, reasons);
+  const value: Value = tree.children
+    .map((node) => convert(node, source))
+    .filter((node): node is TElement => !TextApi.isText(node));
+  if (!value.length) value.push({ type: "p", children: [{ text: "" }] });
+  const originalMeaning = meaning(tree);
+  if (
+    !reasons.size &&
+    source.trim() &&
+    JSON.stringify(meaning(processor.parse(writeMarkdown(value)))) !==
+      JSON.stringify(originalMeaning)
+  ) {
+    reasons.add(
+      "This Markdown cannot be converted faithfully yet. Edit its source to preserve all content.",
+    );
+  }
+  return { value, reasons: [...reasons], meaning: originalMeaning };
+}
