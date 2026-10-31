@@ -2832,3 +2832,60 @@ fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
     ws.write(Some("new-occurrence"), request()).unwrap();
     assert_eq!(ws.inbox(100, 0).unwrap().len(), 2);
 }
+
+#[test]
+fn sidebar_counts_follow_readiness_rules_and_unread_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let set = |w: &mut Workspace, reference: &str, status: Status| {
+        w.change_ticket(
+            reference,
+            TicketPatch {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    };
+    let blocker = w.create_ticket("Blocker").unwrap();
+    let blocked = w.create_ticket("Blocked").unwrap();
+    let canceled_blocker = w.create_ticket("Canceled blocker").unwrap();
+    let after_canceled = w.create_ticket("After canceled").unwrap();
+    let trashed = w.create_ticket("Trashed").unwrap();
+    let active = w.create_ticket("Active").unwrap();
+    let trashed_active = w.create_ticket("Trashed active").unwrap();
+    w.add_dependency(&blocker.reference, &blocked.reference, None)
+        .unwrap();
+    w.add_dependency(&canceled_blocker.reference, &after_canceled.reference, None)
+        .unwrap();
+    set(&mut w, &canceled_blocker.reference, Status::Canceled);
+    set(&mut w, &active.reference, Status::InProgress);
+    set(&mut w, &trashed_active.reference, Status::InProgress);
+    w.set_trashed(&trashed.reference, true, None).unwrap();
+    w.set_trashed(&trashed_active.reference, true, None)
+        .unwrap();
+    // Only the unblocked Todo "Blocker" is Ready: "Blocked" waits for it, only Done
+    // satisfies a dependency (so "After canceled" stays blocked), trashed tickets are excluded.
+    let counts = w.sidebar_counts().unwrap();
+    assert_eq!((counts.ready, counts.in_progress), (1, 1));
+    assert_eq!(counts.unread_inbox, 0);
+
+    // Finishing the blocker removes it from Ready and releases "Blocked".
+    set(&mut w, &blocker.reference, Status::Done);
+    assert_eq!(w.sidebar_counts().unwrap().ready, 1);
+
+    w.set_following(&active.reference, true).unwrap();
+    set(&mut w, &active.reference, Status::InReview);
+    set(&mut w, &active.reference, Status::Done);
+    let counts = w.sidebar_counts().unwrap();
+    assert_eq!(counts.unread_inbox, 2);
+    assert_eq!(counts.in_progress, 0);
+    let ids: Vec<i64> = w
+        .inbox(100, 0)
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    w.set_inbox_read(&ids, true).unwrap();
+    assert_eq!(w.sidebar_counts().unwrap().unread_inbox, 0);
+}

@@ -3,7 +3,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 // A stable scope for the one local person, independent of editing attribution.
-const LOCAL_PERSON: &str = "local-person";
+pub(crate) const LOCAL_PERSON: &str = "local-person";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxEntry {

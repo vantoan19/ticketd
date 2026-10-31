@@ -37,6 +37,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod history;
+mod counts;
+pub use counts::SidebarCounts;
 mod inbox;
 pub use inbox::InboxEntry;
 mod notes;

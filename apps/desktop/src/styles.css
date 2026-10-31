@@ -530,6 +530,15 @@
 .sidebar-nav button svg {
   flex: none;
 }
+.sidebar-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
 .sidebar-nav button:hover {
   background: var(--recessed);
   color: var(--foreground);

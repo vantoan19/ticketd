@@ -101,9 +101,9 @@ try {
     `Native finding referencing ${target.reference}`,
   );
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 12000 });
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
     await browser.$("p*=New note: Native finding")
   ).waitForDisplayed({ timeout: 12000 });
@@ -113,7 +113,7 @@ try {
     "Inbox entries were not marked read",
   );
   await waitFor(
-    async () => !(await browser.$('[aria-label="Inbox, unread"]').isExisting()),
+    async () => !(await browser.$('[aria-label^="Inbox,"]').isExisting()),
     "Unread indicator did not clear",
   );
   await click(
@@ -152,13 +152,13 @@ try {
   await browser.keys("Escape");
   await click(await browser.$('[aria-label="Manage projects"]'));
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 75000, interval: 250 });
   assert.equal(
     run("inbox").filter((item) => item.kind === "reminder").length,
     1,
   );
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
     await browser.$("p*=Reminder due")
   ).waitForDisplayed({ timeout: 10000 });
@@ -178,9 +178,9 @@ try {
   );
   browser = await connect();
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 15000 });
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   assert.equal(
     run("inbox").filter((item) => item.kind === "reminder").length,
     2,
