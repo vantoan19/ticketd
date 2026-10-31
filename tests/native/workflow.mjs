@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { remote } from "webdriverio";
 
@@ -83,13 +83,16 @@ const browser = await remote({
   logLevel: "error",
   capabilities: { "tauri:options": { application } },
 });
+const detail = () =>
+  browser.$('section[aria-labelledby="detail-heading"] > div:not([hidden])');
 try {
   const row = await browser.$(
     "button*=Exercise installed desktop and CLI together",
   );
   await row.waitForDisplayed({ timeout: 15000 });
   await row.click();
-  const title = await browser.$("label=Title").$("input");
+  await (await detail()).waitForDisplayed({ timeout: 10000 });
+  const title = await (await detail()).$("label=Title").$("input");
   await title.waitForDisplayed();
   await title.click();
   await browser.keys(["End"]);
@@ -98,7 +101,7 @@ try {
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
-  const editor = await browser.$(".cm-content");
+  const editor = await (await detail()).$(".cm-content");
   await editor.click();
   await browser.keys(["End"]);
   await browser.keys(" Reviewed in desktop.");
@@ -115,14 +118,15 @@ try {
   );
   await search.clearValue();
   const graphNode = await (
-    await browser.$('[aria-label="Graph tickets"]')
+    await (await detail()).$('[aria-label="Graph tickets"]')
   ).$(`button*=${evidence.reference}`);
   await graphNode.waitForDisplayed({ timeout: 10000 });
   await graphNode.click();
   await browser.waitUntil(
     async () =>
-      (await (await browser.$("label=Title").$("input")).getValue()) ===
-      evidence.title,
+      (await (
+        await (await detail()).$("label=Title").$("input")
+      ).getValue()) === evidence.title,
   );
   console.log(
     "Desktop review: keyboard title and Markdown edits, search, mouse graph navigation",
@@ -171,10 +175,10 @@ try {
       ).includes("Ready"),
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
-  await (await browser.$("button=Move to trash")).click();
+  await (await (await detail()).$("button=Move to trash")).click();
   await (await browser.$("button=Show trash")).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
-  await (await browser.$("button=Restore")).click();
+  await (await (await detail()).$("button=Restore")).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,
@@ -183,6 +187,17 @@ try {
   console.log(
     "External status and note updates refreshed; trash/restore retained hierarchy",
   );
+} catch (error) {
+  try {
+    writeFileSync("native-failure.html", await browser.getPageSource());
+    await browser.saveScreenshot("native-failure.png");
+  } catch (diagnosticError) {
+    console.error(
+      "Could not capture native failure diagnostics",
+      diagnosticError,
+    );
+  }
+  throw error;
 } finally {
   await browser.deleteSession();
 }

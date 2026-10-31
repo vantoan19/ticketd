@@ -76,7 +76,15 @@ jobs:
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/refresh.mjs'
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: native-smoke-diagnostics
+          path: native-failure.*
+          if-no-files-found: ignore
+          retention-days: 7
 
   distribution:
     if: github.event_name == 'workflow_dispatch' && inputs.distribution
@@ -119,9 +127,17 @@ jobs:
           export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs && XDG_DATA_HOME="$XDG_DATA_HOME/workflow" node tests/native/workflow.mjs'
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'
+          XDG_DATA_HOME="$XDG_DATA_HOME/workflow" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/workflow.mjs'
           sudo apt-get remove -y "$package"
           "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: installed-workflow-diagnostics
+          path: native-failure.*
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Assemble download
         run: |
           mkdir -p distribution

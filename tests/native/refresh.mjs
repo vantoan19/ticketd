@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { remote } from "webdriverio";
 
@@ -17,6 +18,8 @@ const browser = await remote({
   },
 });
 
+const detail = () =>
+  browser.$('section[aria-labelledby="detail-heading"] > div:not([hidden])');
 try {
   const empty = await browser.$("p=No tickets match the active filters.");
   await empty.waitForDisplayed({ timeout: 15000 });
@@ -26,7 +29,8 @@ try {
   await row.waitForDisplayed({ timeout: 10000, interval: 100 });
   console.log(`CLI creation appeared after ${Date.now() - started} ms`);
   await row.click();
-  const title = await browser.$("label=Title").$("input");
+  await (await detail()).waitForDisplayed({ timeout: 10000 });
+  const title = await (await detail()).$("label=Title").$("input");
   await title.waitForDisplayed();
   runCli("change", ticket.reference, "--title", "Changed by CLI");
   const changed = Date.now();
@@ -109,18 +113,20 @@ try {
   await (await browser.$("button*=Benchmark ticket 999")).click();
   await browser.waitUntil(
     async () =>
-      (await (await browser.$("label=Title").$("input")).getValue()) ===
-      "Benchmark ticket 999",
+      (await (
+        await (await detail()).$("label=Title").$("input")
+      ).getValue()) === "Benchmark ticket 999",
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);
   await browser.waitUntil(
     async () =>
-      (await browser.$$("[aria-label='Graph tickets'] li")).length === 50,
+      (await (await detail()).$$("[aria-label='Graph tickets'] li")).length ===
+      50,
     { timeout: 15000 },
   );
   console.log(`50-node graph loading and layout: ${Date.now() - clock} ms`);
-  const pane = await browser.$(".react-flow__pane");
-  const viewport = await browser.$(".react-flow__viewport");
+  const pane = await (await detail()).$(".react-flow__pane");
+  const viewport = await (await detail()).$(".react-flow__viewport");
   const beforePan = await viewport.getCSSProperty("transform");
   clock = Date.now();
   const paneSize = await pane.getSize();
@@ -142,6 +148,17 @@ try {
   console.log(
     `Graph pan gesture: ${Date.now() - clock} ms (includes 300 ms gesture)`,
   );
+} catch (error) {
+  try {
+    writeFileSync("native-failure.html", await browser.getPageSource());
+    await browser.saveScreenshot("native-failure.png");
+  } catch (diagnosticError) {
+    console.error(
+      "Could not capture native failure diagnostics",
+      diagnosticError,
+    );
+  }
+  throw error;
 } finally {
   await browser.deleteSession();
 }
