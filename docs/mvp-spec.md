@@ -398,7 +398,8 @@ These are draft verification criteria for review, not individually approved requ
 - Plugin system, custom workflow engine, vector database, and MCP server.
 - Project archiving, permanent ticket/project deletion, full ticket body revision history, and record-version conflict detection.
 
-These are possible future directions, not a committed roadmap.
+These exclusions apply to the initial MVP. Section 15 records agreed product
+extensions and future integration intent; it does not commit delivery dates.
 
 ## 14. Open decisions
 
@@ -406,3 +407,99 @@ These are possible future directions, not a committed roadmap.
 | --------------------- | -------------------------------------------------------------- |
 | MVP success criterion | Complete one real project through the workflow in section 12   |
 | Performance budgets   | Establish after measuring a representative dataset and machine |
+
+## 15. Agreed product extensions
+
+The priority remains completing and validating the existing person-and-agent
+workflow. The following extensions describe agreed product direction; detailed
+behavior still requires design before implementation.
+
+### 15.1. Attention inbox
+
+- People explicitly follow tickets to receive changes in an attention inbox.
+- Include new notes, status changes, and relationship changes on followed tickets.
+- Support read/unread state and navigation to the relevant change.
+- Following and inbox read state are personal preferences. Shared ticket changes
+  must not overwrite another person's preferences when multiple users are
+  supported. The initial local workspace serves one person without requiring
+  accounts.
+
+### 15.2. Ticket references and contextual relationships
+
+- Ticket references in descriptions and notes are clickable.
+- Show incoming backlinks with the passage containing each reference.
+- Support explicit Related to and Discovered while working on relationships.
+- These contextual relationships do not affect readiness or imply hierarchy.
+
+### 15.3. Bulk editing
+
+- People can select tickets and change status, project, or Effort, and add/remove
+  tags across the selection.
+- Show the selection count clearly.
+- Apply each bulk edit atomically: every selected ticket changes successfully or
+  none does.
+
+### 15.4. Reminders
+
+- Support one reminder per person per ticket, with reschedule, snooze, and dismiss.
+- Reminders are personal preferences; shared ticket changes do not replace
+  another person's reminder.
+- Reminders bring tickets back to attention without changing status or readiness.
+- Due reminders appear while the desktop is running. Reminders missed while it
+  was closed appear when it next opens; background delivery is not required.
+
+### 15.5. Duplicate handling
+
+- Preserve a duplicate ticket's identity, content, and history, and link it to its
+  canonical ticket.
+- Marking a duplicate sets it to Canceled and presents its duplicate relationship
+  explicitly, for example, Canceled · Duplicate of T-10.
+- Review affected blocking dependencies when marking a duplicate. Show proposed
+  replacements and apply the agreed changes atomically with cycle validation.
+- Cancellation alone never satisfies a prerequisite. For example, if T-30 is
+  blocked by T-20 and T-20 duplicates T-10, replacing T-20 with T-10 as the blocker
+  makes T-30's readiness depend on T-10's completion.
+- Duplicate identity is separate from status so future integrations can preserve
+  the relationship across platforms with different closure conventions.
+- Removing the duplicate designation restores the status held before duplicate
+  marking, following [Linear's documented undo behavior](https://linear.app/changelog/2026-06-18-agent-assisted-project-updates).
+  If the status has since been changed independently, preserve that newer choice.
+  Reversing dependency replacements requires a separate review of the current
+  graph; undo does not silently revert later work.
+- Each duplicate points directly to one canonical ticket, following
+  [YouTrack's consolidation behavior](https://www.jetbrains.com/help/youtrack/server/workflow-duplicates.html).
+  If A duplicates B and B is then marked as duplicating C, both A and B point to C.
+  Reject self-links and duplicate cycles. Record consolidation and undo in ticket
+  history.
+
+### 15.6. Implementation evidence
+
+- People and agents can attach named evidence through the desktop and CLI:
+  pull request URLs, commits, branches, worktree paths, and verification results.
+- The first version uses explicit attachments. Live platform synchronization is
+  a separate future capability.
+
+### 15.7. Future platform synchronization
+
+Future synchronization with external work trackers is an intended direction.
+Design these extensions with compatible meanings and preserve enough information
+to distinguish duplicate closure from completion or ordinary cancellation.
+Platforms differ, so exact status mappings, unsupported relationships, conflict
+handling, and synchronization behavior require explicit integration design.
+
+In particular, the current official documentation describes different duplicate
+conventions:
+
+- [GitHub](https://docs.github.com/en/issues/tracking-your-work-with-issues/administering-issues/marking-issues-or-pull-requests-as-a-duplicate)
+  records a duplicate reference and a reversible timeline event.
+- [GitLab](https://docs.gitlab.com/user/project/quick_actions/) closes the item and
+  marks it as related to, and a duplicate of, the selected item.
+- [Linear's issue properties](https://linear.app/docs/issue-property) describe a
+  reserved Duplicate status, while its [triage documentation](https://linear.app/docs/triage)
+  describes a Canceled status type. Resolve this documentation inconsistency
+  against the actual API when designing that integration.
+- [YouTrack's default duplicate workflow](https://www.jetbrains.com/help/youtrack/server/workflow-duplicates.html)
+  uses a Duplicate state and consolidates duplicate links onto a single original.
+
+These sources do not establish a common automatic dependency-transfer rule.
+Ticketd's reviewed dependency replacement is its own explicit behavior.

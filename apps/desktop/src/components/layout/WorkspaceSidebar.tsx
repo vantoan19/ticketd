@@ -21,10 +21,12 @@ import {
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/api/client";
 import type { RefObject } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
-type View = "tickets" | "projects" | "efforts" | "settings";
+type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export function WorkspaceSidebar({
   view,
+  unread,
   setView,
   projects,
   efforts,
@@ -39,6 +41,7 @@ export function WorkspaceSidebar({
     effort: string;
   };
   view: View;
+  unread: boolean;
   setView: (view: View) => void;
   filter: string;
   effort: string;
@@ -55,37 +58,53 @@ export function WorkspaceSidebar({
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
+  const isMobile = useIsMobile();
   return (
-    <Sidebar collapsible="none" className="sidebar">
+    <Sidebar
+      collapsible={isMobile ? "offcanvas" : "none"}
+      className="sidebar"
+      closeOnAction
+    >
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <span className="brand-mark">◈</span>
           <strong>ticketd</strong>
-          <span className="brand-label">WORKSPACE</span>
+
+          <Button
+            className="new-ticket"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="New ticket"
+            title="New ticket"
+            onClick={(event) => {
+              createTriggerRef.current = event.currentTarget;
+              setView("tickets");
+              setCreating(true);
+            }}
+          >
+            <Plus />
+          </Button>
         </div>
-        <Button
-          className="new-ticket"
-          onClick={(event) => {
-            createTriggerRef.current = event.currentTarget;
-            setView("tickets");
-            setCreating(true);
-          }}
-        >
-          <Plus size={16} /> New ticket
-        </Button>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
+                isActive={view === "inbox"}
+                onClick={() => setView("inbox")}
+              >
+                <Inbox size={16} /> Attention inbox{" "}
+                {unread && <span aria-label="Unread attention">●</span>}
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={
                   navigation.kind === "all" &&
                   navigation.project === "all" &&
                   !navigation.effort &&
                   view === "tickets"
-                    ? "active"
-                    : ""
                 }
                 onClick={() => scope("all")}
               >
@@ -94,11 +113,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "ready" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "ready" && view === "tickets"}
                 onClick={() => scope("ready")}
               >
                 <CheckCircle2 size={16} /> Ready
@@ -106,11 +121,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "progress" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "progress" && view === "tickets"}
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
@@ -118,11 +129,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "trash" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "trash" && view === "tickets"}
                 onClick={() => scope("trash")}
               >
                 <Trash2 size={16} /> Trash
@@ -145,10 +152,8 @@ export function WorkspaceSidebar({
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className={
+                    isActive={
                       navigation.project === "unlinked" && view === "tickets"
-                        ? "active"
-                        : ""
                     }
                     onClick={() => scope("all", "unlinked")}
                   >
@@ -161,10 +166,8 @@ export function WorkspaceSidebar({
                       aria-pressed={
                         navigation.project === p.id && view === "tickets"
                       }
-                      className={
+                      isActive={
                         navigation.project === p.id && view === "tickets"
-                          ? "active"
-                          : ""
                       }
                       onClick={() => scope("all", p.id)}
                     >
@@ -192,10 +195,8 @@ export function WorkspaceSidebar({
                   .map((e) => (
                     <SidebarMenuItem key={e.id}>
                       <SidebarMenuButton
-                        className={
+                        isActive={
                           navigation.effort === e.id && view === "tickets"
-                            ? "active"
-                            : ""
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >

@@ -22,6 +22,8 @@ const ticketSchema = z.object({
       trashed: z.boolean(),
     }),
   ),
+  duplicate_of: z.string().nullable().optional(),
+  duplicates: z.array(z.string()).optional(),
   prerequisites: z.array(
     z.object({
       reference: z.string(),
@@ -48,6 +50,23 @@ const graphSchema = z.object({
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
+const dependencyEdgeSchema = z.object({
+  blocker: z.string(),
+  dependent: z.string(),
+  replacement_blocker: z.string(),
+  replacement_dependent: z.string(),
+});
+const duplicatePreviewSchema = z.object({
+  canonical: z.string(),
+  edges: z.array(dependencyEdgeSchema),
+});
+export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>;
+export type DuplicatePreview = z.infer<typeof duplicatePreviewSchema>;
+export type DependencyDecision = {
+  edge: DependencyEdge;
+  choice: "replace" | "remove" | "retain";
+};
+
 const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -62,6 +81,26 @@ const noteSchema = z.object({
   updated_at: z.string(),
   editing_agent: z.string().nullable(),
 });
+const evidenceSchema = z.object({
+  id: z.string(),
+  kind: z.enum([
+    "pull_request",
+    "commit",
+    "branch",
+    "worktree",
+    "verification",
+  ]),
+  name: z.string(),
+  value: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  editing_agent: z.string().nullable(),
+});
+export type Evidence = z.infer<typeof evidenceSchema>;
+export type EvidenceInput = Pick<
+  Evidence,
+  "kind" | "name" | "value" | "editing_agent"
+>;
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export type FindFilter = {
@@ -76,7 +115,115 @@ export type FindFilter = {
   limit: number;
   offset: number;
 };
+export type BulkChange = {
+  project_id?: string | null;
+  effort_id?: string | null;
+  add_tags?: string[];
+  remove_tags?: string[];
+};
 export const client = {
+  async bulkChange(
+    references: string[],
+    change: BulkChange,
+    requestId: string,
+  ) {
+    return z
+      .array(ticketSchema)
+      .parse(await invoke("bulk_change", { references, change, requestId }));
+  },
+  async contextualRelationships(reference: string, offset = 0) {
+    const item = z.object({
+      reference: z.string(),
+      title: z.object({ text: z.string() }),
+      status: z.string(),
+      trashed: z.boolean(),
+    });
+    const page = z.object({
+      items: z.array(item),
+      next_offset: z.number().nullable(),
+    });
+    return z
+      .object({
+        relationships: z.object({
+          related: page,
+          discovered_while: page,
+          discoveries: page,
+        }),
+      })
+      .parse(await invoke("contextual_relationships", { reference, offset }))
+      .relationships;
+  },
+  async changeContextualRelationship(
+    source: string,
+    target: string,
+    kind: "related" | "discovered",
+    add: boolean,
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("change_contextual_relationship", {
+        source,
+        target,
+        kind,
+        add,
+        requestId,
+      }),
+    );
+  },
+  async bulkStatus(references: string[], status: string, requestId: string) {
+    return z
+      .array(ticketSchema)
+      .parse(await invoke("bulk_status", { references, status, requestId }));
+  },
+  async previewDuplicate(source: string, canonical: string) {
+    return duplicatePreviewSchema.parse(
+      await invoke("preview_duplicate_dependencies", { source, canonical }),
+    );
+  },
+  async markDuplicateReviewed(
+    source: string,
+    canonical: string,
+    expectedCanonical: string,
+    decisions: DependencyDecision[],
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("mark_duplicate_reviewed", {
+        source,
+        canonical,
+        expectedCanonical,
+        decisions,
+        requestId,
+      }),
+    );
+  },
+  async editDependenciesReviewed(
+    source: string,
+    canonical: string,
+    expectedCanonical: string,
+    decisions: DependencyDecision[],
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("edit_dependencies_reviewed", {
+        source,
+        canonical,
+        expectedCanonical,
+        decisions,
+        requestId,
+      }),
+    );
+  },
+  async markDuplicate(source: string, canonical: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("mark_duplicate", { source, canonical, requestId }),
+    );
+  },
+  async removeDuplicate(source: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("remove_duplicate", { source, requestId }),
+    );
+  },
   async changeDependency(
     command: "add_dependency" | "remove_dependency",
     blocker: string,
@@ -135,10 +282,56 @@ export const client = {
       await invoke("edit_project", { id, name, path }),
     );
   },
+  async evidence(reference: string, offset: number) {
+    return z
+      .array(evidenceSchema)
+      .parse(await invoke("list_evidence", { reference, offset }));
+  },
+  async addEvidence(
+    reference: string,
+    input: EvidenceInput,
+    requestId: string,
+  ) {
+    return evidenceSchema.parse(
+      await invoke("add_evidence", { reference, input, requestId }),
+    );
+  },
+  async editEvidence(
+    reference: string,
+    id: string,
+    input: EvidenceInput,
+    requestId: string,
+  ) {
+    return evidenceSchema.parse(
+      await invoke("edit_evidence", { reference, id, input, requestId }),
+    );
+  },
+  async deleteEvidence(reference: string, id: string, requestId: string) {
+    await invoke("delete_evidence", { reference, id, requestId });
+  },
+  async backlinks(reference: string, offset: number) {
+    return z
+      .array(
+        z.object({
+          source_reference: z.string(),
+          source_title: z.string(),
+          note_id: z.string().nullable(),
+          passage: z.string(),
+        }),
+      )
+      .parse(
+        await invoke("ticket_backlinks", { reference, limit: 20, offset }),
+      );
+  },
   async notes(reference: string, offset: number) {
     return z
       .array(noteSchema)
       .parse(await invoke("list_notes", { reference, limit: 50, offset }));
+  },
+  async note(reference: string, id: string) {
+    return noteSchema
+      .nullable()
+      .parse(await invoke("get_note", { reference, id }));
   },
   async addNote(reference: string, content: string) {
     return noteSchema.parse(await invoke("add_note", { reference, content }));

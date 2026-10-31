@@ -115,3 +115,13 @@ matches. Results exclude trash and are ordered by descending ticket reference.
 Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
 or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
+
+Contextual links can be added with `ticketd add-relationship T-1 T-2 related`
+or `ticketd add-relationship T-1 T-2 discovered`. For discovery, the first
+ticket is the work during which the second was discovered. Use
+`remove-relationship` with the same arguments to detach a link. Related links
+are symmetric; neither kind affects readiness. `context --relationships`
+returns bounded pages of related tickets, discoveries, and their sources.
+The JSON export includes `contextual_relationships` records. Backups retain
+these links and retry outcomes; personal preferences remain scoped to
+`local-person`, independently of editing-agent attribution.

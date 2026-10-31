@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Effort, Error, Note, NotePatch, Project, Ticket, TicketChange, TicketPatch,
-    Workspace,
+    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project,
+    RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    AddEvidence {
+        reference: String,
+        input: EvidenceInput,
+    },
+    EditEvidence {
+        reference: String,
+        id: String,
+        input: EvidenceInput,
+    },
+    DeleteEvidence {
+        reference: String,
+        id: String,
+    },
+    SetReminder {
+        reference: String,
+        due_at: Option<String>,
+    },
+    SetFollowing {
+        reference: String,
+        following: bool,
+    },
+    SetInboxRead {
+        ids: Vec<i64>,
+        read: bool,
+    },
     CreateTicket {
         title: String,
         project_id: Option<String>,
@@ -53,6 +78,41 @@ pub enum WriteRequest {
     RemoveTag {
         reference: String,
         name: String,
+    },
+    MarkDuplicate {
+        source: String,
+        canonical: String,
+        agent: Option<String>,
+    },
+    MarkDuplicateReviewed {
+        source: String,
+        canonical: String,
+        expected_canonical: String,
+        decisions: Vec<crate::DependencyDecision>,
+        agent: Option<String>,
+    },
+    EditDependenciesReviewed {
+        source: String,
+        canonical: String,
+        expected_canonical: String,
+        decisions: Vec<crate::DependencyDecision>,
+        agent: Option<String>,
+    },
+    RemoveDuplicate {
+        source: String,
+        agent: Option<String>,
+    },
+    AddContextualRelationship {
+        source: String,
+        target: String,
+        kind: RelationshipKind,
+        agent: Option<String>,
+    },
+    RemoveContextualRelationship {
+        source: String,
+        target: String,
+        kind: RelationshipKind,
+        agent: Option<String>,
     },
     AddDependency {
         blocker: String,
@@ -107,10 +167,13 @@ pub enum WriteRequest {
 }
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+// Results are owned at the public boundary; boxing tickets would complicate every caller.
+#[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
     Note(Note),
+    Evidence(Evidence),
     Project(Project),
     Effort(Effort),
     Deleted,
@@ -168,6 +231,33 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::AddEvidence { reference, input } => {
+                WriteResult::Evidence(self.add_evidence(&reference, input)?)
+            }
+            WriteRequest::EditEvidence {
+                reference,
+                id,
+                input,
+            } => WriteResult::Evidence(self.edit_evidence(&reference, &id, input)?),
+            WriteRequest::DeleteEvidence { reference, id } => {
+                self.delete_evidence(&reference, &id)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetReminder { reference, due_at } => {
+                self.set_reminder(&reference, due_at.as_deref())?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetFollowing {
+                reference,
+                following,
+            } => {
+                self.set_following(&reference, following)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetInboxRead { ids, read } => {
+                self.set_inbox_read(&ids, read)?;
+                WriteResult::Deleted
+            }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)
             }
@@ -205,6 +295,62 @@ impl Workspace {
             WriteRequest::RemoveTag { reference, name } => {
                 WriteResult::Ticket(self.remove_tag(&reference, &name)?)
             }
+            WriteRequest::MarkDuplicate {
+                source,
+                canonical,
+                agent,
+            } => WriteResult::Ticket(self.mark_duplicate(&source, &canonical, agent.as_deref())?),
+            WriteRequest::MarkDuplicateReviewed {
+                source,
+                canonical,
+                expected_canonical,
+                decisions,
+                agent,
+            } => WriteResult::Ticket(self.mark_duplicate_reviewed(
+                &source,
+                &canonical,
+                &expected_canonical,
+                decisions,
+                agent.as_deref(),
+            )?),
+            WriteRequest::EditDependenciesReviewed {
+                source,
+                canonical,
+                expected_canonical,
+                decisions,
+                agent,
+            } => WriteResult::Ticket(self.edit_dependencies_reviewed(
+                &source,
+                &canonical,
+                &expected_canonical,
+                decisions,
+                agent.as_deref(),
+            )?),
+            WriteRequest::RemoveDuplicate { source, agent } => {
+                WriteResult::Ticket(self.remove_duplicate(&source, agent.as_deref())?)
+            }
+            WriteRequest::AddContextualRelationship {
+                source,
+                target,
+                kind,
+                agent,
+            } => WriteResult::Ticket(self.add_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?),
+            WriteRequest::RemoveContextualRelationship {
+                source,
+                target,
+                kind,
+                agent,
+            } => WriteResult::Ticket(self.remove_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?),
             WriteRequest::AddDependency {
                 blocker,
                 dependent,

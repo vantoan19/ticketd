@@ -75,3 +75,30 @@ A checkable item within a ticket's Markdown content, without independent status 
 
 **Tag**:
 A label from a shared workspace vocabulary used to classify tickets across projects and Efforts. A ticket may have multiple tags independently of its other relationships.
+
+**Followed ticket**:
+A ticket a person has explicitly selected to receive changes about in their attention inbox. Following is personal to that person.
+
+**Attention inbox**:
+The person's collection of changes on followed tickets, with read and unread state.
+
+**Ticket backlink**:
+An incoming reference from another ticket's description or note, including the passage containing the reference.
+
+**Related tickets**:
+Tickets connected by shared context without implying a blocking dependency or parent/subticket relationship.
+
+**Discovery relationship**:
+A directed relationship recording that a ticket was discovered while working on another ticket. It does not affect readiness.
+
+**Ticket reminder**:
+A person's request to bring a ticket back to their attention at a chosen time, independent of its status and readiness.
+
+**Duplicate ticket**:
+A ticket recognized as describing the same intended outcome as a canonical ticket, with its own identity and history preserved.
+
+**Canonical ticket**:
+The ticket selected to represent an intended outcome shared by duplicate tickets. It is the direct destination of those duplicate relationships and is not itself a duplicate.
+
+**Implementation evidence**:
+Named material associated with a ticket that locates its implementation or records verification, such as a pull request, commit, branch, worktree, or verification result.

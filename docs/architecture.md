@@ -94,3 +94,37 @@ A future server may call the same core workflow interface. Cloud synchronization
 A caller that needs retries uses the core `write` workflow with a typed write request and optional request ID. The CLI exposes the same workflow as `ticketd write --request-id ID FILE` (use `-` for standard input). For example, `{"operation":"create_ticket","title":"Investigate","project_id":null}` creates a ticket, and `{"operation":"batch","operations":[...]}` applies a batch. Results contain a `kind` and `value` (the delete result has no value). Existing individual commands remain available without retry IDs.
 
 Request IDs share one workspace-wide namespace. Equality compares the serialized typed request, including its operation, exact strings, attribution, supplied patch fields, and ordered arrays. JSON object key order and whitespace do not matter; omitted optional fields and their default values compare equally, except that omitted patch fields and explicitly cleared fields remain distinct. A different request with the same ID fails even if its effect would happen to be equivalent. Failed requests are not retained and may be retried. Successful outcomes are retained indefinitely and replayed as originally returned.
+
+The JSON export includes `ticket_follows` and `inbox_entries`. Their `person`
+field is the stable `local-person` scope for the initial local person; it is a
+personal preference scope, not an account or editing-agent identity. Backups
+include these records and retained write outcomes.
+
+The CLI reads the newest personal entries with `ticketd inbox` (use `--limit`
+and `--offset` for bounded pages). Personal writes use the retryable `write`
+workflow: `set_following` takes a ticket `reference` and `following` boolean;
+`set_inbox_read` takes explicit entry `ids` and a `read` boolean. Supplying the
+IDs actually displayed avoids marking later arrivals read.
+
+To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
+T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
+with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
+with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
+optional agent. If the affected edges or resolved canonical change, preview again.
+For a separate graph edit after undo, preview the current endpoint against the
+replacement endpoint and submit the same fields with operation
+`edit_dependencies_reviewed`. Neither operation silently moves newly arrived
+edges; a retained canceled prerequisite remains unresolved.
+Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
+`ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
+Set and snooze take an RFC 3339 instant with an explicit offset; show displays
+local time and UTC. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+occurrences; reopening the inbox catches up after downtime without a daemon.
+
+Inbox entries for new notes retain the note ID and its original content in
+`from_value` and `to_value`; this snapshot remains meaningful after the note is
+edited or deleted. `editing_agent` is descriptive attribution. Relationship
+history kinds `parent`, `dependency`, and those prefixed `relationship:` also
+produce inbox entries for followed tickets, in the same transaction as the
+change. New relationship types use that prefix to participate.

@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1253,8 +1253,10 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     }).unwrap();
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id;")
-        .unwrap();
+    db.execute_batch(
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
+    )
+    .unwrap();
     drop(db);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
@@ -1313,4 +1315,1520 @@ fn tag_search_includes_unused_vocabulary_and_limits_results() {
     workspace.remove_tag(&ticket.reference, "bug").unwrap();
     assert_eq!(workspace.search_tags("bu", 1).unwrap(), vec!["bug"]);
     assert_eq!(workspace.search_tags("BUG", 50).unwrap(), vec!["bug"]);
+}
+
+#[test]
+fn followed_status_changes_persist_and_reading_a_snapshot_leaves_new_entries_unread() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Follow me").unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InReview),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let displayed = workspace.inbox(100, 0).unwrap();
+    assert_eq!(displayed.len(), 1);
+    assert_eq!(displayed[0].from_value, "In progress");
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.set_inbox_read(&[displayed[0].id], true).unwrap();
+    workspace.set_following(&ticket.reference, false).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Canceled),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(!entries[0].read);
+    assert!(entries[1].read);
+    assert!(!workspace.is_following(&ticket.reference).unwrap());
+}
+
+#[test]
+fn inbox_writes_replay_and_failed_batches_leave_no_events() {
+    use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace
+        .write(
+            Some("follow"),
+            WriteRequest::SetFollowing {
+                reference: ticket.reference.clone(),
+                following: true,
+            },
+        )
+        .unwrap();
+    let batch = vec![
+        BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                patch: TicketPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        },
+        BatchOperation::Change {
+            ticket: "T-9999".into(),
+            change: Box::new(TicketChange::default()),
+        },
+    ];
+    assert!(workspace.apply_batch(batch).is_err());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let id = workspace.inbox(100, 0).unwrap()[0].id;
+    workspace
+        .write(
+            Some("read"),
+            WriteRequest::SetInboxRead {
+                ids: vec![id],
+                read: true,
+            },
+        )
+        .unwrap();
+    workspace.set_inbox_read(&[id], false).unwrap();
+    workspace
+        .write(
+            Some("read"),
+            WriteRequest::SetInboxRead {
+                ids: vec![id],
+                read: true,
+            },
+        )
+        .unwrap();
+    assert!(!workspace.inbox(100, 0).unwrap()[0].read);
+}
+
+#[test]
+fn backup_restore_preserves_personal_inbox_and_follows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Backed up").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["ticket_follows"][0]["person"], "local-person");
+    assert_eq!(export["inbox_entries"][0]["to_value"], "Done");
+    workspace.backup(&backup).unwrap();
+    workspace.set_following(&ticket.reference, false).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.is_following(&ticket.reference).unwrap());
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn backlinks_follow_markdown_content_and_note_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "See {} here.\n\n`{}` and [link](https://example.com/{})",
+                    target.reference, target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let note = workspace
+        .add_note(
+            &source.reference,
+            &format!("A note about {}", target.reference),
+            None,
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].source_reference, source.reference);
+    assert_eq!(links[0].passage, "See T-1 here.");
+    assert_eq!(links[1].note_id.as_deref(), Some(note.id.as_str()));
+    workspace.delete_note(&source.reference, &note.id).unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn backlinks_ignore_fenced_code_and_reference_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "```\n{}\n```\n\n{}0",
+                    target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn backlink_pages_follow_edits_and_trash_visibility() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let first = workspace
+        .add_note(&source.reference, "T-1 first", None)
+        .unwrap();
+    workspace
+        .add_note(&source.reference, "T-1 second", None)
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 1, 1).unwrap()[0].passage,
+        "T-1 second"
+    );
+    workspace
+        .edit_note(
+            &source.reference,
+            &first.id,
+            ticketd_core::NotePatch {
+                content: Some("Changed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+    workspace
+        .set_trashed(&source.reference, true, None)
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn long_backlink_passage_keeps_the_reference_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!("{} T-1 context", "x".repeat(600))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert!(links[0].passage.contains("T-1"));
+    assert!(links[0].passage.chars().count() <= 512);
+}
+
+#[test]
+fn backlinks_recognize_escaped_markdown_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some("See T\\-1 and &#84;-1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].source_reference, source.reference);
+}
+
+#[test]
+fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
+    use ticketd_core::{BatchOperation, Status, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bulk.sqlite")).unwrap();
+    let first = workspace.create_ticket("First").unwrap();
+    let second = workspace.create_ticket("Second").unwrap();
+    workspace
+        .set_trashed(&second.reference, true, None)
+        .unwrap();
+    let before = workspace.ticket_history(&first.reference).unwrap();
+    let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"status":"Done"}},
+        {"operation":"change", "ticket":second.reference, "change":{"status":"Done"}}
+    ]))
+    .unwrap();
+    let error = workspace
+        .write(Some("bulk-failed"), WriteRequest::Batch { operations })
+        .unwrap_err();
+    assert!(error.to_string().contains("operation 1"));
+    assert_eq!(
+        workspace.show_ticket(&first.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(workspace.ticket_history(&first.reference).unwrap(), before);
+}
+
+#[test]
+fn followed_note_remains_understandable_after_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let note = workspace
+        .add_note(&ticket.reference, "Original finding", Some("agent"))
+        .unwrap();
+    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, "note");
+    assert_eq!(entries[0].from_value, note.id);
+    assert_eq!(entries[0].to_value, "Original finding");
+}
+
+#[test]
+fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
+    use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    let blocker = workspace.create_ticket("Blocker").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let request = || WriteRequest::Batch {
+        operations: vec![BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Batch note".into()],
+                add_blockers: vec![blocker.reference.clone()],
+                ..Default::default()
+            }),
+        }],
+    };
+    let failed = vec![
+        BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Rolled back".into()],
+                ..Default::default()
+            }),
+        },
+        BatchOperation::Change {
+            ticket: "T-9999".into(),
+            change: Box::new(TicketChange::default()),
+        },
+    ];
+    assert!(workspace.apply_batch(failed).is_err());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace.write(Some("batch"), request()).unwrap();
+    workspace.write(Some("batch"), request()).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "note" && e.to_value == "Batch note")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "dependency" && e.to_value == blocker.reference)
+    );
+}
+
+#[test]
+fn followed_relationship_endpoints_receive_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = workspace.create_ticket("Parent").unwrap();
+    let child = workspace.create_ticket("Child").unwrap();
+    workspace.set_following(&parent.reference, true).unwrap();
+    workspace
+        .set_parent(&child.reference, Some(&parent.reference), Some("agent"))
+        .unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].reference, parent.reference);
+    assert_eq!(entries[0].to_value, child.reference);
+    assert_eq!(entries[0].editing_agent.as_deref(), Some("agent"));
+}
+
+#[test]
+fn duplicate_consolidation_and_undo_preserve_original_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    workspace
+        .change_ticket(
+            &a.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .mark_duplicate(&a.reference, &b.reference, None)
+        .unwrap();
+    workspace
+        .mark_duplicate(&b.reference, &c.reference, None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&a.reference)
+            .unwrap()
+            .duplicate_of
+            .as_deref(),
+        Some(c.reference.as_str())
+    );
+    workspace.remove_duplicate(&a.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&a.reference).unwrap().status,
+        Status::InProgress
+    );
+}
+
+#[test]
+fn duplicate_rejects_dependencies_and_undo_respects_later_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .add_dependency(&source.reference, &target.reference, None)
+        .unwrap();
+    assert!(
+        workspace
+            .mark_duplicate(&source.reference, &target.reference, None)
+            .unwrap_err()
+            .to_string()
+            .contains("blocking dependencies")
+    );
+    workspace
+        .remove_dependency(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Done
+    );
+}
+
+#[test]
+fn duplicate_write_replay_does_not_undo_a_later_change() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let request = || WriteRequest::MarkDuplicate {
+        source: source.reference.clone(),
+        canonical: target.reference.clone(),
+        agent: None,
+    };
+    workspace
+        .write(Some("duplicate-request"), request())
+        .unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .write(Some("duplicate-request"), request())
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Done
+    );
+}
+
+#[test]
+fn concurrent_opposing_duplicate_marks_cannot_form_a_cycle() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [
+        (a.reference.clone(), b.reference.clone()),
+        (b.reference, a.reference),
+    ]
+    .into_iter()
+    .map(|(source, target)| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut workspace = Workspace::open(path).unwrap();
+            barrier.wait();
+            workspace.mark_duplicate(&source, &target, None).is_ok()
+        })
+    })
+    .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|success| *success)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn followed_duplicate_changes_appear_in_attention_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace.set_following(&source.reference, true).unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    let duplicate_events: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.kind == "relationship:duplicate")
+        .collect();
+    assert_eq!(duplicate_events.len(), 2);
+    assert_eq!(duplicate_events[0].from_value, target.reference);
+    assert_eq!(duplicate_events[1].to_value, target.reference);
+}
+
+#[test]
+fn duplicate_relationship_survives_export_and_backup_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["duplicate_tickets"][0]["source_id"], source.id);
+    assert_eq!(export["duplicate_tickets"][0]["canonical_id"], target.id);
+    workspace.backup(&backup).unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&source.reference)
+            .unwrap()
+            .duplicate_of,
+        Some(target.reference)
+    );
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+}
+
+#[test]
+fn named_evidence_survives_reopening_and_can_be_edited_and_removed() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    let input = EvidenceInput {
+        kind: EvidenceKind::Verification,
+        name: "Tests".into(),
+        value: "cargo test: passed".into(),
+        editing_agent: Some("agent".into()),
+    };
+    let evidence = workspace.add_evidence(&ticket.reference, input).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.evidence(&ticket.reference, 20, 0).unwrap(),
+        vec![evidence.clone()]
+    );
+    let revised = EvidenceInput {
+        kind: EvidenceKind::Branch,
+        name: "Branch".into(),
+        value: "feature/full-name".into(),
+        editing_agent: None,
+    };
+    let edited = workspace
+        .edit_evidence(&ticket.reference, &evidence.id, revised)
+        .unwrap();
+    assert_eq!(edited.value, "feature/full-name");
+    workspace
+        .delete_evidence(&ticket.reference, &evidence.id)
+        .unwrap();
+    assert!(
+        workspace
+            .evidence(&ticket.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn evidence_retry_context_export_and_trash_rules() {
+    use ticketd_core::{ContextOptions, EvidenceInput, EvidenceKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Check").unwrap();
+    let request = || WriteRequest::AddEvidence {
+        reference: ticket.reference.clone(),
+        input: EvidenceInput {
+            kind: EvidenceKind::Worktree,
+            name: "Checkout".into(),
+            value: "/missing/full/path".into(),
+            editing_agent: Some("agent".into()),
+        },
+    };
+    assert_eq!(
+        ws.write(Some("evidence-retry"), request()).unwrap(),
+        ws.write(Some("evidence-retry"), request()).unwrap()
+    );
+    assert_eq!(ws.evidence(&ticket.reference, 50, 0).unwrap().len(), 1);
+    let context = ws
+        .ticket_context(
+            &ticket.reference,
+            ContextOptions {
+                evidence: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        context.evidence.unwrap().items[0].value.text,
+        "/missing/full/path"
+    );
+    assert_eq!(
+        ws.export().unwrap()["evidence"][0]["editing_agent"],
+        "agent"
+    );
+    ws.set_trashed(&ticket.reference, true, None).unwrap();
+    assert!(ws.write(None, request()).is_err());
+    assert_eq!(ws.evidence(&ticket.reference, 50, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn backup_restores_evidence_and_its_retry_outcome() {
+    use ticketd_core::{EvidenceInput, EvidenceKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    let request = || WriteRequest::AddEvidence {
+        reference: ticket.reference.clone(),
+        input: EvidenceInput {
+            kind: EvidenceKind::Commit,
+            name: "Commit".into(),
+            value: "abcdef0123456789".into(),
+            editing_agent: None,
+        },
+    };
+    let original = ws.write(Some("save-evidence"), request()).unwrap();
+    ws.backup(&backup).unwrap();
+    drop(ws);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    assert_eq!(
+        ws.write(Some("save-evidence"), request()).unwrap(),
+        original
+    );
+    assert_eq!(
+        ws.evidence(&ticket.reference, 50, 0).unwrap()[0].value,
+        "abcdef0123456789"
+    );
+}
+
+#[test]
+fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    for (name, value) in [
+        ("", "https://example.com/pr/1"),
+        ("PR", "https://"),
+        ("PR", "https://example.com/bad path"),
+    ] {
+        assert!(
+            ws.add_evidence(
+                &ticket.reference,
+                EvidenceInput {
+                    kind: EvidenceKind::PullRequest,
+                    name: name.into(),
+                    value: value.into(),
+                    editing_agent: None
+                }
+            )
+            .is_err()
+        );
+    }
+    assert!(ws.evidence(&ticket.reference, 50, 0).unwrap().is_empty());
+}
+
+#[test]
+fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace
+        .create_ticket("Evidence survives migration")
+        .unwrap();
+    workspace
+        .add_evidence(
+            &ticket.reference,
+            EvidenceInput {
+                kind: EvidenceKind::Commit,
+                name: "Commit".into(),
+                value: "abc123".into(),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+    )
+    .unwrap();
+    drop(db);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.evidence(&ticket.reference, 10, 0).unwrap()[0].value,
+        "abc123"
+    );
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let db = rusqlite::Connection::open(backup).unwrap();
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 19);
+    assert!(
+        db.prepare("SELECT editing_agent FROM inbox_entries")
+            .is_ok()
+    );
+}
+
+#[test]
+fn duplicate_review_replaces_a_blocker_atomically() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Duplicate").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = workspace
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let choices = preview
+        .edges
+        .clone()
+        .into_iter()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    workspace
+        .mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            choices,
+            None,
+        )
+        .unwrap();
+    let saved = workspace.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(saved.prerequisites[0].reference, canonical.reference);
+    assert_eq!(saved.availability.as_deref(), Some("Blocked"));
+}
+
+#[test]
+fn duplicate_review_rejects_new_edges_without_partial_changes() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut first = Workspace::open(&path).unwrap();
+    let source = first.create_ticket("Duplicate").unwrap();
+    let canonical = first.create_ticket("Canonical").unwrap();
+    let dependent = first.create_ticket("Dependent").unwrap();
+    let other = first.create_ticket("Other").unwrap();
+    first
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = first
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .clone()
+        .into_iter()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    let mut second = Workspace::open(&path).unwrap();
+    second
+        .add_dependency(&source.reference, &other.reference, None)
+        .unwrap();
+    assert!(
+        first
+            .mark_duplicate_reviewed(
+                &source.reference,
+                &canonical.reference,
+                &preview.canonical,
+                decisions,
+                None
+            )
+            .is_err()
+    );
+    assert_eq!(
+        first.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(
+        first
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .prerequisites[0]
+            .reference,
+        source.reference
+    );
+}
+
+#[test]
+fn reviewed_duplicate_rollback_cycle_and_separate_undo_edit() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    ws.add_dependency(&dependent.reference, &canonical.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    assert!(
+        ws.mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            decisions,
+            None
+        )
+        .is_err()
+    );
+    assert_eq!(
+        ws.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        source.reference
+    );
+    ws.remove_dependency(&dependent.reference, &canonical.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    ws.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        canonical.reference
+    );
+    let review = ws
+        .preview_duplicate_dependencies(&canonical.reference, &source.reference)
+        .unwrap();
+    let decisions = review
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    ws.edit_dependencies_reviewed(
+        &canonical.reference,
+        &source.reference,
+        &review.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        source.reference
+    );
+}
+
+#[test]
+fn reviewed_duplicate_retry_preserves_later_graph_edits() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let request = || WriteRequest::MarkDuplicateReviewed {
+        source: source.reference.clone(),
+        canonical: canonical.reference.clone(),
+        expected_canonical: preview.canonical.clone(),
+        decisions: preview
+            .edges
+            .iter()
+            .cloned()
+            .map(|edge| DependencyDecision {
+                edge,
+                choice: DependencyChoice::Replace,
+            })
+            .collect(),
+        agent: None,
+    };
+    ws.write(Some("review"), request()).unwrap();
+    ws.remove_dependency(&canonical.reference, &dependent.reference, None)
+        .unwrap();
+    ws.write(Some("review"), request()).unwrap();
+    assert!(
+        ws.show_ticket(&dependent.reference)
+            .unwrap()
+            .prerequisites
+            .is_empty()
+    );
+}
+
+#[test]
+fn retained_duplicate_blocker_stays_unresolved_and_review_notifies_followers() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let kept = ws.create_ticket("Kept").unwrap();
+    let moved = ws.create_ticket("Moved").unwrap();
+    ws.add_dependency(&source.reference, &kept.reference, None)
+        .unwrap();
+    ws.add_dependency(&source.reference, &moved.reference, None)
+        .unwrap();
+    ws.set_following(&moved.reference, true).unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| {
+            let choice = if edge.dependent == kept.reference {
+                DependencyChoice::Retain
+            } else {
+                DependencyChoice::Replace
+            };
+            DependencyDecision { edge, choice }
+        })
+        .collect();
+    ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    let kept = ws.show_ticket(&kept.reference).unwrap();
+    assert_eq!(kept.availability.as_deref(), Some("Blocked"));
+    assert_eq!(kept.prerequisites[0].status, Status::Canceled);
+    assert!(
+        ws.inbox(100, 0)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.kind == "dependency" && entry.reference == moved.reference)
+    );
+}
+
+#[test]
+fn concurrent_new_edge_is_never_silently_replaced_by_duplicate_review() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("New dependent").unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let thread_path = path.clone();
+    let thread_barrier = barrier.clone();
+    let blocker = source.reference.clone();
+    let target = dependent.reference.clone();
+    let worker = std::thread::spawn(move || {
+        let mut other = Workspace::open(thread_path).unwrap();
+        thread_barrier.wait();
+        other.add_dependency(&blocker, &target, None).unwrap();
+    });
+    barrier.wait();
+    let result = ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        vec![],
+        None,
+    );
+    worker.join().unwrap();
+    let saved = ws.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(saved.prerequisites[0].reference, source.reference);
+    if result.is_err() {
+        assert_eq!(
+            ws.show_ticket(&source.reference).unwrap().status,
+            Status::Todo
+        );
+    }
+}
+
+#[test]
+fn concurrent_inbox_reads_deliver_one_reminder_and_backup_restores_it() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Concurrent reminder").unwrap();
+    workspace
+        .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    workspace.backup(&backup).unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let workspace = Workspace::open(path).unwrap();
+                barrier.wait();
+                workspace.inbox(100, 0).unwrap()
+            })
+        })
+        .collect();
+    for thread in threads {
+        assert_eq!(thread.join().unwrap().len(), 1);
+    }
+    assert_eq!(
+        workspace.export().unwrap()["ticket_reminders"][0]["person"],
+        "local-person"
+    );
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2020-01-01T00:00:00Z")
+    );
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn contextual_relationships_are_symmetric_or_directed() {
+    use ticketd_core::{ContextOptions, RelationshipKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("Original work").unwrap();
+    let b = w.create_ticket("Discovered work").unwrap();
+    w.add_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    w.add_contextual_relationship(
+        &a.reference,
+        &b.reference,
+        RelationshipKind::Discovered,
+        None,
+    )
+    .unwrap();
+    let context = w
+        .ticket_context(
+            &b.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(context.related.items[0].reference, a.reference);
+    assert_eq!(context.discovered_while.items[0].reference, a.reference);
+    assert!(context.discoveries.items.is_empty());
+    assert_eq!(
+        w.show_ticket(&b.reference).unwrap().availability.as_deref(),
+        Some("Ready")
+    );
+}
+
+#[test]
+fn contextual_relationships_reject_self_links_and_deduplicate_and_detach_from_trash() {
+    use ticketd_core::{ContextOptions, RelationshipKind};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    assert!(
+        w.add_contextual_relationship(&a.reference, &a.reference, RelationshipKind::Related, None)
+            .is_err()
+    );
+    w.add_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    w.add_contextual_relationship(&b.reference, &a.reference, RelationshipKind::Related, None)
+        .unwrap();
+    assert_eq!(w.ticket_history(&a.reference).unwrap().len(), 1);
+    w.set_trashed(&b.reference, true, None).unwrap();
+    w.remove_contextual_relationship(&a.reference, &b.reference, RelationshipKind::Related, None)
+        .unwrap();
+    let context = w
+        .ticket_context(
+            &a.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert!(context.related.items.is_empty());
+}
+
+#[test]
+fn contextual_relationship_retry_notifies_both_endpoints_and_exports() {
+    use ticketd_core::{RelationshipKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    w.set_following(&a.reference, true).unwrap();
+    w.set_following(&b.reference, true).unwrap();
+    let request = || WriteRequest::AddContextualRelationship {
+        source: a.reference.clone(),
+        target: b.reference.clone(),
+        kind: RelationshipKind::Discovered,
+        agent: Some("agent".into()),
+    };
+    w.write(Some("relationship-request"), request()).unwrap();
+    w.write(Some("relationship-request"), request()).unwrap();
+    let inbox = w.inbox(20, 0).unwrap();
+    assert_eq!(inbox.len(), 2);
+    assert!(
+        inbox
+            .iter()
+            .all(|entry| entry.kind.starts_with("relationship:"))
+    );
+    assert_eq!(
+        w.export().unwrap()["contextual_relationships"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn contextual_relationships_and_retry_survive_backup_restore() {
+    use ticketd_core::{ContextOptions, RelationshipKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut w = Workspace::open(&path).unwrap();
+    let a = w.create_ticket("A").unwrap();
+    let b = w.create_ticket("B").unwrap();
+    let request = || WriteRequest::AddContextualRelationship {
+        source: a.reference.clone(),
+        target: b.reference.clone(),
+        kind: RelationshipKind::Related,
+        agent: None,
+    };
+    let original = w.write(Some("link"), request()).unwrap();
+    w.backup(&backup).unwrap();
+    drop(w);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut w = Workspace::open(&path).unwrap();
+    assert_eq!(w.write(Some("link"), request()).unwrap(), original);
+    let links = w
+        .ticket_context(
+            &b.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(links.related.items[0].reference, a.reference);
+}
+
+#[test]
+fn version_eighteen_reminders_survive_contextual_relationship_migration_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("version-18.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember after migration").unwrap();
+    workspace
+        .set_reminder(&ticket.reference, Some("2030-01-01T00:00:00Z"))
+        .unwrap();
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE contextual_relationships; PRAGMA user_version = 18;")
+        .unwrap();
+    drop(db);
+    std::fs::copy(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2030-01-01T00:00:00Z")
+    );
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2030-01-01T00:00:00Z")
+    );
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 19);
+    assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
+}
+
+#[test]
+fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection() {
+    use ticketd_core::{BatchOperation, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bulk-organization.sqlite")).unwrap();
+    let project = workspace.create_project("Project", "/project").unwrap();
+    let effort = workspace.create_effort("Effort").unwrap();
+    let first = workspace.create_ticket("First").unwrap();
+    let second = workspace.create_ticket("Second").unwrap();
+    workspace.add_tag(&first.reference, "keep").unwrap();
+    workspace.add_tag(&second.reference, "remove").unwrap();
+    let changes = || {
+        serde_json::from_value::<Vec<BatchOperation>>(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}},
+        {"operation":"change", "ticket":second.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}}
+    ])).unwrap()
+    };
+    workspace
+        .write(
+            Some("organize"),
+            WriteRequest::Batch {
+                operations: changes(),
+            },
+        )
+        .unwrap();
+    workspace
+        .write(
+            Some("organize"),
+            WriteRequest::Batch {
+                operations: changes(),
+            },
+        )
+        .unwrap();
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(saved.tags, vec!["keep", "new"]);
+    assert_eq!(
+        workspace.show_ticket(&second.reference).unwrap().tags,
+        vec!["new"]
+    );
+    let invalid: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}},
+        {"operation":"change", "ticket":second.reference, "change":{"project_id":"missing"}}
+    ])).unwrap();
+    assert!(workspace.apply_batch(invalid).is_err());
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    let clear: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}}
+    ])).unwrap();
+    workspace.apply_batch(clear).unwrap();
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id, None);
+    assert_eq!(saved.effort_id, None);
+    assert_eq!(saved.tags, vec!["keep", "new"]);
+}
+
+#[test]
+fn reviewed_dependency_replacement_records_each_change_once_and_replay_is_silent() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    for ticket in [&source, &canonical, &dependent] {
+        ws.set_following(&ticket.reference, true).unwrap();
+    }
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let request = || WriteRequest::MarkDuplicateReviewed {
+        source: source.reference.clone(),
+        canonical: canonical.reference.clone(),
+        expected_canonical: preview.canonical.clone(),
+        decisions: preview
+            .edges
+            .iter()
+            .cloned()
+            .map(|edge| DependencyDecision {
+                edge,
+                choice: DependencyChoice::Replace,
+            })
+            .collect(),
+        agent: None,
+    };
+    let history_before: Vec<_> = [&source, &canonical, &dependent]
+        .iter()
+        .map(|ticket| ws.ticket_history(&ticket.reference).unwrap().len())
+        .collect();
+    ws.write(Some("review-once"), request()).unwrap();
+    let histories: Vec<_> = [&source, &canonical, &dependent]
+        .iter()
+        .map(|ticket| ws.ticket_history(&ticket.reference).unwrap())
+        .collect();
+    for (history, start) in histories.iter().zip(history_before) {
+        assert!(
+            !history[start..]
+                .iter()
+                .any(|entry| entry.kind == "relationship:dependency_review")
+        );
+    }
+    let edge_counts: Vec<_> = histories
+        .iter()
+        .map(|history| {
+            history
+                .iter()
+                .filter(|entry| entry.kind == "dependency" || entry.kind == "relationship:blocks")
+                .count()
+        })
+        .collect();
+    assert_eq!(edge_counts, vec![2, 1, 3]);
+    let entries = ws.inbox(100, 0).unwrap();
+    let edge_entries: Vec<_> = entries
+        .iter()
+        .filter(|e| {
+            e.kind == "dependency"
+                || e.kind.starts_with("relationship:blocks")
+                || e.kind == "relationship:dependency_review"
+        })
+        .collect();
+    assert_eq!(edge_entries.len(), 4);
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == source.reference)
+            .count(),
+        1
+    );
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == canonical.reference)
+            .count(),
+        1
+    );
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == dependent.reference)
+            .count(),
+        2
+    );
+    ws.write(Some("review-once"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), entries.len());
+    assert!(ws.write(Some("different-review"), request()).is_err());
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), entries.len());
+    for (ticket, history) in [&source, &canonical, &dependent].iter().zip(histories) {
+        assert_eq!(ws.ticket_history(&ticket.reference).unwrap(), history);
+    }
+}
+
+#[test]
+fn unread_observation_delivers_reminders_once_across_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember").unwrap();
+    assert!(!workspace.has_unread_inbox().unwrap());
+    workspace
+        .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.has_unread_inbox().unwrap());
+    assert!(workspace.has_unread_inbox().unwrap());
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    workspace.set_inbox_read(&[entries[0].id], true).unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(!workspace.has_unread_inbox().unwrap());
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember once").unwrap();
+    let request = || WriteRequest::SetReminder {
+        reference: ticket.reference.clone(),
+        due_at: Some("2020-01-01T00:00:00Z".into()),
+    };
+    ws.write(Some("lost-response"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
+    ws.write(Some("lost-response"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
+    ws.write(Some("new-occurrence"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 2);
 }

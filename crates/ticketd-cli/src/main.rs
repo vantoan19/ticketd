@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    Availability, BatchOperation, ContextOptions, NotePatch, Status, TicketFilter, TicketPatch,
-    Workspace, WriteRequest,
+    Availability, BatchOperation, ContextOptions, EvidenceInput, EvidenceKind, NotePatch, Status,
+    TicketFilter, TicketPatch, Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -13,7 +13,27 @@ struct Arguments {
 }
 
 #[derive(Subcommand)]
+enum ReminderCommand {
+    Show { reference: String },
+    Set { reference: String, due_at: String },
+    Snooze { reference: String, due_at: String },
+    Dismiss { reference: String },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Manage a personal ticket reminder (times require an RFC 3339 offset)
+    Reminder {
+        #[command(subcommand)]
+        command: ReminderCommand,
+    },
+    /// List personal inbox entries (newest first)
+    Inbox {
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
@@ -76,6 +96,11 @@ enum Command {
     },
     /// Show ticket history
     History { reference: String },
+    /// Manage implementation evidence
+    Evidence {
+        #[command(subcommand)]
+        command: EvidenceCommand,
+    },
     /// Manage ticket notes
     Note {
         #[command(subcommand)]
@@ -85,6 +110,37 @@ enum Command {
     AddTag { reference: String, tag: String },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
     RemoveTag { reference: String, tag: String },
+    /// Mark a ticket as a duplicate of a canonical ticket
+    MarkDuplicate {
+        source: String,
+        canonical: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Preview dependencies before marking a duplicate
+    PreviewDuplicate { source: String, canonical: String },
+    /// Remove a duplicate designation
+    RemoveDuplicate {
+        source: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Add a contextual relationship (kind: related or discovered; source is the work being done)
+    AddRelationship {
+        source: String,
+        target: String,
+        kind: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Remove a contextual relationship
+    RemoveRelationship {
+        source: String,
+        target: String,
+        kind: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Add a directed blocking dependency
     AddDependency {
         blocker: String,
@@ -117,6 +173,14 @@ enum Command {
         #[command(flatten)]
         filters: FindArgs,
     },
+    /// List incoming ticket references with passage context
+    Backlinks {
+        reference: String,
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     /// Retrieve bounded context; select related scopes explicitly
     Context {
         reference: String,
@@ -128,6 +192,10 @@ enum Command {
         relationships: bool,
         #[arg(long)]
         notes: bool,
+        #[arg(long)]
+        evidence: bool,
+        #[arg(long)]
+        backlinks: bool,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
@@ -251,6 +319,71 @@ enum ProjectCommand {
     },
 }
 
+#[derive(Clone, ValueEnum)]
+enum EvidenceType {
+    PullRequest,
+    Commit,
+    Branch,
+    Worktree,
+    Verification,
+}
+impl From<EvidenceType> for EvidenceKind {
+    fn from(value: EvidenceType) -> Self {
+        match value {
+            EvidenceType::PullRequest => Self::PullRequest,
+            EvidenceType::Commit => Self::Commit,
+            EvidenceType::Branch => Self::Branch,
+            EvidenceType::Worktree => Self::Worktree,
+            EvidenceType::Verification => Self::Verification,
+        }
+    }
+}
+#[derive(Args)]
+struct EvidenceFields {
+    #[arg(long, value_enum)]
+    kind: EvidenceType,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    value: String,
+    #[arg(long)]
+    agent: Option<String>,
+}
+impl From<EvidenceFields> for EvidenceInput {
+    fn from(fields: EvidenceFields) -> Self {
+        Self {
+            kind: fields.kind.into(),
+            name: fields.name,
+            value: fields.value,
+            editing_agent: fields.agent,
+        }
+    }
+}
+#[derive(Subcommand)]
+enum EvidenceCommand {
+    Add {
+        reference: String,
+        #[command(flatten)]
+        fields: EvidenceFields,
+    },
+    Edit {
+        reference: String,
+        id: String,
+        #[command(flatten)]
+        fields: EvidenceFields,
+    },
+    Delete {
+        reference: String,
+        id: String,
+    },
+    List {
+        reference: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+}
 #[derive(Subcommand)]
 enum NoteCommand {
     /// Append a note, reading --file - from stdin
@@ -303,7 +436,10 @@ fn read_content(
 fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     if let Command::RestoreWorkspace { path } = &args.command {
-        let safety = Workspace::restore_default(path)?;
+        let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+            Some(workspace) => Workspace::restore(workspace, path)?,
+            None => Workspace::restore_default(path)?,
+        };
         writeln!(
             output,
             "Restored workspace. Safety backup: {}",
@@ -311,8 +447,40 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         )?;
         return Ok(());
     }
-    let mut workspace = Workspace::open_default()?;
+    // Integration tests run the real executable against a private database on every OS.
+    // ProjectDirs on Windows uses known folders and ignores HOME and XDG_DATA_HOME.
+    let mut workspace = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+        Some(path) => Workspace::open(path)?,
+        None => Workspace::open_default()?,
+    };
     let text = match args.command {
+        Command::Reminder { command } => match command {
+            ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
+                Some(value) => {
+                    let instant = chrono::DateTime::parse_from_rfc3339(&value)?;
+                    format!(
+                        "{} (UTC: {})",
+                        instant
+                            .with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M:%S %:z"),
+                        value
+                    )
+                }
+                None => "No reminder".into(),
+            },
+            ReminderCommand::Set { reference, due_at }
+            | ReminderCommand::Snooze { reference, due_at } => {
+                workspace.set_reminder(&reference, Some(&due_at))?;
+                "Reminder scheduled".into()
+            }
+            ReminderCommand::Dismiss { reference } => {
+                workspace.set_reminder(&reference, None)?;
+                "Reminder dismissed".into()
+            }
+        },
+        Command::Inbox { limit, offset } => {
+            serde_json::to_string(&workspace.inbox(limit, offset)?)?
+        }
         Command::Backup { path } => {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
@@ -406,6 +574,27 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 },
             )?)?
         }
+        Command::Evidence { command } => match command {
+            EvidenceCommand::Add { reference, fields } => {
+                serde_json::to_string(&workspace.add_evidence(&reference, fields.into())?)?
+            }
+            EvidenceCommand::Edit {
+                reference,
+                id,
+                fields,
+            } => {
+                serde_json::to_string(&workspace.edit_evidence(&reference, &id, fields.into())?)?
+            }
+            EvidenceCommand::Delete { reference, id } => {
+                workspace.delete_evidence(&reference, &id)?;
+                "null".into()
+            }
+            EvidenceCommand::List {
+                reference,
+                limit,
+                offset,
+            } => serde_json::to_string(&workspace.evidence(&reference, limit, offset)?)?,
+        },
         Command::Note { command } => match command {
             NoteCommand::Add {
                 reference,
@@ -459,6 +648,49 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::RemoveTag { reference, tag } => {
             serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
+        }
+        Command::MarkDuplicate {
+            source,
+            canonical,
+            agent,
+        } => serde_json::to_string(&workspace.mark_duplicate(
+            &source,
+            &canonical,
+            agent.as_deref(),
+        )?)?,
+        Command::PreviewDuplicate { source, canonical } => {
+            serde_json::to_string(&workspace.preview_duplicate_dependencies(&source, &canonical)?)?
+        }
+        Command::RemoveDuplicate { source, agent } => {
+            serde_json::to_string(&workspace.remove_duplicate(&source, agent.as_deref())?)?
+        }
+        Command::AddRelationship {
+            source,
+            target,
+            kind,
+            agent,
+        } => {
+            let kind = parse_relationship_kind(&kind)?;
+            serde_json::to_string(&workspace.add_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?)?
+        }
+        Command::RemoveRelationship {
+            source,
+            target,
+            kind,
+            agent,
+        } => {
+            let kind = parse_relationship_kind(&kind)?;
+            serde_json::to_string(&workspace.remove_contextual_relationship(
+                &source,
+                &target,
+                kind,
+                agent.as_deref(),
+            )?)?
         }
         Command::AddDependency {
             blocker,
@@ -521,12 +753,19 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Search { query, filters } => {
             serde_json::to_string(&workspace.find_tickets(&filters.filter(query))?)?
         }
+        Command::Backlinks {
+            reference,
+            limit,
+            offset,
+        } => serde_json::to_string(&workspace.backlinks(&reference, limit, offset)?)?,
         Command::Context {
             reference,
             project,
             effort,
             relationships,
             notes,
+            evidence,
+            backlinks,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
             &reference,
@@ -535,6 +774,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 effort,
                 relationships,
                 notes,
+                evidence,
+                backlinks,
                 offset,
             },
         )?)?,
@@ -552,5 +793,15 @@ fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
         eprintln!("error: {error}");
         std::process::exit(1);
+    }
+}
+
+fn parse_relationship_kind(
+    value: &str,
+) -> Result<ticketd_core::RelationshipKind, Box<dyn std::error::Error>> {
+    match value {
+        "related" => Ok(ticketd_core::RelationshipKind::Related),
+        "discovered" => Ok(ticketd_core::RelationshipKind::Discovered),
+        _ => Err("relationship kind must be related or discovered".into()),
     }
 }

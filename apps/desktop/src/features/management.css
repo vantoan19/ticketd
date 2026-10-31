@@ -1,17 +1,17 @@
 .management-content {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
   max-width: 680px;
-  padding: 20px 0 40px;
+  padding: 24px 0 40px;
 }
 .management-content h2 {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 .management-content h3 {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 .management-content p {
   color: var(--muted-foreground);
@@ -26,19 +26,19 @@
 }
 .management-section + .management-form,
 .management-form + .management-section {
-  border-top: 1px solid var(--border);
   padding-top: 24px;
 }
 .management-content select {
-  min-height: 36px;
+  min-height: 40px;
   max-width: 100%;
-  border: 1px solid var(--border);
+  border: 0;
+  box-shadow: var(--shadow-border);
   border-radius: 6px;
-  background: var(--background);
+  background: var(--surface);
   padding: 0 12px;
 }
 .management-content select:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 1px solid var(--input-focus);
   outline-offset: 2px;
 }
 .management-actions,
@@ -65,13 +65,12 @@
   gap: 12px;
   min-width: 0;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border);
 }
 .management-path {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 3px;
+  gap: 4px;
 }
 .management-path span,
 .management-path-text {
@@ -92,7 +91,7 @@
 }
 .management-counts dd {
   margin: 2px 0 0;
-  font-weight: 600;
+  font-weight: 500;
 }
 .management-content .management-error {
   color: var(--destructive);

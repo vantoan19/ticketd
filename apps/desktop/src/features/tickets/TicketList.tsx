@@ -22,10 +22,18 @@ export function TicketList({
   tickets,
   selected,
   onOpen,
+  bulkSelection,
+  onToggle,
+  selectable,
+  selectionDisabled = false,
 }: {
   tickets: Ticket[];
   selected: string | null;
   onOpen: (reference: string) => void;
+  bulkSelection: string[];
+  onToggle: (reference: string) => void;
+  selectable: boolean;
+  selectionDisabled?: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   return (
@@ -34,6 +42,17 @@ export function TicketList({
         const StatusIcon = statusIcons[ticket.status] ?? Circle;
         return (
           <li key={ticket.id}>
+            {selectable && (
+              <label className="ticket-select">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${ticket.reference}`}
+                  checked={bulkSelection.includes(ticket.reference)}
+                  disabled={selectionDisabled}
+                  onChange={() => onToggle(ticket.reference)}
+                />
+              </label>
+            )}
             <button
               ref={(node) => {
                 if (node) rows.current.set(ticket.id, node);
@@ -58,9 +77,14 @@ export function TicketList({
                 }
               }}
             >
-              <span className="ticket-row-status">
+              <span
+                className="ticket-row-status"
+                title={ticket.status}
+                role="img"
+                aria-label={ticket.status}
+              >
                 <StatusIcon aria-hidden="true" size={16} />
-                <span>{ticket.status}</span>
+                <span className="ticket-status-label">{ticket.status}</span>
               </span>
               <span className="ticket-ref">{ticket.reference}</span>
               <span className="ticket-title" title={ticket.title}>

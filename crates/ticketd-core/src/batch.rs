@@ -6,7 +6,7 @@ use std::{
 };
 
 /// A cohesive change applies each supplied edit in the order documented here.
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TicketChange {
     #[serde(flatten)]

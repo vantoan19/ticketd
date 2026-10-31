@@ -77,8 +77,55 @@ jobs:
       - name: Run real desktop refresh smoke test
         run: |
           export XDG_DATA_HOME="$(mktemp -d)"
-          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
+          active_group=
+          stop_group() {
+            local group="$1" attempt
+            if kill -0 -- "-$group" 2>/dev/null; then
+              kill -TERM -- "-$group" 2>/dev/null || true
+              for attempt in {1..40}; do
+                if ! kill -0 -- "-$group" 2>/dev/null; then return 0; fi
+                sleep 0.25
+              done
+              kill -KILL -- "-$group" 2>/dev/null || true
+              for attempt in {1..20}; do
+                if ! kill -0 -- "-$group" 2>/dev/null; then return 0; fi
+                sleep 0.25
+              done
+              echo "Native smoke process group $group did not stop" >&2
+              return 1
+            fi
+          }
+          cleanup() {
+            local status=$? attempt
+            trap - EXIT
+            if [[ -n "$active_group" ]]; then stop_group "$active_group" || status=1; fi
+            for attempt in {1..20}; do
+              if rm -rf "$XDG_DATA_HOME"; then exit "$status"; fi
+              sleep 0.25
+            done
+            echo "Could not remove native smoke workspace: $XDG_DATA_HOME" >&2
+            exit 1
+          }
+          trap cleanup EXIT
+          run_native() {
+            local script="$1" status=0
+            setsid xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node "$1"' sh "$script" &
+            active_group=$!
+            wait "$active_group" || status=$?
+            stop_group "$active_group" || status=1
+            active_group=
+            return "$status"
+          }
+          run_native tests/native/refresh.mjs
+          XDG_DATA_HOME="$XDG_DATA_HOME/extensions" run_native tests/native/extensions.mjs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: success()
+        with:
+          name: native-smoke-screenshots
+          path: native-extensions-*.png
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()

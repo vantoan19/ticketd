@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import ReactMarkdown, {
+  defaultUrlTransform,
   type Components,
   type ExtraProps,
 } from "react-markdown";
@@ -7,9 +8,42 @@ import remarkGfm from "remark-gfm";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { CopySourceButton } from "./CopySourceButton";
+import { TicketReference } from "@/features/tickets/TicketMarkdown";
+import { references } from "@/features/tickets/ticket-references";
 
 const MarkdownSource = createContext("");
-const remarkPlugins = [remarkGfm];
+const remarkPlugins = [remarkGfm, references];
+const TicketNavigation = createContext<{
+  select: ((reference: string) => void) | undefined;
+  revision: number | undefined;
+}>({ select: undefined, revision: undefined });
+
+function DocumentLink({
+  href,
+  children,
+}: {
+  href?: string | undefined;
+  children?: React.ReactNode;
+}) {
+  const { select, revision } = useContext(TicketNavigation);
+  if (href?.startsWith("ticketd:"))
+    return select ? (
+      <TicketReference
+        reference={href.slice(8)}
+        select={select}
+        revision={revision}
+      />
+    ) : (
+      <>{children}</>
+    );
+  return href ? (
+    <a href={href} rel="noreferrer">
+      {children}
+    </a>
+  ) : (
+    <span>{children}</span>
+  );
+}
 
 // Use the original fence interior: the Markdown AST normalizes CRLF and adds a
 // presentation newline. Container fences use the parser's de-indented content.
@@ -65,14 +99,7 @@ function CodeBlock({ node }: ExtraProps) {
 // React treats each component function as a type. Recreating these functions
 // during workspace polling would remount diagrams and discard their SVG/state.
 const components: Components = {
-  a: ({ href, children }) =>
-    href ? (
-      <a href={href} rel="noreferrer">
-        {children}
-      </a>
-    ) : (
-      <span>{children}</span>
-    ),
+  a: DocumentLink,
   table: ({ children }) => (
     <div
       className="markdown-table-scroll"
@@ -86,18 +113,31 @@ const components: Components = {
   pre: CodeBlock,
 };
 
-export function MarkdownDocument({ source }: { source: string }) {
+export function MarkdownDocument({
+  source,
+  select,
+  revision,
+}: {
+  source: string;
+  select?: ((reference: string) => void) | undefined;
+  revision?: number | undefined;
+}) {
   return (
     <div className="markdown-document">
-      <MarkdownSource.Provider value={source}>
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          skipHtml
-          components={components}
-        >
-          {source}
-        </ReactMarkdown>
-      </MarkdownSource.Provider>
+      <TicketNavigation.Provider value={{ select, revision }}>
+        <MarkdownSource.Provider value={source}>
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            urlTransform={(url) =>
+              url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
+            }
+            skipHtml
+            components={components}
+          >
+            {source}
+          </ReactMarkdown>
+        </MarkdownSource.Provider>
+      </TicketNavigation.Provider>
     </div>
   );
 }

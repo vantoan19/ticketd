@@ -27,9 +27,24 @@ impl Workspace {
                 "ticket_history",
                 "number, ticket_id, kind, from_value, to_value, timestamp, editing_agent",
             ),
+            (
+                "evidence",
+                "number, id, ticket_id, kind, name, value, created_at, updated_at, editing_agent",
+            ),
+            ("ticket_follows", "person, ticket_id"),
+            ("ticket_reminders", "person, ticket_id, due_at, delivered"),
+            (
+                "inbox_entries",
+                "id, person, ticket_id, kind, from_value, to_value, timestamp, read, editing_agent",
+            ),
             ("tags", "name"),
             ("ticket_tags", "ticket_id, tag_name"),
+            (
+                "duplicate_tickets",
+                "source_id, canonical_id, restore_status",
+            ),
             ("dependencies", "blocker_id, dependent_id"),
+            ("contextual_relationships", "kind, source_id, target_id"),
             ("ticket_parents", "child_id, parent_id"),
         ] {
             let mut statement =

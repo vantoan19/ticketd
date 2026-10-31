@@ -1,8 +1,16 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod backlinks;
+pub use backlinks::Backlink;
 mod backup;
 mod context;
+mod duplicates;
+pub use duplicates::{
+    DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
+};
+mod evidence;
 mod export;
 pub use context::{ContextOptions, TicketContext};
+pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
 
 mod efforts;
 mod retry;
@@ -12,6 +20,7 @@ mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
 mod projects;
 mod relationships;
+pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter};
 mod tags;
@@ -28,6 +37,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod history;
+mod inbox;
+pub use inbox::InboxEntry;
 mod notes;
 pub use history::{HistoryEntry, Status};
 pub use notes::{Note, NotePatch};
@@ -82,6 +93,16 @@ pub enum Error {
     EmptyProject,
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("duplicate would create a cycle or self-link")]
+    DuplicateCycle,
+    #[error(
+        "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
+    )]
+    DuplicateDependencies,
+    #[error("a ticket cannot be related to itself")]
+    RelationshipSelfLink,
+    #[error("dependency review has changed; preview and choose again")]
+    DependencyReviewChanged,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
@@ -96,6 +117,10 @@ pub enum Error {
     EmptyTitle,
     #[error("ticket '{0}' was not found")]
     NotFound(String),
+    #[error("invalid evidence: {0}")]
+    InvalidEvidence(String),
+    #[error("evidence '{0}' was not found")]
+    EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
     #[error("could not determine the application data directory")]
@@ -121,11 +146,15 @@ pub struct Ticket {
     pub project_id: Option<String>,
     pub availability: Option<String>,
     pub prerequisites: Vec<relationships::Prerequisite>,
+    #[serde(default)]
+    pub duplicate_of: Option<String>,
+    #[serde(default)]
+    pub duplicates: Vec<String>,
     pub parent: Option<hierarchy::RelatedTicket>,
     pub children: Vec<hierarchy::RelatedTicket>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TicketPatch {
     pub title: Option<String>,
     pub body: Option<String>,
@@ -189,10 +218,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 13 {
+            if version > 19 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 13 {
+            if version == 19 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -213,10 +242,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 13 {
+            if version > 19 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 13 {
+            if version < 19 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -288,6 +317,24 @@ impl Workspace {
         if version < 13 {
             transaction.execute_batch("CREATE INDEX ticket_history_ticket_id ON ticket_history(ticket_id); PRAGMA user_version = 13;")?;
         }
+        if version < 14 {
+            inbox::migrate(&transaction)?;
+        }
+        if version < 15 {
+            duplicates::migrate(&transaction)?;
+        }
+        if version < 16 {
+            transaction.execute_batch("CREATE TABLE evidence (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), editing_agent TEXT); PRAGMA user_version = 16;")?;
+        }
+        if version < 17 {
+            transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 17;")?;
+        }
+        if version < 18 {
+            inbox::migrate_reminders(&transaction)?;
+        }
+        if version < 19 {
+            transaction.execute_batch("CREATE TABLE contextual_relationships (kind TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES tickets(id), target_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(kind, source_id, target_id)); PRAGMA user_version = 19;")?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -332,6 +379,8 @@ impl Workspace {
             project_id: project_id.map(str::to_owned),
             availability: Some("Ready".into()),
             prerequisites: Vec::new(),
+            duplicate_of: None,
+            duplicates: Vec::new(),
             parent: None,
             children: Vec::new(),
         })
@@ -394,6 +443,12 @@ impl Workspace {
                 )?;
             }
         }
+        if patch.status.is_some() && patch.status != Some(ticket.status) {
+            transaction.execute(
+                "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id = ?1",
+                [&ticket.id],
+            )?;
+        }
         let status = patch.status.unwrap_or(ticket.status);
         transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
         if status != ticket.status {
@@ -414,6 +469,7 @@ impl Workspace {
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
         relationships::populate(&transaction, &mut updated)?;
         hierarchy::populate(&transaction, &mut updated)?;
+        duplicates::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -465,6 +521,7 @@ impl Workspace {
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
         let result = notes::add(&tx, &id_ticket, content, agent)?;
+        inbox::record(&tx, &id_ticket, "note", &result.id, content, agent)?;
         tx.commit()?;
         Ok(result)
     }
@@ -491,6 +548,11 @@ impl Workspace {
         tx.commit()?;
         Ok(())
     }
+    pub fn note(&self, reference: &str, id: &str) -> Result<Note, Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::get(&self.connection, &ticket.id, id)
+    }
+
     pub fn notes(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Note>, Error> {
         let ticket = self.show_ticket(reference)?;
         notes::read(&self.connection, &ticket.id, limit, offset)
@@ -515,6 +577,7 @@ impl Workspace {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
+            duplicates::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -535,6 +598,7 @@ impl Workspace {
         ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
         relationships::populate(&self.connection, &mut ticket)?;
         hierarchy::populate(&self.connection, &mut ticket)?;
+        duplicates::populate(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -558,6 +622,8 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         effort_id: row.get(6)?,
         availability: None,
         prerequisites: Vec::new(),
+        duplicate_of: None,
+        duplicates: Vec::new(),
         parent: None,
         children: Vec::new(),
     })

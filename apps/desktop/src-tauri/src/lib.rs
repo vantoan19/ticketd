@@ -1,8 +1,72 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
-    BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project,
-    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
+    InboxEntry, Note, NotePatch, Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
+    Workspace, WriteRequest, WriteResult,
 };
+
+#[tauri::command]
+fn reminder(reference: String) -> Result<Option<String>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.reminder(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_reminder(
+    reference: String,
+    due_at: Option<String>,
+    request_id: String,
+) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetReminder { reference, due_at },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.inbox(100, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn has_unread_inbox() -> Result<bool, String> {
+    Workspace::open_default()
+        .and_then(|w| w.has_unread_inbox())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn is_following(reference: String) -> Result<bool, String> {
+    Workspace::open_default()
+        .and_then(|w| w.is_following(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_following(reference: String, following: bool, request_id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetFollowing {
+                    reference,
+                    following,
+                },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::SetInboxRead { ids, read }))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn export_workspace(path: String) -> Result<(), String> {
@@ -42,6 +106,17 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.list_tickets())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn ticket_backlinks(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::Backlink>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -134,6 +209,60 @@ fn create_ticket(
 }
 
 #[tauri::command]
+fn bulk_change(
+    references: Vec<String>,
+    change: TicketChange,
+    request_id: String,
+) -> Result<Vec<Ticket>, String> {
+    let operations = references
+        .into_iter()
+        .map(|ticket| BatchOperation::Change {
+            ticket,
+            change: Box::new(change.clone()),
+        })
+        .collect();
+    match Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(Some(&request_id), WriteRequest::Batch { operations })
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Tickets(tickets) => Ok(tickets),
+        _ => Err("Unexpected batch result".into()),
+    }
+}
+
+#[tauri::command]
+fn bulk_status(
+    references: Vec<String>,
+    status: Status,
+    request_id: String,
+) -> Result<Vec<Ticket>, String> {
+    let operations = references
+        .into_iter()
+        .map(|ticket| BatchOperation::Change {
+            ticket,
+            change: Box::new(TicketChange {
+                patch: TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        })
+        .collect();
+    match Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(Some(&request_id), WriteRequest::Batch { operations })
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Tickets(tickets) => Ok(tickets),
+        _ => Err("Unexpected batch result".into()),
+    }
+}
+
+#[tauri::command]
 fn change_ticket(reference: String, patch: TicketPatch) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.change_ticket(&reference, patch))
@@ -148,9 +277,80 @@ fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, String> {
 }
 
 #[tauri::command]
+fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.evidence(&reference, 50, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn add_evidence(
+    reference: String,
+    input: EvidenceInput,
+    request_id: String,
+) -> Result<Evidence, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::AddEvidence { reference, input },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Evidence(value) => Ok(value),
+        _ => Err("Unexpected evidence result".into()),
+    }
+}
+#[tauri::command]
+fn edit_evidence(
+    reference: String,
+    id: String,
+    input: EvidenceInput,
+    request_id: String,
+) -> Result<Evidence, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::EditEvidence {
+                    reference,
+                    id,
+                    input,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Evidence(value) => Ok(value),
+        _ => Err("Unexpected evidence result".into()),
+    }
+}
+#[tauri::command]
+fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::DeleteEvidence { reference, id },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn list_notes(reference: String, limit: u32, offset: u32) -> Result<Vec<Note>, String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.notes(&reference, limit, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn get_note(reference: String, id: String) -> Result<Option<Note>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| match workspace.note(&reference, &id) {
+            Ok(note) => Ok(Some(note)),
+            Err(ticketd_core::Error::NoteNotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -191,6 +391,162 @@ fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.remove_tag(&reference, &tag))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn mark_duplicate(source: String, canonical: String, request_id: String) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::MarkDuplicate {
+                    source,
+                    canonical,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
+fn preview_duplicate_dependencies(
+    source: String,
+    canonical: String,
+) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.preview_duplicate_dependencies(&source, &canonical))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn mark_duplicate_reviewed(
+    source: String,
+    canonical: String,
+    expected_canonical: String,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::MarkDuplicateReviewed {
+                    source,
+                    canonical,
+                    expected_canonical,
+                    decisions,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
+fn edit_dependencies_reviewed(
+    source: String,
+    canonical: String,
+    expected_canonical: String,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::EditDependenciesReviewed {
+                    source,
+                    canonical,
+                    expected_canonical,
+                    decisions,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
+fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::RemoveDuplicate {
+                    source,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
+fn contextual_relationships(
+    reference: String,
+    offset: u32,
+) -> Result<ticketd_core::TicketContext, String> {
+    Workspace::open_default()
+        .and_then(|w| {
+            w.ticket_context(
+                &reference,
+                ticketd_core::ContextOptions {
+                    relationships: true,
+                    offset,
+                    ..Default::default()
+                },
+            )
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn change_contextual_relationship(
+    source: String,
+    target: String,
+    kind: ticketd_core::RelationshipKind,
+    add: bool,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let request = if add {
+        WriteRequest::AddContextualRelationship {
+            source,
+            target,
+            kind,
+            agent: None,
+        }
+    } else {
+        WriteRequest::RemoveContextualRelationship {
+            source,
+            target,
+            kind,
+            agent: None,
+        }
+    };
+    match Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), request))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
 }
 
 #[tauri::command]
@@ -294,14 +650,36 @@ pub fn run() -> Result<(), tauri::Error> {
             set_trashed,
             create_ticket,
             change_ticket,
+            bulk_status,
+            bulk_change,
             ticket_history,
+            reminder,
+            set_reminder,
+            inbox,
+            is_following,
+            set_following,
+            set_inbox_read,
+            has_unread_inbox,
+            list_evidence,
+            add_evidence,
+            edit_evidence,
+            delete_evidence,
+            ticket_backlinks,
             list_notes,
+            get_note,
             add_note,
             edit_note,
             delete_note,
             search_tags,
             add_tag,
             remove_tag,
+            mark_duplicate,
+            preview_duplicate_dependencies,
+            mark_duplicate_reviewed,
+            edit_dependencies_reviewed,
+            remove_duplicate,
+            contextual_relationships,
+            change_contextual_relationship,
             add_dependency,
             remove_dependency,
             set_parent,

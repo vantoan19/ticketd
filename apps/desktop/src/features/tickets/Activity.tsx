@@ -27,6 +27,8 @@ export function Activity({
   projects,
   active,
   trashed,
+  select,
+  target,
 }: {
   reference: string;
   status: string;
@@ -34,13 +36,37 @@ export function Activity({
   projects: Project[];
   active: boolean;
   trashed: boolean;
+  select?: (reference: string) => void;
+  target?: { id: string; key: number } | null;
 }) {
+  const [loadError, setLoadError] = useState("");
+  const [targetNote, setTargetNote] = useState<Note | null>(null);
+  const targetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active || !target) return;
+    let current = true;
+    void client
+      .note(reference, target.id)
+      .then((note) => {
+        if (current) setTargetNote(note);
+      })
+      .catch((reason: unknown) => {
+        if (current) setLoadError(String(reason));
+      });
+    return () => {
+      current = false;
+    };
+  }, [active, reference, target]);
+  useEffect(() => {
+    if (active && target && targetNote?.id === target.id)
+      targetRef.current?.scrollIntoView?.({ block: "center" });
+  }, [active, target, targetNote]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState("");
+  const [composing, setComposing] = useState(false);
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
@@ -98,7 +124,10 @@ export function Activity({
       if (edit) await client.editNote(reference, edit.id, edit.content);
       else await client.addNote(reference, draft);
       if (edit) setEdit(null);
-      else setDraft("");
+      else {
+        setDraft("");
+        setComposing(false);
+      }
       await loadNotes();
     } catch (reason) {
       setError(String(reason));
@@ -165,6 +194,16 @@ export function Activity({
   }
   return (
     <section className="activity" aria-label="Activity">
+      {active && target && targetNote?.id === target.id && (
+        <div ref={targetRef} tabIndex={-1} aria-label="Selected note">
+          <strong>Selected note</strong>
+          <MarkdownDocument
+            source={targetNote.content}
+            select={select}
+            revision={revision}
+          />
+        </div>
+      )}
       <div className="activity-heading">
         <h3>Activity</h3>
         <span>Notes and recorded changes</span>
@@ -204,7 +243,11 @@ export function Activity({
                   )}
                 </div>
                 <div className="markdown-preview activity-note">
-                  <MarkdownDocument source={item.note.content} />
+                  <MarkdownDocument
+                    source={item.note.content}
+                    select={select}
+                    revision={revision}
+                  />
                 </div>
                 {!trashed && (
                   <div className="activity-actions">
@@ -269,7 +312,17 @@ export function Activity({
           Load more notes
         </Button>
       )}
-      {!trashed && (
+      {!trashed && !composing && !edit && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          onClick={() => setComposing(true)}
+        >
+          Add a note
+        </Button>
+      )}
+      {!trashed && (composing || edit) && (
         <form
           className="activity-composer"
           onSubmit={(event) => void save(event)}

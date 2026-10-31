@@ -242,3 +242,26 @@ test("focuses the description on entry and reentry for rich and source documents
     cleanup();
   }
 });
+
+test("navigates references in Markdown text while leaving code and links alone", async () => {
+  const select = vi.fn();
+  bridge.invoke.mockResolvedValue({ ...initial, reference: "T-2" });
+  render(
+    <TicketEditor
+      ticket={
+        {
+          ...initial,
+          body: "See T-2 and `T-3` and [website](https://example.com/T-4)",
+        } as never
+      }
+      onSaved={vi.fn()}
+      select={select}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "T-2" }));
+  expect(select).toHaveBeenCalledWith("T-2");
+  expect(screen.queryByRole("button", { name: "T-3" })).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "website" }).getAttribute("href"),
+  ).toBe("https://example.com/T-4");
+});

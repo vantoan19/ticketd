@@ -126,7 +126,6 @@ try {
       ).getValue()) === "Benchmark ticket 999",
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);
-  await (await (await detail()).$("summary=Relationships")).click();
   await (await (await detail()).$("button=Open dependency graph")).click();
   await browser.waitUntil(
     async () =>

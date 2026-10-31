@@ -2,36 +2,38 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
+  margin-top: 32px;
 }
 .activity-heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 .activity-heading h3 {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
 }
 .activity-heading span,
 .activity-muted,
 .activity-meta {
   color: var(--muted-foreground);
   font-size: 12px;
+  line-height: 16px;
 }
 .activity-list {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 16px;
   list-style: none;
   padding: 0;
   margin: 0;
 }
 .activity-entry {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+  padding-block: 8px;
   overflow-wrap: anywhere;
 }
 .activity-meta {
@@ -39,11 +41,11 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 12px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .activity-meta strong {
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: 500;
 }
 .activity-note {
   margin: 0;
@@ -61,5 +63,5 @@
 .activity-composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }

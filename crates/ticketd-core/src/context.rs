@@ -13,6 +13,9 @@ pub struct ContextOptions {
     pub effort: bool,
     pub relationships: bool,
     pub notes: bool,
+    #[serde(default)]
+    pub evidence: bool,
+    pub backlinks: bool,
     pub offset: u32,
 }
 #[derive(Debug, Serialize)]
@@ -56,11 +59,26 @@ pub struct ContextRelationships {
     pub children: ContextPage<ContextRelated>,
     pub prerequisites: ContextPage<ContextRelated>,
     pub blocking: ContextPage<ContextRelated>,
+    pub related: ContextPage<ContextRelated>,
+    pub discovered_while: ContextPage<ContextRelated>,
+    pub discoveries: ContextPage<ContextRelated>,
+    pub duplicate_of: Option<ContextRelated>,
+    pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
 pub struct ContextNote {
     pub id: String,
     pub content: BoundedText,
+    pub created_at: String,
+    pub updated_at: String,
+    pub editing_agent: Option<BoundedText>,
+}
+#[derive(Debug, Serialize)]
+pub struct ContextEvidence {
+    pub id: String,
+    pub kind: String,
+    pub name: BoundedText,
+    pub value: BoundedText,
     pub created_at: String,
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
@@ -76,6 +94,10 @@ pub struct TicketContext {
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<ContextPage<ContextNote>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<ContextPage<ContextEvidence>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backlinks: Option<ContextPage<crate::Backlink>>,
 }
 fn text(value: String, limit: usize) -> BoundedText {
     let mut chars = value.chars();
@@ -196,6 +218,11 @@ impl Workspace {
             let parent = related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.parent_id WHERE p.child_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next();
             Some(ContextRelationships {
                 parent,
+                related: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.kind='related' AND (r.source_id=?1 OR r.target_id=?1) ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discovered_while: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                discoveries: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children: related(
                     &tx,
                     "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
@@ -235,6 +262,33 @@ impl Workspace {
         } else {
             None
         };
+        let evidence = if options.evidence {
+            let mut stmt = tx.prepare("SELECT id,kind,name,value,created_at,updated_at,editing_agent FROM evidence WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+            let rows = stmt
+                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                    Ok(ContextEvidence {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        name: text(r.get(2)?, LABEL),
+                        value: text(r.get(3)?, TEXT),
+                        created_at: r.get(4)?,
+                        updated_at: r.get(5)?,
+                        editing_agent: r.get::<_, Option<String>>(6)?.map(|v| text(v, LABEL)),
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(page(rows, options.offset))
+        } else {
+            None
+        };
+        let backlinks = if options.backlinks {
+            Some(page(
+                crate::backlinks::query(&tx, reference, PAGE as u32 + 1, options.offset)?,
+                options.offset,
+            ))
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -251,6 +305,8 @@ impl Workspace {
             effort,
             relationships,
             notes,
+            evidence,
+            backlinks,
         })
     }
 }

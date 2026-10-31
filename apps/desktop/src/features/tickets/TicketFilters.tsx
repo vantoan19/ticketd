@@ -100,9 +100,11 @@ export function TicketFilters(p: Props) {
           />
         </label>
         <Popover>
-          <PopoverTrigger className="filters-trigger">
-            <SlidersHorizontal size={14} /> Filters
-            {chips.length ? " • Active" : ""}
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <SlidersHorizontal data-icon="inline-start" /> Filters
+              {chips.length ? " • Active" : ""}
+            </Button>
           </PopoverTrigger>
           <PopoverContent
             className="filters-content"

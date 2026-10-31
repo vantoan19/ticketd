@@ -2,24 +2,22 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 16px 12px;
+  gap: 8px;
+  padding: 0 24px 12px;
   color: var(--muted-foreground);
   font-size: 12px;
-}
-.filter-chips button {
-  height: 26px;
+  line-height: 16px;
 }
 .selection-context {
-  padding: 8px 16px;
+  padding: 12px 24px;
   color: var(--muted-foreground);
-  border-bottom: 1px solid var(--border);
+  background: var(--recessed);
   font-size: 12px;
+  line-height: 16px;
 }
-
 .filters-content [data-slot="field-group"] {
-  gap: 12px;
+  gap: 16px;
 }
 .filters-content [data-slot="field"] {
-  gap: 4px;
+  gap: 8px;
 }

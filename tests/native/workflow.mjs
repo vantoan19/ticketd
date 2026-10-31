@@ -142,6 +142,7 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
+  await (await (await detail()).$("button=Add a note")).click();
   const noteEditor = await (
     await detail()
   ).$('[role="textbox"][aria-label="New note rich text"]');
@@ -167,7 +168,6 @@ try {
       ).length === 0,
   );
   await search.clearValue();
-  await (await (await detail()).$("summary=Relationships")).click();
   await (await (await detail()).$("button=Open dependency graph")).click();
   const graphNode = await (
     await (await detail()).$('[aria-label="Graph tickets"]')

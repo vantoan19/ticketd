@@ -1,40 +1,79 @@
 .ticket-list {
   container-type: inline-size;
 }
-.ticket-list .ticket-rows {
-  margin: 12px 0 0;
-  padding: 0;
+.ticket-rows {
+  margin: 0;
+  padding: 0 8px 24px;
   list-style: none;
 }
 .ticket-rows li {
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-block: 0;
+  padding-left: 0;
+  border-radius: 6px;
+}
+.ticket-rows li:hover {
+  background: var(--accent);
+}
+.ticket-rows li:has(.ticket-row[aria-pressed="true"]) {
+  background: var(--recessed);
+  box-shadow: none;
+}
+.ticket-rows li:has(input:checked) {
+  box-shadow: inset 0 0 0 1px var(--foreground);
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 105px 52px minmax(0, 1fr) minmax(0, auto);
-  column-gap: 12px;
-  row-gap: 3px;
+  grid-template-columns: 16px 52px minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 4px;
   width: 100%;
-  min-height: 52px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 12px 8px 0;
   text-align: left;
-  padding: 8px 26px;
+  border-radius: 6px;
+  background: transparent;
 }
 .ticket-row-status {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
+  color: var(--muted-foreground);
   font-size: 12px;
+  line-height: 16px;
 }
 .ticket-row-status svg {
   flex: none;
 }
+.ticket-row-status span {
+  display: none;
+}
+.ticket-title {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ticket-row-meta {
   display: flex;
+  grid-column: 3;
   gap: 12px;
   min-width: 0;
-  overflow: hidden;
+  color: var(--muted-foreground);
   font-size: 12px;
+  line-height: 16px;
+  overflow: hidden;
+}
+.ticket-row-meta:empty {
+  display: none;
 }
 .ticket-row-meta span {
   overflow: hidden;
@@ -42,36 +81,114 @@
   white-space: nowrap;
 }
 .ticket-list .ticket-row:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: -3px;
   position: relative;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
-.ticket-list .ticket-row[aria-pressed="true"] {
-  box-shadow: inset 3px 0 var(--foreground);
+.ticket-rows input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--foreground);
+  cursor: pointer;
 }
-@container (max-width: 650px) {
+.ticket-select {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+}
+.ticket-rows input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+.bulk-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 24px 12px;
+  padding: 12px;
+  border-radius: 6px;
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+}
+.bulk-controls > span {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.bulk-controls > [role="alert"] {
+  width: 100%;
+  color: var(--destructive);
+  font-size: 12px;
+  line-height: 16px;
+}
+.bulk-action-error {
+  color: var(--error-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.bulk-action-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 280px;
+}
+.bulk-action-popover h3 {
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+  font-weight: 500;
+}
+.bulk-action-popover label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bulk-action-popover :is(input, select) {
+  width: 100%;
+}
+
+@container (min-width: 740px) {
   .ticket-list .ticket-row {
-    grid-template-columns: 105px 52px minmax(0, 1fr);
+    grid-template-columns: 112px 52px minmax(0, 1fr) minmax(0, auto);
+  }
+  .ticket-row-status span {
+    display: inline;
   }
   .ticket-row-meta {
-    grid-column: 3;
+    grid-column: auto;
+  }
+}
+@container (max-width: 440px) {
+  .ticket-list .ticket-row {
+    column-gap: 8px;
+  }
+  .bulk-actions {
+    flex: 1;
   }
 }
 
-@container (max-width: 500px) {
-  .ticket-list .ticket-row {
-    grid-template-columns: 16px 52px minmax(0, 1fr);
-    padding-inline: 18px;
+/* Reveal selection without moving the identifier or title columns. */
+@media (hover: hover) and (pointer: fine) {
+  .ticket-select input:not(:checked) {
+    opacity: 0;
   }
-  .ticket-row-status span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+  .ticket-rows li:hover .ticket-select input,
+  .ticket-rows li:focus-within .ticket-select input,
+  .ticket-rows:has(input:checked) .ticket-select input {
+    opacity: 1;
   }
 }

@@ -91,6 +91,14 @@ impl Workspace {
         )?;
         if changed != 0 {
             history::record(&tx, &dependent_id, "dependency", "", blocker, agent)?;
+            history::record(
+                &tx,
+                &blocker_id,
+                "relationship:blocks",
+                "",
+                dependent,
+                agent,
+            )?;
         }
         tx.commit()?;
         self.show_ticket(dependent)
@@ -122,8 +130,102 @@ impl Workspace {
         )?;
         if changed != 0 {
             history::record(&tx, &dependent_id, "dependency", blocker, "", agent)?;
+            history::record(
+                &tx,
+                &blocker_id,
+                "relationship:blocks",
+                dependent,
+                "",
+                agent,
+            )?;
         }
         tx.commit()?;
         self.show_ticket(dependent)
+    }
+}
+
+/// Related is symmetric; Discovered points from the work to the discovered ticket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationshipKind {
+    Related,
+    Discovered,
+}
+
+impl Workspace {
+    pub fn add_contextual_relationship(
+        &mut self,
+        source: &str,
+        target: &str,
+        kind: RelationshipKind,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        self.change_contextual_relationship(source, target, kind, agent, true)
+    }
+
+    pub fn remove_contextual_relationship(
+        &mut self,
+        source: &str,
+        target: &str,
+        kind: RelationshipKind,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        self.change_contextual_relationship(source, target, kind, agent, false)
+    }
+
+    fn change_contextual_relationship(
+        &mut self,
+        source: &str,
+        target: &str,
+        kind: RelationshipKind,
+        agent: Option<&str>,
+        add: bool,
+    ) -> Result<Ticket, Error> {
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        let source_id = id(&tx, source)?;
+        let target_id = id(&tx, target)?;
+        if source_id == target_id {
+            return Err(Error::RelationshipSelfLink);
+        }
+        if add {
+            crate::ensure_editable(&tx, &source_id)?;
+            crate::ensure_editable(&tx, &target_id)?;
+        } else {
+            let source_trash: bool = tx.query_row(
+                "SELECT trashed FROM tickets WHERE id=?1",
+                [&source_id],
+                |r| r.get(0),
+            )?;
+            crate::ensure_editable(&tx, if source_trash { &target_id } else { &source_id })?;
+        }
+        let (first, second) = if kind == RelationshipKind::Related && source_id > target_id {
+            (&target_id, &source_id)
+        } else {
+            (&source_id, &target_id)
+        };
+        let kind_name = match kind {
+            RelationshipKind::Related => "related",
+            RelationshipKind::Discovered => "discovered",
+        };
+        let changed = if add {
+            tx.execute("INSERT OR IGNORE INTO contextual_relationships(kind,source_id,target_id) VALUES (?1,?2,?3)", params![kind_name,first,second])?
+        } else {
+            tx.execute("DELETE FROM contextual_relationships WHERE kind=?1 AND source_id=?2 AND target_id=?3", params![kind_name,first,second])?
+        };
+        if changed != 0 {
+            let (from_target, to_target) = if add { ("", target) } else { (target, "") };
+            let (from_source, to_source) = if add { ("", source) } else { (source, "") };
+            let (source_kind, target_kind) = match kind {
+                RelationshipKind::Related => ("relationship:related", "relationship:related"),
+                RelationshipKind::Discovered => {
+                    ("relationship:discovery", "relationship:discovered-while")
+                }
+            };
+            history::record(&tx, &source_id, source_kind, from_target, to_target, agent)?;
+            history::record(&tx, &target_id, target_kind, from_source, to_source, agent)?;
+        }
+        tx.commit()?;
+        self.show_ticket(source)
     }
 }

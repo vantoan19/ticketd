@@ -110,6 +110,7 @@ impl Workspace {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
+            crate::duplicates::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -143,6 +144,7 @@ impl Workspace {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
+            crate::duplicates::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
