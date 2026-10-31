@@ -1003,6 +1003,60 @@ fn search_tracks_note_deletion() {
 }
 
 #[test]
+fn export_preserves_workspace_relationships_and_trash() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace
+        .create_project("Project", dir.path().to_str().unwrap())
+        .unwrap();
+    let effort = workspace.create_effort("Effort").unwrap();
+    let parent = workspace
+        .create_ticket_in_project("Parent", Some(&project.id))
+        .unwrap();
+    let child = workspace.create_ticket("Child").unwrap();
+    workspace
+        .set_effort(&child.reference, Some(&effort.id), None)
+        .unwrap();
+    workspace
+        .set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    workspace
+        .add_dependency(&parent.reference, &child.reference, None)
+        .unwrap();
+    workspace.add_tag(&child.reference, "urgent").unwrap();
+    let note = workspace
+        .add_note(&child.reference, "Finding", Some("agent"))
+        .unwrap();
+    workspace
+        .set_trashed(&parent.reference, true, None)
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["format_version"], 1);
+    assert_eq!(export["projects"][0]["id"], project.id);
+    assert_eq!(export["project_checkouts"][0]["project_id"], project.id);
+    assert_eq!(export["efforts"][0]["id"], effort.id);
+    assert_eq!(export["tickets"][0]["id"], parent.id);
+    assert_eq!(export["tickets"][0]["trashed"], 1);
+    assert_eq!(export["tickets"][1]["effort_id"], effort.id);
+    assert_eq!(export["notes"][0]["id"], note.id);
+    assert_eq!(export["notes"][0]["ticket_id"], child.id);
+    assert_eq!(export["ticket_parents"][0]["parent_id"], parent.id);
+    assert_eq!(export["dependencies"][0]["dependent_id"], child.id);
+    assert_eq!(export["ticket_tags"][0]["tag_name"], "urgent");
+    assert!(!export["ticket_history"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn export_file_does_not_replace_an_existing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let path = dir.path().join("export.json");
+    std::fs::write(&path, "existing").unwrap();
+    assert!(workspace.export_file(&path).is_err());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "existing");
+}
+
+#[test]
 fn combined_filters_search_flat_family_with_all_tags_and_paging() {
     use ticketd_core::{Availability, TicketFilter};
     let dir = tempfile::tempdir().unwrap();

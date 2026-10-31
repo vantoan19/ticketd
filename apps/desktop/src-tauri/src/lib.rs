@@ -5,6 +5,13 @@ use ticketd_core::{
 };
 
 #[tauri::command]
+fn export_workspace(path: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.export_file(path))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_projects() -> Result<Vec<Project>, String> {
     Workspace::open_default()
         .and_then(|w| w.list_projects())
@@ -222,6 +229,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
             restore_workspace,
+            export_workspace,
             list_efforts,
             show_effort,
             create_effort,

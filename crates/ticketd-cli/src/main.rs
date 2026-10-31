@@ -18,6 +18,11 @@ enum Command {
     Backup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
     RestoreWorkspace { path: String },
+    /// Export a portable JSON snapshot to stdout or a new file
+    Export {
+        #[arg(long)]
+        file: Option<String>,
+    },
     /// Execute a JSON write request from a file or stdin; retain its result for safe retries
     Write {
         file: String,
@@ -309,6 +314,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             format!("Backup saved: {path}")
         }
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
+        Command::Export { file } => {
+            if let Some(path) = file {
+                workspace.export_file(path)?;
+                return Ok(());
+            }
+            serde_json::to_string_pretty(&workspace.export()?)?
+        }
         Command::Write { file, request_id } => {
             let input = read_content(None, Some(file))?.ok_or("missing request")?;
             let request: WriteRequest = serde_json::from_str(&input)?;

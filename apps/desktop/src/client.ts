@@ -82,6 +82,9 @@ export const client = {
   async restoreWorkspace(path: string) {
     return z.string().parse(await invoke("restore_workspace", { path }));
   },
+  async exportWorkspace(path: string) {
+    await invoke("export_workspace", { path });
+  },
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },
