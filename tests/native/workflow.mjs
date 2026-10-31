@@ -121,7 +121,8 @@ try {
       ).length === 0,
   );
   await search.clearValue();
-  await (await (await detail()).$("summary=Relationships & graph")).click();
+  await (await (await detail()).$("summary=Relationships")).click();
+  await (await (await detail()).$("button=Open dependency graph")).click();
   const graphNode = await (
     await (await detail()).$('[aria-label="Graph tickets"]')
   ).$(`button*=${evidence.reference}`);

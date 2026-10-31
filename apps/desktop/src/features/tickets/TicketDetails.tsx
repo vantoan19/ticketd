@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { ArrowLeft, Maximize2, X } from "lucide-react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
@@ -23,7 +24,6 @@ export function TicketDetails({
   refresh,
   updateTicket,
   setError,
-  setTrash,
 }: {
   selected: string | null;
   expanded: boolean;
@@ -38,6 +38,7 @@ export function TicketDetails({
   setError: (error: string) => void;
   setTrash: (trash: boolean) => void;
 }) {
+  const [graphReference, setGraphReference] = useState<string | null>(null);
   return (
     <section className="ticket-detail" aria-labelledby="detail-heading">
       <div className="detail-header">
@@ -143,24 +144,54 @@ export function TicketDetails({
           {item.reference === selected && !item.trashed && (
             <>
               <details className="detail-disclosure">
-                <summary>Relationships & graph</summary>
-                <Hierarchy
-                  ticket={item}
-                  refresh={refresh}
-                  select={setSelected}
-                />
-                <Dependencies ticket={item} refresh={refresh} />
-                <Suspense fallback={<p>Loading graph…</p>}>
-                  <DependencyGraph
-                    key={item.reference}
-                    reference={item.reference}
-                    revision={revision}
-                    select={(reference, trashed) => {
-                      setSelected(reference);
-                      setTrash(trashed);
-                    }}
-                  />
-                </Suspense>
+                <summary>Relationships</summary>
+                {graphReference === item.reference ? (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setGraphReference(null)}
+                    >
+                      Back to relationships
+                    </Button>
+                    <Suspense fallback={<p role="status">Loading graph…</p>}>
+                      <DependencyGraph
+                        key={item.reference}
+                        reference={item.reference}
+                        revision={revision}
+                        select={(reference) => {
+                          setSelected(reference);
+                          setGraphReference(null);
+                        }}
+                      />
+                    </Suspense>
+                  </>
+                ) : (
+                  <>
+                    <Hierarchy
+                      ticket={item}
+                      refresh={refresh}
+                      revision={revision}
+                      select={(reference) => {
+                        setSelected(reference);
+                      }}
+                    />
+                    <Dependencies
+                      ticket={item}
+                      refresh={refresh}
+                      select={(reference) => {
+                        setSelected(reference);
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setGraphReference(item.reference)}
+                    >
+                      Open dependency graph
+                    </Button>
+                  </>
+                )}
               </details>
             </>
           )}
