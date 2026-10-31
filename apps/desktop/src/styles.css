@@ -1011,6 +1011,7 @@ select option {
   padding: 16px;
 }
 .mermaid-canvas {
+  width: max-content;
   min-width: 1px;
 }
 .mermaid-canvas > svg {
@@ -1029,4 +1030,37 @@ select option {
   font-family: "Geist Mono", monospace;
   font-size: 12px;
   max-height: 320px;
+}
+
+/* Syntax colors keep readable contrast on the document's own surface. */
+:root {
+  --syntax-keyword: #8250df;
+  --syntax-string: #0a6b3b;
+  --syntax-number: #0550ae;
+  --syntax-comment: #656d76;
+  --syntax-title: #953800;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --syntax-keyword: #d2a8ff;
+    --syntax-string: #a5d6ff;
+    --syntax-number: #79c0ff;
+    --syntax-comment: #9da7b1;
+    --syntax-title: #ffa657;
+  }
+}
+.markdown-document :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta) {
+  color: var(--syntax-keyword);
+}
+.markdown-document :is(.hljs-string, .hljs-attr, .hljs-regexp) {
+  color: var(--syntax-string);
+}
+.markdown-document :is(.hljs-number, .hljs-literal, .hljs-variable) {
+  color: var(--syntax-number);
+}
+.markdown-document :is(.hljs-comment, .hljs-quote) {
+  color: var(--syntax-comment);
+}
+.markdown-document :is(.hljs-title, .hljs-type, .hljs-built_in, .hljs-section) {
+  color: var(--syntax-title);
 }

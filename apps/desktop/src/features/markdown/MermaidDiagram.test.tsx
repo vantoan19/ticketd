@@ -172,3 +172,14 @@ test("offers exact source copy and an expanded keyboard-accessible zoom view wit
   ).toContain("100%");
   expect(edit).not.toHaveBeenCalled();
 });
+
+test("keeps resource-loading image nodes as source without invoking the renderer", async () => {
+  const source =
+    'flowchart LR\n  A@{ img: "https://tracker.example/image", label: "Remote" }';
+  render(<MermaidDiagram source={source} />);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "external resources",
+  );
+  expect(screen.getByLabelText("Mermaid source").textContent).toBe(source);
+  expect(engine.render).not.toHaveBeenCalled();
+});

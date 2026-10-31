@@ -75,3 +75,13 @@ test("routes multiple Mermaid fences to diagrams and copies the exact original C
     container.querySelector('[aria-label="Mermaid source"]')?.textContent,
   ).toBe('graph LR\r\n  A["Xin chào 🌿"] --> B\r\n');
 });
+
+test("highlights known code languages while preserving literal HTML as code", () => {
+  const code = 'const label = "<img src=x onerror=alert(1)>";';
+  const { container } = render(
+    <MarkdownDocument source={"```typescript\n" + code + "\n```"} />,
+  );
+  expect(container.querySelector("pre code")?.textContent).toBe(code + "\n");
+  expect(container.querySelector("pre code span")?.textContent).toBe("const");
+  expect(container.querySelector("img")).toBeNull();
+});

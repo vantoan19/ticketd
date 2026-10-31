@@ -1,5 +1,6 @@
 import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { CopySourceButton } from "./CopySourceButton";
 
@@ -50,7 +51,7 @@ export function MarkdownDocument({ source }: { source: string }) {
               <table>{children}</table>
             </div>
           ),
-          pre: ({ node, children }) => {
+          pre: ({ node }) => {
             const code = node?.children[0];
             const language =
               code?.type === "element"
@@ -74,7 +75,9 @@ export function MarkdownDocument({ source }: { source: string }) {
                   <span>{language || "Code"}</span>
                   <CopySourceButton label="Copy code" source={content} />
                 </div>
-                <pre tabIndex={0}>{children}</pre>
+                <pre tabIndex={0}>
+                  <SyntaxCode source={content} language={language} />
+                </pre>
               </div>
             );
           },
