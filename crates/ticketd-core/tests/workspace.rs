@@ -329,6 +329,81 @@ fn concurrent_opposing_dependencies_cannot_form_cycle() {
 }
 
 #[test]
+fn hierarchy_rejects_grandchildren_and_records_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    workspace
+        .set_parent(&b.reference, Some(&a.reference), None)
+        .unwrap();
+    assert!(
+        workspace
+            .set_parent(&c.reference, Some(&b.reference), None)
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_ticket(&a.reference).unwrap().children[0].reference,
+        b.reference
+    );
+    assert_eq!(
+        workspace
+            .show_ticket(&b.reference)
+            .unwrap()
+            .parent
+            .unwrap()
+            .reference,
+        a.reference
+    );
+    workspace.set_parent(&b.reference, None, None).unwrap();
+    assert_eq!(
+        workspace
+            .ticket_history(&b.reference)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.kind == "parent")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn concurrent_hierarchy_assignments_preserve_one_level() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [
+        (b.reference.clone(), a.reference),
+        (c.reference, b.reference),
+    ]
+    .into_iter()
+    .map(|(child, parent)| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut workspace = Workspace::open(path).unwrap();
+            barrier.wait();
+            workspace.set_parent(&child, Some(&parent), None).is_ok()
+        })
+    })
+    .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .filter(|result| *result)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn effort_membership_progress_and_archiving_preserve_tickets() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -490,4 +565,124 @@ fn effort_patch_combines_membership_and_status_atomically() {
     );
     let clear: TicketPatch = serde_json::from_str(r#"{"effort_id":null}"#).unwrap();
     assert_eq!(clear.effort_id, Some(None));
+}
+
+#[test]
+fn trash_preserves_relationships_and_requires_restoration_for_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    let child = w.create_ticket("Child").unwrap();
+    w.set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    w.add_dependency(&parent.reference, &child.reference, None)
+        .unwrap();
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert_eq!(w.list_tickets().unwrap().len(), 1);
+    assert_eq!(w.list_trash().unwrap()[0].id, parent.id);
+    let visible = w.show_ticket(&child.reference).unwrap();
+    assert!(visible.parent.unwrap().trashed);
+    assert!(visible.prerequisites[0].trashed);
+    assert_eq!(visible.availability.as_deref(), Some("Blocked"));
+    assert!(
+        w.change_ticket(&parent.reference, TicketPatch::default())
+            .is_err()
+    );
+    assert!(w.add_note(&parent.reference, "note", None).is_err());
+    assert!(
+        w.add_dependency(&child.reference, &parent.reference, None)
+            .is_err()
+    );
+    w.set_trashed(&parent.reference, false, None).unwrap();
+    w.change_ticket(
+        &parent.reference,
+        TicketPatch {
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert_eq!(
+        w.show_ticket(&child.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Ready")
+    );
+    w.remove_dependency(&parent.reference, &child.reference, None)
+        .unwrap();
+    w.set_parent(&child.reference, None, None).unwrap();
+    assert_eq!(
+        w.ticket_history(&parent.reference)
+            .unwrap()
+            .iter()
+            .filter(|h| h.kind == "trash")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn visible_parent_can_detach_trashed_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    let child = w.create_ticket("Child").unwrap();
+    w.set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    w.set_trashed(&child.reference, true, None).unwrap();
+    assert!(
+        w.set_parent(&child.reference, Some(&parent.reference), None)
+            .is_err()
+    );
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert!(w.set_parent(&child.reference, None, None).is_err());
+    w.set_trashed(&parent.reference, false, None).unwrap();
+    w.detach_child(&parent.reference, &child.reference, None)
+        .unwrap();
+    let restored = w.set_trashed(&child.reference, false, None).unwrap();
+    assert_eq!(restored.id, child.id);
+    assert!(restored.parent.is_none());
+}
+
+#[test]
+fn checkout_context_is_local_and_ambiguous_matches_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    let nested = first.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let project = workspace
+        .create_project("one", first.to_str().unwrap())
+        .unwrap();
+    workspace
+        .register_checkout(&project.id, second.to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        workspace.resolve_project(&nested).unwrap().unwrap().id,
+        project.id
+    );
+    assert_eq!(
+        workspace.resolve_project(&second).unwrap().unwrap().id,
+        project.id
+    );
+    assert!(workspace.resolve_project(dir.path()).unwrap().is_none());
+    let other = workspace
+        .create_project("two", nested.to_str().unwrap())
+        .unwrap();
+    assert!(workspace.resolve_project(&nested).is_err());
+    let ticket = workspace
+        .create_ticket_in_project("override", Some(&other.id))
+        .unwrap();
+    assert_eq!(ticket.project_id.as_deref(), Some(other.id.as_str()));
+    workspace
+        .remove_checkout(&other.id, nested.to_str().unwrap())
+        .unwrap();
+    assert_eq!(
+        workspace.resolve_project(&nested).unwrap().unwrap().id,
+        project.id
+    );
 }

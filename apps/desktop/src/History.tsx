@@ -39,12 +39,14 @@ export function History({
   revision,
   onChange,
   projects,
+  trashed,
 }: {
   reference: string;
   status: string;
   revision: number;
   onChange: () => Promise<void>;
   projects: Project[];
+  trashed: boolean;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
@@ -83,6 +85,7 @@ export function History({
         <select
           className="ml-2 rounded border p-1"
           value={status}
+          disabled={trashed}
           onChange={(event) => void changeStatus(event.target.value)}
         >
           {["Todo", "In progress", "In review", "Done", "Canceled"].map(

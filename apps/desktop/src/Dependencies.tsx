@@ -35,7 +35,8 @@ export function Dependencies({
         {ticket.prerequisites.map((item) => (
           <li key={item.reference}>
             {item.reference} {item.title} ({item.status}
-            {item.status !== "Done" && ", unresolved"}){" "}
+            {item.status !== "Done" && ", unresolved"}
+            {item.trashed && ", trashed"}){" "}
             <button
               type="button"
               onClick={() => void change("remove_dependency", item.reference)}

@@ -40,6 +40,20 @@ enum Command {
         #[arg(long)]
         clear_project: bool,
     },
+    /// List trashed tickets
+    TrashList,
+    /// Move a ticket to trash
+    Trash {
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Restore a ticket from trash
+    Restore {
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Show ticket history
     History { reference: String },
     /// Manage ticket notes
@@ -62,6 +76,14 @@ enum Command {
     RemoveDependency {
         blocker: String,
         dependent: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Assign or remove a parent (omit --parent to remove)
+    SetParent {
+        reference: String,
+        #[arg(long)]
+        parent: Option<String>,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -130,6 +152,14 @@ enum ProjectCommand {
         id: String,
     },
     List,
+    Register {
+        id: String,
+        path: String,
+    },
+    Unregister {
+        id: String,
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -193,10 +223,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.edit_project(&id, &name, &path)?)?
             }
             ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
+            ProjectCommand::Register { id, path } => {
+                serde_json::to_string(&workspace.register_checkout(&id, &path)?)?
+            }
+            ProjectCommand::Unregister { id, path } => {
+                serde_json::to_string(&workspace.remove_checkout(&id, &path)?)?
+            }
             ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
         },
         Command::Create { title, project } => {
-            serde_json::to_string(&workspace.create_ticket_in_project(&title, project.as_deref())?)?
+            let inferred = if project.is_none() {
+                workspace.resolve_project(&std::env::current_dir()?)?
+            } else {
+                None
+            };
+            let project = project
+                .as_deref()
+                .or_else(|| inferred.as_ref().map(|p| p.id.as_str()));
+            serde_json::to_string(&workspace.create_ticket_in_project(&title, project)?)?
         }
         Command::Change {
             reference,
@@ -271,6 +315,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 offset,
             } => serde_json::to_string(&workspace.notes(&reference, limit, offset)?)?,
         },
+        Command::TrashList => serde_json::to_string(&workspace.list_trash()?)?,
+        Command::Trash { reference, agent } => {
+            serde_json::to_string(&workspace.set_trashed(&reference, true, agent.as_deref())?)?
+        }
+        Command::Restore { reference, agent } => {
+            serde_json::to_string(&workspace.set_trashed(&reference, false, agent.as_deref())?)?
+        }
         Command::History { reference } => {
             serde_json::to_string(&workspace.ticket_history(&reference)?)?
         }
@@ -296,6 +347,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => serde_json::to_string(&workspace.remove_dependency(
             &blocker,
             &dependent,
+            agent.as_deref(),
+        )?)?,
+        Command::SetParent {
+            reference,
+            parent,
+            agent,
+        } => serde_json::to_string(&workspace.set_parent(
+            &reference,
+            parent.as_deref(),
             agent.as_deref(),
         )?)?,
         Command::Effort { command } => match command {
