@@ -475,6 +475,8 @@ select option {
   transform: translate(-50%, -50%);
   translate: none;
   width: min(500px, 80vw);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   background: var(--accent);
   border: 1px solid var(--border);
   border-radius: 9px;
