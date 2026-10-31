@@ -2381,3 +2381,44 @@ fn retained_duplicate_blocker_stays_unresolved_and_review_notifies_followers() {
                 && entry.reference == moved.reference)
     );
 }
+
+#[test]
+fn concurrent_new_edge_is_never_silently_replaced_by_duplicate_review() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("New dependent").unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let thread_path = path.clone();
+    let thread_barrier = barrier.clone();
+    let blocker = source.reference.clone();
+    let target = dependent.reference.clone();
+    let worker = std::thread::spawn(move || {
+        let mut other = Workspace::open(thread_path).unwrap();
+        thread_barrier.wait();
+        other.add_dependency(&blocker, &target, None).unwrap();
+    });
+    barrier.wait();
+    let result = ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        vec![],
+        None,
+    );
+    worker.join().unwrap();
+    let saved = ws.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(saved.prerequisites[0].reference, source.reference);
+    if result.is_err() {
+        assert_eq!(
+            ws.show_ticket(&source.reference).unwrap().status,
+            Status::Todo
+        );
+    }
+}

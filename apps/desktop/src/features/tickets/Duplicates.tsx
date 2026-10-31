@@ -81,7 +81,23 @@ export function Duplicates({
       await refresh();
     } catch (reason) {
       setError(String(reason));
-      if (String(reason).includes("review has changed")) setPreview(null);
+      if (String(reason).includes("review has changed") && target !== null) {
+        setPreview(null);
+        setChoices([]);
+        try {
+          const updated = await client.previewDuplicate(
+            editingGraph ? existingEndpoint.trim() : ticket.reference,
+            editingGraph ? ticket.reference : target,
+          );
+          setPreview(updated);
+          setChoices(updated.edges.map(() => ""));
+          setError(
+            "Dependencies changed. Review the updated relationships and choose again.",
+          );
+        } catch (previewError) {
+          setError(String(previewError));
+        }
+      }
     } finally {
       setPending(false);
     }
