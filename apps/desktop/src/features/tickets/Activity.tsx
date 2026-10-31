@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { MarkdownEditor } from "@/features/markdown/MarkdownEditor";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -279,7 +279,7 @@ export function Activity({
               <FieldLabel asChild>
                 <span>{edit ? "Edit note" : "New note"}</span>
               </FieldLabel>
-              <MarkdownEditor
+              <LazyMarkdownEditor
                 key={edit?.id ?? "new"}
                 label={edit ? "Edit note" : "New note"}
                 value={edit ? edit.content : draft}

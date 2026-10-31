@@ -57,7 +57,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
       trashed={false}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   const composer = screen.getByRole("textbox", { name: "New note source" });
   fireEvent.change(composer, { target: { value: "A **draft**" } });
   fireEvent.click(screen.getByRole("button", { name: "Add note" }));
@@ -113,7 +115,9 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   const add = screen.getByRole("button", { name: "Add note" });
   expect(add).toHaveProperty("disabled", true);
   fireEvent.submit(add.closest("form")!);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   const source = screen.getByRole("textbox", { name: "New note source" });
   fireEvent.change(source, { target: { value: " \n\t" } });
   fireEvent.submit(add.closest("form")!);
@@ -151,7 +155,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   });
   const view = render(<Activity {...props} />);
   await screen.findByText("Agent: cli-agent");
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
     target: { value: "Unsubmitted new draft" },
   });
@@ -159,7 +165,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   expect(
     screen.getByRole("textbox", { name: "Edit note rich text" }).textContent,
   ).toContain("Original note");
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
     target: { value: "My edited **draft**" },
   });
@@ -178,7 +186,9 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     screen.getByRole("textbox", { name: "Edit note source" }),
   ).toHaveProperty("value", "My edited **draft**");
   fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   expect(
     screen.getByRole("textbox", { name: "New note source" }),
   ).toHaveProperty("value", "Unsubmitted new draft");
@@ -203,7 +213,9 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   render(<Activity {...props} />);
   await screen.findByText("Agent: cli-agent");
   fireEvent.click(screen.getByRole("button", { name: /Edit note from/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
     target: { value: "## Edited finding" },
   });

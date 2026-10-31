@@ -13,7 +13,7 @@ import {
   FieldLabel,
   FieldError,
 } from "@/components/ui/field";
-import { MarkdownEditor } from "@/features/markdown/MarkdownEditor";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -192,7 +192,7 @@ export function CreateTicketDialog({
                 <span>Description</span>
               </FieldLabel>
               <div onKeyDown={(event) => event.stopPropagation()}>
-                <MarkdownEditor
+                <LazyMarkdownEditor
                   label="Description"
                   readOnly={pending}
                   value={draft.body}
