@@ -1,6 +1,12 @@
 import { Notes } from "./Notes";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { History } from "./History";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { client, type Ticket } from "./client";
 import { Tags } from "./Tags";
 import { TicketEditor } from "./TicketEditor";
@@ -11,17 +17,49 @@ export function App() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const generation = useRef(0);
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
+    if (refreshing.current) return;
+    refreshing.current = true;
+    const request = ++generation.current;
+    let timeout = 0;
     try {
-      setTickets(await client.listTickets());
+      const result = await Promise.race([
+        client.listTickets(),
+        new Promise<never>((_, reject) => {
+          timeout = window.setTimeout(
+            () => reject(new Error("Timed out")),
+            5000,
+          );
+        }),
+      ]);
+      if (request !== generation.current) return;
+      setTickets(result);
+      setRevision((value) => value + 1);
       setError("");
     } catch (reason) {
-      setError(String(reason));
+      if (request !== generation.current) return;
+      setError(
+        `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
+      );
+    } finally {
+      window.clearTimeout(timeout);
+      refreshing.current = false;
+      if (request === generation.current) setLoading(false);
     }
   }, []);
   useEffect(() => {
+    const generationRef = generation;
     const timer = window.setTimeout(() => void refresh(), 0);
-    return () => window.clearTimeout(timer);
+    const interval = window.setInterval(() => void refresh(), 2000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      generationRef.current++;
+    };
   }, [refresh]);
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -38,6 +76,7 @@ export function App() {
     }
   }
   const updateTicket = useCallback((updated: Ticket) => {
+    generation.current++;
     setTickets((items) =>
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
@@ -82,7 +121,11 @@ export function App() {
           <h2 id="tickets-heading" className="text-xl font-semibold">
             Tickets
           </h2>
-          {tickets.length === 0 ? (
+          {loading ? (
+            <p role="status" className="mt-3">
+              Loading tickets…
+            </p>
+          ) : tickets.length === 0 ? (
             <p className="mt-3">No tickets yet.</p>
           ) : (
             <ul className="mt-3 divide-y divide-neutral-200">
@@ -122,11 +165,12 @@ export function App() {
                 <History
                   reference={item.reference}
                   status={item.status}
+                  revision={revision}
                   onChange={refresh}
                 />
               )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
-              {item.id === selected && <Notes reference={item.reference} />}
+              {item.id === selected && <Notes reference={item.reference} refreshRevision={revision} />}
               <Tags
                 reference={item.reference}
                 tags={item.tags}
