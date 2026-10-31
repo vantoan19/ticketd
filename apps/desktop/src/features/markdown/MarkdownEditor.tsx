@@ -153,16 +153,19 @@ function Element(props: PlateElementProps) {
     <PlateElement
       {...props}
       as={tag}
-      {...(element.type === "a"
-        ? {
-            href: /^(https?:|mailto:|\/|#)/i.test(String(element.url))
-              ? String(element.url)
-              : undefined,
-            title: String(element.title ?? ""),
-            onClick: (event: MouseEvent) => event.preventDefault(),
-          }
-        : {})}
-      {...(element.type === "ol" ? { start: Number(element.start ?? 1) } : {})}
+      attributes={{
+        ...props.attributes,
+        ...(element.type === "a"
+          ? {
+              href: /^(https?:|mailto:|\/|#)/i.test(String(element.url))
+                ? String(element.url)
+                : undefined,
+              title: String(element.title ?? ""),
+              onClick: (event: MouseEvent) => event.preventDefault(),
+            }
+          : {}),
+        ...(element.type === "ol" ? { start: Number(element.start ?? 1) } : {}),
+      }}
     >
       {element.type === "li" && typeof element.checked === "boolean" && (
         <input

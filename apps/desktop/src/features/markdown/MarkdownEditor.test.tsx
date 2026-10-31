@@ -65,4 +65,16 @@ describe("Markdown draft editor", () => {
     ).toBe("true");
     expect(onChange).not.toHaveBeenCalled();
   });
+  it("shows ordered-list starts and link destinations in the rich document", () => {
+    render(
+      <MarkdownEditor
+        value={'3. Third\n\n[Example](https://example.com "Title")\n'}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("list").getAttribute("start")).toBe("3");
+    expect(
+      screen.getByRole("link", { name: "Example" }).getAttribute("href"),
+    ).toBe("https://example.com");
+  });
 });
