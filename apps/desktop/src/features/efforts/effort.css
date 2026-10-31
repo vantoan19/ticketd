@@ -1,0 +1,170 @@
+.effort-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 20px 12px;
+}
+.effort-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 16px;
+}
+.effort-title {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.effort-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.effort-header h1,
+.effort-index h1 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+  overflow-wrap: anywhere;
+}
+.effort-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.effort-title p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+}
+.effort-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.effort-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 4px 0 0;
+}
+.effort-counts > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.effort-counts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.effort-counts dd {
+  margin: 0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.effort-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.effort-rename,
+.effort-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.effort-rename [data-slot="field"],
+.effort-create [data-slot="field"] {
+  flex: 1 1 200px;
+  max-width: 360px;
+}
+.effort-index {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 680px;
+  padding: 24px 20px 40px;
+}
+.effort-index-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.effort-index-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  border-radius: 6px;
+}
+.effort-index-list li:hover {
+  background: var(--recessed);
+}
+.effort-index-list li > button:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  text-align: left;
+  border-radius: 6px;
+  background: transparent;
+}
+.effort-index-list li > button:first-child:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.effort-add-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+.effort-add-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.effort-add-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 0;
+}
+.effort-add-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.effort-add-title small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.effort-add-error {
+  margin: 0;
+  color: var(--destructive);
+}
