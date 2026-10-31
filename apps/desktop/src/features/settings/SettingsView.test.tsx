@@ -13,6 +13,7 @@ import { loadPreferences } from "@/lib/preferences";
 import { workspaceClient } from "@/lib/api/workspace";
 import { client } from "@/lib/api/client";
 import { notificationClient } from "@/lib/api/notifications";
+import { cliClient } from "@/lib/api/cli";
 
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: {
@@ -26,6 +27,7 @@ vi.mock("@/lib/api/workspace", () => ({
     safetyBackups: vi.fn(),
   },
 }));
+vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
     permitted: vi.fn(),
@@ -51,6 +53,18 @@ const info = {
 };
 
 beforeEach(() => {
+  vi.mocked(cliClient.check).mockResolvedValue({
+    found: false,
+    on_path: false,
+    path: null,
+    version: null,
+    version_matches: null,
+    workspace_path: null,
+    workspace_matches: null,
+    app_version: "0.1.0",
+    app_workspace_path: null,
+    suggested_directory: "~/.local/bin",
+  });
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);

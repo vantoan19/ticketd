@@ -7,10 +7,16 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import { CreateTicketDialog } from "./CreateTicketDialog";
+
+// The description editor loads lazily. Load it once up front so no test waits on
+// the import, which is slow when many test files start together.
+beforeAll(async () => {
+  await import("@/features/markdown/MarkdownEditor");
+});
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
 vi.mock("@uiw/react-codemirror", () => ({
@@ -86,11 +92,7 @@ test("editor modes and keyboard operations never create a ticket; explicit submi
     target: { value: "Draft ticket" },
   });
   expect(
-    await screen.findByRole(
-      "textbox",
-      { name: "Description rich text" },
-      { timeout: 5000 },
-    ),
+    await screen.findByRole("textbox", { name: "Description rich text" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   const source = screen.getByRole("textbox", { name: "Description source" });

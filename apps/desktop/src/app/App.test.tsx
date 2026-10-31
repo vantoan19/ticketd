@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
+import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
 class ResizeObserverStub {
   observe() {}
@@ -57,6 +58,9 @@ afterEach(() => {
   bridge.invoke.mockReset();
   localStorage.clear();
   narrowViewport = false;
+  // A command no fake answers means the bridge contract moved under the test.
+  const unknown = unknownCommands.splice(0);
+  expect(unknown).toEqual([]);
 });
 
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
@@ -220,7 +224,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
           },
         };
       }
-      throw new Error(`unexpected ${command}`);
+      return bridgeDefault(command, args);
     },
   );
   render(<App />);
@@ -279,12 +283,14 @@ test("opens a related ticket outside the filtered list and preserves drafts when
 
 test("retains project drafts and clears filters when navigating scopes", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_efforts")
-      return [{ id: "e1", name: "Old effort", archived: true }];
-    if (command === "list_projects" || command === "find_tickets") return [];
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_efforts")
+        return [{ id: "e1", name: "Old effort", archived: true }];
+      if (command === "list_projects" || command === "find_tickets") return [];
+      return bridgeDefault(command, args);
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -405,7 +411,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
       if (command === "find_tickets") return tickets;
       if (command === "show_ticket")
         return tickets.find((ticket) => ticket.reference === args?.reference);
-      throw new Error(`unexpected ${command}`);
+      return bridgeDefault(command, args);
     },
   );
   render(<App />);
@@ -437,12 +443,14 @@ test("moves focus between ticket rows without opening them until Enter, and reta
 
 test("clears additional filters while preserving the selected Effort", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_efforts")
-      return [{ id: "e1", name: "Launch", archived: false }];
-    if (command === "list_projects" || command === "find_tickets") return [];
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_efforts")
+        return [{ id: "e1", name: "Launch", archived: false }];
+      if (command === "list_projects" || command === "find_tickets") return [];
+      return bridgeDefault(command, args);
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -464,11 +472,13 @@ test("clears additional filters while preserving the selected Effort", async () 
 
 test("removes one filter chip and shows the query when nothing matches", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_efforts" || command === "list_projects") return [];
-    if (command === "find_tickets") return [];
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_efforts" || command === "list_projects") return [];
+      if (command === "find_tickets") return [];
+      return bridgeDefault(command, args);
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -497,21 +507,23 @@ test("removes one filter chip and shows the query when nothing matches", async (
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_projects")
-      return [
-        {
-          id: "p",
-          name: "Desktop app",
-          path: "/workspace",
-          paths: ["/workspace"],
-        },
-      ];
-    if (["list_efforts", "find_tickets", "search_tags"].includes(command))
-      return [];
-    if (command === "create_ticket") throw new Error("Creation failed");
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_projects")
+        return [
+          {
+            id: "p",
+            name: "Desktop app",
+            path: "/workspace",
+            paths: ["/workspace"],
+          },
+        ];
+      if (["list_efforts", "find_tickets", "search_tags"].includes(command))
+        return [];
+      if (command === "create_ticket") throw new Error("Creation failed");
+      return bridgeDefault(command, args);
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -887,17 +899,19 @@ test("removes an Effort and adds or removes a tag from the Organize menu", async
 test("shows attention for a reminder while another view is active and after reopening", async () => {
   vi.useFakeTimers();
   let unread = 0;
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "sidebar_counts")
-      return { unread_inbox: unread, ready: 4, in_progress: 2 };
-    if (
-      command === "list_projects" ||
-      command === "list_efforts" ||
-      command === "find_tickets"
-    )
-      return [];
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "sidebar_counts")
+        return { unread_inbox: unread, ready: 4, in_progress: 2 };
+      if (
+        command === "list_projects" ||
+        command === "list_efforts" ||
+        command === "find_tickets"
+      )
+        return [];
+      return bridgeDefault(command, args);
+    },
+  );
   const app = render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -989,23 +1003,25 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
-  bridge.invoke.mockImplementation(async (command: string) => {
-    calls.push(command);
-    if (command === "list_projects" || command === "list_efforts") return [];
-    if (command === "find_tickets") return [];
-    if (command === "workspace_info")
-      return {
-        path: "/data/ticketd.sqlite3",
-        tickets,
-        projects: 0,
-        active_efforts: 0,
-        size_bytes: 4096,
-        format_version: 20,
-      };
-    if (command === "last_backup") return null;
-    if (command === "check_cli") throw new Error("not installed");
-    throw new Error(`unexpected ${command}`);
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      calls.push(command);
+      if (command === "list_projects" || command === "list_efforts") return [];
+      if (command === "find_tickets") return [];
+      if (command === "workspace_info")
+        return {
+          path: "/data/ticketd.sqlite3",
+          tickets,
+          projects: 0,
+          active_efforts: 0,
+          size_bytes: 4096,
+          format_version: 20,
+        };
+      if (command === "last_backup") return null;
+      if (command === "check_cli") throw new Error("not installed");
+      return bridgeDefault(command, args);
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
