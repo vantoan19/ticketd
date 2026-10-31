@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
+// Clippy only exempts #[test] functions from the unwrap lint, not their helpers.
+#[allow(clippy::unwrap_used)]
 fn run(dir: &Path, args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
         .args(args)
@@ -24,7 +26,11 @@ fn workspace_prints_its_path_and_format_version_as_json() {
         serde_json::from_str(&run(dir.path(), &["workspace"])).unwrap();
     assert_eq!(
         printed["path"],
-        dir.path().join("workspace.sqlite3").to_str().unwrap()
+        // SQLite reports the resolved path (/private/var on macOS).
+        std::fs::canonicalize(dir.path().join("workspace.sqlite3"))
+            .unwrap()
+            .to_str()
+            .unwrap()
     );
     assert!(printed["format_version"].as_i64().unwrap() >= 19);
     assert_eq!(printed.as_object().unwrap().len(), 2);
