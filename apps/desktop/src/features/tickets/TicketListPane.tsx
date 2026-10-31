@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { EffortHeader } from "@/features/efforts/EffortHeader";
 import { useEffortView } from "@/features/efforts/useEffortView";
 import { effortsClient } from "@/lib/api/efforts";
@@ -120,15 +121,13 @@ export function TicketListPane({
             {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
             {tickets.length === PAGE_SIZE ? " shown" : ""}
           </p>
-          <Button
+          <IconButton
             className="list-refresh"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Refresh"
+            label="Refresh"
             onClick={() => void refresh()}
           >
             <RefreshCw />
-          </Button>
+          </IconButton>
         </div>
       )}
       {!trash && (

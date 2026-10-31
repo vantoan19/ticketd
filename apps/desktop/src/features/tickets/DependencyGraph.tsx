@@ -16,6 +16,7 @@ import {
 import { ArrowLeft, Maximize, Minus, Plus } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
@@ -86,25 +87,15 @@ function Toolbar() {
   const zoom = useStore((state) => state.transform[2]);
   return (
     <Panel position="top-left" className="graph-toolbar">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Zoom out"
-        onClick={() => void zoomOut()}
-      >
+      <IconButton label="Zoom out" onClick={() => void zoomOut()}>
         <Minus />
-      </Button>
+      </IconButton>
       <span className="graph-zoom" role="status" aria-label="Zoom level">
         {Math.round(zoom * 100)}%
       </span>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Zoom in"
-        onClick={() => void zoomIn()}
-      >
+      <IconButton label="Zoom in" onClick={() => void zoomIn()}>
         <Plus />
-      </Button>
+      </IconButton>
       <Button
         variant="ghost"
         size="sm"

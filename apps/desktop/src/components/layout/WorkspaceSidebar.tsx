@@ -22,6 +22,7 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   Tooltip,
@@ -176,12 +177,12 @@ export function WorkspaceSidebar({
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
               Projects{" "}
-              <button
-                aria-label="Manage projects"
+              <IconButton
+                label="Manage projects"
                 onClick={() => setView("projects")}
               >
                 <Settings2 size={15} />
-              </button>
+              </IconButton>
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
               <SidebarMenu>
@@ -213,12 +214,12 @@ export function WorkspaceSidebar({
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
               Efforts{" "}
-              <button
-                aria-label="Manage Efforts"
+              <IconButton
+                label="Manage Efforts"
                 onClick={() => setView("efforts")}
               >
                 <Settings2 size={15} />
-              </button>
+              </IconButton>
             </div>
             <nav aria-label="Effort scopes" className="sidebar-nav">
               <SidebarMenu>

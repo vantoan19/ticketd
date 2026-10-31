@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -197,15 +198,13 @@ export function BulkControls({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Clear selection"
+          <IconButton
+            label="Clear selection"
             disabled={pending}
             onClick={bulk.clearSelection}
           >
             <X />
-          </Button>
+          </IconButton>
         </div>
       )}
       {pending && (

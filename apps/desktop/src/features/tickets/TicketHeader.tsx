@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { useCopy } from "@/components/ui/use-copy";
 import {
   Dialog,
@@ -86,13 +87,13 @@ export function TicketHeader({
     <div className="detail-header">
       <div className="detail-title-group">
         {selected && (
-          <button
-            className="icon-button return-to-list"
-            aria-label="Return to ticket list"
+          <IconButton
+            className="return-to-list"
+            label="Return to ticket list"
             onClick={onReturn}
           >
             <ArrowLeft size={16} />
-          </button>
+          </IconButton>
         )}
         <h2
           id="detail-heading"
@@ -102,14 +103,12 @@ export function TicketHeader({
           {selected ?? "Ticket details"}
         </h2>
         {selected && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Copy reference"
+          <IconButton
+            label="Copy reference"
             onClick={() => void copy("Reference", selected)}
           >
             {copied === "Reference" ? <Check /> : <Copy />}
-          </Button>
+          </IconButton>
         )}
       </div>
       {ticket && (
@@ -136,15 +135,13 @@ export function TicketHeader({
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
+              <IconButton
                 ref={actionsTrigger}
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Ticket actions"
+                label="Ticket actions"
                 disabled={pending}
               >
                 <MoreHorizontal />
-              </Button>
+              </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={4}>
               <DropdownMenuGroup>
@@ -196,33 +193,21 @@ export function TicketHeader({
       {selected && (
         <div className="detail-actions">
           {expanded ? (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Show beside the list"
-              onClick={onReturn}
-            >
+            <IconButton label="Show beside the list" onClick={onReturn}>
               <Minimize2 />
-            </Button>
+            </IconButton>
           ) : (
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            <IconButton
               className="expand-ticket"
-              aria-label="Expand ticket"
+              label="Expand ticket"
               onClick={onExpand}
             >
               <Maximize2 />
-            </Button>
+            </IconButton>
           )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close ticket details"
-            onClick={onClose}
-          >
+          <IconButton label="Close ticket details" onClick={onClose}>
             <X />
-          </Button>
+          </IconButton>
         </div>
       )}
       {(message || copied) && (
