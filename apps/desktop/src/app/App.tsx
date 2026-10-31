@@ -51,7 +51,6 @@ export function App() {
     family,
     setFamily,
     trash,
-    setTrash,
     tickets,
     selected,
     setSelected,

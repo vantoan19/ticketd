@@ -18,6 +18,7 @@ test("identifies canceled prerequisites as unresolved and opens the related tick
     trashed: false,
     tags: [],
     project_id: null,
+    effort_id: null,
     availability: "Blocked",
     parent: null,
     children: [],
