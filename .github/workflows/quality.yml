@@ -2,6 +2,11 @@ name: Quality
 
 on:
   workflow_dispatch:
+    inputs:
+      native_smoke:
+        description: Run the Linux native desktop smoke test
+        type: boolean
+        default: false
   pull_request:
   push:
     branches: [main]
@@ -11,6 +16,7 @@ permissions:
 
 jobs:
   quality:
+    if: github.event_name != 'workflow_dispatch' || !inputs.native_smoke
     name: Quality checks
     strategy:
       fail-fast: false
@@ -38,3 +44,27 @@ jobs:
       - run: ./scripts/check
       - name: Build desktop and CLI
         run: cargo build --workspace --locked
+
+  native-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.native_smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.14.0"
+      - name: Install desktop and WebDriver dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+      - run: rustup show active-toolchain
+      - run: npm ci
+      - run: npm run build
+      - run: cargo build --workspace --locked
+      - run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Run real desktop refresh smoke test
+        run: |
+          export XDG_DATA_HOME="$(mktemp -d)"
+          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/refresh.mjs'
