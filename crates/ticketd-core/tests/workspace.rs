@@ -568,6 +568,85 @@ fn effort_patch_combines_membership_and_status_atomically() {
 }
 
 #[test]
+fn trash_preserves_relationships_and_requires_restoration_for_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    let child = w.create_ticket("Child").unwrap();
+    w.set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    w.add_dependency(&parent.reference, &child.reference, None)
+        .unwrap();
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert_eq!(w.list_tickets().unwrap().len(), 1);
+    assert_eq!(w.list_trash().unwrap()[0].id, parent.id);
+    let visible = w.show_ticket(&child.reference).unwrap();
+    assert!(visible.parent.unwrap().trashed);
+    assert!(visible.prerequisites[0].trashed);
+    assert_eq!(visible.availability.as_deref(), Some("Blocked"));
+    assert!(
+        w.change_ticket(&parent.reference, TicketPatch::default())
+            .is_err()
+    );
+    assert!(w.add_note(&parent.reference, "note", None).is_err());
+    assert!(
+        w.add_dependency(&child.reference, &parent.reference, None)
+            .is_err()
+    );
+    w.set_trashed(&parent.reference, false, None).unwrap();
+    w.change_ticket(
+        &parent.reference,
+        TicketPatch {
+            status: Some(Status::Done),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert_eq!(
+        w.show_ticket(&child.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Ready")
+    );
+    w.remove_dependency(&parent.reference, &child.reference, None)
+        .unwrap();
+    w.set_parent(&child.reference, None, None).unwrap();
+    assert_eq!(
+        w.ticket_history(&parent.reference)
+            .unwrap()
+            .iter()
+            .filter(|h| h.kind == "trash")
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn visible_parent_can_detach_trashed_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    let child = w.create_ticket("Child").unwrap();
+    w.set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    w.set_trashed(&child.reference, true, None).unwrap();
+    assert!(
+        w.set_parent(&child.reference, Some(&parent.reference), None)
+            .is_err()
+    );
+    w.set_trashed(&parent.reference, true, None).unwrap();
+    assert!(w.set_parent(&child.reference, None, None).is_err());
+    w.set_trashed(&parent.reference, false, None).unwrap();
+    w.detach_child(&parent.reference, &child.reference, None)
+        .unwrap();
+    let restored = w.set_trashed(&child.reference, false, None).unwrap();
+    assert_eq!(restored.id, child.id);
+    assert!(restored.parent.is_none());
+}
+
+#[test]
 fn checkout_context_is_local_and_ambiguous_matches_are_reported() {
     let dir = tempfile::tempdir().unwrap();
     let first = dir.path().join("first");

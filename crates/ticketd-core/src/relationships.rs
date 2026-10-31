@@ -8,6 +8,7 @@ pub struct Prerequisite {
     pub reference: String,
     pub title: String,
     pub status: Status,
+    pub trashed: bool,
 }
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
@@ -16,13 +17,14 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    let mut statement = connection.prepare("SELECT number, title, status FROM tickets JOIN dependencies ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY number")?;
+    let mut statement = connection.prepare("SELECT number, title, status, trashed FROM tickets JOIN dependencies ON tickets.id = dependencies.blocker_id WHERE dependencies.dependent_id = ?1 ORDER BY number")?;
     ticket.prerequisites = statement
         .query_map([&ticket.id], |row| {
             let status: String = row.get(2)?;
             Ok(Prerequisite {
                 reference: format!("T-{}", row.get::<_, i64>(0)?),
                 title: row.get(1)?,
+                trashed: row.get(3)?,
                 status: status.parse().map_err(|e| {
                     rusqlite::Error::FromSqlConversionFailure(
                         2,
@@ -78,6 +80,8 @@ impl Workspace {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let blocker_id = id(&tx, blocker)?;
         let dependent_id = id(&tx, dependent)?;
+        crate::ensure_editable(&tx, &blocker_id)?;
+        crate::ensure_editable(&tx, &dependent_id)?;
         let cycle: bool = tx.query_row("WITH RECURSIVE reachable(id) AS (SELECT dependent_id FROM dependencies WHERE blocker_id = ?1 UNION SELECT dependencies.dependent_id FROM dependencies JOIN reachable ON dependencies.blocker_id = reachable.id) SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2)", params![dependent_id, blocker_id], |row| row.get(0))?;
         if blocker_id == dependent_id || cycle {
             return Err(Error::DependencyCycle);
@@ -103,6 +107,17 @@ impl Workspace {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let blocker_id = id(&tx, blocker)?;
         let dependent_id = id(&tx, dependent)?;
+        // Either visible endpoint may detach an edge to a trashed ticket.
+        let blocker_trash: bool = tx.query_row(
+            "SELECT trashed FROM tickets WHERE id = ?1",
+            [&blocker_id],
+            |r| r.get(0),
+        )?;
+        if blocker_trash {
+            crate::ensure_editable(&tx, &dependent_id)?;
+        } else {
+            crate::ensure_editable(&tx, &blocker_id)?;
+        }
         let changed = tx.execute(
             "DELETE FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2",
             params![blocker_id, dependent_id],
