@@ -1,3 +1,8 @@
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Field, FieldGroup } from "@/components/ui/field";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -36,6 +41,7 @@ export function Evidence({
   trashed: boolean;
   refresh: () => Promise<void>;
 }) {
+  const [composing, setComposing] = useState(false);
   const [items, setItems] = useState<EvidenceRecord[]>([]);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
@@ -81,6 +87,7 @@ export function Evidence({
       request.current = null;
       setDraft(blank);
       setEditing(null);
+      setComposing(false);
       setError("");
       await load();
       await refresh();
@@ -118,17 +125,39 @@ export function Evidence({
       current.name !== editing.name ||
       current.kind !== editing.kind);
   return (
-    <section aria-label="Implementation evidence" className="mt-4">
-      <h3>Implementation evidence</h3>
+    <section aria-label="Implementation evidence" className="evidence-section">
+      <div className="evidence-heading">
+        <h3>
+          Implementation evidence{" "}
+          <span className="text-muted-foreground">{items.length || ""}</span>
+        </h3>
+        {!trashed && !composing && (
+          <Button variant="ghost" size="sm" onClick={() => setComposing(true)}>
+            <Plus data-icon="inline-start" />
+            Add evidence
+          </Button>
+        )}
+      </div>
+      {!items.length && !composing && (
+        <p className="text-muted-foreground text-xs">
+          Link a pull request, commit, or verification result.
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
       <ol>
         {items.map((item) => (
-          <li key={item.id} className="my-3 border-b pb-2">
-            <strong>{item.name}</strong> · {labels[item.kind]}
-            <p className="whitespace-pre-wrap break-all">{item.value}</p>
+          <li key={item.id} className="evidence-item">
+            <div className="evidence-item-heading">
+              <strong>{item.name}</strong>
+              <span>{labels[item.kind]}</span>
+            </div>
+            <p className="evidence-item-value">{item.value}</p>
             {item.kind === "pull_request" &&
               /^https?:\/\//i.test(item.value) && (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="self-start"
                   type="button"
                   onClick={() => {
                     if (!navigator.clipboard) {
@@ -153,18 +182,21 @@ export function Evidence({
                   {copied === item.id
                     ? "Copied pull request URL"
                     : "Copy pull request URL"}
-                </button>
+                </Button>
               )}
-            <p>
-              {item.updated_at}
+            <p className="evidence-item-meta">
+              {new Date(item.updated_at).toLocaleDateString()}
               {item.editing_agent && ` · ${item.editing_agent}`}
             </p>
             {!trashed && (
-              <>
-                <button
+              <div className="evidence-item-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
                   type="button"
                   disabled={pending}
                   onClick={() => {
+                    setComposing(true);
                     setEditing(item);
                     setDraft({
                       kind: item.kind,
@@ -175,22 +207,25 @@ export function Evidence({
                   }}
                 >
                   Edit
-                </button>
-                {" · "}
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   type="button"
                   disabled={pending}
                   onClick={() => void remove(item.id)}
                 >
                   Delete
-                </button>
-              </>
+                </Button>
+              </div>
             )}
           </li>
         ))}
       </ol>
       {more && (
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           type="button"
           onClick={() => {
             pages.current += 1;
@@ -198,7 +233,7 @@ export function Evidence({
           }}
         >
           Load more evidence
-        </button>
+        </Button>
       )}
       {changed && (
         <p role="status">
@@ -206,73 +241,83 @@ export function Evidence({
           preserved; saving will replace it.
         </p>
       )}
-      {!trashed && (
+      {!trashed && composing && (
         <form onSubmit={(event) => void save(event)} className="mt-3">
           <fieldset disabled={pending}>
-            <label className="block">
-              Type
-              <select
-                value={draft.kind}
-                onChange={(event) => {
-                  const kind = Object.keys(labels).find(
-                    (key) => key === event.target.value,
-                  );
-                  if (
-                    kind === "pull_request" ||
-                    kind === "commit" ||
-                    kind === "branch" ||
-                    kind === "worktree" ||
-                    kind === "verification"
-                  )
-                    setDraft({ ...draft, kind });
-                }}
-              >
-                {Object.entries(labels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block">
-              Name
-              <input
-                className="block w-full rounded border p-2"
-                required
-                value={draft.name}
-                onChange={(event) =>
-                  setDraft({ ...draft, name: event.target.value })
-                }
-              />
-            </label>
-            <label className="block">
-              {draft.kind === "verification"
-                ? "What was checked and its outcome"
-                : "URL, reference, or path"}
-              <textarea
-                className="block w-full rounded border p-2"
-                required
-                value={draft.value}
-                onChange={(event) =>
-                  setDraft({ ...draft, value: event.target.value })
-                }
-              />
-            </label>
-            <button type="submit">
-              {editing ? "Save evidence" : "Add evidence"}
-            </button>
-            {editing && (
-              <button
-                type="button"
-                className="ml-3"
-                onClick={() => {
-                  setEditing(null);
-                  setDraft(blank);
-                }}
-              >
-                Cancel
-              </button>
-            )}
+            <FieldGroup>
+              <Field>
+                <label className="evidence-label">
+                  Type
+                  <select
+                    value={draft.kind}
+                    onChange={(event) => {
+                      const kind = Object.keys(labels).find(
+                        (key) => key === event.target.value,
+                      );
+                      if (
+                        kind === "pull_request" ||
+                        kind === "commit" ||
+                        kind === "branch" ||
+                        kind === "worktree" ||
+                        kind === "verification"
+                      )
+                        setDraft({ ...draft, kind });
+                    }}
+                  >
+                    {Object.entries(labels).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </Field>
+              <Field>
+                <label className="evidence-label">
+                  Name
+                  <Input
+                    required
+                    value={draft.name}
+                    onChange={(event) =>
+                      setDraft({ ...draft, name: event.target.value })
+                    }
+                  />
+                </label>
+              </Field>
+              <Field>
+                <label className="evidence-label">
+                  {draft.kind === "verification"
+                    ? "What was checked and its outcome"
+                    : "URL, reference, or path"}
+                  <Textarea
+                    required
+                    value={draft.value}
+                    onChange={(event) =>
+                      setDraft({ ...draft, value: event.target.value })
+                    }
+                  />
+                </label>
+              </Field>
+              <div className="flex gap-2">
+                <Button size="sm" type="submit">
+                  {editing ? "Save evidence" : "Add evidence"}
+                </Button>
+                {composing && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setComposing(false);
+                      setDraft(blank);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
+            </FieldGroup>
           </fieldset>
         </form>
       )}

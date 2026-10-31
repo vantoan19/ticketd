@@ -36,6 +36,8 @@ test("adds and removes a verification result", async () => {
       refresh={async () => {}}
     />,
   );
+  expect(screen.queryByLabelText("Type")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Type"), {
     target: { value: "verification" },
   });
@@ -82,6 +84,7 @@ test("retries a lost response with the same request ID and uses a new ID for a d
       refresh={async () => {}}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
   fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
     target: { value: "https://example.com/pr" },
@@ -98,9 +101,8 @@ test("retries a lost response with the same request ID and uses a new ID for a d
   expect((calls[0]?.[1] as { requestId: string }).requestId).toBe(
     (calls[1]?.[1] as { requestId: string }).requestId,
   );
-  await waitFor(() =>
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
-  );
+  await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Other" },
   });
@@ -143,6 +145,7 @@ test("disables evidence controls while a write is pending", async () => {
       refresh={async () => {}}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
   fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
     target: { value: "https://example.com/pr" },
@@ -163,7 +166,7 @@ test("disables evidence controls while a write is pending", async () => {
     created_at: "now",
     updated_at: "now",
   });
-  await waitFor(() => expect(button.matches(":disabled")).toBe(false));
+  await waitFor(() => expect(screen.queryByLabelText("Name")).toBeNull());
   view.unmount();
 });
 

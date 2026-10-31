@@ -57,6 +57,7 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
       trashed={false}
     />,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -142,6 +143,8 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
     },
   );
   render(<Activity {...props} />);
+  expect(screen.queryByRole("textbox")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
   const add = screen.getByRole("button", { name: "Add note" });
   expect(add).toHaveProperty("disabled", true);
   fireEvent.submit(add.closest("form")!);
@@ -168,11 +171,8 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
     expect(screen.getByRole("heading", { name: "Finding" })).toBeTruthy(),
   );
   expect(saved[0]?.content).toBe("## Finding\n\n- [x] Done");
-  expect(
-    screen
-      .getByRole("textbox", { name: "New note rich text" })
-      .textContent?.replaceAll("\uFEFF", ""),
-  ).toBe("");
+  expect(screen.queryByRole("textbox")).toBeNull();
+  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
 });
 
 test("preserves new and edited drafts across hidden navigation, external refresh and failed edits, then cancels back to the new draft", async () => {
@@ -185,6 +185,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   });
   const view = render(<Activity {...props} />);
   await screen.findByText("Agent: cli-agent");
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -252,9 +253,6 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   fireEvent.click(screen.getByRole("button", { name: "Save note" }));
   await screen.findByRole("heading", { name: "Edited finding" });
   expect(saved.content).toBe("## Edited finding");
-  expect(screen.getByRole("button", { name: "Add note" })).toHaveProperty(
-    "disabled",
-    true,
-  );
+  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Cancel edit" })).toBeNull();
 });

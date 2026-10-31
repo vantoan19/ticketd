@@ -1,7 +1,13 @@
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
 
@@ -23,6 +29,32 @@ export function TicketEditor({
     title: ticket.title,
     body: ticket.body,
   });
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const title = titleRef.current;
+    if (!title) return;
+    const fitTitle = () => {
+      if (!title.clientWidth) return;
+      title.style.height = "auto";
+      title.style.height = `${title.scrollHeight}px`;
+    };
+    fitTitle();
+    void document.fonts?.ready.then(fitTitle);
+    document.fonts?.addEventListener("loadingdone", fitTitle);
+    if (typeof ResizeObserver === "undefined")
+      return () => document.fonts?.removeEventListener("loadingdone", fitTitle);
+    let width = title.clientWidth;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry || entry.contentRect.width === width) return;
+      width = entry.contentRect.width;
+      fitTitle();
+    });
+    observer.observe(title);
+    return () => {
+      observer.disconnect();
+      document.fonts?.removeEventListener("loadingdone", fitTitle);
+    };
+  }, [draft.title]);
   const [saved, setSaved] = useState<Content>({
     title: ticket.title,
     body: ticket.body,
@@ -108,10 +140,7 @@ export function TicketEditor({
     setState("pending");
   }
   return (
-    <div className="mt-3">
-      <p className="editor-reference">
-        {ticket.reference} · {ticket.status}
-      </p>
+    <div className="ticket-editor">
       {externalChange && dirty && (
         <p role="status">
           Saved content changed.{" "}
@@ -141,9 +170,9 @@ export function TicketEditor({
       <label className="editor-title">
         <span className="sr-only">Title</span>
         <textarea
+          ref={titleRef}
           aria-label="Title"
-          rows={2}
-          className="rounded border border-neutral-400 bg-white p-2"
+          rows={1}
           value={draft.title}
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
@@ -221,7 +250,7 @@ export function TicketEditor({
             </Button>
           ))}
       </div>
-      <p role="status" className="my-2">
+      <p role="status" className="editor-save-state">
         {saving
           ? "Saving…"
           : dirty && state !== "failed"

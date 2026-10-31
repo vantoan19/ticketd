@@ -66,6 +66,7 @@ export function Activity({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState("");
+  const [composing, setComposing] = useState(false);
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
@@ -123,7 +124,10 @@ export function Activity({
       if (edit) await client.editNote(reference, edit.id, edit.content);
       else await client.addNote(reference, draft);
       if (edit) setEdit(null);
-      else setDraft("");
+      else {
+        setDraft("");
+        setComposing(false);
+      }
       await loadNotes();
     } catch (reason) {
       setError(String(reason));
@@ -308,7 +312,17 @@ export function Activity({
           Load more notes
         </Button>
       )}
-      {!trashed && (
+      {!trashed && !composing && !edit && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          onClick={() => setComposing(true)}
+        >
+          Add a note
+        </Button>
+      )}
+      {!trashed && (composing || edit) && (
         <form
           className="activity-composer"
           onSubmit={(event) => void save(event)}

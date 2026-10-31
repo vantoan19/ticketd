@@ -238,7 +238,12 @@ export function Follow({
   }
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => void toggle()}>
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-pressed={following}
+        onClick={() => void toggle()}
+      >
         {following ? "Unfollow" : "Follow"}
       </Button>
       {error && <p role="alert">{error}</p>}

@@ -229,6 +229,11 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
     target: { value: "Unfinished note" },
@@ -561,7 +566,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
   expand.focus();
   fireEvent.click(expand);
   expect(document.activeElement).toBe(
-    screen.getByRole("heading", { name: "Ticket details" }),
+    screen.getByRole("heading", { name: "T-1" }),
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Return to ticket list" }),
@@ -600,7 +605,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   row.focus();
   fireEvent.keyDown(row, { key: "Enter" });
   expect(document.activeElement).toBe(
-    screen.getByRole("heading", { name: "Ticket details" }),
+    screen.getByRole("heading", { name: "T-1" }),
   );
   fireEvent.click(
     screen.getByRole("button", { name: "Return to ticket list" }),
@@ -651,6 +656,9 @@ test("selects tickets independently and applies one bulk status change", async (
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change selected status" }),
+  );
   fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
     target: { value: "Done" },
   });
@@ -662,7 +670,7 @@ test("selects tickets independently and applies one bulk status change", async (
   expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
     "Done",
   );
-  expect(screen.getByText("0 selected")).toBeTruthy();
+  expect(screen.queryByLabelText("Status for selected tickets")).toBeNull();
 });
 
 test("keeps keyboard selection and reports a failed bulk change for retry", async () => {
@@ -695,6 +703,9 @@ test("keeps keyboard selection and reports a failed bulk change for retry", asyn
   const checkbox = screen.getByRole("checkbox", { name: "Select T-1" });
   checkbox.focus();
   fireEvent.click(checkbox);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change selected status" }),
+  );
   fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
     target: { value: "Todo" },
   });
@@ -745,12 +756,15 @@ test("applies a project to selected tickets without replacing other fields", asy
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change selected project" }),
+  );
   fireEvent.change(screen.getByLabelText("Project for selected tickets"), {
     target: { value: "p1" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Apply project" }));
   await act(async () => {});
-  expect(screen.getByText("0 selected")).toBeTruthy();
+  expect(screen.queryByLabelText("Status for selected tickets")).toBeNull();
 });
 
 test("clears Effort and removes a tag with explicit bulk actions", async () => {
@@ -786,12 +800,16 @@ test("clears Effort and removes a tag with explicit bulk actions", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change selected effort" }),
+  );
   fireEvent.change(screen.getByLabelText("Effort for selected tickets"), {
     target: { value: "__clear__" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Apply Effort" }));
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Change selected tags" }));
   fireEvent.change(screen.getByLabelText("Tag for selected tickets"), {
     target: { value: "old" },
   });

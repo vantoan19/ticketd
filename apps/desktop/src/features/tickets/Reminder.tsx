@@ -1,3 +1,12 @@
+import { Bell } from "lucide-react";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+} from "@/components/ui/popover";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -103,83 +112,96 @@ export function Reminder({
     }
   }
   return (
-    <div>
-      {due && <p>Scheduled: {new Date(due).toLocaleString()}</p>}
-      <label htmlFor="reminder-time">Local reminder date and time</label>
-      <Input
-        id="reminder-time"
-        type="datetime-local"
-        disabled={pending}
-        value={draft}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setOccurrence("");
-        }}
-      />
-      <p>
-        Uses your computer’s local time zone. The selected time is saved as an
-        instant with a UTC offset.
-      </p>
-      {draft && options.length === 0 && (
-        <p role="alert">
-          This local time is invalid or skipped by a clock change. Choose
-          another time.
-        </p>
-      )}
-      {options.length > 1 && (
-        <label>
-          Clock change: choose which occurrence
-          <select
-            value={occurrence}
-            disabled={pending}
-            onChange={(e) => setOccurrence(e.target.value)}
-          >
-            <option value="">Choose an offset</option>
-            {options.map((date) => (
-              <option key={date.toISOString()} value={date.toISOString()}>
-                {offsetLabel(date)}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <Button
-        size="sm"
-        disabled={
-          pending || options.length === 0 || (options.length > 1 && !occurrence)
-        }
-        onClick={() => {
-          const selected = occurrence || options[0]!.toISOString();
-          void save(`schedule:${selected}`, () => selected);
-        }}
-      >
-        {due ? "Reschedule reminder" : "Set reminder"}
-      </Button>
-      {due && (
-        <>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() =>
-              void save("snooze-hour", () =>
-                new Date(Date.now() + 3600000).toISOString(),
-              )
-            }
-          >
-            Snooze 1 hour
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending}
-            onClick={() => void save("dismiss", () => null)}
-          >
-            Dismiss reminder
-          </Button>
-        </>
-      )}
-      {error && <p role="alert">{error}</p>}
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" aria-label="Manage reminder">
+          <Bell data-icon="inline-start" />
+          {due ? "Reminder set" : "Remind me"}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="reminder-popover">
+        <PopoverHeader>
+          <PopoverTitle>Reminder</PopoverTitle>
+          <PopoverDescription>
+            Bring this ticket back to your inbox.
+          </PopoverDescription>
+        </PopoverHeader>
+        {due && <p>Scheduled: {new Date(due).toLocaleString()}</p>}
+        <label htmlFor="reminder-time">Local reminder date and time</label>
+        <Input
+          id="reminder-time"
+          type="datetime-local"
+          disabled={pending}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setOccurrence("");
+          }}
+        />
+        <p className="text-muted-foreground text-xs">Your local time zone.</p>
+        {draft && options.length === 0 && (
+          <p role="alert">
+            This local time is invalid or skipped by a clock change. Choose
+            another time.
+          </p>
+        )}
+        {options.length > 1 && (
+          <label>
+            Clock change: choose which occurrence
+            <select
+              value={occurrence}
+              disabled={pending}
+              onChange={(e) => setOccurrence(e.target.value)}
+            >
+              <option value="">Choose an offset</option>
+              {options.map((date) => (
+                <option key={date.toISOString()} value={date.toISOString()}>
+                  {offsetLabel(date)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <Button
+          size="sm"
+          disabled={
+            pending ||
+            options.length === 0 ||
+            (options.length > 1 && !occurrence)
+          }
+          onClick={() => {
+            const selected = occurrence || options[0]!.toISOString();
+            void save(`schedule:${selected}`, () => selected);
+          }}
+        >
+          {due ? "Reschedule reminder" : "Set reminder"}
+        </Button>
+        {due && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                void save("snooze-hour", () =>
+                  new Date(Date.now() + 3600000).toISOString(),
+                )
+              }
+            >
+              Snooze 1 hour
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void save("dismiss", () => null)}
+            >
+              Dismiss reminder
+            </Button>
+          </>
+        )}
+        {error && <p role="alert">{error}</p>}
+      </PopoverContent>
+    </Popover>
   );
 }

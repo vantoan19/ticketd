@@ -61,7 +61,10 @@ async function open(title) {
   );
 }
 async function disclosure(label) {
-  const summary = await (await detail()).$(`summary=${label}`);
+  const labelled = await (await detail()).$(`summary[aria-label="${label}"]`);
+  const summary = (await labelled.isExisting())
+    ? labelled
+    : await (await detail()).$(`summary=${label}`);
   const isOpen = await browser.execute(
     (element) => element.parentElement.open,
     summary,
@@ -130,7 +133,8 @@ try {
   const local = new Date(future.getTime() - future.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
-  const input = await (await detail()).$('input[type="datetime-local"]');
+  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
+  const input = await browser.$('input[type="datetime-local"]');
   await input.scrollIntoView();
   await browser.execute(
     (element, value) => {
@@ -144,7 +148,8 @@ try {
     input,
     local,
   );
-  await click(await (await detail()).$("button=Set reminder"));
+  await click(await browser.$("button=Set reminder"));
+  await browser.keys("Escape");
   await click(await browser.$('[aria-label="Manage projects"]'));
   await (
     await browser.$("button=Unread inbox")
@@ -199,7 +204,8 @@ try {
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  await click(await (await detail()).$("button=Snooze 1 hour"));
+  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
+  await click(await browser.$("button=Snooze 1 hour"));
   await waitFor(() => {
     const value = command(["reminder", "show", source.reference]).match(
       /UTC: ([^)]+)/,
@@ -207,7 +213,7 @@ try {
     const remaining = Date.parse(value ?? "") - Date.now();
     return remaining > 50 * 60000 && remaining < 70 * 60000;
   }, "One-hour snooze did not persist");
-  const reschedule = await (await detail()).$('input[type="datetime-local"]');
+  const reschedule = await browser.$('input[type="datetime-local"]');
   await reschedule.waitForEnabled({ timeout: 10000 });
   await browser.execute(
     (element, value) => {
@@ -221,16 +227,15 @@ try {
     reschedule,
     "2030-01-01T12:00",
   );
-  const rescheduleButton = await (
-    await detail()
-  ).$("button=Reschedule reminder");
+  const rescheduleButton = await browser.$("button=Reschedule reminder");
   await rescheduleButton.waitForEnabled({ timeout: 10000 });
   await click(rescheduleButton);
   await waitFor(
     () => command(["reminder", "show", source.reference]).includes("2030"),
     "Reminder was not rescheduled",
   );
-  await click(await (await detail()).$("button=Dismiss reminder"));
+  await click(await browser.$("button=Dismiss reminder"));
+  await browser.keys("Escape");
 
   // Backlinks, contextual links and evidence cross the real bridge.
   await click(
@@ -249,7 +254,7 @@ try {
   await (
     await (await detail()).$(`p*=See ${target.reference} for context.`)
   ).waitForDisplayed({ timeout: 10000 });
-  await disclosure("Relationships");
+  await disclosure("Related work");
   let section = await (
     await detail()
   ).$('section[aria-label="Contextual relationships"]');
@@ -272,6 +277,7 @@ try {
   const evidence = await (
     await detail()
   ).$('section[aria-label="Implementation evidence"]');
+  await click(await evidence.$("button=Add evidence"));
   await (await evidence.$("input[required]")).setValue("Native check");
   await (await evidence.$("textarea")).setValue("https://example.com/pull/1");
   await click(await evidence.$("button=Add evidence"));
@@ -286,6 +292,7 @@ try {
   // Bulk organization and status through UI, then verify an invalid batch is atomic.
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
+  await click(await browser.$('[aria-label="Change selected status"]'));
   await (
     await browser.$('[aria-label="Status for selected tickets"]')
   ).selectByVisibleText("In review");
@@ -297,6 +304,7 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
+  await click(await browser.$('[aria-label="Change selected project"]'));
   await (
     await browser.$('[aria-label="Project for selected tickets"]')
   ).selectByVisibleText(project.name);
@@ -310,6 +318,7 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
+  await click(await browser.$('[aria-label="Change selected effort"]'));
   await (
     await browser.$('[aria-label="Effort for selected tickets"]')
   ).selectByVisibleText(effort.name);
@@ -323,6 +332,7 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
+  await click(await browser.$('[aria-label="Change selected tags"]'));
   await (
     await browser.$('[aria-label="Tag for selected tickets"]')
   ).setValue("native");
@@ -352,7 +362,7 @@ try {
 
   // Review the blocker replacement, then undo the duplicate designation.
   await open(source.title);
-  await disclosure("Relationships");
+  await disclosure("Duplicates");
   section = await (await detail()).$('section[aria-label="Duplicates"]');
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
   await click(await section.$("button=Preview dependencies"));
@@ -397,9 +407,10 @@ try {
     () => browser.execute(() => window.innerWidth <= 767),
     "Narrow viewport not applied",
   );
+  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
   const reminderRect = await browser.execute(() => {
     const field = document.querySelector(
-      '.detail-content:not([hidden]) input[type="datetime-local"]',
+      '[data-slot="popover-content"] input[type="datetime-local"]',
     );
     if (!field) return null;
     const rect = field.getBoundingClientRect();
@@ -410,6 +421,7 @@ try {
     "Reminder control is clipped at narrow width",
   );
   await browser.saveScreenshot("native-extensions-narrow-detail.png");
+  await browser.keys("Escape");
   const menu = await browser.$('button[data-sidebar="trigger"]');
   await click(menu);
   await (

@@ -79,7 +79,7 @@ export function WorkspaceSidebar({
             setCreating(true);
           }}
         >
-          <Plus size={16} /> New ticket
+          <Plus data-icon="inline-start" /> New ticket
         </Button>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
@@ -87,7 +87,7 @@ export function WorkspaceSidebar({
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={view === "inbox" ? "active" : ""}
+                isActive={view === "inbox"}
                 onClick={() => setView("inbox")}
               >
                 <Inbox size={16} /> Attention inbox{" "}
@@ -96,13 +96,11 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
+                isActive={
                   navigation.kind === "all" &&
                   navigation.project === "all" &&
                   !navigation.effort &&
                   view === "tickets"
-                    ? "active"
-                    : ""
                 }
                 onClick={() => scope("all")}
               >
@@ -111,11 +109,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "ready" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "ready" && view === "tickets"}
                 onClick={() => scope("ready")}
               >
                 <CheckCircle2 size={16} /> Ready
@@ -123,11 +117,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "progress" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "progress" && view === "tickets"}
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
@@ -135,11 +125,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={
-                  navigation.kind === "trash" && view === "tickets"
-                    ? "active"
-                    : ""
-                }
+                isActive={navigation.kind === "trash" && view === "tickets"}
                 onClick={() => scope("trash")}
               >
                 <Trash2 size={16} /> Trash
@@ -162,10 +148,8 @@ export function WorkspaceSidebar({
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    className={
+                    isActive={
                       navigation.project === "unlinked" && view === "tickets"
-                        ? "active"
-                        : ""
                     }
                     onClick={() => scope("all", "unlinked")}
                   >
@@ -178,10 +162,8 @@ export function WorkspaceSidebar({
                       aria-pressed={
                         navigation.project === p.id && view === "tickets"
                       }
-                      className={
+                      isActive={
                         navigation.project === p.id && view === "tickets"
-                          ? "active"
-                          : ""
                       }
                       onClick={() => scope("all", p.id)}
                     >
@@ -209,10 +191,8 @@ export function WorkspaceSidebar({
                   .map((e) => (
                     <SidebarMenuItem key={e.id}>
                       <SidebarMenuButton
-                        className={
+                        isActive={
                           navigation.effort === e.id && view === "tickets"
-                            ? "active"
-                            : ""
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >

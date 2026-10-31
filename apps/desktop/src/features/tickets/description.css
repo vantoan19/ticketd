@@ -2,8 +2,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--muted-foreground);
-  font-weight: 600;
+  gap: 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
 }
 .description-document,
 .description-empty {
@@ -15,14 +19,16 @@
 .description-document {
   color: var(--foreground);
   cursor: text;
-  line-height: 1.6;
+  line-height: normal;
   overflow-wrap: anywhere;
 }
-/* The default Markdown syntax colors are not legible in both system themes. */
+.editor-body {
+  margin-top: 24px;
+}
 .editor-body .cm-line span {
   color: inherit;
 }
 .editor-body .cm-editor.cm-focused {
-  outline: 2px solid var(--ring);
+  outline: 1px solid var(--input-focus);
   outline-offset: 2px;
 }
