@@ -32,7 +32,14 @@ pub struct Ticket {
     pub reference: String,
     pub title: String,
     pub status: String,
+    pub body: String,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct TicketPatch {
+    pub title: Option<String>,
+    pub body: Option<String>,
 }
 
 pub struct Workspace {
@@ -54,15 +61,18 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 2 {
+        if version > 3 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
             transaction.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); PRAGMA user_version = 1;")?;
         }
         if version < 2 {
+            transaction.execute_batch("ALTER TABLE tickets ADD COLUMN body TEXT NOT NULL DEFAULT ''; PRAGMA user_version = 2;")?;
+        }
+        if version < 3 {
             tags::migrate(&transaction)?;
-            transaction.pragma_update(None, "user_version", 2)?;
+            transaction.pragma_update(None, "user_version", 3)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -83,14 +93,33 @@ impl Workspace {
             reference: format!("T-{}", self.connection.last_insert_rowid()),
             title: title.to_owned(),
             status: "Todo".to_owned(),
+            body: String::new(),
             tags: Vec::new(),
         })
+    }
+
+    pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
+        let title = patch.title.as_deref().map(str::trim);
+        if title == Some("") {
+            return Err(Error::EmptyTitle);
+        }
+        let number = reference
+            .strip_prefix("T-")
+            .and_then(|value| value.parse::<i64>().ok());
+        let changed = self.connection.execute(
+            "UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body) WHERE number = ?3",
+            params![title, patch.body, number],
+        )?;
+        if changed == 0 {
+            return Err(Error::NotFound(reference.to_owned()));
+        }
+        self.show_ticket(reference)
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
         let mut statement = self
             .connection
-            .prepare("SELECT id, number, title, status FROM tickets ORDER BY number DESC")?;
+            .prepare("SELECT id, number, title, status, body FROM tickets ORDER BY number DESC")?;
         let mut tickets = statement
             .query_map([], ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -107,7 +136,7 @@ impl Workspace {
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -124,6 +153,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         reference: format!("T-{}", row.get::<_, i64>(1)?),
         title: row.get(2)?,
         status: row.get(3)?,
+        body: row.get(4)?,
         tags: Vec::new(),
     })
 }

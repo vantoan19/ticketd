@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
-use ticketd_core::Workspace;
+use std::io::Read;
+use ticketd_core::{TicketPatch, Workspace};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -12,6 +13,16 @@ struct Arguments {
 enum Command {
     /// Create a ticket with a title
     Create { title: String },
+    /// Patch ticket content; use --body-file - to read stdin
+    Change {
+        reference: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<String>,
+    },
     /// Add a tag (trimmed and lowercased; duplicates are ignored)
     AddTag { reference: String, tag: String },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
@@ -27,6 +38,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
         Command::Create { title } => serde_json::to_string(&workspace.create_ticket(&title)?)?,
+        Command::Change {
+            reference,
+            title,
+            body,
+            body_file,
+        } => {
+            let body = match body_file {
+                Some(path) if path == "-" => {
+                    let mut content = String::new();
+                    std::io::stdin().read_to_string(&mut content)?;
+                    Some(content)
+                }
+                Some(path) => Some(std::fs::read_to_string(path)?),
+                None => body,
+            };
+            serde_json::to_string(
+                &workspace.change_ticket(&reference, TicketPatch { title, body })?,
+            )?
+        }
         Command::AddTag { reference, tag } => {
             serde_json::to_string(&workspace.add_tag(&reference, &tag)?)?
         }
