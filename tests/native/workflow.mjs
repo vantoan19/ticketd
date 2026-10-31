@@ -245,7 +245,7 @@ try {
   await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
   await (
     await (
-      await browser.$('nav[aria-label="Workspace views"]')
+      await browser.$('nav[aria-label="Trash and settings"]')
     ).$("button=Trash")
   ).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
