@@ -79,7 +79,8 @@ beforeEach(() => {
         };
       }
       case "find_tickets": {
-        const effort = (input?.filter as { effort: string | null }).effort;
+        const effort = (input?.filter as unknown as { effort: string | null })
+          .effort;
         return tickets
           .filter((item) => !effort || item.effort === effort)
           .map(ticket);
@@ -88,7 +89,8 @@ beforeEach(() => {
         const target = tickets.find(
           (item) => item.reference === input?.reference,
         );
-        if (target) target.effort = (input?.effort as string | null) ?? "";
+        if (target)
+          target.effort = (input?.effort as unknown as string | null) ?? "";
         return target ? ticket(target) : null;
       }
       case "change_effort": {

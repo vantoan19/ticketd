@@ -25,7 +25,7 @@ const list = (names: string[]) =>
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /** The context line: how many tickets, and which projects they span. */
-export function effortContext(
+function effortContext(
   members: View["members"],
   projects: { id: string; name: string }[],
 ) {
