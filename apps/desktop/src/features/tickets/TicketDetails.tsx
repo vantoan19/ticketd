@@ -1,7 +1,9 @@
+import { Follow } from "@/features/tickets/Inbox";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Maximize2, X } from "lucide-react";
 import { type Project, type Ticket } from "@/lib/api/client";
+import { Backlinks } from "@/features/tickets/Backlinks";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
@@ -81,6 +83,9 @@ export function TicketDetails({
           key={item.id}
           hidden={item.reference !== selected}
         >
+          {item.reference === selected && (
+            <Follow reference={item.reference} revision={revision} />
+          )}
           {item.trashed ? (
             <>
               <h3>
@@ -95,7 +100,11 @@ export function TicketDetails({
               />
             </>
           ) : (
-            <TicketEditor ticket={item} onSaved={updateTicket}>
+            <TicketEditor
+              ticket={item}
+              onSaved={updateTicket}
+              select={setSelected}
+            >
               <TicketProperties
                 ticket={item}
                 projects={projects}
@@ -175,6 +184,13 @@ export function TicketDetails({
               </details>
             </>
           )}
+          {item.reference === selected && (
+            <Backlinks
+              reference={item.reference}
+              revision={revision}
+              select={setSelected}
+            />
+          )}
           <Activity
             reference={item.reference}
             projects={projects}
@@ -182,6 +198,7 @@ export function TicketDetails({
             revision={revision}
             active={item.reference === selected}
             trashed={item.trashed}
+            select={setSelected}
           />
         </div>
       ))}

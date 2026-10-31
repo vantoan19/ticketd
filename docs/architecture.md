@@ -90,3 +90,14 @@ A future server may call the same core workflow interface. Cloud synchronization
 A caller that needs retries uses the core `write` workflow with a typed write request and optional request ID. The CLI exposes the same workflow as `ticketd write --request-id ID FILE` (use `-` for standard input). For example, `{"operation":"create_ticket","title":"Investigate","project_id":null}` creates a ticket, and `{"operation":"batch","operations":[...]}` applies a batch. Results contain a `kind` and `value` (the delete result has no value). Existing individual commands remain available without retry IDs.
 
 Request IDs share one workspace-wide namespace. Equality compares the serialized typed request, including its operation, exact strings, attribution, supplied patch fields, and ordered arrays. JSON object key order and whitespace do not matter; omitted optional fields and their default values compare equally, except that omitted patch fields and explicitly cleared fields remain distinct. A different request with the same ID fails even if its effect would happen to be equivalent. Failed requests are not retained and may be retried. Successful outcomes are retained indefinitely and replayed as originally returned.
+
+The JSON export includes `ticket_follows` and `inbox_entries`. Their `person`
+field is the stable `local-person` scope for the initial local person; it is a
+personal preference scope, not an account or editing-agent identity. Backups
+include these records and retained write outcomes.
+
+The CLI reads the newest personal entries with `ticketd inbox` (use `--limit`
+and `--offset` for bounded pages). Personal writes use the retryable `write`
+workflow: `set_following` takes a ticket `reference` and `following` boolean;
+`set_inbox_read` takes explicit entry `ids` and a `read` boolean. Supplying the
+IDs actually displayed avoids marking later arrivals read.

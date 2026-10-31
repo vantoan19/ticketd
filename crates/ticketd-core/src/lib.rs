@@ -1,4 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod backlinks;
+pub use backlinks::Backlink;
 mod backup;
 mod context;
 mod duplicates;
@@ -29,6 +31,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod history;
+mod inbox;
+pub use inbox::InboxEntry;
 mod notes;
 pub use history::{HistoryEntry, Status};
 pub use notes::{Note, NotePatch};
@@ -200,10 +204,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 14 {
+            if version > 15 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 14 {
+            if version == 15 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -224,10 +228,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 14 {
+            if version > 15 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 14 {
+            if version < 15 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -300,6 +304,9 @@ impl Workspace {
             transaction.execute_batch("CREATE INDEX ticket_history_ticket_id ON ticket_history(ticket_id); PRAGMA user_version = 13;")?;
         }
         if version < 14 {
+            inbox::migrate(&transaction)?;
+        }
+        if version < 15 {
             duplicates::migrate(&transaction)?;
         }
         transaction.commit()?;

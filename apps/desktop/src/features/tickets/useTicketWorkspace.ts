@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
-type View = "tickets" | "projects" | "efforts" | "settings";
+type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export function useTicketWorkspace(
   setView: (view: View) => void,
   setCreating: (value: boolean) => void,

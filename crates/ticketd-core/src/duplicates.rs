@@ -2,7 +2,7 @@ use crate::{Error, Ticket, Workspace, history, relationships};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
-    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT); PRAGMA user_version = 14;")?;
+    conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT); PRAGMA user_version = 15;")?;
     Ok(())
 }
 

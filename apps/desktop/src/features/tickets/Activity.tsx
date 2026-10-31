@@ -5,8 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { TicketMarkdown } from "@/features/tickets/TicketMarkdown";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
@@ -27,6 +26,7 @@ export function Activity({
   projects,
   active,
   trashed,
+  select,
 }: {
   reference: string;
   status: string;
@@ -34,6 +34,7 @@ export function Activity({
   projects: Project[];
   active: boolean;
   trashed: boolean;
+  select?: (reference: string) => void;
 }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
@@ -198,9 +199,11 @@ export function Activity({
                   )}
                 </div>
                 <div className="markdown-preview activity-note">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {item.note.content}
-                  </ReactMarkdown>
+                  <TicketMarkdown
+                    content={item.note.content}
+                    select={select}
+                    revision={revision}
+                  />
                 </div>
                 {!trashed && (
                   <div className="activity-actions">

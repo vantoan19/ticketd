@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1253,8 +1253,10 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     }).unwrap();
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id;")
-        .unwrap();
+    db.execute_batch(
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows;",
+    )
+    .unwrap();
     drop(db);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
@@ -1313,6 +1315,301 @@ fn tag_search_includes_unused_vocabulary_and_limits_results() {
     workspace.remove_tag(&ticket.reference, "bug").unwrap();
     assert_eq!(workspace.search_tags("bu", 1).unwrap(), vec!["bug"]);
     assert_eq!(workspace.search_tags("BUG", 50).unwrap(), vec!["bug"]);
+}
+
+#[test]
+fn followed_status_changes_persist_and_reading_a_snapshot_leaves_new_entries_unread() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Follow me").unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InReview),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let displayed = workspace.inbox(100, 0).unwrap();
+    assert_eq!(displayed.len(), 1);
+    assert_eq!(displayed[0].from_value, "In progress");
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.set_inbox_read(&[displayed[0].id], true).unwrap();
+    workspace.set_following(&ticket.reference, false).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Canceled),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(!entries[0].read);
+    assert!(entries[1].read);
+    assert!(!workspace.is_following(&ticket.reference).unwrap());
+}
+
+#[test]
+fn inbox_writes_replay_and_failed_batches_leave_no_events() {
+    use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace
+        .write(
+            Some("follow"),
+            WriteRequest::SetFollowing {
+                reference: ticket.reference.clone(),
+                following: true,
+            },
+        )
+        .unwrap();
+    let batch = vec![
+        BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                patch: TicketPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        },
+        BatchOperation::Change {
+            ticket: "T-9999".into(),
+            change: Box::new(TicketChange::default()),
+        },
+    ];
+    assert!(workspace.apply_batch(batch).is_err());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let id = workspace.inbox(100, 0).unwrap()[0].id;
+    workspace
+        .write(
+            Some("read"),
+            WriteRequest::SetInboxRead {
+                ids: vec![id],
+                read: true,
+            },
+        )
+        .unwrap();
+    workspace.set_inbox_read(&[id], false).unwrap();
+    workspace
+        .write(
+            Some("read"),
+            WriteRequest::SetInboxRead {
+                ids: vec![id],
+                read: true,
+            },
+        )
+        .unwrap();
+    assert!(!workspace.inbox(100, 0).unwrap()[0].read);
+}
+
+#[test]
+fn backup_restore_preserves_personal_inbox_and_follows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Backed up").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["ticket_follows"][0]["person"], "local-person");
+    assert_eq!(export["inbox_entries"][0]["to_value"], "Done");
+    workspace.backup(&backup).unwrap();
+    workspace.set_following(&ticket.reference, false).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.is_following(&ticket.reference).unwrap());
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn backlinks_follow_markdown_content_and_note_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "See {} here.\n\n`{}` and [link](https://example.com/{})",
+                    target.reference, target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let note = workspace
+        .add_note(
+            &source.reference,
+            &format!("A note about {}", target.reference),
+            None,
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].source_reference, source.reference);
+    assert_eq!(links[0].passage, "See T-1 here.");
+    assert_eq!(links[1].note_id.as_deref(), Some(note.id.as_str()));
+    workspace.delete_note(&source.reference, &note.id).unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn backlinks_ignore_fenced_code_and_reference_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "```\n{}\n```\n\n{}0",
+                    target.reference, target.reference
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn backlink_pages_follow_edits_and_trash_visibility() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let first = workspace
+        .add_note(&source.reference, "T-1 first", None)
+        .unwrap();
+    workspace
+        .add_note(&source.reference, "T-1 second", None)
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 1, 1).unwrap()[0].passage,
+        "T-1 second"
+    );
+    workspace
+        .edit_note(
+            &source.reference,
+            &first.id,
+            ticketd_core::NotePatch {
+                content: Some("Changed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
+        1
+    );
+    workspace
+        .set_trashed(&source.reference, true, None)
+        .unwrap();
+    assert!(
+        workspace
+            .backlinks(&target.reference, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn long_backlink_passage_keeps_the_reference_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(format!("{} T-1 context", "x".repeat(600))),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert!(links[0].passage.contains("T-1"));
+    assert!(links[0].passage.chars().count() <= 512);
+}
+
+#[test]
+fn backlinks_recognize_escaped_markdown_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some("See T\\-1 and &#84;-1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].source_reference, source.reference);
 }
 
 #[test]
