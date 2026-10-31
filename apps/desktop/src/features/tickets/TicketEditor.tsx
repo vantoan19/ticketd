@@ -1,13 +1,9 @@
 import "./description.css";
-import CodeMirror from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
-import { EditorView } from "@codemirror/view";
-import { TicketMarkdown } from "@/features/tickets/TicketMarkdown";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
-
-const extensions = [markdown(), EditorView.lineWrapping];
 
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
@@ -34,7 +30,10 @@ export function TicketEditor({
   const [state, setState] = useState<"saved" | "pending" | "failed">("saved");
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
-  const [editingBody, setEditingBody] = useState(false);
+  const [bodyMode, setBodyMode] = useState<"unopened" | "editing" | "reading">(
+    "unopened",
+  );
+  const editingBody = bodyMode === "editing";
   const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -159,7 +158,7 @@ export function TicketEditor({
               size="sm"
               type="button"
               onClick={() => {
-                setEditingBody(false);
+                setBodyMode("reading");
                 window.requestAnimationFrame(() => editButton.current?.focus());
               }}
             >
@@ -171,59 +170,56 @@ export function TicketEditor({
               variant="ghost"
               size="sm"
               type="button"
-              onClick={() => setEditingBody(true)}
+              onClick={() => setBodyMode("editing")}
             >
               Edit description
             </Button>
           )}
         </div>
-        {editingBody ? (
-          <CodeMirror
-            value={draft.body}
-            onChange={(body) => edit({ ...draft, body })}
-            extensions={extensions}
-            basicSetup={{
-              lineNumbers: false,
-              foldGutter: false,
-              highlightActiveLine: false,
-            }}
-            indentWithTab={false}
-            autoFocus
-            aria-labelledby={`body-${ticket.id}`}
-          />
-        ) : draft.body ? (
-          <div
-            className="markdown-preview description-document"
-            onClick={(event) => {
-              const target = event.target;
-              if (
-                target instanceof Element &&
-                target.closest(
-                  "a, button, input, select, textarea, [role=button]",
-                )
-              )
-                return;
-              if (window.getSelection()?.toString()) return;
-              setEditingBody(true);
-            }}
-          >
-            <TicketMarkdown
-              content={draft.body}
-              select={select}
-              revision={revision}
+        {bodyMode !== "unopened" && (
+          <div hidden={!editingBody}>
+            <LazyMarkdownEditor
+              value={draft.body}
+              onChange={(body) => edit({ ...draft, body })}
+              label="Description"
+              autoFocus={editingBody}
             />
           </div>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            className="description-empty"
-            onClick={() => setEditingBody(true)}
-          >
-            Add a description…
-          </Button>
         )}
+        {!editingBody &&
+          (draft.body ? (
+            <div
+              className="markdown-preview description-document"
+              onClick={(event) => {
+                const target = event.target;
+                if (
+                  target instanceof Element &&
+                  target.closest(
+                    "a, button, input, select, textarea, summary, [role=button]",
+                  )
+                )
+                  return;
+                if (window.getSelection()?.toString()) return;
+                setBodyMode("editing");
+              }}
+            >
+              <MarkdownDocument
+                source={draft.body}
+                select={select}
+                revision={revision}
+              />
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="description-empty"
+              onClick={() => setBodyMode("editing")}
+            >
+              Add a description…
+            </Button>
+          ))}
       </div>
       <p role="status" className="my-2">
         {saving

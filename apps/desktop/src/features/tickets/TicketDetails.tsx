@@ -13,6 +13,7 @@ import { ContextualRelationships } from "@/features/tickets/ContextualRelationsh
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { Dependencies } from "@/features/tickets/Dependencies";
 import { Activity } from "@/features/tickets/Activity";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 const DependencyGraph = lazy(
   () => import("@/features/tickets/DependencyGraph"),
@@ -106,12 +107,23 @@ export function TicketDetails({
                 onSaved={updateTicket}
                 refresh={refresh}
               />
+              <div className="editor-body">
+                <p className="description-heading">Description</p>
+                <div className="markdown-preview description-document">
+                  <MarkdownDocument
+                    source={item.body}
+                    select={setSelected}
+                    revision={revision}
+                  />
+                </div>
+              </div>
             </>
           ) : (
             <TicketEditor
               ticket={item}
               onSaved={updateTicket}
               select={setSelected}
+              revision={revision}
             >
               <TicketProperties
                 ticket={item}

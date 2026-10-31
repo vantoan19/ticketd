@@ -13,7 +13,7 @@ import {
   FieldLabel,
   FieldError,
 } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -103,7 +103,7 @@ export function CreateTicketDialog({
     setDraft((old) => old && { ...old, ...patch });
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (lock.current) return;
+    if (event.target !== event.currentTarget || lock.current) return;
     if (!draft!.title.trim()) {
       setTitleError("Enter a title.");
       return;
@@ -188,14 +188,17 @@ export function CreateTicketDialog({
               )}
             </Field>
             <Field data-disabled={pending}>
-              <FieldLabel htmlFor="create-body">Description</FieldLabel>
-              <Textarea
-                id="create-body"
-                disabled={pending}
-                rows={4}
-                value={draft.body}
-                onChange={(event) => update({ body: event.target.value })}
-              />
+              <FieldLabel asChild>
+                <span>Description</span>
+              </FieldLabel>
+              <div onKeyDown={(event) => event.stopPropagation()}>
+                <LazyMarkdownEditor
+                  label="Description"
+                  readOnly={pending}
+                  value={draft.body}
+                  onChange={(body) => update({ body })}
+                />
+              </div>
             </Field>
           </FieldGroup>
           <div className="ticket-properties" aria-label="Initial properties">

@@ -216,6 +216,14 @@ The graph needs clear edge direction or a legend and ticket selection. Creating 
 
 A board view and an agent/chat panel are outside the MVP.
 
+### Document reading and editing
+
+- Descriptions and notes support rich editing in place, with Markdown shortcuts, slash commands, selection formatting, and block movement with keyboard alternatives.
+- Rich authoring covers paragraphs, headings, nested lists, checklists, quotes, dividers, links, inline formatting, fenced code, and simple GFM tables. Markdown remains the content format exchanged with the CLI and exports; advanced source editing remains available.
+- Viewing or focusing content does not rewrite it. Visual edits preserve supported content without silent loss; unsupported syntax stays intact through source editing when it cannot safely be represented visually.
+- Fenced Mermaid blocks display diagrams offline and expose their source for editing. Invalid or incomplete diagrams retain their source and show a local error without preventing the document from being saved.
+- Descriptions retain autosave with visible save/error state; notes retain explicit submission. Drafts survive mode changes, navigation, save failures, and external refresh, with existing reload or overwrite choices when saved content changes.
+
 ## 8. CLI and context contract
 
 ### Required capabilities

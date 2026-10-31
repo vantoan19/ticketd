@@ -88,6 +88,36 @@ const detail = () =>
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
 try {
+  const newTicket = await browser.$("button=New ticket");
+  await newTicket.waitForDisplayed({ timeout: 15000 });
+  await newTicket.click();
+  const creation = await browser.$('.create-panel[role="dialog"]');
+  await (
+    await creation.$('[aria-label="Description rich text"]')
+  ).waitForDisplayed({ timeout: 15000 });
+  await browser.waitUntil(
+    () =>
+      browser.execute(() => {
+        const dialog = document.querySelector('.create-panel[role="dialog"]');
+        if (!dialog) return false;
+        const bounds = dialog.getBoundingClientRect();
+        return (
+          bounds.left >= 0 &&
+          bounds.top >= 0 &&
+          bounds.right <= window.innerWidth &&
+          bounds.bottom <= window.innerHeight &&
+          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2 &&
+          Math.abs(bounds.y + bounds.height / 2 - window.innerHeight / 2) < 2
+        );
+      }),
+    {
+      timeout: 5000,
+      timeoutMsg: "New ticket dialog is off-center or outside the app window",
+    },
+  );
+  await (await creation.$('[aria-label="Close new ticket"]')).click();
+  await creation.waitForDisplayed({ reverse: true });
+
   const row = await browser.$(
     "button*=Exercise installed desktop and CLI together",
   );
@@ -102,13 +132,29 @@ try {
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
   await (await (await detail()).$("button=Edit description")).click();
-  const editor = await (await detail()).$(".cm-content");
+  const editor = await (
+    await detail()
+  ).$('[role="textbox"][aria-label="Description rich text"]');
   await editor.click();
   await browser.keys(["End"]);
   await browser.keys(" Reviewed in desktop.");
   await browser.waitUntil(
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
+  );
+  const noteEditor = await (
+    await detail()
+  ).$('[role="textbox"][aria-label="New note rich text"]');
+  await noteEditor.click();
+  await browser.keys("Reviewed rich notes in the installed desktop.");
+  assert.equal(run("note", "list", harness.reference).length, 0);
+  await (await (await detail()).$("button=Add note")).click();
+  await browser.waitUntil(
+    () =>
+      run("note", "list", harness.reference).some((note) =>
+        note.content.includes("Reviewed rich notes in the installed desktop."),
+      ),
+    { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
   const search = await browser.$('input[aria-label="Search tickets"]');
   await search.setValue("Exercise installed desktop");
