@@ -11,8 +11,17 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage repository projects
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommand,
+    },
     /// Create a ticket with a title
-    Create { title: String },
+    Create {
+        title: String,
+        #[arg(long)]
+        project: Option<String>,
+    },
     /// Patch ticket content; use --body-file - to read stdin
     Change {
         reference: String,
@@ -26,6 +35,10 @@ enum Command {
         status: Option<Status>,
         #[arg(long)]
         agent: Option<String>,
+        #[arg(long, conflicts_with = "clear_project")]
+        project: Option<String>,
+        #[arg(long)]
+        clear_project: bool,
     },
     /// Show ticket history
     History { reference: String },
@@ -58,7 +71,12 @@ enum Command {
         command: EffortCommand,
     },
     /// List tickets
-    List,
+    List {
+        #[arg(long, conflicts_with = "unlinked")]
+        project: Option<String>,
+        #[arg(long)]
+        unlinked: bool,
+    },
     /// Show a ticket by its reference
     Show { reference: String },
 }
@@ -97,6 +115,23 @@ enum EffortCommand {
         agent: Option<String>,
     },
 }
+#[derive(Subcommand)]
+enum ProjectCommand {
+    Create {
+        name: String,
+        path: String,
+    },
+    Edit {
+        id: String,
+        name: String,
+        path: String,
+    },
+    Show {
+        id: String,
+    },
+    List,
+}
+
 #[derive(Subcommand)]
 enum NoteCommand {
     /// Append a note, reading --file - from stdin
@@ -150,7 +185,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
-        Command::Create { title } => serde_json::to_string(&workspace.create_ticket(&title)?)?,
+        Command::Project { command } => match command {
+            ProjectCommand::Create { name, path } => {
+                serde_json::to_string(&workspace.create_project(&name, &path)?)?
+            }
+            ProjectCommand::Edit { id, name, path } => {
+                serde_json::to_string(&workspace.edit_project(&id, &name, &path)?)?
+            }
+            ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
+            ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
+        },
+        Command::Create { title, project } => {
+            serde_json::to_string(&workspace.create_ticket_in_project(&title, project.as_deref())?)?
+        }
         Command::Change {
             reference,
             title,
@@ -158,6 +205,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             body_file,
             status,
             agent,
+            project,
+            clear_project,
         } => {
             let body = match body_file {
                 Some(path) if path == "-" => {
@@ -175,6 +224,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     body,
                     status,
                     editing_agent: agent,
+                    effort_id: None,
+                    project_id: if clear_project {
+                        Some(None)
+                    } else {
+                        project.map(Some)
+                    },
                 },
             )?)?
         }
@@ -271,7 +326,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.set_effort(&reference, None, agent.as_deref())?)?
             }
         },
-        Command::List => serde_json::to_string(&workspace.list_tickets()?)?,
+        Command::List { project, unlinked } => {
+            if let Some(ref id) = project {
+                workspace.show_project(id)?;
+            }
+            let tickets: Vec<_> = workspace
+                .list_tickets()?
+                .into_iter()
+                .filter(|ticket| {
+                    if unlinked {
+                        ticket.project_id.is_none()
+                    } else if let Some(ref id) = project {
+                        ticket.project_id.as_ref() == Some(id)
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            serde_json::to_string(&tickets)?
+        }
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };
     println!("{output}");

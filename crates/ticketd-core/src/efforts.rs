@@ -1,5 +1,5 @@
-use crate::{Error, Status, Ticket, Workspace, history};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use crate::{Error, Status, Ticket, TicketPatch, Workspace};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -28,7 +28,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch("CREATE TABLE efforts (id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0); ALTER TABLE tickets ADD COLUMN effort_id TEXT REFERENCES efforts(id);")?;
     Ok(())
 }
-fn get(connection: &Connection, id: &str) -> Result<Effort, Error> {
+pub(crate) fn get(connection: &Connection, id: &str) -> Result<Effort, Error> {
     connection
         .query_row(
             "SELECT id, name, archived FROM efforts WHERE id = ?1",
@@ -118,38 +118,13 @@ impl Workspace {
         effort: Option<&str>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let number = reference
-            .strip_prefix("T-")
-            .and_then(|v| v.parse::<i64>().ok());
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (ticket_id, previous): (String, Option<String>) = tx
-            .query_row(
-                "SELECT id, effort_id FROM tickets WHERE number = ?1",
-                [number],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .optional()?
-            .ok_or_else(|| Error::NotFound(reference.into()))?;
-        if let Some(id) = effort {
-            get(&tx, id)?;
-        }
-        if previous.as_deref() != effort {
-            tx.execute(
-                "UPDATE tickets SET effort_id = ?1 WHERE id = ?2",
-                params![effort, ticket_id],
-            )?;
-            history::record(
-                &tx,
-                &ticket_id,
-                "effort",
-                previous.as_deref().unwrap_or(""),
-                effort.unwrap_or(""),
-                agent,
-            )?;
-        }
-        tx.commit()?;
-        self.show_ticket(reference)
+        self.change_ticket(
+            reference,
+            TicketPatch {
+                effort_id: Some(effort.map(str::to_owned)),
+                editing_agent: agent.map(str::to_owned),
+                ..Default::default()
+            },
+        )
     }
 }

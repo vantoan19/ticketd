@@ -20,11 +20,14 @@ test("refreshes clean content and preserves a draft when saved content changes",
     body: "Old",
     status: "Todo",
     tags: [],
+    project_id: null,
     availability: "Ready",
     prerequisites: [],
   };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch?: { title?: string } }) => {
+      if (command === "list_projects") return [];
+      if (command === "list_notes") return [];
       if (command === "list_tickets") return [saved];
       if (command === "ticket_history") return [];
       if (command === "change_ticket" && args?.patch?.title) {

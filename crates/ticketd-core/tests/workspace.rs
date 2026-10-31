@@ -410,3 +410,84 @@ fn moving_effort_membership_is_atomic_and_survives_reopening() {
     assert_eq!(history[1].from_value, first.id);
     assert_eq!(history[1].to_value, second.id);
 }
+
+#[test]
+fn project_membership_preserves_ticket_identity_and_records_changes() {
+    use ticketd_core::TicketPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let project = workspace.create_project("Alpha", "/repo/a").unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    let linked = workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(Some(project.id.clone())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(linked.id, ticket.id);
+    assert_eq!(linked.reference, ticket.reference);
+    workspace
+        .edit_project(&project.id, "Renamed", "/repo/b")
+        .unwrap();
+    assert_eq!(workspace.show_project(&project.id).unwrap().name, "Renamed");
+    let cleared = workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                project_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(cleared.id, ticket.id);
+    assert_eq!(cleared.project_id, None);
+    let history = workspace.ticket_history(&ticket.reference).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].to_value, project.id);
+    assert_eq!(history[1].to_value, "");
+}
+
+#[test]
+fn project_patch_distinguishes_omitted_and_null() {
+    use ticketd_core::TicketPatch;
+    let omitted: TicketPatch = serde_json::from_str("{}").unwrap();
+    let cleared: TicketPatch = serde_json::from_str(r#"{"project_id":null}"#).unwrap();
+    let assigned: TicketPatch = serde_json::from_str(r#"{"project_id":"project-id"}"#).unwrap();
+    assert_eq!(omitted.project_id, None);
+    assert_eq!(cleared.project_id, Some(None));
+    assert_eq!(assigned.project_id, Some(Some("project-id".into())));
+}
+
+#[test]
+fn effort_patch_combines_membership_and_status_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Combined change").unwrap();
+    assert!(
+        workspace
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    effort_id: Some(Some("missing".into())),
+                    status: Some(Status::Done),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().status,
+        Status::Todo
+    );
+    assert!(
+        workspace
+            .ticket_history(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    let clear: TicketPatch = serde_json::from_str(r#"{"effort_id":null}"#).unwrap();
+    assert_eq!(clear.effort_id, Some(None));
+}
