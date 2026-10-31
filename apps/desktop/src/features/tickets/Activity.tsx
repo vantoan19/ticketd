@@ -63,8 +63,8 @@ export function Activity({
   useEffect(() => {
     if (!active) return;
     let current = true;
-    setLoading(true);
-    void Promise.all([loadNotes(), historyClient.list(reference)])
+    void Promise.resolve()
+      .then(() => Promise.all([loadNotes(), historyClient.list(reference)]))
       .then(([, entries]) => {
         if (current) {
           setHistory(entries);
