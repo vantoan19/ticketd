@@ -393,6 +393,8 @@ test("clears additional filters while preserving the selected Effort", async () 
       name: "Clear filters",
     }),
   );
-  expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
+  expect(
+    screen.getByText("Launch", { selector: "header strong" }),
+  ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
 });
