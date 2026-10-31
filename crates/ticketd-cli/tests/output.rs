@@ -67,3 +67,29 @@ fn cli_status_change_appears_in_followed_inbox() {
     assert_eq!(inbox[0]["to_value"], "Done");
     assert_eq!(inbox[0]["read"], false);
 }
+
+#[test]
+fn backlinks_command_returns_source_and_passage() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    run(&["create", "Target"]);
+    run(&["create", "Source"]);
+    run(&["change", "T-2", "--body", "See T-1 for context"]);
+    let result = run(&["backlinks", "T-1"]);
+    assert_eq!(result[0]["source_reference"], "T-2");
+    assert_eq!(result[0]["passage"], "See T-1 for context");
+}

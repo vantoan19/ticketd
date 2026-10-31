@@ -140,6 +140,20 @@ export const client = {
       await invoke("edit_project", { id, name, path }),
     );
   },
+  async backlinks(reference: string, offset: number) {
+    return z
+      .array(
+        z.object({
+          source_reference: z.string(),
+          source_title: z.string(),
+          note_id: z.string().nullable(),
+          passage: z.string(),
+        }),
+      )
+      .parse(
+        await invoke("ticket_backlinks", { reference, limit: 20, offset }),
+      );
+  },
   async notes(reference: string, offset: number) {
     return z
       .array(noteSchema)

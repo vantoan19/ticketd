@@ -124,6 +124,14 @@ enum Command {
         #[command(flatten)]
         filters: FindArgs,
     },
+    /// List incoming ticket references with passage context
+    Backlinks {
+        reference: String,
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     /// Retrieve bounded context; select related scopes explicitly
     Context {
         reference: String,
@@ -135,6 +143,8 @@ enum Command {
         relationships: bool,
         #[arg(long)]
         notes: bool,
+        #[arg(long)]
+        backlinks: bool,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
@@ -531,12 +541,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Search { query, filters } => {
             serde_json::to_string(&workspace.find_tickets(&filters.filter(query))?)?
         }
+        Command::Backlinks {
+            reference,
+            limit,
+            offset,
+        } => serde_json::to_string(&workspace.backlinks(&reference, limit, offset)?)?,
         Command::Context {
             reference,
             project,
             effort,
             relationships,
             notes,
+            backlinks,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
             &reference,
@@ -545,6 +561,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 effort,
                 relationships,
                 notes,
+                backlinks,
                 offset,
             },
         )?)?,
