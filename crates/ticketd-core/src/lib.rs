@@ -6,6 +6,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod history;
+pub use history::{HistoryEntry, Status};
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("ticket title must not be empty")]
@@ -27,7 +30,7 @@ pub struct Ticket {
     pub id: String,
     pub reference: String,
     pub title: String,
-    pub status: String,
+    pub status: Status,
 }
 
 pub struct Workspace {
@@ -48,11 +51,14 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 1 {
+        if version > 2 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
             transaction.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); PRAGMA user_version = 1;")?;
+        }
+        if version < 2 {
+            history::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -72,8 +78,51 @@ impl Workspace {
             id,
             reference: format!("T-{}", self.connection.last_insert_rowid()),
             title: title.to_owned(),
-            status: "Todo".to_owned(),
+            status: Status::Todo,
         })
+    }
+
+    pub fn change_status(
+        &mut self,
+        reference: &str,
+        status: Status,
+        editing_agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let number = reference
+            .strip_prefix("T-")
+            .and_then(|value| value.parse::<i64>().ok());
+        let ticket = transaction
+            .query_row(
+                "SELECT id, number, title, status FROM tickets WHERE number = ?1",
+                [number],
+                ticket_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+        if ticket.status != status {
+            transaction.execute(
+                "UPDATE tickets SET status = ?1 WHERE id = ?2",
+                params![status.to_string(), ticket.id],
+            )?;
+            history::record(
+                &transaction,
+                &ticket.id,
+                "status",
+                &ticket.status.to_string(),
+                &status.to_string(),
+                editing_agent,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(Ticket { status, ..ticket })
+    }
+
+    pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
+        let ticket = self.show_ticket(reference)?;
+        history::read(&self.connection, &ticket.id)
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
@@ -107,6 +156,12 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         id: row.get(0)?,
         reference: format!("T-{}", row.get::<_, i64>(1)?),
         title: row.get(2)?,
-        status: row.get(3)?,
+        status: row.get::<_, String>(3)?.parse().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
     })
 }

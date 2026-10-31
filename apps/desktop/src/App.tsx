@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { History } from "./History";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 type Ticket = { id: string; reference: string; title: string; status: string };
@@ -130,6 +131,11 @@ export function App() {
                 {ticket.reference} · {ticket.status}
               </p>
               <h3 className="mt-2 text-lg">{ticket.title}</h3>
+              <History
+                reference={ticket.reference}
+                status={ticket.status}
+                onChange={refresh}
+              />
             </div>
           ) : (
             <p className="mt-3">Select a ticket to see its details.</p>
