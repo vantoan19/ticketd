@@ -1,4 +1,6 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
 :root {
   font-family:
     Inter,
@@ -9,6 +11,14 @@
   color: #e5e5e9;
   background: #19191c;
   font-size: 13px;
+  --sidebar: hsl(0 0% 98%);
+  --sidebar-foreground: hsl(240 5.3% 26.1%);
+  --sidebar-primary: hsl(240 5.9% 10%);
+  --sidebar-primary-foreground: hsl(0 0% 98%);
+  --sidebar-accent: hsl(240 4.8% 95.9%);
+  --sidebar-accent-foreground: hsl(240 5.9% 10%);
+  --sidebar-border: hsl(220 13% 91%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
 * {
   box-sizing: border-box;
@@ -44,6 +54,7 @@ select option {
   background: #242429;
 }
 .workspace {
+  width: 100%;
   display: flex;
   height: 100vh;
   min-height: 0;
@@ -55,6 +66,7 @@ select option {
   display: flex;
   flex-direction: column;
   background: #17171a;
+  color: #d4d4dc;
   border-right: 1px solid #303035;
   padding: 19px 12px 12px;
 }
@@ -265,7 +277,7 @@ select option {
 .filters {
   position: relative;
 }
-.filters summary {
+.filters-trigger {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -275,12 +287,8 @@ select option {
   padding: 7px 10px;
   border-radius: 5px;
 }
-.filters fieldset {
-  position: absolute;
-  z-index: 3;
-  top: 36px;
-  right: 0;
-  width: 270px;
+.filters-content fieldset {
+  width: 100%;
   display: grid;
   gap: 10px;
   padding: 16px;
@@ -289,12 +297,12 @@ select option {
   border-radius: 7px;
   box-shadow: 0 12px 35px #0008;
 }
-.filters fieldset label {
+.filters-content fieldset label {
   display: grid;
   gap: 4px;
   color: #aaaab3;
 }
-.filters legend {
+.filters-content legend {
   display: none;
 }
 .list-heading {
@@ -436,11 +444,12 @@ select option {
   margin-top: 12px;
 }
 .create-panel {
-  position: absolute;
-  z-index: 5;
-  top: 70px;
+  position: fixed;
+  z-index: 51;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
+  translate: none;
   width: min(500px, 80vw);
   background: #29292f;
   border: 1px solid #484850;
@@ -609,4 +618,34 @@ select option {
   color: white;
   padding: 8px 14px;
   font-weight: 600;
+}
+
+.dark {
+  --sidebar: hsl(240 5.9% 10%);
+  --sidebar-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-primary: hsl(224.3 76.3% 48%);
+  --sidebar-primary-foreground: hsl(0 0% 100%);
+  --sidebar-accent: hsl(240 3.7% 15.9%);
+  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
+  --sidebar-border: hsl(240 3.7% 15.9%);
+  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+}
+
+@theme inline {
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+.filters-content {
+  z-index: 50;
+  width: 300px;
+  color: #e5e5e9;
+  background: #29292f;
+  border: 1px solid #484850;
 }

@@ -94,7 +94,7 @@ try {
   await row.waitForDisplayed({ timeout: 15000 });
   await row.click();
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  const title = await (await detail()).$("label=Title").$("textarea");
+  const title = await (await detail()).$('textarea[aria-label="Title"]');
   await title.waitForDisplayed();
   await title.click();
   await browser.keys(["End"]);
@@ -111,7 +111,7 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
-  const search = await browser.$("label=Search tickets").$("input");
+  const search = await browser.$('input[aria-label="Search tickets"]');
   await search.setValue("Exercise installed desktop");
   await browser.waitUntil(
     async () =>
@@ -131,7 +131,7 @@ try {
   await browser.waitUntil(
     async () =>
       (await (
-        await (await detail()).$("label=Title").$("textarea")
+        await (await detail()).$('textarea[aria-label="Title"]')
       ).getValue()) === evidence.title,
   );
   console.log(
@@ -182,7 +182,11 @@ try {
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
   await (await (await detail()).$("button=Move to trash")).click();
-  await (await browser.$("button=Trash")).click();
+  await (
+    await (
+      await browser.$('nav[aria-label="Workspace views"]')
+    ).$("button=Trash")
+  ).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
   await (await (await detail()).$("button=Restore")).click();
   assert.equal(run("show", evidence.reference).trashed, false);

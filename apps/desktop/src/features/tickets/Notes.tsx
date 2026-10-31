@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { client, type Note } from "./client";
+import { client, type Note } from "@/lib/api/client";
 
 export function Notes({
   reference,

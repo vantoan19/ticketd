@@ -4,7 +4,7 @@ import { EditorView } from "@codemirror/view";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { client, type Ticket } from "./client";
+import { client, type Ticket } from "@/lib/api/client";
 
 const extensions = [markdown(), EditorView.lineWrapping];
 
@@ -122,6 +122,7 @@ export function TicketEditor({
       <label className="editor-title">
         <span className="sr-only">Title</span>
         <textarea
+          aria-label="Title"
           rows={2}
           className="rounded border border-neutral-400 bg-white p-2"
           value={draft.title}

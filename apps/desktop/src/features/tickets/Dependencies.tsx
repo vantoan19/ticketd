@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, type FormEvent } from "react";
-import type { Ticket } from "./client";
+import type { Ticket } from "@/lib/api/client";
 
 export function Dependencies({
   ticket,

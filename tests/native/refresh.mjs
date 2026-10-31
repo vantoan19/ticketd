@@ -36,7 +36,7 @@ try {
   console.log(`CLI creation appeared after ${Date.now() - started} ms`);
   await row.click();
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  const title = await (await detail()).$("label=Title").$("textarea");
+  const title = await (await detail()).$('textarea[aria-label="Title"]');
   await title.waitForDisplayed();
   runCli("change", ticket.reference, "--title", "Changed by CLI");
   const changed = Date.now();
@@ -95,7 +95,9 @@ try {
     ]),
   });
   await (await browser.$('[aria-label="Refresh"]')).click();
-  const projectButton = await browser.$("button=Benchmark project");
+  const projectButton = await (
+    await browser.$('nav[aria-label="Project scopes"]')
+  ).$("button=Benchmark project");
   await projectButton.waitForDisplayed({ timeout: 10000 });
   let clock = Date.now();
   await projectButton.click();
@@ -106,7 +108,7 @@ try {
     await browser.$("button*=Benchmark ticket 999")
   ).waitForDisplayed({ timeout: 10000 });
   console.log(`Project selection: ${Date.now() - clock} ms`);
-  const search = await browser.$("label=Search tickets").$("input");
+  const search = await browser.$('input[aria-label="Search tickets"]');
   clock = Date.now();
   await search.setValue("Benchmark ticket 999");
   await browser.waitUntil(
@@ -120,7 +122,7 @@ try {
   await browser.waitUntil(
     async () =>
       (await (
-        await (await detail()).$("label=Title").$("textarea")
+        await (await detail()).$('textarea[aria-label="Title"]')
       ).getValue()) === "Benchmark ticket 999",
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);

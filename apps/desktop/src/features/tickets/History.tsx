@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
-import type { Project } from "./client";
+import type { Project } from "@/lib/api/client";
 
 type Entry = {
   kind: string;
@@ -95,9 +95,9 @@ export function History({
           )}
         </select>
       </label>
+      {error && <p role="alert">{error}</p>}
       <details className="detail-disclosure">
         <summary>Activity & history</summary>
-        {error && <p role="alert">{error}</p>}
         {entries.length === 0 ? (
           <p>No recorded changes.</p>
         ) : (
