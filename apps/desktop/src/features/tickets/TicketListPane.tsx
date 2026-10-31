@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -70,6 +70,15 @@ export function TicketListPane({
           {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
           {tickets.length === PAGE_SIZE ? " shown" : ""}
         </p>
+        <Button
+          className="list-refresh"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={() => void refresh()}
+        >
+          <RefreshCw />
+        </Button>
       </div>
       {!trash && (
         <TicketFilters
