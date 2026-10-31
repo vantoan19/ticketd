@@ -10,7 +10,7 @@ Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](
 
 The visual reference is the third-party [Vercel design language analysis by design-bites](https://github.com/educlopez/design-bites/blob/main/design-mds/vercel.com/DESIGN.md). Use its published numeric values for the light palette, type scale, control sizes, spacing scale, radii, focus treatment, and elevation. It is a third-party observation rather than an official Vercel specification. The tables below distinguish those source values from ticketd-specific layout assignments and dark-theme extensions.
 
-Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. A ticket title uses the reference’s 32px section-title role; it does not introduce a 24px or 22px size. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
+Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
 
 ## 1. Visual character and hierarchy
 
@@ -109,10 +109,10 @@ Bundle Geist Sans and Geist Mono locally. Use the reference’s actual 400, 500,
 | Reference role      | Size | Weight | Line height | Tracking  | Ticketd assignment                                       |
 | ------------------- | ---- | ------ | ----------- | --------- | -------------------------------------------------------- |
 | Display heading     | 48px | 600    | 48px        | `-2.28px` | Reserved for display content; not ordinary ticket chrome |
-| Section title       | 32px | 600    | 40px        | `-1.28px` | Ticket title and management-view title                   |
+| Section title       | 32px | 600    | 40px        | `-1.28px` | Reserved for spacious standalone views                   |
 | Subsection heading  | 14px | 500    | 20px        | `-0.28px` | Activity, evidence, relationships, list heading          |
 | Tertiary heading    | 14px | 400    | 20px        | Normal    | Supporting section labels                                |
-| Body / inline link  | 16px | 400    | Normal      | Normal    | Ticket descriptions, notes, ticket-row titles            |
+| Body / inline link  | 16px | 400    | Normal      | Normal    | Long-form standalone reading                             |
 | Button              | 14px | 400    | 14px        | Normal    | Button and compact action labels                         |
 | Label               | 14px | 400    | 20px        | Normal    | Field and property labels, navigation                    |
 | Caption             | 12px | 400    | 16px        | Normal    | Dates, hints, counts, supporting metadata                |
@@ -120,7 +120,7 @@ Bundle Geist Sans and Geist Mono locally. Use the reference’s actual 400, 500,
 
 Use the source’s form tokens for shared inputs: 14px/20px default and 16px/24px large. Its observed native input size is 13.3px; ticketd’s themed form controls use the explicit 14px form token rather than relying on browser-native metrics. Root text size is 16px, so the reference’s `.875rem` form size resolves to 14px.
 
-Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation is 14px, authored text is 16px. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
+Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation, ticket rows, descriptions, and notes are 14px/20px in the working panes. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
 
 Authored headings use these same roles: first-level headings may use the 32px section-title role, with lower levels using the 14px heading roles and spacing to express hierarchy. The ticket title remains the strongest application heading through placement. Preserve authored strong emphasis using the available semibold face without changing all surrounding interface labels to semibold.
 
@@ -160,7 +160,7 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Marketing radius       | 8px    | Reserved; not a replacement control radius            |
 | Elevated panel radius  | 12px   | Menus, popovers, dialogs, sheets                      |
 | Pill radius            | 9999px | Tags or compact badges only                           |
-| Header height          | 64px   | Workspace header                                      |
+| Header height          | 48px   | Workspace header                                      |
 | Sub-navigation height  | 46px   | Compact pane/header row                               |
 | Page gutter            | 24px   | Workspace and management content gutters              |
 | Standard content width | 1200px | Management content maximum                            |
@@ -219,14 +219,14 @@ The drawing describes hierarchy, not additional duplicate search fields. Search 
 
 | Region          | Geometry and behavior                                                                   |
 | --------------- | --------------------------------------------------------------------------------------- |
-| Navigation      | 224px default width; 16px outer inset; independently scrollable groups                  |
-| Top bar         | 64px minimum height; 24px horizontal inset; no decorative second header                 |
-| List toolbar    | 16px vertical and 24px horizontal padding; one search field and Filters                 |
+| Navigation      | 208px default width; 12px outer inset; independently scrollable groups                  |
+| Top bar         | 48px height; 24px horizontal inset; no decorative second header                         |
+| List toolbar    | 46px title/count row; 32px search and Filters with 16px horizontal inset                |
 | List pane       | At least 360px in split mode; remaining width allocated with the detail pane            |
 | Detail pane     | At least 480px in split mode; start near 55% of workspace content width                 |
-| Detail content  | 24px gutters in both split and expanded views; prose capped near 72 characters per line |
+| Detail content  | 32px desktop gutters, 16px on narrow windows; content capped at 800px including gutters |
 | Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing          |
-| Expanded detail | Center reading column up to 880px; keep navigation and return context                   |
+| Expanded detail | Center reading column up to 800px; keep navigation and return context                   |
 
 List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty note editor must not push the title down.
 
@@ -249,7 +249,7 @@ Switching pane modes, resizing, or opening navigation must not remount drafts, r
 
 ### Navigation
 
-Keep the product name quiet and New ticket easy to locate. Group personal work views, Projects, and Efforts with 24px between groups. Use 8px between a group heading and its rows. Keep Settings at the bottom without forcing navigation items off-screen.
+Keep the product name quiet. Place a 32px New ticket icon button beside it with an accessible name and tooltip. Do not use a full-width primary creation button in persistent navigation. Group personal work views, Projects, and Efforts with 20px between groups. Use 8px between a group heading and its rows. Keep Settings at the bottom without forcing navigation items off-screen.
 
 Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention may use a small dot or count; do not add a permanent high-contrast banner.
 
@@ -257,11 +257,11 @@ Active navigation uses a neutral fill and primary text, plus semantic current-st
 
 Use stable columns: selection, status, reference, title, then optional supporting metadata. Titles receive flexible width. Reference and status columns do not move when a checkbox becomes checked.
 
-- Checkbox hit areas occupy a reserved 32px column. Selection never shifts the row or creates an extra row of controls inside it.
+- Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
 - Status uses a 16px icon and a visible label when space allows. Compact icon-only presentation retains an accessible status name and tooltip.
 - Show at most one supporting line: blocked reason, parent, or project/Effort context relevant to the current view. Do not repeat the current project on every row.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
-- An open ticket uses a neutral selected fill and a 2px leading marker. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
+- An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
 - Row hover uses a quieter fill than selection. Hover actions also appear on focus; essential actions cannot be hover-only.
 
 There is no permanent “0 selected” bar. When tickets are selected, show a compact action bar with the count, Change status, Organize, and Clear selection. Organize exposes project, Effort, and explicit tag addition/removal choices. Do not display four inline forms and their submit buttons at once. Keep the count visible after validation errors; show which ticket prevents the batch and state that nothing changed.
@@ -274,12 +274,12 @@ Search retains its query while opening details. Filter controls show active cons
 
 1. **Compact header:** reference, return/expand controls, and a small action group. Avoid repeating “Ticket details” above the reference and title.
 2. **Title:** wraps to its content height. Reading must not look like an empty resizable form. Editing retains a clear focus treatment.
-3. **Properties:** Status, Project, Effort, and Tags, in a compact aligned band. Labels remain consistent; avoid a separate card per property.
+3. **Properties:** Status, Project, Effort, and Tags appear as 32px ghost controls with identifying icons in a wrapping inline band. Keep their accessible names; visible field labels and outlined boxes belong in creation forms, not the reading view. Hover and keyboard focus reveal interactivity.
 4. **Description:** primary reading surface, with editing on demand.
 5. **Linked work and evidence:** concise existing information with contextual add/edit actions.
 6. **Activity:** authored notes, distinguishable recorded changes, and explicit note submission.
 
-Use 8px from reference to title, 16px from title to properties, and 24px from properties to description. Use 32px between major reading sections. Use section spacing instead of divider lines; shadow boundaries belong to pane edges and floating surfaces.
+Use 8px from reference to title, 16px from title to properties, and 24px from properties to description. Use 24px between major reading sections. Use section spacing instead of divider lines; shadow boundaries belong to pane edges and floating surfaces.
 
 A save state belongs next to the edited content, in 12px supporting text. Stable Saved feedback must not take an entire standalone section. Pending save, Saving, and failures remain visible and accessible. Never hide a failure to achieve a cleaner screenshot.
 
@@ -347,7 +347,7 @@ Each edge has an explicit retain, remove, or replace choice where valid. The fin
 
 ## 10. Projects, Efforts, graph, and settings
 
-Project and Effort views reuse list typography, filters, row density, and selection behavior. Use the 32px section-title role and a short context line. Effort status counts are simple labeled counts, not large dashboard cards or a productivity score. Archive/reactivate actions remain distinct from completing tickets.
+Project and Effort views reuse list typography, filters, row density, and selection behavior. Use the compact 24px/32px application title and a short context line. Effort status counts are simple labeled counts, not large dashboard cards or a productivity score. Archive/reactivate actions remain distinct from completing tickets.
 
 The dependency graph uses a neutral canvas, readable reference/title nodes, and explicit edge direction with a legend explaining which ticket blocks which. Selection and keyboard focus remain visible without relying on colored edges. Keep zoom, fit, and return controls in one compact toolbar. Node selection opens ticket context; graph navigation must retain a way back to the prior ticket. Large graphs need bounded loading and a clear explanation when the displayed scope is limited.
 
@@ -432,3 +432,11 @@ Review a complete workflow with realistic content, not only an empty screenshot.
 10. Does the screen remain useful with mouse, keyboard, larger text, and reduced motion?
 
 A design change is ready for implementation review only when these questions can be answered from the rendered screens and interaction evidence. Record unresolved exceptions in the corresponding GitHub issue. Do not label a change visually complete solely because formatting, tests, or a build passed.
+
+### Compact workspace density
+
+Keep the 16px root so rem-based shared controls remain predictable. Working-pane text and ticket-row titles use 14px/20px; captions stay 12px/16px. Ticket and view titles use the ticketd-specific 24px/32px heading above. Navigation items are 32px high, the brand and workspace header are 48px high, and ticket rows have a 48px minimum with 8px vertical padding and no inter-row margin. List headers use 16px top and 12px bottom padding. Use 32px desktop document gutters and 16px narrow-window gutters. These application density choices take precedence over spacious display roles; preserve the reference palette, font families, shadows, and focus treatment.
+
+### Workspace hierarchy
+
+The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the working panes. Preserve one subtle boundary between navigation, list, and detail; do not add nested cards around these regions. Properties use the shared ghost button and select variants. The full creation form keeps labeled, outlined controls.

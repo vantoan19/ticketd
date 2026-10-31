@@ -69,18 +69,22 @@ export function WorkspaceSidebar({
         <div className="brand">
           <span className="brand-mark">◈</span>
           <strong>ticketd</strong>
-          <span className="brand-label">WORKSPACE</span>
+
+          <Button
+            className="new-ticket"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="New ticket"
+            title="New ticket"
+            onClick={(event) => {
+              createTriggerRef.current = event.currentTarget;
+              setView("tickets");
+              setCreating(true);
+            }}
+          >
+            <Plus />
+          </Button>
         </div>
-        <Button
-          className="new-ticket"
-          onClick={(event) => {
-            createTriggerRef.current = event.currentTarget;
-            setView("tickets");
-            setCreating(true);
-          }}
-        >
-          <Plus data-icon="inline-start" /> New ticket
-        </Button>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">

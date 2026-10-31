@@ -5,6 +5,11 @@
   gap: 12px;
   margin: 16px 0 24px;
 }
+.ticket-properties-inline {
+  align-items: center;
+  gap: 4px 8px;
+  margin: 12px -12px 24px;
+}
 .ticket-property {
   display: flex;
   flex-direction: column;

@@ -14,7 +14,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
+import {
+  MoreHorizontal,
+  Folder,
+  Layers,
+  Tag,
+  Circle,
+  CircleDot,
+  CircleDashed,
+  CheckCircle2,
+  CircleSlash,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -42,8 +53,12 @@ export function PropertyPicker({
   onChoose,
   allowCreate = false,
   onSearch,
+  compact = false,
+  icon: Icon,
 }: {
   label: string;
+  compact?: boolean;
+  icon?: LucideIcon;
   value: string;
   choices: Choice[];
   disabled: boolean;
@@ -63,12 +78,13 @@ export function PropertyPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
+          variant={compact ? "ghost" : "outline"}
           size="sm"
           disabled={disabled}
           aria-label={`${label}: ${value}`}
         >
-          {value}
+          {Icon && <Icon data-icon="inline-start" />}
+          <span className="truncate">{value}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -217,7 +233,7 @@ export function TicketProperties({
   function property(label: string, control: React.ReactNode) {
     return (
       <div className="ticket-property">
-        <span>{label}</span>
+        <span className="sr-only">{label}</span>
         {control}
         {pending === label && <small role="status">Saving…</small>}
         {errors[label] && <small role="alert">{errors[label]}</small>}
@@ -227,7 +243,7 @@ export function TicketProperties({
   return (
     <div
       ref={propertiesRef}
-      className="ticket-properties"
+      className="ticket-properties ticket-properties-inline"
       aria-label="Ticket properties"
     >
       {property(
@@ -241,7 +257,23 @@ export function TicketProperties({
             )
           }
         >
-          <SelectTrigger size="sm" aria-label="Status">
+          <SelectTrigger
+            size="sm"
+            variant="ghost"
+            aria-label="Status"
+            title="Status"
+          >
+            {ticket.status === "In progress" ? (
+              <CircleDot />
+            ) : ticket.status === "In review" ? (
+              <CircleDashed />
+            ) : ticket.status === "Done" ? (
+              <CheckCircle2 />
+            ) : ticket.status === "Canceled" ? (
+              <CircleSlash />
+            ) : (
+              <Circle />
+            )}
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -260,6 +292,8 @@ export function TicketProperties({
       {property(
         "Project",
         <PropertyPicker
+          compact
+          icon={Folder}
           label="Project"
           value={projectName}
           disabled={disabled}
@@ -279,6 +313,8 @@ export function TicketProperties({
       {property(
         "Effort",
         <PropertyPicker
+          compact
+          icon={Layers}
           label="Effort"
           value={effortName}
           disabled={disabled}
@@ -298,6 +334,8 @@ export function TicketProperties({
       {property(
         "Tags",
         <PropertyPicker
+          compact
+          icon={Tag}
           label="Tags"
           value={ticket.tags.length ? ticket.tags.join(", ") : "No tags"}
           disabled={disabled}

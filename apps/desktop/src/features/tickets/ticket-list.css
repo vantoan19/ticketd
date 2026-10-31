@@ -3,15 +3,15 @@
 }
 .ticket-rows {
   margin: 0;
-  padding: 0 12px 24px;
+  padding: 0 8px 24px;
   list-style: none;
 }
 .ticket-rows li {
   display: flex;
   align-items: center;
   min-width: 0;
-  margin-block: 4px;
-  padding-left: 12px;
+  margin-block: 0;
+  padding-left: 0;
   border-radius: 6px;
 }
 .ticket-rows li:hover {
@@ -19,7 +19,7 @@
 }
 .ticket-rows li:has(.ticket-row[aria-pressed="true"]) {
   background: var(--recessed);
-  box-shadow: inset 2px 0 var(--foreground);
+  box-shadow: none;
 }
 .ticket-rows li:has(input:checked) {
   box-shadow: inset 0 0 0 1px var(--foreground);
@@ -27,12 +27,12 @@
 .ticket-list .ticket-row {
   display: grid;
   grid-template-columns: 16px 52px minmax(0, 1fr);
-  column-gap: 12px;
+  column-gap: 8px;
   row-gap: 4px;
   width: 100%;
   min-width: 0;
-  min-height: 64px;
-  padding: 12px;
+  min-height: 48px;
+  padding: 8px 12px 8px 0;
   text-align: left;
   border-radius: 6px;
   background: transparent;
@@ -55,7 +55,7 @@
 .ticket-title {
   min-width: 0;
   color: var(--foreground);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 400;
   line-height: 20px;
   overflow: hidden;
@@ -178,5 +178,17 @@
   }
   .bulk-actions {
     flex: 1;
+  }
+}
+
+/* Reveal selection without moving the identifier or title columns. */
+@media (hover: hover) and (pointer: fine) {
+  .ticket-select input:not(:checked) {
+    opacity: 0;
+  }
+  .ticket-rows li:hover .ticket-select input,
+  .ticket-rows li:focus-within .ticket-select input,
+  .ticket-rows:has(input:checked) .ticket-select input {
+    opacity: 1;
   }
 }
