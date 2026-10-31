@@ -131,12 +131,13 @@ try {
   clock = Date.now();
   const paneSize = await pane.getSize();
   // The center can be covered by a graph node; start on empty pane background.
-  await pane.moveTo({
-    xOffset: -Math.floor(paneSize.width / 2) + 10,
-    yOffset: -Math.floor(paneSize.height / 2) + 10,
-  });
   await browser
     .action("pointer")
+    .move({
+      origin: pane,
+      x: -Math.floor(paneSize.width / 2) + 10,
+      y: -Math.floor(paneSize.height / 2) + 10,
+    })
     .down()
     .move({ duration: 300, x: 70, y: 30, origin: "pointer" })
     .up()
