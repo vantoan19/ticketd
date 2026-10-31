@@ -210,9 +210,25 @@ fn set_effort(reference: String, effort: Option<String>) -> Result<Ticket, Strin
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn backup_workspace(path: String) -> Result<String, String> {
+    Workspace::open_default()
+        .and_then(|w| w.backup(&path))
+        .map(|()| format!("Backup saved: {path}"))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn restore_workspace(path: String) -> Result<String, String> {
+    Workspace::restore_default(path)
+        .map(|safety| format!("Workspace restored. Safety backup: {}", safety.display()))
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            backup_workspace,
+            restore_workspace,
             export_workspace,
             list_efforts,
             show_effort,

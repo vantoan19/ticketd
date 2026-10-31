@@ -14,6 +14,10 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Save a consistent workspace backup to a new file
+    Backup { path: String },
+    /// Restore a workspace backup after closing other ticketd operations
+    RestoreWorkspace { path: String },
     /// Export a portable JSON snapshot to stdout or a new file
     Export {
         #[arg(long)]
@@ -298,8 +302,18 @@ fn read_content(
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
+    if let Command::RestoreWorkspace { path } = &args.command {
+        let safety = Workspace::restore_default(path)?;
+        println!("Restored workspace. Safety backup: {}", safety.display());
+        return Ok(());
+    }
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
+        Command::Backup { path } => {
+            workspace.backup(&path)?;
+            format!("Backup saved: {path}")
+        }
+        Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::Export { file } => {
             if let Some(path) = file {
                 workspace.export_file(path)?;

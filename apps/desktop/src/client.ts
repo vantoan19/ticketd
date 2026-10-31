@@ -76,6 +76,12 @@ export type FindFilter = {
   offset: number;
 };
 export const client = {
+  async backupWorkspace(path: string) {
+    return z.string().parse(await invoke("backup_workspace", { path }));
+  },
+  async restoreWorkspace(path: string) {
+    return z.string().parse(await invoke("restore_workspace", { path }));
+  },
   async exportWorkspace(path: string) {
     await invoke("export_workspace", { path });
   },

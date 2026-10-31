@@ -1,4 +1,5 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod backup;
 mod context;
 mod export;
 pub use context::{ContextOptions, TicketContext};
@@ -31,6 +32,8 @@ pub use projects::Project;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("backup or restore failed: {0}")]
+    Backup(String),
     #[error("request ID was already used for different content: {0}")]
     RequestConflict(String),
     #[error("request serialization error: {0}")]
@@ -128,16 +131,16 @@ fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
 
 pub struct Workspace {
     connection: Connection,
+    _lock: std::fs::File,
 }
 
 impl Workspace {
     pub fn open_default() -> Result<Self, Error> {
-        let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
-        std::fs::create_dir_all(dirs.data_dir())?;
-        Self::open(dirs.data_dir().join("workspace.sqlite3"))
+        Self::open(default_path()?)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let lock = backup::shared_lock(path.as_ref())?;
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(10))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -190,7 +193,10 @@ impl Workspace {
             transaction.execute_batch("CREATE TABLE request_outcomes (id TEXT PRIMARY KEY, request TEXT NOT NULL, outcome TEXT NOT NULL); PRAGMA user_version = 12;")?;
         }
         transaction.commit()?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            _lock: lock,
+        })
     }
 
     pub fn create_ticket(&mut self, title: &str) -> Result<Ticket, Error> {
@@ -485,3 +491,9 @@ fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
 
 mod batch;
 pub use batch::{BatchOperation, TicketChange};
+
+fn default_path() -> Result<std::path::PathBuf, Error> {
+    let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
+    std::fs::create_dir_all(dirs.data_dir())?;
+    Ok(dirs.data_dir().join("workspace.sqlite3"))
+}
