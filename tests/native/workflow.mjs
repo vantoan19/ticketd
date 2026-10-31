@@ -209,6 +209,18 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Blocked");
+  await browser.waitUntil(
+    async () =>
+      (
+        await (
+          await browser.$("button*=Record native workflow evidence")
+        ).getText()
+      ).includes(`Blocked by ${harness.reference}`),
+    {
+      timeout: 10000,
+      timeoutMsg: "External blocked state did not refresh in the ticket row",
+    },
+  );
   run(
     "change",
     harness.reference,

@@ -1,57 +1,187 @@
 // @vitest-environment jsdom
 
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { vi, test, expect } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, vi, test, expect } from "vitest";
 import { Inbox } from "./Inbox";
+import type { Entry } from "./inboxModel";
 
-vi.mock("@tauri-apps/api/core", () => {
-  let read = false;
+const hours = (n: number) => new Date(Date.now() - n * 3600000).toISOString();
+
+let store: Entry[] = [];
+const calls: { command: string; args: Record<string, unknown> }[] = [];
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (command: string, args: Record<string, unknown>) => {
+    calls.push({ command, args });
+    if (command === "set_inbox_read") {
+      const ids = args.ids as number[];
+      store = store.map((e) =>
+        ids.includes(e.id) ? { ...e, read: args.read as boolean } : e,
+      );
+    }
+    if (command === "inbox") {
+      const offset = args.offset as number;
+      const limit = args.limit as number;
+      return store
+        .filter((e) => !args.unreadOnly || !e.read)
+        .slice(offset, offset + limit);
+    }
+  }),
+}));
+
+function entry(over: Partial<Entry> & Pick<Entry, "id">): Entry {
   return {
-    invoke: vi.fn(async (command: string) => {
-      if (command === "set_inbox_read") read = true;
-      if (command === "inbox")
-        return [
-          {
-            id: 1,
-            reference: "T-1",
-            title: "First",
-            kind: "status",
-            from_value: "Todo",
-            to_value: "Done",
-            timestamp: "now",
-            read,
-          },
-          {
-            id: 2,
-            reference: "T-2",
-            title: "Finding",
-            kind: "note",
-            from_value: "note-id",
-            to_value: "Original note",
-            timestamp: "now",
-            read: false,
-            editing_agent: "agent",
-          },
-        ];
-    }),
+    reference: `T-${over.id}`,
+    title: `Ticket ${over.id}`,
+    kind: "status",
+    from_value: "Todo",
+    to_value: "Done",
+    timestamp: hours(0),
+    read: false,
+    editing_agent: null,
+    ...over,
   };
-});
+}
 
-test("opens an entry without marking it read and explicitly marks displayed entries", async () => {
+beforeEach(() => {
+  calls.length = 0;
+  store = [
+    entry({ id: 1, reference: "T-1", title: "First" }),
+    entry({
+      id: 2,
+      reference: "T-2",
+      title: "Finding",
+      kind: "note",
+      from_value: "note-id",
+      to_value: "Original note",
+      editing_agent: "agent",
+    }),
+  ];
+});
+afterEach(cleanup);
+
+test("opens an entry without marking it read and explicitly marks shown entries", async () => {
   const select = vi.fn();
-  const view = render(<Inbox revision={0} select={select} />);
+  render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-1.*First/ }));
   expect(select).toHaveBeenCalledWith("T-1");
-  expect(screen.getAllByText("Unread")[0]).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Mark displayed read" }));
-  await waitFor(() => expect(screen.getAllByText("Read")[0]).toBeTruthy());
-  view.unmount();
+  expect(store.every((e) => !e.read)).toBe(true);
+  const unreadState = { selector: ".sr-only" };
+  expect(screen.getAllByText("Unread", unreadState)).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Unread", unreadState)).toBeNull(),
+  );
+  expect(store.every((e) => e.read)).toBe(true);
 });
 
-test("opens the note identified by an inbox entry and shows its original text", async () => {
+test("opens the note identified by an inbox entry and shows its text", async () => {
   const select = vi.fn();
   render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-2.*Finding/ }));
   expect(select).toHaveBeenCalledWith("T-2", "note-id");
-  expect(screen.getByText(/New note: Original note/)).toBeTruthy();
+  expect(screen.getByText(/New note: Original note · agent/)).toBeTruthy();
+});
+
+test("groups entries by local day and never shows internal event keys", async () => {
+  store = [
+    entry({ id: 1, title: "Now", timestamp: hours(0) }),
+    entry({
+      id: 2,
+      title: "Long ago",
+      kind: "relationship:discovered-while",
+      from_value: "",
+      to_value: "T-9",
+      timestamp: hours(24 * 10),
+    }),
+  ];
+  const view = render(<Inbox revision={0} select={vi.fn()} />);
+  await screen.findByText("Long ago");
+  expect(screen.getByRole("heading", { name: "Today" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Earlier" })).toBeTruthy();
+  expect(screen.getByText("Discovered while working on T-9")).toBeTruthy();
+  expect(view.container.textContent).not.toMatch(/relationship:/);
+});
+
+test("the Unread filter asks the core for unread entries and loads older pages", async () => {
+  store = Array.from({ length: 60 }, (_, i) =>
+    entry({ id: 100 - i, read: i % 2 === 1 }),
+  );
+  render(<Inbox revision={0} select={vi.fn()} />);
+  await screen.findByRole("button", { name: /^T-100/ });
+  fireEvent.click(screen.getByRole("radio", { name: "Unread" }));
+  await waitFor(() =>
+    expect(calls.some((c) => c.args.unreadOnly === true)).toBe(true),
+  );
+  await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(30));
+  expect(screen.queryByRole("button", { name: /^T-99/ })).toBeNull();
+  expect(screen.getByText(/That’s everything unread/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+});
+
+test("loads older entries on request", async () => {
+  store = Array.from({ length: 70 }, (_, i) => entry({ id: 200 - i }));
+  render(<Inbox revision={0} select={vi.fn()} />);
+  await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(50));
+  fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+  await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(70));
+  expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
+});
+
+test("row actions are real buttons reachable by keyboard focus and mark one entry", async () => {
+  render(<Inbox revision={0} select={vi.fn()} />);
+  const row = (await screen.findByText("First")).closest("li")!;
+  const action = within(row).getByRole("button", {
+    name: "Mark T-1 change read",
+  });
+  action.focus();
+  expect(document.activeElement).toBe(action);
+  fireEvent.click(action);
+  await waitFor(() =>
+    expect(
+      within(row).getByRole("button", { name: "Mark T-1 change unread" }),
+    ).toBeTruthy(),
+  );
+  expect(store.find((e) => e.id === 2)?.read).toBe(false);
+});
+
+test("snoozing a due reminder reschedules it and marks the entry read", async () => {
+  store = [
+    entry({
+      id: 7,
+      reference: "T-7",
+      title: "Remember",
+      kind: "reminder",
+      from_value: "",
+      to_value: "2020-01-01T00:00:00Z",
+    }),
+  ];
+  render(<Inbox revision={0} select={vi.fn()} />);
+  expect(await screen.findByText("Your reminder is due")).toBeTruthy();
+  const before = Date.now();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Snooze reminder for T-7" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "In one hour" }));
+  await waitFor(() =>
+    expect(calls.some((c) => c.command === "set_reminder")).toBe(true),
+  );
+  const call = calls.find((c) => c.command === "set_reminder")!;
+  expect(call.args.reference).toBe("T-7");
+  const due = new Date(call.args.dueAt as string).getTime();
+  expect(due).toBeGreaterThanOrEqual(before + 3600000 - 1000);
+  await waitFor(() => expect(store[0]!.read).toBe(true));
+});
+
+test("only reminders offer Snooze", async () => {
+  render(<Inbox revision={0} select={vi.fn()} />);
+  await screen.findByText("First");
+  expect(screen.queryByRole("button", { name: /Snooze/ })).toBeNull();
 });

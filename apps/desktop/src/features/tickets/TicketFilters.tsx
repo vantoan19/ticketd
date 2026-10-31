@@ -101,9 +101,17 @@ export function TicketFilters(p: Props) {
         </label>
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={
+                chips.length ? `Filters, ${chips.length} active` : "Filters"
+              }
+            >
               <SlidersHorizontal data-icon="inline-start" /> Filters
-              {chips.length ? " • Active" : ""}
+              {chips.length > 0 && (
+                <span className="filter-count">{chips.length}</span>
+              )}
             </Button>
           </PopoverTrigger>
           <PopoverContent

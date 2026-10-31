@@ -28,13 +28,24 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { Project } from "@/lib/api/client";
+import type { SidebarCounts } from "@/lib/api/counts";
 import type { RefObject } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+
+/** A secondary, trailing count; it is part of the row's name for assistive technology. */
+function SidebarCount({ value }: { value: number }) {
+  return (
+    <>
+      {" "}
+      <span className="sidebar-count">{value}</span>
+    </>
+  );
+}
 
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export function WorkspaceSidebar({
   view,
-  unread,
+  counts,
   setView,
   projects,
   efforts,
@@ -49,7 +60,7 @@ export function WorkspaceSidebar({
     effort: string;
   };
   view: View;
-  unread: boolean;
+  counts: SidebarCounts;
   setView: (view: View) => void;
   filter: string;
   effort: string;
@@ -67,6 +78,7 @@ export function WorkspaceSidebar({
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const isMobile = useIsMobile();
+  const unread = counts.unread_inbox > 0;
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -102,11 +114,18 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
-                aria-label={unread ? "Inbox, unread" : "Inbox"}
+                aria-label={
+                  unread ? `Inbox, ${counts.unread_inbox} unread` : "Inbox"
+                }
                 onClick={() => setView("inbox")}
               >
                 <Inbox size={16} /> Inbox
-                {unread && <StatusDot tone="unread" className="ml-auto" />}
+                {unread && (
+                  <span className="sidebar-count" aria-hidden="true">
+                    <StatusDot tone="unread" />
+                    {counts.unread_inbox}
+                  </span>
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -128,6 +147,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("ready")}
               >
                 <CirclePlay size={16} /> Ready
+                <SidebarCount value={counts.ready} />
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -136,6 +156,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
+                <SidebarCount value={counts.in_progress} />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
