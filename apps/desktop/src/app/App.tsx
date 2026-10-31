@@ -18,12 +18,18 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { cn } from "cn";
+import { client } from "@/lib/api/client";
 
 export function App() {
   const [view, setView] = useState<
     "tickets" | "projects" | "efforts" | "settings"
   >("tickets");
   const [creating, setCreating] = useState(false);
+  const [bulkSelection, setBulkSelection] = useState<string[]>([]);
+  const [bulkStatus, setBulkStatus] = useState("Todo");
+  const [bulkError, setBulkError] = useState("");
+  const [bulkPending, setBulkPending] = useState(false);
+  const bulkRequest = useRef<{ key: string; id: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -146,6 +152,8 @@ export function App() {
             onRestore={async () => {
               setSelected(null);
               setDetails({});
+              setBulkSelection([]);
+              bulkRequest.current = null;
               await refresh();
             }}
           />
@@ -220,6 +228,79 @@ export function App() {
                   {trash ? "Deleted tickets" : "Tickets"}{" "}
                   <span>{tickets.length}</span>
                 </h2>
+                {!trash && (
+                  <div className="bulk-controls">
+                    <span aria-live="polite">
+                      {bulkSelection.length} selected
+                    </span>
+                    {bulkSelection.length > 0 && (
+                      <span>Selected: {bulkSelection.join(", ")}</span>
+                    )}
+                    <label>
+                      Status for selected tickets{" "}
+                      <select
+                        aria-label="Status for selected tickets"
+                        value={bulkStatus}
+                        onChange={(event) => setBulkStatus(event.target.value)}
+                        disabled={bulkPending}
+                      >
+                        {[
+                          "Todo",
+                          "In progress",
+                          "In review",
+                          "Done",
+                          "Canceled",
+                        ].map((value) => (
+                          <option key={value}>{value}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button
+                      disabled={!bulkSelection.length || bulkPending}
+                      onClick={() =>
+                        void (async () => {
+                          const key = JSON.stringify([
+                            bulkSelection,
+                            bulkStatus,
+                          ]);
+                          if (bulkRequest.current?.key !== key)
+                            bulkRequest.current = {
+                              key,
+                              id: crypto.randomUUID(),
+                            };
+                          setBulkPending(true);
+                          setBulkError("");
+                          try {
+                            await client.bulkStatus(
+                              bulkSelection,
+                              bulkStatus,
+                              bulkRequest.current.id,
+                            );
+                            bulkRequest.current = null;
+                            setBulkSelection([]);
+                            await refresh();
+                          } catch (reason) {
+                            setBulkError(
+                              `Could not change selected tickets: ${String(reason)}. Check the selection and retry.`,
+                            );
+                          } finally {
+                            setBulkPending(false);
+                          }
+                        })()
+                      }
+                    >
+                      Apply status
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={!bulkSelection.length || bulkPending}
+                      onClick={() => setBulkSelection([])}
+                    >
+                      Clear selection
+                    </Button>
+                    {bulkError && <p role="alert">{bulkError}</p>}
+                  </div>
+                )}
                 {queryError ? (
                   <div className="empty-state" role="alert">
                     <strong>Could not load tickets</strong>
@@ -295,6 +376,15 @@ export function App() {
                           : item.project_id === filter),
                     )}
                     selected={selected}
+                    selectable={!trash && !bulkPending}
+                    bulkSelection={bulkSelection}
+                    onToggle={(reference) =>
+                      setBulkSelection((current) =>
+                        current.includes(reference)
+                          ? current.filter((item) => item !== reference)
+                          : [...current, reference],
+                      )
+                    }
                     onOpen={(reference) => {
                       setSelected(reference);
                       setNarrowDetail(true);

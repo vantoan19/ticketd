@@ -1,7 +1,7 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
     BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project,
-    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -131,6 +131,36 @@ fn create_ticket(
                 .ok_or_else(|| ticketd_core::Error::InvalidBatch("missing result".into()))
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn bulk_status(
+    references: Vec<String>,
+    status: Status,
+    request_id: String,
+) -> Result<Vec<Ticket>, String> {
+    let operations = references
+        .into_iter()
+        .map(|ticket| BatchOperation::Change {
+            ticket,
+            change: Box::new(TicketChange {
+                patch: TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        })
+        .collect();
+    match Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(Some(&request_id), WriteRequest::Batch { operations })
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Tickets(tickets) => Ok(tickets),
+        _ => Err("Unexpected batch result".into()),
+    }
 }
 
 #[tauri::command]
@@ -294,6 +324,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_trashed,
             create_ticket,
             change_ticket,
+            bulk_status,
             ticket_history,
             list_notes,
             add_note,

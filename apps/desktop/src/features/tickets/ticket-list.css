@@ -8,6 +8,9 @@
 }
 .ticket-rows li {
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
 }
 .ticket-list .ticket-row {
   display: grid;
@@ -74,4 +77,17 @@
     white-space: nowrap;
     border: 0;
   }
+}
+
+.bulk-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+}
+.bulk-controls select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
 }

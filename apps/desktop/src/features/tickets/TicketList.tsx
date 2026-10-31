@@ -22,10 +22,16 @@ export function TicketList({
   tickets,
   selected,
   onOpen,
+  bulkSelection,
+  onToggle,
+  selectable,
 }: {
   tickets: Ticket[];
   selected: string | null;
   onOpen: (reference: string) => void;
+  bulkSelection: string[];
+  onToggle: (reference: string) => void;
+  selectable: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   return (
@@ -34,6 +40,14 @@ export function TicketList({
         const StatusIcon = statusIcons[ticket.status] ?? Circle;
         return (
           <li key={ticket.id}>
+            {selectable && (
+              <input
+                type="checkbox"
+                aria-label={`Select ${ticket.reference}`}
+                checked={bulkSelection.includes(ticket.reference)}
+                onChange={() => onToggle(ticket.reference)}
+              />
+            )}
             <button
               ref={(node) => {
                 if (node) rows.current.set(ticket.id, node);
