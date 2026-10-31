@@ -26,17 +26,18 @@ type View = "tickets" | "projects" | "efforts" | "settings";
 export function WorkspaceSidebar({
   view,
   setView,
-  filter,
-  effort,
-  status,
-  availability,
-  trash,
   projects,
   efforts,
   scope,
   setCreating,
   createTriggerRef,
+  navigation,
 }: {
+  navigation: {
+    kind: "all" | "ready" | "progress" | "trash";
+    project: string;
+    effort: string;
+  };
   view: View;
   setView: (view: View) => void;
   filter: string;
@@ -79,11 +80,9 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 className={
-                  !trash &&
-                  filter === "all" &&
-                  !effort &&
-                  !status &&
-                  !availability &&
+                  navigation.kind === "all" &&
+                  navigation.project === "all" &&
+                  !navigation.effort &&
                   view === "tickets"
                     ? "active"
                     : ""
@@ -96,7 +95,9 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 className={
-                  availability === "Ready" && view === "tickets" ? "active" : ""
+                  navigation.kind === "ready" && view === "tickets"
+                    ? "active"
+                    : ""
                 }
                 onClick={() => scope("ready")}
               >
@@ -106,7 +107,9 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 className={
-                  status === "In progress" && view === "tickets" ? "active" : ""
+                  navigation.kind === "progress" && view === "tickets"
+                    ? "active"
+                    : ""
                 }
                 onClick={() => scope("progress")}
               >
@@ -115,7 +118,11 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                className={trash && view === "tickets" ? "active" : ""}
+                className={
+                  navigation.kind === "trash" && view === "tickets"
+                    ? "active"
+                    : ""
+                }
                 onClick={() => scope("trash")}
               >
                 <Trash2 size={16} /> Trash
@@ -139,7 +146,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     className={
-                      filter === "unlinked" && view === "tickets"
+                      navigation.project === "unlinked" && view === "tickets"
                         ? "active"
                         : ""
                     }
@@ -151,9 +158,13 @@ export function WorkspaceSidebar({
                 {projects.map((p) => (
                   <SidebarMenuItem key={p.id}>
                     <SidebarMenuButton
-                      aria-pressed={filter === p.id && view === "tickets"}
+                      aria-pressed={
+                        navigation.project === p.id && view === "tickets"
+                      }
                       className={
-                        filter === p.id && view === "tickets" ? "active" : ""
+                        navigation.project === p.id && view === "tickets"
+                          ? "active"
+                          : ""
                       }
                       onClick={() => scope("all", p.id)}
                     >
@@ -182,7 +193,9 @@ export function WorkspaceSidebar({
                     <SidebarMenuItem key={e.id}>
                       <SidebarMenuButton
                         className={
-                          effort === e.id && view === "tickets" ? "active" : ""
+                          navigation.effort === e.id && view === "tickets"
+                            ? "active"
+                            : ""
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >

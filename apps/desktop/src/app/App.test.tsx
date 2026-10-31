@@ -10,9 +10,17 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = ResizeObserverStub;
+
+let narrowViewport = false;
 Object.defineProperty(window, "matchMedia", {
   value: () => ({
-    matches: false,
+    matches: narrowViewport,
     addEventListener() {},
     removeEventListener() {},
   }),
@@ -26,6 +34,8 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   bridge.invoke.mockReset();
+  localStorage.clear();
+  narrowViewport = false;
 });
 
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
@@ -39,6 +49,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
     status: "Todo",
     tags: [],
     project_id: null,
+    effort_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -77,6 +88,18 @@ test("refreshes clean content and preserves a draft when saved content changes",
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "My draft" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Expand ticket" }));
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My draft",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My draft",
+  );
   saved = { ...saved, title: "Another change" };
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
@@ -122,6 +145,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     trashed: false,
     tags: [],
     project_id: null,
+    effort_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -176,6 +200,9 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     "value",
     "Unfinished title",
   );
+  expect(
+    screen.getByText("This ticket is outside the current results."),
+  ).toBeTruthy();
   listVisible = true;
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {
@@ -266,4 +293,292 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   }
+});
+
+test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
+  vi.useFakeTimers();
+  let tickets = [
+    {
+      id: "1",
+      reference: "T-1",
+      title:
+        "A very long title that remains accessible even when the list truncates it",
+      body: "",
+      status: "Todo",
+      trashed: false,
+      tags: [],
+      project_id: null,
+      effort_id: null,
+      availability: "Ready",
+      prerequisites: [],
+      parent: null,
+      children: [],
+    },
+    {
+      id: "2",
+      reference: "T-2",
+      title: "Second",
+      body: "",
+      status: "In progress",
+      trashed: false,
+      tags: [],
+      project_id: null,
+      effort_id: null,
+      availability: null,
+      prerequisites: [],
+      parent: null,
+      children: [],
+    },
+  ];
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { reference?: string }) => {
+      if (
+        [
+          "list_projects",
+          "list_efforts",
+          "list_notes",
+          "ticket_history",
+        ].includes(command)
+      )
+        return [];
+      if (command === "find_tickets") return tickets;
+      if (command === "show_ticket")
+        return tickets.find((ticket) => ticket.reference === args?.reference);
+      throw new Error(`unexpected ${command}`);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const first = screen.getByRole("button", { name: /A very long title/ });
+  const second = screen.getByRole("button", { name: /Second/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(second);
+  expect(second.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.keyDown(second, { key: "Enter" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(second.getAttribute("aria-pressed")).toBe("true");
+  tickets = [tickets[0]!, { ...tickets[1]!, status: "Done" }];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(
+    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
+    "Done",
+  );
+});
+
+test("clears additional filters while preserving the selected Effort", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_efforts")
+      return [{ id: "e1", name: "Launch", archived: false }];
+    if (command === "list_projects" || command === "find_tickets") return [];
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug" },
+  });
+  expect(screen.getByRole("button", { name: "Remove Tag: bug" })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByLabelText("Active filters")).getByRole("button", {
+      name: "Clear filters",
+    }),
+  );
+  expect(
+    screen.getByText("Launch", { selector: "header strong" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+});
+
+test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_projects")
+      return [
+        {
+          id: "p",
+          name: "Desktop app",
+          path: "/workspace",
+          paths: ["/workspace"],
+        },
+      ];
+    if (["list_efforts", "find_tickets", "search_tags"].includes(command))
+      return [];
+    if (command === "create_ticket") throw new Error("Creation failed");
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Desktop app" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  fireEvent.change(screen.getByLabelText("New ticket title"), {
+    target: { value: "Draft ticket" },
+  });
+  fireEvent.change(screen.getByLabelText("Description"), {
+    target: { value: "Draft body" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await act(async () => {});
+  expect(screen.getByRole("alert").textContent).toContain("Creation failed");
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "create_ticket",
+    expect.objectContaining({
+      title: "Draft ticket",
+      body: "Draft body",
+      status: "Todo",
+      projectId: "p",
+      effortId: null,
+      tags: [],
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  expect(screen.getByLabelText("Description")).toHaveProperty(
+    "value",
+    "Draft body",
+  );
+});
+
+test("keeps ticket rows mounted while a filter refresh is pending", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: ["bug"],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  let resolveRefresh: ((value: unknown) => void) | undefined;
+  let calls = 0;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") {
+      if (calls++ === 0) return [ticket];
+      return new Promise((resolve) => {
+        resolveRefresh = resolve;
+      });
+    }
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  fireEvent.click(row);
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
+    target: { value: "bug" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+  await act(async () => {
+    resolveRefresh?.([ticket]);
+  });
+  expect(screen.getByRole("button", { name: /First/ })).toBe(row);
+  expect(row.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("moves focus to the visible pane when expanding and returning", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  fireEvent.click(row);
+  const expand = screen.getByRole("button", { name: "Expand ticket" });
+  expand.focus();
+  fireEvent.click(expand);
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Ticket details" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(document.activeElement).toBe(row);
+});
+
+test("moves focus into the ticket on narrow screens and back to the row", async () => {
+  vi.useFakeTimers();
+  narrowViewport = true;
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const row = screen.getByRole("button", { name: /First/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "Enter" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Ticket details" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(document.activeElement).toBe(row);
 });

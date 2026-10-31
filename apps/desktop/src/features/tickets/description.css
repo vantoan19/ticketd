@@ -1,0 +1,64 @@
+.description-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.description-document,
+.description-empty {
+  display: block;
+  margin-top: 12px;
+  min-height: 48px;
+  text-align: left;
+}
+.description-document {
+  color: var(--foreground);
+  cursor: text;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.description-document > * + * {
+  margin-top: 0.8em;
+}
+.description-document h1,
+.description-document h2,
+.description-document h3 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.description-document h1 {
+  font-size: 1.4em;
+}
+.description-document h2 {
+  font-size: 1.2em;
+}
+.description-document ul,
+.description-document ol {
+  padding-left: 1.5em;
+  list-style: revert;
+}
+.description-document a {
+  color: inherit;
+  text-decoration: underline;
+}
+.description-document pre {
+  overflow: auto;
+  padding: 10px;
+  background: var(--accent);
+  border-radius: 5px;
+}
+.description-document code {
+  font-family: monospace;
+}
+.description-document input {
+  margin-right: 0.4em;
+}
+/* The default Markdown syntax colors are not legible in both system themes. */
+.editor-body .cm-line span {
+  color: inherit;
+}
+.editor-body .cm-editor.cm-focused {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}

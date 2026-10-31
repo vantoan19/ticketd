@@ -101,6 +101,7 @@ try {
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
+  await (await (await detail()).$("button=Edit description")).click();
   const editor = await (await detail()).$(".cm-content");
   await editor.click();
   await browser.keys(["End"]);
@@ -120,7 +121,8 @@ try {
       ).length === 0,
   );
   await search.clearValue();
-  await (await (await detail()).$("summary=Relationships & graph")).click();
+  await (await (await detail()).$("summary=Relationships")).click();
+  await (await (await detail()).$("button=Open dependency graph")).click();
   const graphNode = await (
     await (await detail()).$('[aria-label="Graph tickets"]')
   ).$(`button*=${evidence.reference}`);
@@ -179,14 +181,20 @@ try {
       ).includes("Ready"),
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
-  await (await (await detail()).$("button=Move to trash")).click();
+  await (
+    await (await detail()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
   await (
     await (
       await browser.$('nav[aria-label="Workspace views"]')
     ).$("button=Trash")
   ).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
-  await (await (await detail()).$("button=Restore")).click();
+  await (
+    await (await detail()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,

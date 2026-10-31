@@ -13,16 +13,12 @@ export function History({
   reference,
   status,
   revision,
-  onChange,
   projects,
-  trashed,
 }: {
   reference: string;
   status: string;
   revision: number;
-  onChange: () => Promise<void>;
   projects: Project[];
-  trashed: boolean;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
@@ -40,6 +36,47 @@ export function History({
       active = false;
     };
   }, [reference, status, revision]);
+  function historyValue(entry: Entry, value: string) {
+    if (entry.kind !== "project") return value;
+    return value
+      ? (projects.find((project) => project.id === value)?.name ?? value)
+      : "Unlinked";
+  }
+  return (
+    <div className="history-block">
+      {error && <p role="alert">{error}</p>}
+      <details className="detail-disclosure">
+        <summary>Activity & history</summary>
+        {entries.length === 0 ? (
+          <p>No recorded changes.</p>
+        ) : (
+          <ol>
+            {entries.map((entry, index) => (
+              <li key={index}>
+                {entry.kind}: {historyValue(entry, entry.from_value)} →{" "}
+                {historyValue(entry, entry.to_value)} · {entry.timestamp} ·{" "}
+                {entry.editing_agent ?? "Unknown"}
+              </li>
+            ))}
+          </ol>
+        )}
+      </details>
+    </div>
+  );
+}
+
+export function StatusControl({
+  reference,
+  status,
+  trashed,
+  onChange,
+}: {
+  reference: string;
+  status: string;
+  trashed: boolean;
+  onChange: () => Promise<void>;
+}) {
+  const [error, setError] = useState("");
   async function changeStatus(value: string) {
     try {
       await historyClient.changeStatus(reference, value);
@@ -49,14 +86,8 @@ export function History({
       setError(String(reason));
     }
   }
-  function historyValue(entry: Entry, value: string) {
-    if (entry.kind !== "project") return value;
-    return value
-      ? (projects.find((project) => project.id === value)?.name ?? value)
-      : "Unlinked";
-  }
   return (
-    <div className="history-block">
+    <>
       <div className="status-control">
         <span>Status</span>
         <Select
@@ -79,22 +110,6 @@ export function History({
         </Select>
       </div>
       {error && <p role="alert">{error}</p>}
-      <details className="detail-disclosure">
-        <summary>Activity & history</summary>
-        {entries.length === 0 ? (
-          <p>No recorded changes.</p>
-        ) : (
-          <ol>
-            {entries.map((entry, index) => (
-              <li key={index}>
-                {entry.kind}: {historyValue(entry, entry.from_value)} →{" "}
-                {historyValue(entry, entry.to_value)} · {entry.timestamp} ·{" "}
-                {entry.editing_agent ?? "Unknown"}
-              </li>
-            ))}
-          </ol>
-        )}
-      </details>
-    </div>
+    </>
   );
 }

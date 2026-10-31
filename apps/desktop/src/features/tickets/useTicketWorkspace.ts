@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 type View = "tickets" | "projects" | "efforts" | "settings";
 export function useTicketWorkspace(
@@ -16,6 +10,12 @@ export function useTicketWorkspace(
     { id: string; name: string; archived: boolean }[]
   >([]);
   const [filter, setFilter] = useState("all");
+  const [navigation, setNavigation] = useState<{
+    kind: "all" | "ready" | "progress" | "trash";
+    project: string;
+    effort: string;
+  }>({ kind: "all", project: "all", effort: "" });
+  const [queryError, setQueryError] = useState(false);
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [effort, setEffort] = useState("");
@@ -27,9 +27,7 @@ export function useTicketWorkspace(
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
-  const [title, setTitle] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
@@ -69,6 +67,7 @@ export function useTicketWorkspace(
         }),
       ]);
       if (request !== generation.current) return;
+      setQueryError(false);
       setTickets(result[0]);
       setProjects(result[1]);
       setEfforts(result[2]);
@@ -76,6 +75,7 @@ export function useTicketWorkspace(
       setError("");
     } catch (reason) {
       if (request !== generation.current) return;
+      setQueryError(true);
       setError(
         `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
       );
@@ -96,7 +96,10 @@ export function useTicketWorkspace(
   ]);
   useEffect(() => {
     const generationRef = generation;
-    const timer = window.setTimeout(() => void refresh(), 0);
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      void refresh();
+    }, 0);
     const interval = window.setInterval(() => void refresh(), 2000);
     return () => {
       window.clearTimeout(timer);
@@ -124,23 +127,26 @@ export function useTicketWorkspace(
       active = false;
     };
   }, [selected, revision]);
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      const ticket = await client.createTicket(
-        title,
-        filter === "all" || filter === "unlinked" ? null : filter,
-      );
-      setTitle("");
-      setCreating(false);
-      await refresh();
-      setSelected(ticket.reference);
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setSaving(false);
-    }
+  async function create(
+    title: string,
+    body: string,
+    status: string,
+    project: string | null,
+    effortId: string | null,
+    tags: string[],
+  ) {
+    const ticket = await client.createTicket(
+      title,
+      body,
+      status,
+      project,
+      effortId,
+      tags,
+    );
+    setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
+    setCreating(false);
+    setSelected(ticket.reference);
+    await refresh();
   }
   const updateTicket = useCallback((updated: Ticket) => {
     generation.current++;
@@ -150,19 +156,37 @@ export function useTicketWorkspace(
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
   }, []);
-  const scopeName = trash
-    ? "Trash"
-    : filter === "unlinked"
-      ? "Unlinked"
-      : (projects.find((p) => p.id === filter)?.name ??
-        (effort
-          ? efforts.find((e) => e.id === effort)?.name
-          : status || availability || "All tickets"));
+  const scopeName =
+    navigation.kind === "trash"
+      ? "Trash"
+      : navigation.project === "unlinked"
+        ? "Unlinked"
+        : navigation.project !== "all"
+          ? (projects.find((p) => p.id === navigation.project)?.name ??
+            "Project")
+          : navigation.effort
+            ? (efforts.find((e) => e.id === navigation.effort)?.name ??
+              "Effort")
+            : navigation.kind === "ready"
+              ? "Ready"
+              : navigation.kind === "progress"
+                ? "In progress"
+                : "All tickets";
+  function clearFilters() {
+    setQuery("");
+    setEffort(navigation.effort);
+    setStatus(navigation.kind === "progress" ? "In progress" : "");
+    setAvailability(navigation.kind === "ready" ? "Ready" : "");
+    setTags("");
+    setFamily("");
+    setOffset(0);
+  }
   function scope(
     next: "all" | "ready" | "progress" | "trash",
     project = "all",
     effortId = "",
   ) {
+    setNavigation({ kind: next, project, effort: effortId });
     setView("tickets");
     setTrash(next === "trash");
     setFilter(project);
@@ -173,7 +197,6 @@ export function useTicketWorkspace(
     setFamily("");
     setQuery("");
     setOffset(0);
-    setSelected(null);
   }
   return {
     projects,
@@ -201,11 +224,8 @@ export function useTicketWorkspace(
     setSelected,
     details,
     setDetails,
-    title,
-    setTitle,
     error,
     setError,
-    saving,
     loading,
     revision,
     refresh,
@@ -213,5 +233,8 @@ export function useTicketWorkspace(
     updateTicket,
     scopeName,
     scope,
+    navigation,
+    clearFilters,
+    queryError,
   };
 }
