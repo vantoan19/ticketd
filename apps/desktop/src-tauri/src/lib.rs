@@ -30,6 +30,18 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
 }
 
 #[tauri::command]
+fn list_trash() -> Result<Vec<Ticket>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.list_trash())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.set_trashed(&reference, trashed, None))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn create_ticket(title: String, project_id: Option<String>) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.create_ticket_in_project(&title, project_id.as_deref()))
@@ -104,6 +116,12 @@ fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, Strin
 }
 
 #[tauri::command]
+fn detach_child(parent: String, child: String) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.detach_child(&parent, &child, None))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.set_parent(&reference, parent.as_deref(), None))
@@ -157,6 +175,8 @@ pub fn run() -> Result<(), tauri::Error> {
             create_project,
             edit_project,
             list_tickets,
+            list_trash,
+            set_trashed,
             create_ticket,
             change_ticket,
             ticket_history,
@@ -168,7 +188,8 @@ pub fn run() -> Result<(), tauri::Error> {
             remove_tag,
             add_dependency,
             remove_dependency,
-            set_parent
+            set_parent,
+            detach_child
         ])
         .run(tauri::generate_context!())
 }

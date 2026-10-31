@@ -88,8 +88,9 @@ impl Workspace {
     pub fn show_effort(&self, id: &str) -> Result<EffortView, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let effort = get(&tx, id)?;
-        let mut stmt =
-            tx.prepare("SELECT number FROM tickets WHERE effort_id = ?1 ORDER BY number")?;
+        let mut stmt = tx.prepare(
+            "SELECT number FROM tickets WHERE effort_id = ?1 AND trashed = 0 ORDER BY number",
+        )?;
         let references = stmt
             .query_map([id], |r| Ok(format!("T-{}", r.get::<_, i64>(0)?)))?
             .collect::<Result<Vec<_>, _>>()?;
