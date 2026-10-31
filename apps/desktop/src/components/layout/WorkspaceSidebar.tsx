@@ -21,10 +21,12 @@ import {
 import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/api/client";
 import type { RefObject } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export function WorkspaceSidebar({
   view,
+  unread,
   setView,
   projects,
   efforts,
@@ -39,6 +41,7 @@ export function WorkspaceSidebar({
     effort: string;
   };
   view: View;
+  unread: boolean;
   setView: (view: View) => void;
   filter: string;
   effort: string;
@@ -55,8 +58,13 @@ export function WorkspaceSidebar({
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
+  const isMobile = useIsMobile();
   return (
-    <Sidebar collapsible="none" className="sidebar">
+    <Sidebar
+      collapsible={isMobile ? "offcanvas" : "none"}
+      className="sidebar"
+      closeOnAction
+    >
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <span className="brand-mark">◈</span>
@@ -82,7 +90,8 @@ export function WorkspaceSidebar({
                 className={view === "inbox" ? "active" : ""}
                 onClick={() => setView("inbox")}
               >
-                <Inbox size={16} /> Attention inbox
+                <Inbox size={16} /> Attention inbox{" "}
+                {unread && <span aria-label="Unread attention">●</span>}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

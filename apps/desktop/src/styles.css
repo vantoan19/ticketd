@@ -900,3 +900,63 @@ select option {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+.mobile-sidebar-trigger {
+  display: none;
+}
+@media (max-width: 767px) {
+  .mobile-sidebar-trigger {
+    display: inline-flex;
+  }
+  [data-mobile="true"].sidebar {
+    width: min(280px, 85vw);
+    padding: 19px 12px 12px;
+  }
+  .topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .topbar > div {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.inbox-entries {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+}
+.inbox-entry {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+}
+.inbox-entry > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.inbox-entry p {
+  margin: 4px 0;
+}
+.inbox-ticket {
+  font-weight: 600;
+  text-align: left;
+}
+.inbox-meta {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.unread-attention {
+  color: var(--foreground);
+  text-decoration: underline;
+  white-space: nowrap;
+  margin-right: 8px;
+}

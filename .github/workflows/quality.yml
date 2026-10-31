@@ -79,6 +79,7 @@ jobs:
           export XDG_DATA_HOME="$(mktemp -d)"
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
           xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
+          XDG_DATA_HOME="$XDG_DATA_HOME/extensions" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/extensions.mjs'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()

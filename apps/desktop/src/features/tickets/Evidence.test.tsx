@@ -28,7 +28,7 @@ vi.mock("@tauri-apps/api/core", () => {
   };
 });
 test("adds and removes a verification result", async () => {
-  render(
+  const view = render(
     <Evidence
       reference="T-1"
       revision={0}
@@ -51,4 +51,156 @@ test("adds and removes a verification result", async () => {
   await waitFor(() =>
     expect(screen.queryByText("Unit tests passed")).toBeNull(),
   );
+  view.unmount();
+});
+
+test("retries a lost response with the same request ID and uses a new ID for a different submission", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const mock = vi.mocked(invoke);
+  mock.mockClear();
+  let first = true;
+  mock.mockImplementation(async (command, args) => {
+    if (command === "list_evidence") return [];
+    if (command === "add_evidence") {
+      if (first) {
+        first = false;
+        throw new Error("response lost");
+      }
+      return {
+        ...(args as { input: object }).input,
+        id: "new",
+        created_at: "now",
+        updated_at: "now",
+      };
+    }
+  });
+  const view = render(
+    <Evidence
+      reference="T-2"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
+  fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
+    target: { value: "https://example.com/pr" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  await screen.findByRole("alert");
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  await waitFor(() =>
+    expect(
+      mock.mock.calls.filter(([name]) => name === "add_evidence"),
+    ).toHaveLength(2),
+  );
+  const calls = mock.mock.calls.filter(([name]) => name === "add_evidence");
+  expect((calls[0]?.[1] as { requestId: string }).requestId).toBe(
+    (calls[1]?.[1] as { requestId: string }).requestId,
+  );
+  await waitFor(() =>
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
+  );
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Other" },
+  });
+  fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
+    target: { value: "https://example.com/other" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  await waitFor(() =>
+    expect(
+      mock.mock.calls.filter(([name]) => name === "add_evidence"),
+    ).toHaveLength(3),
+  );
+  expect(
+    (
+      mock.mock.calls.filter(([name]) => name === "add_evidence")[2]?.[1] as {
+        requestId: string;
+      }
+    ).requestId,
+  ).not.toBe((calls[0]?.[1] as { requestId: string }).requestId);
+  view.unmount();
+});
+
+test("disables evidence controls while a write is pending", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const mock = vi.mocked(invoke);
+  mock.mockReset();
+  let complete: (value: unknown) => void = () => {};
+  mock.mockImplementation(async (command) => {
+    if (command === "list_evidence") return [];
+    if (command === "add_evidence")
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
+  });
+  const view = render(
+    <Evidence
+      reference="T-3"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
+  fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
+    target: { value: "https://example.com/pr" },
+  });
+  const button = screen.getByRole("button", { name: "Add evidence" });
+  fireEvent.click(button);
+  expect(button.matches(":disabled")).toBe(true);
+  fireEvent.click(button);
+  expect(
+    mock.mock.calls.filter(([name]) => name === "add_evidence"),
+  ).toHaveLength(1);
+  complete({
+    id: "one",
+    name: "PR",
+    value: "https://example.com/pr",
+    kind: "pull_request",
+    editing_agent: null,
+    created_at: "now",
+    updated_at: "now",
+  });
+  await waitFor(() => expect(button.matches(":disabled")).toBe(false));
+  view.unmount();
+});
+
+test("copies a pull request address on explicit request", async () => {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const copy = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: copy },
+  });
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "list_evidence")
+      return [
+        {
+          id: "pr",
+          kind: "pull_request",
+          name: "Review",
+          value: "https://example.com/pr/1",
+          editing_agent: null,
+          created_at: "now",
+          updated_at: "now",
+        },
+      ];
+  });
+  const view = render(
+    <Evidence
+      reference="T-4"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Copy pull request URL" }),
+  );
+  expect(copy).toHaveBeenCalledWith("https://example.com/pr/1");
+  await screen.findByRole("button", { name: "Copied pull request URL" });
+  view.unmount();
+  Reflect.deleteProperty(navigator, "clipboard");
 });

@@ -153,6 +153,15 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
     }
+    /// Materialize due reminders and report whether any inbox entry is unread.
+    pub fn has_unread_inbox(&self) -> Result<bool, Error> {
+        self.inbox(0, 0)?;
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM inbox_entries WHERE person = ?1 AND read = 0)",
+            [LOCAL_PERSON],
+            |row| row.get(0),
+        )?)
+    }
     pub fn set_inbox_read(&mut self, ids: &[i64], read: bool) -> Result<(), Error> {
         if ids.len() > 100 {
             return Err(Error::InvalidBatch(

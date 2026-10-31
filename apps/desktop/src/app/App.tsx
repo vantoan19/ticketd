@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -7,11 +8,11 @@ import { TicketList } from "@/features/tickets/TicketList";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Plus, RefreshCw } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   ResizableHandle,
@@ -30,6 +31,22 @@ export function App() {
     id: string;
     key: number;
   } | null>(null);
+  const [unread, setUnread] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const poll = () =>
+      void invoke("has_unread_inbox")
+        .then((value) => {
+          if (active && typeof value === "boolean") setUnread(value);
+        })
+        .catch(() => {});
+    poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
   const [creating, setCreating] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<string[]>([]);
   const [bulkStatus, setBulkStatus] = useState("");
@@ -127,6 +144,7 @@ export function App() {
     <SidebarProvider>
       <main className="workspace">
         <WorkspaceSidebar
+          unread={unread}
           view={view}
           setView={setView}
           filter={filter}
@@ -143,6 +161,7 @@ export function App() {
         />
         <div className="main-area">
           <header className="topbar">
+            <SidebarTrigger className="mobile-sidebar-trigger" />
             <div>
               <span>Workspace</span>
               <span className="slash">/</span>
@@ -158,6 +177,16 @@ export function App() {
                         : "Settings"}
               </strong>
             </div>
+            <span aria-live="polite">
+              {unread && (
+                <button
+                  className="unread-attention"
+                  onClick={() => setView("inbox")}
+                >
+                  Unread inbox
+                </button>
+              )}
+            </span>
             <button
               aria-label="Refresh"
               className="icon-button"

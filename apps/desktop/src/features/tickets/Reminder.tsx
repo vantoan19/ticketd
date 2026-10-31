@@ -3,6 +3,39 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+// A local clock time may be skipped or occur twice during a time-zone transition.
+function localInstants(value: string): Date[] {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return [];
+  const [, y, m, d, h, min] = match;
+  const utc = Date.UTC(
+    Number(y),
+    Number(m) - 1,
+    Number(d),
+    Number(h),
+    Number(min),
+  );
+  const offsets = new Set<number>();
+  for (let delta = -48; delta <= 48; delta++)
+    offsets.add(new Date(utc + delta * 3600000).getTimezoneOffset());
+  return [...offsets]
+    .map((offset) => new Date(utc + offset * 60000))
+    .filter(
+      (date) =>
+        date.getFullYear() === Number(y) &&
+        date.getMonth() === Number(m) - 1 &&
+        date.getDate() === Number(d) &&
+        date.getHours() === Number(h) &&
+        date.getMinutes() === Number(min),
+    )
+    .sort((a, b) => a.getTime() - b.getTime());
+}
+function offsetLabel(date: Date): string {
+  const minutes = -date.getTimezoneOffset();
+  const sign = minutes >= 0 ? "+" : "-";
+  return `UTC${sign}${String(Math.floor(Math.abs(minutes) / 60)).padStart(2, "0")}:${String(Math.abs(minutes) % 60).padStart(2, "0")}`;
+}
+
 export function Reminder({
   reference,
   revision,
@@ -12,6 +45,8 @@ export function Reminder({
 }) {
   const [due, setDue] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [occurrence, setOccurrence] = useState("");
+  const options = localInstants(draft);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -46,33 +81,54 @@ export function Reminder({
   }
   return (
     <div>
-      {due && (
-        <p>
-          Scheduled: {new Date(due).toLocaleString()} ({due})
-        </p>
-      )}
-      <label htmlFor="reminder-time">Reminder time with offset</label>
+      {due && <p>Scheduled: {new Date(due).toLocaleString()}</p>}
+      <label htmlFor="reminder-time">Local reminder date and time</label>
       <Input
         id="reminder-time"
+        type="datetime-local"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        placeholder="2030-01-01T12:00:00+07:00"
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setOccurrence("");
+        }}
       />
       <p>
-        Use an ISO 8601 time with an explicit UTC offset, such as +07:00 or Z.
+        Uses your computer’s local time zone. The selected time is saved as an
+        instant with a UTC offset.
       </p>
-      <Button size="sm" onClick={() => void save(draft)}>
+      {draft && options.length === 0 && (
+        <p role="alert">
+          This local time is invalid or skipped by a clock change. Choose
+          another time.
+        </p>
+      )}
+      {options.length > 1 && (
+        <label>
+          Clock change: choose which occurrence
+          <select
+            value={occurrence}
+            onChange={(e) => setOccurrence(e.target.value)}
+          >
+            <option value="">Choose an offset</option>
+            {options.map((date) => (
+              <option key={date.toISOString()} value={date.toISOString()}>
+                {offsetLabel(date)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <Button
+        size="sm"
+        disabled={options.length === 0 || (options.length > 1 && !occurrence)}
+        onClick={() => void save(occurrence || options[0]!.toISOString())}
+      >
         {due ? "Reschedule reminder" : "Set reminder"}
       </Button>
       {due && (
-        <>
-          <Button size="sm" variant="outline" onClick={() => void save(draft)}>
-            Snooze until entered time
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => void save(null)}>
-            Dismiss reminder
-          </Button>
-        </>
+        <Button size="sm" variant="outline" onClick={() => void save(null)}>
+          Dismiss reminder
+        </Button>
       )}
       {error && <p role="alert">{error}</p>}
     </div>

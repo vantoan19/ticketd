@@ -155,8 +155,10 @@ function Sidebar({
   collapsible = "offcanvas",
   className,
   children,
+  closeOnAction = false,
   ...props
 }: React.ComponentProps<"div"> & {
+  closeOnAction?: boolean;
   side?: "left" | "right";
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
@@ -185,7 +187,17 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          onClick={(event) => {
+            if (
+              closeOnAction &&
+              (event.target as HTMLElement).closest("button")
+            )
+              setOpenMobile(false);
+          }}
+          className={cn(
+            "w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden",
+            className,
+          )}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,

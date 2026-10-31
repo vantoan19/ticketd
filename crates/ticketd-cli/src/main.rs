@@ -444,7 +444,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         )?;
         return Ok(());
     }
-    let mut workspace = Workspace::open_default()?;
+    // Integration tests run the real executable against a private database on every OS.
+    // ProjectDirs on Windows uses known folders and ignores HOME and XDG_DATA_HOME.
+    let mut workspace = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+        Some(path) => Workspace::open(path)?,
+        None => Workspace::open_default()?,
+    };
     let text = match args.command {
         Command::Reminder { command } => match command {
             ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
