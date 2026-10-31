@@ -5,8 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
@@ -198,9 +197,7 @@ export function Activity({
                   )}
                 </div>
                 <div className="markdown-preview activity-note">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {item.note.content}
-                  </ReactMarkdown>
+                  <MarkdownDocument source={item.note.content} />
                 </div>
                 {!trashed && (
                   <div className="activity-actions">
