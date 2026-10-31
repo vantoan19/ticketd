@@ -91,6 +91,14 @@ impl Workspace {
         )?;
         if changed != 0 {
             history::record(&tx, &dependent_id, "dependency", "", blocker, agent)?;
+            history::record(
+                &tx,
+                &blocker_id,
+                "relationship:blocks",
+                "",
+                dependent,
+                agent,
+            )?;
         }
         tx.commit()?;
         self.show_ticket(dependent)
@@ -122,6 +130,14 @@ impl Workspace {
         )?;
         if changed != 0 {
             history::record(&tx, &dependent_id, "dependency", blocker, "", agent)?;
+            history::record(
+                &tx,
+                &blocker_id,
+                "relationship:blocks",
+                dependent,
+                "",
+                agent,
+            )?;
         }
         tx.commit()?;
         self.show_ticket(dependent)

@@ -21,6 +21,8 @@ paths describe the source machine and may need adjustment on another machine.
 Evidence preserves full values and optional editing-agent attribution. Follows and inbox entries use the stable `local-person` preference scope, which is not an account or editing-agent identity.
 `duplicate_tickets` records `source_id`, `canonical_id`, and nullable `restore_status`; the first two refer to ticket IDs. All arrays represent the same SQLite read snapshot, including trash.
 
+Follow and inbox records use `local-person` as a stable personal preference scope, independent of editing-agent attribution. Note inbox entries retain the note ID and original content in `from_value` and `to_value`, and `editing_agent` is descriptive attribution.
+
 This portable data export is for inspection and transfer, not a live write
 interface. Generic import is not supported. It is not a full backup: database
 metadata and successful request replay outcomes are excluded. Use the backup

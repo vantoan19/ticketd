@@ -41,10 +41,10 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 
 fn validate(connection: &Connection) -> Result<(), Error> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 17 {
+    if version > 18 {
         return Err(Error::NewerSchema(version));
     }
-    if !(1..=17).contains(&version) {
+    if !(1..=18).contains(&version) {
         return Err(Error::Backup(format!(
             "unsupported backup schema version {version}"
         )));
@@ -77,7 +77,7 @@ fn validate(connection: &Connection) -> Result<(), Error> {
         ("inbox_entries", 14),
         ("duplicate_tickets", 15),
         ("evidence", 16),
-        ("ticket_reminders", 17),
+        ("ticket_reminders", 18),
     ] {
         if version < introduced {
             continue;
@@ -164,7 +164,7 @@ impl Workspace {
         current.busy_timeout(Duration::from_secs(10))?;
         let current_version: i64 =
             current.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_version > 17 {
+        if current_version > 18 {
             return Err(Error::NewerSchema(current_version));
         }
         let mut name = workspace.as_os_str().to_os_string();

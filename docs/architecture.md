@@ -108,3 +108,10 @@ Set and snooze take an RFC 3339 instant with an explicit offset; show displays
 local time and UTC. The retryable `set_reminder` write takes `reference` and
 `due_at` (or null to dismiss). Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
+
+Inbox entries for new notes retain the note ID and its original content in
+`from_value` and `to_value`; this snapshot remains meaningful after the note is
+edited or deleted. `editing_agent` is descriptive attribution. Relationship
+history kinds `parent`, `dependency`, and those prefixed `relationship:` also
+produce inbox entries for followed tickets, in the same transaction as the
+change. New relationship types use that prefix to participate.

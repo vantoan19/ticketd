@@ -11,6 +11,7 @@ type Entry = {
   to_value: string;
   timestamp: string;
   read: boolean;
+  editing_agent: string | null;
 };
 function parseEntries(value: unknown): Entry[] {
   if (!Array.isArray(value))
@@ -27,7 +28,10 @@ function parseEntries(value: unknown): Entry[] {
       typeof e.from_value !== "string" ||
       typeof e.to_value !== "string" ||
       typeof e.timestamp !== "string" ||
-      typeof e.read !== "boolean"
+      typeof e.read !== "boolean" ||
+      (e.editing_agent !== null &&
+        e.editing_agent !== undefined &&
+        typeof e.editing_agent !== "string")
     )
       throw new Error("Invalid inbox entry");
     return {
@@ -39,6 +43,8 @@ function parseEntries(value: unknown): Entry[] {
       to_value: e.to_value,
       timestamp: e.timestamp,
       read: e.read,
+      editing_agent:
+        typeof e.editing_agent === "string" ? e.editing_agent : null,
     };
   });
 }
@@ -47,7 +53,7 @@ export function Inbox({
   select,
 }: {
   revision: number;
-  select: (reference: string) => void;
+  select: (reference: string, noteId?: string) => void;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
@@ -113,10 +119,21 @@ export function Inbox({
       <ul>
         {entries.map((e) => (
           <li key={e.id}>
-            <button onClick={() => select(e.reference)}>
+            <button
+              onClick={() =>
+                e.kind === "note"
+                  ? select(e.reference, e.from_value)
+                  : select(e.reference)
+              }
+            >
               {e.reference} · {e.title}
             </button>{" "}
-            · {e.kind}: {e.from_value} → {e.to_value} · {e.timestamp} ·{" "}
+            ·{" "}
+            {e.kind === "note"
+              ? `New note: ${e.to_value}`
+              : `${e.kind}: ${e.from_value} → ${e.to_value}`}{" "}
+            · {e.timestamp}
+            {e.editing_agent && ` · Agent: ${e.editing_agent}`} ·{" "}
             <span>{e.read ? "Read" : "Unread"}</span>{" "}
             <Button
               variant="outline"

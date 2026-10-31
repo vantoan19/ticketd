@@ -18,6 +18,7 @@ const DependencyGraph = lazy(
 );
 export function TicketDetails({
   selected,
+  inboxTarget,
   expanded,
   onExpand,
   onReturn,
@@ -30,6 +31,7 @@ export function TicketDetails({
   updateTicket,
 }: {
   selected: string | null;
+  inboxTarget?: { reference: string; id: string; key: number } | null;
   expanded: boolean;
   onExpand: () => void;
   onReturn: () => void;
@@ -206,6 +208,9 @@ export function TicketDetails({
           )}
           <Activity
             reference={item.reference}
+            target={
+              inboxTarget?.reference === item.reference ? inboxTarget : null
+            }
             projects={projects}
             status={item.status}
             revision={revision}
