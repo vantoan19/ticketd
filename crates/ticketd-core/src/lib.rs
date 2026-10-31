@@ -3,6 +3,10 @@ mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
 pub use backup::BackupRecord;
+mod backup_review;
+pub use backup_review::{
+    BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
+};
 mod context;
 mod duplicates;
 pub use duplicates::{

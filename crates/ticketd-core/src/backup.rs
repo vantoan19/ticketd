@@ -49,7 +49,51 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
     Ok(())
 }
 
-fn validate(connection: &Connection) -> Result<(), Error> {
+/// Each table a ticketd workspace has, with the format version that added it.
+const TABLES: [(&str, i64); 18] = [
+    ("tickets", 1),
+    ("ticket_history", 3),
+    ("tags", 4),
+    ("ticket_tags", 4),
+    ("notes", 5),
+    ("dependencies", 6),
+    ("contextual_relationships", 19),
+    ("projects", 7),
+    ("efforts", 8),
+    ("ticket_parents", 9),
+    ("project_checkouts", 10),
+    ("request_outcomes", 12),
+    ("ticket_follows", 14),
+    ("inbox_entries", 14),
+    ("duplicate_tickets", 15),
+    ("evidence", 16),
+    ("ticket_reminders", 18),
+    ("last_backup", 20),
+];
+
+pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [table],
+        |r| r.get(0),
+    )?)
+}
+
+/// The tables a workspace of this format version should have but does not.
+pub(crate) fn missing_tables(
+    connection: &Connection,
+    version: i64,
+) -> Result<Vec<&'static str>, Error> {
+    let mut missing = Vec::new();
+    for (table, introduced) in TABLES {
+        if version >= introduced && !table_exists(connection, table)? {
+            missing.push(table);
+        }
+    }
+    Ok(missing)
+}
+
+pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version > 20 {
         return Err(Error::NewerSchema(version));
@@ -71,37 +115,8 @@ fn validate(connection: &Connection) -> Result<(), Error> {
         return Err(Error::Backup("foreign key check failed".into()));
     }
     // Verify this is a ticketd database, not an unrelated database with a matching version.
-    for (table, introduced) in [
-        ("tickets", 1),
-        ("ticket_history", 3),
-        ("tags", 4),
-        ("ticket_tags", 4),
-        ("notes", 5),
-        ("dependencies", 6),
-        ("contextual_relationships", 19),
-        ("projects", 7),
-        ("efforts", 8),
-        ("ticket_parents", 9),
-        ("project_checkouts", 10),
-        ("request_outcomes", 12),
-        ("ticket_follows", 14),
-        ("inbox_entries", 14),
-        ("duplicate_tickets", 15),
-        ("evidence", 16),
-        ("ticket_reminders", 18),
-        ("last_backup", 20),
-    ] {
-        if version < introduced {
-            continue;
-        }
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            return Err(Error::Backup(format!("missing table {table}")));
-        }
+    if let Some(table) = missing_tables(connection, version)?.first() {
+        return Err(Error::Backup(format!("missing table {table}")));
     }
     Ok(())
 }

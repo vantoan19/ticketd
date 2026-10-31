@@ -231,9 +231,6 @@
   font-size: 13px;
   color: var(--foreground);
 }
-.backup-restore {
-  margin-top: 16px;
-}
 .workspace-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));

@@ -20,6 +20,9 @@ vi.mock("@/lib/api/workspace", () => ({
     openLink: vi.fn(),
     lastBackup: vi.fn(),
     chooseSavePath: vi.fn(),
+    chooseBackupFile: vi.fn(),
+    inspectBackup: vi.fn(),
+    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/client", () => ({
