@@ -1,0 +1,372 @@
+# ticketd — MVP Specification
+
+**Version:** 0.3 — Domain model reviewed; delivery details remain draft  
+**Date:** October 31, 2026  
+**Product name:** ticketd  
+**CLI command:** `ticketd`  
+**Initial surface:** Local desktop application and agent-facing CLI.
+
+> ticketd is a local ticket workspace: a simple desktop UI for people and a fast CLI for agents, sharing the same work and context.
+
+## 1. Problem and purpose
+
+The current workflow uses skills and coding agents to create local Markdown tickets. As work grows, reading, editing, navigating hierarchy, and understanding dependencies become difficult. People lack a clear overview, while agents must repeatedly locate and assemble context.
+
+ticketd becomes the primary system of record for tickets. People use a desktop UI; agents use a CLI. Brainstorming, conversations, planning, skill execution, and coding remain in external harnesses such as Claude Code, Codex, and Orca.
+
+### Goals
+
+- Make creating, reading, editing, and organizing tickets easy.
+- Present work as a flat, searchable stream without losing hierarchy.
+- Make dependencies and available work understandable.
+- Provide structured context to agents with few CLI calls.
+- Work locally and offline, with a path toward accounts, cloud storage, and synchronization.
+
+### Non-goals
+
+- Running or orchestrating agents inside the application.
+- Replacing coding harnesses, IDEs, or execution environments.
+- Building an enterprise project-management platform in the first release.
+
+## 2. Product philosophy
+
+### 2.1. Task-driven work, with the user in control
+
+Follow the task-driven direction of the Matt Pocock workflow the user currently applies. Tickets express intent, scope, and expected outcomes. The user retains direction; people and agents can manage ticket statuses themselves, including completion. In review expresses finished implementation awaiting review, without requiring every ticket to pass through review.
+
+This specification records the agreed direction, not compatibility with a particular skill version. Actual skills must be inspected when adapting their ticket-writing steps to the CLI.
+
+### 2.2. Simple and familiar
+
+Creating, reading, editing, and taking notes should feel straightforward. Reveal structure as needed. Do not require a complete form or a custom workflow before someone can record work.
+
+### 2.3. Lightweight and performant
+
+Ticket management must not become a bottleneck in the AI workflow. Optimize UI responsiveness, CLI startup and execution, tool-call count, and context volume.
+
+### 2.4. Fit existing workflows
+
+ticketd provides shared storage, visualization, and context. Users keep their preferred harnesses and skills. The CLI is the primary agent interface; MCP is not required.
+
+### 2.5. Expand from real use cases
+
+First make ticket management, visualization, and context retrieval work well. Add capabilities when actual usage demonstrates a clear need.
+
+## 3. Actors and responsibility boundaries
+
+| Actor or component | Responsibility |
+| --- | --- |
+| Person using the desktop UI | Understand the work, review and edit tickets, inspect relationships and progress |
+| Agent using the CLI | Create and update tickets, notes, tags, hierarchy, and dependencies; retrieve context |
+| External harness | AI conversations, brainstorming, planning, skills, implementation, and verification |
+| Application core | Business rules, context queries, and consistent data operations |
+
+The MVP does not include account sign-in, agent-provider integration, or subscription handling.
+
+## 4. Confirmed product model
+
+### 4.1. Workspace, projects, and Efforts
+
+- One default local workspace contains projects, Efforts, and tickets.
+- A project represents one repository, not a grouping of work. Its explicit identity survives repository moves and renames; multiple local checkouts may refer to the same project.
+- A ticket optionally links to one project. Tickets without a project are valid; no Inbox project is required.
+- Registered checkout paths locate projects without implying Git integration.
+- Project context is local to each UI or CLI interaction. Explicit selection takes precedence; the CLI may infer a project from a registered checkout. With neither, new tickets remain unlinked.
+- An **Effort** is a named grouping of tickets pursuing a shared objective, potentially spanning projects. Each ticket optionally belongs to one Effort.
+- Efforts are Active or Archived. Archiving hides an Effort from active Effort views; its tickets remain searchable and editable, with statuses and relationships unchanged. Reactivation is supported.
+- Effort progress is counts by status of all non-trashed member tickets, including parents and subtickets equally, rather than a completion percentage. Archiving is explicit, never automatic.
+- Project archiving is outside the MVP. Future archiving should preserve tickets and relationships and permit reactivation.
+- Preserve the workspace boundary to support ownership and accounts later.
+
+### 4.2. One ticket type
+
+- Use a single work-item type: **ticket**.
+- Use **tags** for categories such as bug, research, or feature. No mandatory issue-type system.
+- Only the title is mandatory user-entered content. Project and Effort links are optional.
+- A ticket describes an intended outcome, including when it has subtickets.
+- Short ticket references are unique across the workspace and remain unchanged when project or Effort links change.
+- Support Markdown content and checklists. Checklist items have no independent statuses or dependencies; unchecked items do not prevent Done.
+- Acceptance criteria can be written in the body; no separate mandatory field is required.
+- Support editable, deletable, timestamped notes for progress and findings, with author/source when known.
+- Keep automatic ticket history separate from notes: record status, relationship, project/Effort membership, and trash/restore changes. Full body revision history is outside the MVP.
+- Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
+- Priority, deadlines, attachments, and custom fields are not required for the MVP.
+
+### 4.3. Hierarchical relationships, flat presentation
+
+- Support one level of parent/subtickets. A subticket cannot have its own subtickets in the MVP.
+- Hierarchy and dependencies are separate relationships.
+- Parent tickets and subtickets appear as ordinary rows in the same flat list.
+- Users do not need to expand a parent to discover its subtickets.
+- A subticket displays its parent link; ticket details show the parent and subtickets.
+- Support filtering around a parent and its subtickets.
+- Parent and subtickets may link to different projects and belong to different Efforts. Membership changes never cascade.
+- A parent may be Done with open children, without warning or override. Completing children does not automatically complete their parent; no status changes cascade.
+
+### 4.4. Dependencies
+
+- A directed relationship: `A blocks B` is equivalent to `B is blocked by A`.
+- Add and remove relationships through the UI and CLI.
+- Reject self-dependencies and cycles; do not create duplicate edges.
+- Relationship validation and persistence must remain consistent under concurrent writes.
+- Parent/subticket relationships do not create dependency edges automatically.
+- Dependencies may connect tickets across projects within the workspace.
+- Readiness guides selection; unresolved dependencies do not prohibit starting or completing work.
+- Keep dependency relationships after completion so readiness can be recalculated if a prerequisite reopens. There is no separate relationship resolution state.
+
+### 4.5. Status and derived availability
+
+| Stored status | Meaning |
+| --- | --- |
+| Todo | Work has not started |
+| In progress | Work is underway |
+| In review | Implementation is finished; review is pending |
+| Done | Work is complete and no further review is required |
+| Canceled | Work will not continue |
+
+People and agents may transition directly between any statuses. Review may be skipped when unnecessary; transitions are recorded in history and do not change related tickets.
+
+`Ready` and `Blocked` are derived information, not manually maintained statuses:
+
+- **Ready:** a Todo ticket without unresolved blocking dependencies.
+- **Blocked:** a Todo ticket with unresolved blocking dependencies.
+- In progress, In review, Done, and Canceled tickets have neither indicator. Their dependency lists still show unresolved prerequisites.
+- Only a Done prerequisite satisfies an existing dependency. In review and Canceled prerequisites remain unresolved.
+- Remove an obsolete dependency or replace it with the appropriate relationship; cancellation does not resolve it.
+- Reopening a prerequisite recalculates availability for Todo dependents. Started dependents retain their status and only show the open prerequisite in their dependency lists.
+- Trashed tickets are excluded from ordinary lists and work selection. Trashing a Done prerequisite leaves it satisfied; trashing an unfinished prerequisite leaves it unresolved.
+
+### 4.6. Trash and restoration
+
+- Trash and restore are supported; permanent ticket deletion is not supported.
+- Preserve ticket identity and relationships while in trash. Trashing a parent leaves its children visible and unchanged, with a link identifying the trashed parent.
+- Require restoration before editing a trashed ticket's content, status, or relationships, except that visible tickets may remove relationships to trashed tickets.
+- Show an unresolved trashed prerequisite explicitly on its dependent tickets.
+- Continue enforcing hierarchy and dependency validity across trashed tickets so restoration cannot introduce invalid relationships.
+
+## 5. Primary workflows
+
+### 5.1. Agent creates a plan; the person reviews it
+
+1. The person brainstorms and plans in an external harness.
+2. The agent creates tickets, tags, hierarchy, and dependencies through the CLI.
+3. The person opens the project and reviews its flat list and dependency graph.
+4. The person edits content or relationships in the UI.
+5. The agent reads current information before continuing.
+
+### 5.2. Agent finds work and retrieves context
+
+1. The agent queries Ready tickets for a project.
+2. It retrieves a ticket and the requested context in one call where appropriate.
+3. It implements and verifies work in the external harness.
+4. It updates status, findings, and outcomes through the CLI.
+5. The UI reflects those changes without requiring an application restart.
+
+### 5.3. Person manages work directly
+
+1. Create a ticket with a title, optionally selecting a project and Effort.
+2. Add content, checklist items, tags, and relationships when needed.
+3. Record notes and update status as work progresses.
+4. Open the graph to understand dependency chains.
+
+## 6. MVP functional scope
+
+| Area | Required capability |
+| --- | --- |
+| Projects | Create, read, and edit repository projects; select interaction-local context; register checkout paths |
+| Efforts | Create, read, edit, archive/reactivate; manage membership; view counts by status |
+| Tickets | Create, read, edit, trash, and restore; stable identifiers and workspace-wide short references |
+| Content | Markdown editor and preview, checklists, autosave with clear save state |
+| Notes and history | Add, read, edit, and delete timestamped notes; record author/source when known; read automatic ticket history |
+| Tags | Add, remove, and filter tags; classification is optional |
+| Hierarchy | Assign/remove parent, display subtickets, enforce one-level limit |
+| Dependencies | Add/remove edges, reject cycles, derive Ready/Blocked |
+| Search | Search titles, bodies, and notes; combine with filters |
+| Filters | Project (including unlinked), Effort, status, tags, Ready/Blocked, and parent |
+| CLI | Main UI operations, structured output, batch operations, and context queries |
+| Local data | Offline persistence, migrations, export, and verifiable backup/restore |
+
+Trash preserves relationships under section 4.6; permanent ticket deletion is not supported.
+
+## 7. UI/UX direction
+
+### Visual principles
+
+- Clean, neutral, and low-noise; use Linear and Orca as references.
+- Lists and ticket content are the primary surfaces.
+- Flat surfaces, subtle borders, restrained colors, and minimal nested cards.
+- Comfortable information density, readable content, visible focus, and sufficient contrast.
+- Efficient keyboard navigation with complete mouse support.
+- Progressive disclosure of metadata and advanced actions.
+- No streaks, productivity scores, or guilt-based backlog mechanics.
+
+### Required views
+
+| View | Purpose |
+| --- | --- |
+| List | Flat stream, search, filtering, and quick operations; surface important relationships |
+| Ticket detail | Read/edit content, checklist, notes, project/Effort links, parent/subtickets, and dependencies; read history |
+| Effort view | Flat member-ticket list, counts by status, membership management, and archive/reactivation |
+| Dependency graph | Understand dependency direction, blocked work, and relationships around a selected ticket |
+
+Initial layout direction: navigation for projects and Efforts, including unlinked tickets, main list/graph surface, and ticket detail in a panel or dedicated page appropriate to window size. Validate through prototyping rather than treating this as a fixed pixel layout.
+
+The graph needs clear edge direction or a legend and ticket selection. Creating edges by dragging is optional if adding dependencies from ticket details is already easy.
+
+A board view and an agent/chat panel are outside the MVP.
+
+## 8. CLI and context contract
+
+### Required capabilities
+
+- Create, list, show, and update tickets; change status and append notes.
+- Manage projects and their checkout paths, Efforts and archive/reactivation, ticket project/Effort links, tags, parent/subtickets, and dependencies.
+- Trash and restore tickets; edit/delete notes and read ticket history.
+- Query Ready/Blocked work and search with project, Effort, and other filter constraints.
+- Retrieve explicit context scopes with bounded, deterministic output.
+- Support batch creation and updates to reduce round trips; clearly define atomicity or per-item failures.
+- Provide help, structured JSON output, exit codes, and actionable errors.
+- Avoid interactive prompts in agent mode; keep diagnostics separate from JSON stdout.
+- Accept multiline content through files or stdin to avoid fragile shell quoting.
+- Detect stale-version updates. Support safe retry semantics for operations that could otherwise create duplicates.
+
+### Context contents
+
+A context query may include:
+
+- Current ticket title, content, checklist, status, and tags.
+- Relevant linked project and Effort information.
+- Parent and subtickets when requested.
+- Dependencies and blocking reasons.
+- Notes within a selected limit.
+
+Do not return the entire workspace by default. Indicate truncation and how to fetch more. The MVP does not use AI to summarize or select context.
+
+### Illustrative commands — syntax is not final
+
+```bash
+ticketd create "Fix upload timeout" --project demo
+ticketd list --project demo --ready --json
+ticketd show T-42 --context dependencies,parent,notes --json
+ticketd update T-42 --status in-progress
+ticketd note T-42 --file progress.md
+ticketd dependency add T-43 --blocked-by T-42
+```
+
+Agents use the CLI/application core. They do not write SQL directly or treat Markdown exports as the system of record.
+
+## 9. Confirmed technology stack
+
+| Component | Technology |
+| --- | --- |
+| Desktop: macOS, Linux, Windows | Tauri |
+| Frontend | React + TypeScript + Vite |
+| UI components | shadcn/ui + Radix UI |
+| Styling and icons | Tailwind CSS + Lucide |
+| Application core | Rust |
+| Agent-facing CLI | Rust + clap |
+| Local database | SQLite |
+| Dependency visualization | React Flow + Dagre |
+| Markdown editor | CodeMirror + preview |
+
+The product name `ticketd` does not require a background daemon. The proposed MVP CLI remains a direct client of the shared application core.
+
+Dependency versions are not pinned in this product specification. Select compatible versions during implementation planning.
+
+## 10. Architecture direction and extensibility
+
+- UI and CLI share application core, business rules, and data.
+- Keep business logic independent of Tauri and SQLite so it can run in a server later.
+- The CLI calls the core directly; a running desktop UI, HTTP server, or MCP server is not required by the proposed architecture.
+- Proposed MVP topology: UI and CLI processes access the same SQLite database through the shared core. Validate concurrency in a technical spike before finalizing.
+- Detect external changes and refresh affected UI data.
+- Use short transactions, appropriate indexes, lock handling, and version-aware updates.
+- Use globally unique identities, schema migrations, and record versions to preserve future options.
+- Preserve workspace boundaries and necessary change metadata without building a universal database abstraction.
+- Future sync may retain SQLite locally and add a cloud database. Sync requires change propagation, conflict handling, deletion semantics, and authorization; it is not simply a database swap.
+- Placing a live database in a file-sync folder is not the product synchronization strategy.
+
+```mermaid
+flowchart TD
+    Person["Person"] --> UI["ticketd desktop UI"]
+    Agent["Agent in external harness"] --> CLI["ticketd CLI"]
+    UI --> Core["Shared application core"]
+    CLI --> Core
+    Core --> Storage["Local storage: SQLite"]
+```
+
+## 11. Non-functional requirements
+
+### Performance
+
+Measure UI and CLI independently, including full CLI startup rather than database query time alone. Do not present unmeasured numbers as guarantees.
+
+| Area | Measurement |
+| --- | --- |
+| CLI | End-to-end process startup to output, cold and warm |
+| Context | Call count and output size for a real workflow |
+| UI | Project opening, search, ticket opening/editing, external-update visibility |
+| Graph | Loading, layout, and pan/zoom across representative graph sizes |
+| Concurrency | UI reads during agent writes, multiple writers, lock waits, and conflicts |
+
+Set latency budgets and representative dataset sizes after a benchmark spike. Batch operations, bounded output, and loading only needed data are design requirements from the start.
+
+### Reliability and data ownership
+
+- Do not silently overwrite newer content when UI and CLI edit the same record.
+- Persist acknowledged writes across application restarts.
+- Provide an appropriate backup/recovery path for migrations.
+- Export projects, Efforts, tickets, notes, ticket history, tags, and relationships in a documented format.
+- Backup/restore must preserve identities and relationships, including correct handling of an active database.
+- UI and CLI enforce the same hierarchy and dependency rules.
+
+### Platform support
+
+- Target macOS, Linux, and Windows.
+- Define supported OS versions, CPU architectures, and Linux distributions before committing to a release matrix.
+- Verify editor behavior, shortcuts, clipboard, rendering, and CLI packaging on target platforms.
+- WSL agents accessing a Windows-hosted database require explicit validation; do not assume this works as part of ordinary Windows support.
+
+## 12. Proposed acceptance criteria
+
+These are draft verification criteria for review, not individually approved requirements.
+
+1. A person can create a project and ticket without entering unnecessary metadata.
+2. An agent can create tickets, hierarchy, and dependencies through the CLI; the UI displays them correctly.
+3. The default list remains flat; subtickets are not hidden behind parent expansion.
+4. Both UI and CLI reject self-dependencies and dependency cycles.
+5. Ready/Blocked applies only to Todo tickets and follows completion, cancellation, reopening, and trash rules in section 4.
+6. One context query retrieves the requested ticket context without repeated follow-up calls for included scopes.
+7. Content, checklists, and notes persist and are searchable.
+8. The CLI works while the UI is closed, and reopening the UI shows current data, subject to confirming distribution behavior.
+9. The UI reflects CLI changes and detects conflicting edits without silent overwrites.
+10. Export and backup/restore preserve data and relationships.
+11. One real repository project completes the full workflow: external planning, CLI ticket creation, UI review/editing, external execution, and CLI progress updates.
+12. Tickets can exist without project or Effort links; references survive membership changes.
+13. An Effort groups tickets across projects and supports status counts and reversible archiving without changing tickets.
+14. Parent completion is independent of child completion; hierarchy and dependencies may cross projects.
+15. Trash/restore preserves relationships and enforces validity; no permanent deletion is offered.
+
+## 13. Explicitly out of scope
+
+- Embedded agent chat or terminal, provider adapters, and subscription handling.
+- Running, orchestrating, or automatically assigning work to agents.
+- Built-in AI decomposition, summarization, prioritization, or scheduling.
+- Highlight/comment feedback delivered directly to an agent session.
+- Branch, worktree, commit, PR, or CI-check synchronization.
+- GitHub/Jira integrations, Slack/Google Chat capture, and browser extension.
+- Board, roadmap, calendar, time tracking, reporting, and gamification.
+- Full web/mobile clients, cloud hosting, account/auth, collaboration, and multi-device sync.
+- Plugin system, custom workflow engine, vector database, and MCP server.
+- Project archiving, permanent ticket/project deletion, and full ticket body revision history.
+
+These are possible future directions, not a committed roadmap.
+
+## 14. Open decisions
+
+| Question | Proposal for review |
+| --- | --- |
+| Desktop and CLI distribution | Ship together; CLI operates independently while UI is closed |
+| MVP success criterion | Complete one real project through the workflow in section 12 |
+| Performance budgets | Establish after measuring a representative dataset and machine |
+| Supported platforms and WSL | Define release matrix and validate the first actual agent environment |
