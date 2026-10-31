@@ -101,6 +101,7 @@ try {
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
+  await (await (await detail()).$("button=Edit description")).click();
   const editor = await (await detail()).$(".cm-content");
   await editor.click();
   await browser.keys(["End"]);

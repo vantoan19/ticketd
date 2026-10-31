@@ -1,9 +1,11 @@
+import "./description.css";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
 
 const extensions = [markdown(), EditorView.lineWrapping];
@@ -29,16 +31,31 @@ export function TicketEditor({
   const [state, setState] = useState<"saved" | "pending" | "failed">("saved");
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [editingBody, setEditingBody] = useState(false);
+  const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
+  const titleDirty = draft.title !== saved.title;
+  const bodyDirty = draft.body !== saved.body;
   const externalChange =
-    ticket.title !== saved.title || ticket.body !== saved.body;
-  // Adopt fresh content only while there is no draft to protect.
-  if (externalChange && !dirty && !saving) {
-    const content = { title: ticket.title, body: ticket.body };
+    (titleDirty && ticket.title !== saved.title) ||
+    (bodyDirty && ticket.body !== saved.body);
+  // Refresh untouched fields independently while retaining a draft in the other field.
+  if (
+    !saving &&
+    ((!titleDirty && ticket.title !== saved.title) ||
+      (!bodyDirty && ticket.body !== saved.body))
+  ) {
+    const content = {
+      title: titleDirty ? saved.title : ticket.title,
+      body: bodyDirty ? saved.body : ticket.body,
+    };
     setSaved(content);
-    setDraft(content);
+    setDraft({
+      title: titleDirty ? draft.title : content.title,
+      body: bodyDirty ? draft.body : content.body,
+    });
   }
 
   useEffect(() => {
@@ -129,25 +146,87 @@ export function TicketEditor({
           onChange={(event) => edit({ ...draft, title: event.target.value })}
         />
       </label>
-      {children}
       <div className="editor-body">
-        <span id={`body-${ticket.id}`}>
-          Description <small>Markdown supported</small>
-        </span>
-        <CodeMirror
-          value={draft.body}
-          onChange={(body) => edit({ ...draft, body })}
-          extensions={extensions}
-          indentWithTab={false}
-          aria-labelledby={`body-${ticket.id}`}
-        />
+        <div className="description-heading">
+          <span id={`body-${ticket.id}`}>Description</span>
+          {editingBody ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => {
+                setEditingBody(false);
+                window.requestAnimationFrame(() => editButton.current?.focus());
+              }}
+            >
+              Done editing
+            </Button>
+          ) : (
+            <Button
+              ref={editButton}
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => setEditingBody(true)}
+            >
+              Edit description
+            </Button>
+          )}
+        </div>
+        {editingBody ? (
+          <CodeMirror
+            value={draft.body}
+            onChange={(body) => edit({ ...draft, body })}
+            extensions={extensions}
+            basicSetup={{
+              lineNumbers: false,
+              foldGutter: false,
+              highlightActiveLine: false,
+            }}
+            indentWithTab={false}
+            autoFocus
+            aria-labelledby={`body-${ticket.id}`}
+          />
+        ) : draft.body ? (
+          <div
+            className="markdown-preview description-document"
+            onClick={(event) => {
+              const target = event.target;
+              if (
+                target instanceof Element &&
+                target.closest(
+                  "a, button, input, select, textarea, [role=button]",
+                )
+              )
+                return;
+              if (window.getSelection()?.toString()) return;
+              setEditingBody(true);
+            }}
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {draft.body}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            className="description-empty"
+            onClick={() => setEditingBody(true)}
+          >
+            Add a description…
+          </Button>
+        )}
       </div>
       <p role="status" className="my-2">
-        {dirty && state !== "failed"
-          ? "Pending save"
-          : state === "failed"
-            ? "Save failed"
-            : "Saved"}
+        {saving
+          ? "Saving…"
+          : dirty && state !== "failed"
+            ? "Pending save"
+            : state === "failed"
+              ? "Save failed"
+              : "Saved"}
       </p>
       {state === "failed" && (
         <p role="alert">
@@ -164,14 +243,7 @@ export function TicketEditor({
           </button>
         </p>
       )}
-      <details className="detail-disclosure">
-        <summary>Preview</summary>
-        <div className="markdown-preview">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {draft.body}
-          </ReactMarkdown>
-        </div>
-      </details>
+      {children}
     </div>
   );
 }
