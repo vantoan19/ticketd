@@ -1240,3 +1240,43 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
         vec!["kept"]
     );
 }
+
+#[test]
+fn concurrent_project_moves_remove_the_previous_checkout() {
+    use std::{sync::mpsc, thread, time::Duration};
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&database).unwrap();
+    let project = workspace.create_project("Project", "initial").unwrap();
+    let lock = rusqlite::Connection::open(&database).unwrap();
+    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+    lock.execute(
+        "UPDATE projects SET path = 'intermediate' WHERE id = ?1",
+        [&project.id],
+    )
+    .unwrap();
+    lock.execute(
+        "DELETE FROM project_checkouts WHERE project_id = ?1",
+        [&project.id],
+    )
+    .unwrap();
+    lock.execute(
+        "INSERT INTO project_checkouts (project_id, path) VALUES (?1, 'intermediate')",
+        [&project.id],
+    )
+    .unwrap();
+    let (started, receiver) = mpsc::channel();
+    let id = project.id.clone();
+    let worker = thread::spawn(move || {
+        let mut workspace = Workspace::open(database).unwrap();
+        started.send(()).unwrap();
+        workspace.edit_project(&id, "Project", "final").unwrap()
+    });
+    receiver.recv().unwrap();
+    // Give the worker time to reach the blocked SQLite write while the transaction is held.
+    thread::sleep(Duration::from_millis(100));
+    lock.execute_batch("COMMIT").unwrap();
+    let result = worker.join().unwrap();
+    assert_eq!(result.path, "final");
+    assert_eq!(result.paths, vec!["final"]);
+}

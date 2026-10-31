@@ -45,6 +45,13 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
 }
 
 #[tauri::command]
+fn show_ticket(reference: String) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|w| w.show_ticket(&reference))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
     Workspace::open_default()
         .and_then(|w| w.find_tickets(&filter))
@@ -241,6 +248,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_project,
             edit_project,
             list_tickets,
+            show_ticket,
             search_tickets,
             find_tickets,
             dependency_graph,

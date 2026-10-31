@@ -87,8 +87,9 @@ impl Workspace {
         let (name, path) = validate(name, path)?;
         let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
         let path = normalized.as_str();
-        let old = self.show_project(id)?;
         let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        let old = find(&tx, id)?;
         if tx.execute(
             "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
             params![name, path, id],

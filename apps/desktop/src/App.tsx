@@ -40,12 +40,14 @@ export function App() {
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, Ticket>>({});
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
+  const detailGeneration = useRef(0);
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     let timeout = 0;
@@ -116,6 +118,26 @@ export function App() {
       generationRef.current++;
     };
   }, [refresh]);
+  useEffect(() => {
+    if (!selected) return;
+    let active = true;
+    const request = ++detailGeneration.current;
+    void client.showTicket(selected).then(
+      (ticket) => {
+        if (active && request === detailGeneration.current)
+          setDetails((previous) => ({
+            ...previous,
+            [ticket.reference]: ticket,
+          }));
+      },
+      (reason: unknown) => {
+        if (active) setError(`Ticket refresh failed: ${String(reason)}`);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [selected, revision]);
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -126,7 +148,7 @@ export function App() {
       );
       setTitle("");
       await refresh();
-      setSelected(ticket.id);
+      setSelected(ticket.reference);
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -135,6 +157,8 @@ export function App() {
   }
   const updateTicket = useCallback((updated: Ticket) => {
     generation.current++;
+    detailGeneration.current++;
+    setDetails((items) => ({ ...items, [updated.reference]: updated }));
     setTickets((items) =>
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
@@ -183,6 +207,7 @@ export function App() {
               try {
                 setBackupMessage(await client.restoreWorkspace(backupPath));
                 setSelected(null);
+                setDetails({});
                 await refresh();
               } catch (reason) {
                 setBackupMessage(`Restore failed: ${String(reason)}`);
@@ -281,7 +306,6 @@ export function App() {
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setOffset(0);
-                  setSelected(null);
                 }}
                 className="rounded border border-neutral-400 bg-white p-2"
               />
@@ -390,8 +414,8 @@ export function App() {
                   <li key={item.id}>
                     <button
                       type="button"
-                      onClick={() => setSelected(item.id)}
-                      aria-pressed={item.id === selected}
+                      onClick={() => setSelected(item.reference)}
+                      aria-pressed={item.reference === selected}
                       className="w-full rounded p-3 text-left hover:bg-neutral-100 aria-pressed:bg-neutral-200"
                     >
                       <span className="mr-3 text-neutral-600">
@@ -423,7 +447,6 @@ export function App() {
                 disabled={offset === 0}
                 onClick={() => {
                   setOffset(Math.max(0, offset - 50));
-                  setSelected(null);
                 }}
               >
                 Previous
@@ -434,7 +457,6 @@ export function App() {
                 disabled={tickets.length < 50}
                 onClick={() => {
                   setOffset(offset + 50);
-                  setSelected(null);
                 }}
               >
                 Next
@@ -449,9 +471,9 @@ export function App() {
           {selected === null && (
             <p className="mt-3">Select a ticket to see its details.</p>
           )}
-          {tickets.map((item) => (
-            <div key={item.id} hidden={item.id !== selected}>
-              {item.id === selected && (
+          {Object.values(details).map((item) => (
+            <div key={item.id} hidden={item.reference !== selected}>
+              {item.reference === selected && (
                 <History
                   reference={item.reference}
                   projects={projects}
@@ -482,17 +504,12 @@ export function App() {
               {!item.trashed && (
                 <TicketEditor ticket={item} onSaved={updateTicket} />
               )}
-              {item.id === selected && !item.trashed && (
+              {item.reference === selected && !item.trashed && (
                 <>
                   <Hierarchy
                     ticket={item}
                     refresh={refresh}
-                    select={(reference) =>
-                      setSelected(
-                        tickets.find((ticket) => ticket.reference === reference)
-                          ?.id ?? null,
-                      )
-                    }
+                    select={setSelected}
                   />
                   <Dependencies ticket={item} refresh={refresh} />
                   <Suspense fallback={<p>Loading graph…</p>}>
@@ -500,17 +517,16 @@ export function App() {
                       key={item.reference}
                       reference={item.reference}
                       revision={revision}
-                      select={(id, trashed) => {
-                        setSelected(id);
+                      select={(reference, trashed) => {
+                        setSelected(reference);
                         setTrash(trashed);
                       }}
                     />
                   </Suspense>
-                  <Notes
-                    reference={item.reference}
-                    refreshRevision={revision}
-                  />
                 </>
+              )}
+              {!item.trashed && (
+                <Notes reference={item.reference} refreshRevision={revision} />
               )}
               {!item.trashed && (
                 <Tags

@@ -17,7 +17,7 @@ export default function DependencyGraph({
 }: {
   reference: string;
   revision: number;
-  select: (id: string, trashed: boolean) => void;
+  select: (reference: string, trashed: boolean) => void;
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [error, setError] = useState("");
@@ -82,7 +82,7 @@ export default function DependencyGraph({
             const ticket = graph.nodes.find(
               (item) => item.reference === node.id,
             );
-            if (ticket) select(ticket.id, ticket.trashed);
+            if (ticket) select(ticket.reference, ticket.trashed);
           }}
           fitView
           nodesDraggable={false}
@@ -98,7 +98,7 @@ export default function DependencyGraph({
             <button
               type="button"
               className="underline"
-              onClick={() => select(node.id, node.trashed)}
+              onClick={() => select(node.reference, node.trashed)}
             >
               {node.reference} {node.title} · {node.status}
               {node.trashed && " · Trashed"}

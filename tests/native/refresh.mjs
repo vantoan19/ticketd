@@ -123,7 +123,12 @@ try {
   const viewport = await browser.$(".react-flow__viewport");
   const beforePan = await viewport.getCSSProperty("transform");
   clock = Date.now();
-  await pane.moveTo();
+  const paneSize = await pane.getSize();
+  // The center can be covered by a graph node; start on empty pane background.
+  await pane.moveTo({
+    xOffset: -Math.floor(paneSize.width / 2) + 10,
+    yOffset: -Math.floor(paneSize.height / 2) + 10,
+  });
   await browser
     .action("pointer")
     .down()

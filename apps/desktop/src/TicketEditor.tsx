@@ -53,14 +53,8 @@ export function TicketEditor({
         .then((result) => {
           setSaved({ title: result.title, body: result.body });
           setDraft((current) => ({
-            title:
-              current.title === draft.title && patch.title !== undefined
-                ? result.title
-                : current.title,
-            body:
-              current.body === draft.body && patch.body !== undefined
-                ? result.body
-                : current.body,
+            title: current.title === draft.title ? result.title : current.title,
+            body: current.body === draft.body ? result.body : current.body,
           }));
           onSaved(result);
           setError("");

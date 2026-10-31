@@ -122,6 +122,9 @@ export const client = {
   async deleteNote(reference: string, id: string) {
     await invoke("delete_note", { reference, id });
   },
+  async showTicket(reference: string) {
+    return ticketSchema.parse(await invoke("show_ticket", { reference }));
+  },
   async findTickets(filter: FindFilter) {
     return z
       .array(ticketSchema)
