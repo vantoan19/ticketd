@@ -113,20 +113,54 @@ export function Projects({
       {editing && (
         <div>
           <h3>Registered checkouts</h3>
-          {projects.find((project) => project.id === editing)?.paths.map((registered) => (
-            <div key={registered}>
-              {registered}{" "}
-              <button type="button" onClick={() => void (async () => {
-                try { await client.removeCheckout(editing, registered); setError(""); await onChange(); }
-                catch (reason) { setError(String(reason)); }
-              })()}>Remove</button>
-            </div>
-          ))}
-          <label>Checkout path <input value={checkout} onChange={(event) => setCheckout(event.target.value)} className="border p-1" /></label>{" "}
-          <button type="button" onClick={() => void (async () => {
-            try { await client.registerCheckout(editing, checkout); setCheckout(""); setError(""); await onChange(); }
-            catch (reason) { setError(String(reason)); }
-          })()}>Register checkout</button>
+          {projects
+            .find((project) => project.id === editing)
+            ?.paths.map((registered) => (
+              <div key={registered}>
+                {registered}{" "}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        await client.removeCheckout(editing, registered);
+                        setError("");
+                        await onChange();
+                      } catch (reason) {
+                        setError(String(reason));
+                      }
+                    })()
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          <label>
+            Checkout path{" "}
+            <input
+              value={checkout}
+              onChange={(event) => setCheckout(event.target.value)}
+              className="border p-1"
+            />
+          </label>{" "}
+          <button
+            type="button"
+            onClick={() =>
+              void (async () => {
+                try {
+                  await client.registerCheckout(editing, checkout);
+                  setCheckout("");
+                  setError("");
+                  await onChange();
+                } catch (reason) {
+                  setError(String(reason));
+                }
+              })()
+            }
+          >
+            Register checkout
+          </button>
         </div>
       )}
       {error && <p role="alert">{error}</p>}
