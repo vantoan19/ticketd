@@ -25,6 +25,12 @@ pub enum Error {
     EmptyEffortName,
     #[error("effort '{0}' was not found")]
     EffortNotFound(String),
+    #[error(
+        "checkout matches multiple projects; specify --project explicitly or remove a registration"
+    )]
+    AmbiguousProject,
+    #[error("checkout path must be valid Unicode")]
+    InvalidCheckoutPath,
     #[error("project name and path must not be empty")]
     EmptyProject,
     #[error("project '{0}' was not found")]
@@ -104,7 +110,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 9 {
+        if version > 10 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -137,6 +143,10 @@ impl Workspace {
         if version < 9 {
             hierarchy::migrate(&transaction)?;
             transaction.pragma_update(None, "user_version", 9)?;
+        }
+        if version < 10 {
+            projects::migrate_checkouts(&transaction)?;
+            transaction.pragma_update(None, "user_version", 10)?;
         }
         transaction.commit()?;
         Ok(Self { connection })

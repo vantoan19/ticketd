@@ -20,6 +20,7 @@ const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  paths: z.array(z.string()),
 });
 export type Project = z.infer<typeof projectSchema>;
 const noteSchema = z.object({
@@ -61,6 +62,12 @@ export const client = {
   },
   async listTickets() {
     return z.array(ticketSchema).parse(await invoke("list_tickets"));
+  },
+  async registerCheckout(id: string, path: string) {
+    return projectSchema.parse(await invoke("register_checkout", { id, path }));
+  },
+  async removeCheckout(id: string, path: string) {
+    return projectSchema.parse(await invoke("remove_checkout", { id, path }));
   },
   async createTicket(title: string, projectId: string | null) {
     return ticketSchema.parse(
