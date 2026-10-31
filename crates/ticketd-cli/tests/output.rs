@@ -238,3 +238,30 @@ fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
     let saved = run(&["show", "T-3"], None);
     assert_eq!(saved["prerequisites"][0]["reference"], "T-2");
 }
+
+#[test]
+fn cli_schedules_and_dismisses_reminders() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    run(&["create", "Remember"]);
+    run(&["reminder", "set", "T-1", "2020-01-01T00:00:00Z"]);
+    assert!(run(&["reminder", "show", "T-1"]).contains("2020"));
+    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"])).unwrap();
+    assert_eq!(inbox[0]["kind"], "reminder");
+    run(&["reminder", "dismiss", "T-1"]);
+    assert!(run(&["reminder", "show", "T-1"]).contains("No reminder"));
+}

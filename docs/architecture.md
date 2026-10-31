@@ -111,6 +111,13 @@ For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived
 edges; a retained canceled prerequisite remains unresolved.
+Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
+`ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
+Set and snooze take an RFC 3339 instant with an explicit offset; show displays
+local time and UTC. The retryable `set_reminder` write takes `reference` and
+`due_at` (or null to dismiss). Reading the inbox atomically delivers due
+occurrences; reopening the inbox catches up after downtime without a daemon.
+
 Inbox entries for new notes retain the note ID and its original content in
 `from_value` and `to_value`; this snapshot remains meaningful after the note is
 edited or deleted. `editing_agent` is descriptive attribution. Relationship

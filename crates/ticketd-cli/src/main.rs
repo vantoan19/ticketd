@@ -13,7 +13,20 @@ struct Arguments {
 }
 
 #[derive(Subcommand)]
+enum ReminderCommand {
+    Show { reference: String },
+    Set { reference: String, due_at: String },
+    Snooze { reference: String, due_at: String },
+    Dismiss { reference: String },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Manage a personal ticket reminder (times require an RFC 3339 offset)
+    Reminder {
+        #[command(subcommand)]
+        command: ReminderCommand,
+    },
     /// List personal inbox entries (newest first)
     Inbox {
         #[arg(long, default_value_t = 100)]
@@ -417,6 +430,30 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut workspace = Workspace::open_default()?;
     let text = match args.command {
+        Command::Reminder { command } => match command {
+            ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
+                Some(value) => {
+                    let instant = chrono::DateTime::parse_from_rfc3339(&value)?;
+                    format!(
+                        "{} (UTC: {})",
+                        instant
+                            .with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M:%S %:z"),
+                        value
+                    )
+                }
+                None => "No reminder".into(),
+            },
+            ReminderCommand::Set { reference, due_at }
+            | ReminderCommand::Snooze { reference, due_at } => {
+                workspace.set_reminder(&reference, Some(&due_at))?;
+                "Reminder scheduled".into()
+            }
+            ReminderCommand::Dismiss { reference } => {
+                workspace.set_reminder(&reference, None)?;
+                "Reminder dismissed".into()
+            }
+        },
         Command::Inbox { limit, offset } => {
             serde_json::to_string(&workspace.inbox(limit, offset)?)?
         }

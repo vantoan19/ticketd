@@ -25,6 +25,10 @@ pub enum WriteRequest {
         reference: String,
         id: String,
     },
+    SetReminder {
+        reference: String,
+        due_at: Option<String>,
+    },
     SetFollowing {
         reference: String,
         following: bool,
@@ -225,6 +229,10 @@ impl Workspace {
             } => WriteResult::Evidence(self.edit_evidence(&reference, &id, input)?),
             WriteRequest::DeleteEvidence { reference, id } => {
                 self.delete_evidence(&reference, &id)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetReminder { reference, due_at } => {
+                self.set_reminder(&reference, due_at.as_deref())?;
                 WriteResult::Deleted
             }
             WriteRequest::SetFollowing {

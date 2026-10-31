@@ -1,3 +1,4 @@
+import { Reminder } from "@/features/tickets/Reminder";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Follow } from "@/features/tickets/Inbox";
 import { lazy, Suspense, useState } from "react";
@@ -87,7 +88,10 @@ export function TicketDetails({
           hidden={item.reference !== selected}
         >
           {item.reference === selected && (
-            <Follow reference={item.reference} revision={revision} />
+            <>
+              <Follow reference={item.reference} revision={revision} />
+              <Reminder reference={item.reference} revision={revision} />
+            </>
           )}
           {item.trashed ? (
             <>

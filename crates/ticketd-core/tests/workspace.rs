@@ -2422,3 +2422,44 @@ fn concurrent_new_edge_is_never_silently_replaced_by_duplicate_review() {
         );
     }
 }
+
+#[test]
+fn concurrent_inbox_reads_deliver_one_reminder_and_backup_restores_it() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Concurrent reminder").unwrap();
+    workspace
+        .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    workspace.backup(&backup).unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                let workspace = Workspace::open(path).unwrap();
+                barrier.wait();
+                workspace.inbox(100, 0).unwrap()
+            })
+        })
+        .collect();
+    for thread in threads {
+        assert_eq!(thread.join().unwrap().len(), 1);
+    }
+    assert_eq!(
+        workspace.export().unwrap()["ticket_reminders"][0]["person"],
+        "local-person"
+    );
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(path).unwrap();
+    assert_eq!(
+        workspace.reminder(&ticket.reference).unwrap().as_deref(),
+        Some("2020-01-01T00:00:00Z")
+    );
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+}
