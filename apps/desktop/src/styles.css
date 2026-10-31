@@ -627,12 +627,6 @@ select option {
   gap: 18px;
   margin-top: 20px;
 }
-.create-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--muted-foreground);
-}
 .create-form input {
   width: 100%;
 }
