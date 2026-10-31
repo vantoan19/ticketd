@@ -126,11 +126,11 @@ jobs:
           sudo apt-get install -y ./target/release/bundle/deb/*.deb
           package=$(dpkg-deb -f target/release/bundle/deb/*.deb Package)
           export XDG_DATA_HOME="$(mktemp -d)"
-          export TICKETD_SMOKE_CHECKOUT="$(mktemp -d)"
+          export TICKETD_SMOKE_CHECKOUT="$PWD"
           export TICKETD_SMOKE_CLI="$PWD/target/release/ticketd"
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
-          trap 'rm -rf "$XDG_DATA_HOME" "$TICKETD_SMOKE_CHECKOUT"' EXIT
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs'
+          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver" EXIT; node tests/native/install.mjs && XDG_DATA_HOME="$XDG_DATA_HOME/workflow" node tests/native/workflow.mjs'
           sudo apt-get remove -y "$package"
           "$TICKETD_SMOKE_CLI" list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
       - name: Assemble download
