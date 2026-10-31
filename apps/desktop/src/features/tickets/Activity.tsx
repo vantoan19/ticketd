@@ -39,6 +39,7 @@ export function Activity({
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState("");
   const [edit, setEdit] = useState<{
     id: string;
@@ -68,10 +69,11 @@ export function Activity({
       .then(([, entries]) => {
         if (current) {
           setHistory(entries);
+          setLoadError("");
         }
       })
       .catch((reason: unknown) => {
-        if (current) setError(String(reason));
+        if (current) setLoadError(String(reason));
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -161,16 +163,16 @@ export function Activity({
         <h3>Activity</h3>
         <span>Notes and recorded changes</span>
       </div>
-      {error && (
+      {(error || loadError) && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{error || loadError}</AlertDescription>
         </Alert>
       )}
       {loading && entries.length === 0 ? (
         <p className="activity-muted" role="status">
           Loading activity…
         </p>
-      ) : entries.length === 0 && !error ? (
+      ) : entries.length === 0 && !error && !loadError ? (
         <Empty className="activity-empty">
           <EmptyHeader>
             <EmptyDescription>
