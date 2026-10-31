@@ -207,6 +207,8 @@ enum Command {
     },
     /// View a bounded dependency graph around a ticket
     Graph { reference: String },
+    /// Print the workspace path and format version as JSON
+    Workspace,
     /// Show a ticket by its reference
     Show { reference: String },
 }
@@ -782,6 +784,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
 
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
+        }
+        Command::Workspace => {
+            let info = workspace.workspace_info()?;
+            serde_json::to_string(&serde_json::json!({
+                "path": info.path,
+                "format_version": info.format_version,
+            }))?
         }
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
     };

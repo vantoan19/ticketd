@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = [
   { id: "location", label: "Location", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },
+  { id: "command-line", label: "Command line", group: "Workspace" },
   { id: "keyboard-shortcuts", label: "Keyboard shortcuts", group: "Help" },
   { id: "about", label: "About", group: "Help" },
 ] as const satisfies readonly {

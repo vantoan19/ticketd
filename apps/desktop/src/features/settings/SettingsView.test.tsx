@@ -11,12 +11,22 @@ import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { loadPreferences } from "@/lib/preferences";
 import { workspaceClient } from "@/lib/api/workspace";
+import { client } from "@/lib/api/client";
 
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: {
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
+    lastBackup: vi.fn(),
+    chooseSavePath: vi.fn(),
+  },
+}));
+vi.mock("@/lib/api/client", () => ({
+  client: {
+    backupWorkspace: vi.fn(),
+    exportWorkspace: vi.fn(),
+    restoreWorkspace: vi.fn(),
   },
 }));
 
@@ -26,13 +36,15 @@ const info = {
   projects: 3,
   active_efforts: 2,
   size_bytes: 2_621_440,
-  format_version: 19,
+  format_version: 20,
 };
 
 beforeEach(() => {
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
+  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -69,6 +81,7 @@ test("the section list only offers sections that have cards", () => {
     "Location",
     "Backups",
     "Export",
+    "Command line",
     "Keyboard shortcuts",
     "About",
   ]);
@@ -86,7 +99,7 @@ test("the Location card shows the path, counts, size, and format version", async
   expect(text).toContain("Projects3");
   expect(text).toContain("Active Efforts2");
   expect(text).toContain("File size2.5 MB");
-  expect(text).toContain("Format version19");
+  expect(text).toContain("Format version20");
 });
 
 test("Copy path puts the workspace path on the clipboard", async () => {
@@ -125,4 +138,99 @@ test("the About links open Documentation and the issue tracker", async () => {
   );
   const urls = vi.mocked(workspaceClient.openLink).mock.calls.map(([u]) => u);
   expect(urls.every((url) => url.startsWith("https://"))).toBe(true);
+});
+
+const lastBackup = {
+  path: "/Users/me/Backups/ticketd-backup-2026-11-01.sqlite3",
+  completed_at: "2026-11-01T09:30:00.000Z",
+};
+
+test("Back up now saves to the chosen file and shows it as the checked last backup", async () => {
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(lastBackup.path);
+  vi.mocked(client.backupWorkspace).mockImplementation(async () => {
+    vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
+    return "saved";
+  });
+  render(<SettingsView hidden={false} onRestore={async () => {}} />);
+  expect(screen.queryByLabelText(/Backup file path/)).toBeNull();
+  expect(screen.getByText("No backup has been made yet.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
+  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
+    lastBackup.path,
+  );
+  expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
+    expect.objectContaining({
+      defaultPath: expect.stringMatching(
+        /^ticketd-backup-\d{4}-\d{2}-\d{2}\.sqlite3$/,
+      ),
+    }),
+  );
+  expect(client.backupWorkspace).toHaveBeenCalledWith(lastBackup.path);
+  expect(
+    screen.getByRole("group", { name: "Last backup" }).textContent,
+  ).toContain("Checked");
+});
+
+test("the last backup, including one made with the CLI, shows on load and can be revealed", async () => {
+  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
+  render(<SettingsView hidden={false} onRestore={async () => {}} />);
+  expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
+    lastBackup.path,
+  );
+  const group = screen.getByRole("group", { name: "Last backup" });
+  fireEvent.click(group.querySelector("button") as HTMLButtonElement);
+  await waitFor(() =>
+    expect(workspaceClient.reveal).toHaveBeenCalledWith(lastBackup.path),
+  );
+});
+
+test("a refused backup explains itself and keeps the previous status", async () => {
+  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(lastBackup);
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(
+    "/tmp/taken.sqlite3",
+  );
+  vi.mocked(client.backupWorkspace).mockRejectedValue(new Error("File exists"));
+  render(<SettingsView hidden={false} onRestore={async () => {}} />);
+  await screen.findByLabelText("Last backup path");
+  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
+  const alert = await screen.findByText(/The backup was not saved/);
+  expect(alert.textContent).toContain("File exists");
+  expect(screen.getByLabelText("Last backup path").textContent).toBe(
+    lastBackup.path,
+  );
+});
+
+test("cancelling a save dialog changes nothing and shows no error", async () => {
+  render(<SettingsView hidden={false} onRestore={async () => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
+  await waitFor(() =>
+    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  await waitFor(() =>
+    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(2),
+  );
+  expect(client.backupWorkspace).not.toHaveBeenCalled();
+  expect(client.exportWorkspace).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("Export… writes to the chosen file and Copy puts the CLI command on the clipboard", async () => {
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue("/tmp/out.json");
+  vi.mocked(client.exportWorkspace).mockResolvedValue(undefined);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  render(<SettingsView hidden={false} onRestore={async () => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  expect(
+    await screen.findByText("Export saved to /tmp/out.json."),
+  ).toBeTruthy();
+  expect(client.exportWorkspace).toHaveBeenCalledWith("/tmp/out.json");
+  fireEvent.click(screen.getByRole("button", { name: "Copy export command" }));
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith("ticketd export --file PATH"),
+  );
 });

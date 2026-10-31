@@ -2,7 +2,7 @@ import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { Evidence } from "@/features/tickets/Evidence";
 import { lazy, Suspense, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
-import { Backlinks } from "@/features/tickets/Backlinks";
+import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
 import { LinkedWork } from "@/features/tickets/LinkedWork";
@@ -42,6 +42,9 @@ export function TicketDetails({
   const [graphReference, setGraphReference] = useState<string | null>(null);
   // The graph belongs to the ticket it opened from; selecting another closes it.
   const graphOpen = graphReference !== null && graphReference === selected;
+  const [mention, setMention] = useState<
+    (MentionTarget & { key: number }) | null
+  >(null);
   const ticket = Object.values(details).find(
     (item) => item.reference === selected,
   );
@@ -151,15 +154,28 @@ export function TicketDetails({
             <Backlinks
               reference={item.reference}
               revision={revision}
-              select={setSelected}
+              select={(target) => {
+                setMention({ ...target, key: Date.now() });
+                setSelected(target.reference);
+              }}
             />
           )}
           <Activity
             reference={item.reference}
             target={
-              inboxTarget?.reference === item.reference ? inboxTarget : null
+              inboxTarget?.reference === item.reference
+                ? inboxTarget
+                : mention?.reference === item.reference && mention.noteId
+                  ? { id: mention.noteId, key: mention.key }
+                  : null
+            }
+            mention={
+              mention?.reference === item.reference && !mention.noteId
+                ? mention
+                : null
             }
             projects={projects}
+            efforts={efforts}
             status={item.status}
             revision={revision}
             active={item.reference === selected}

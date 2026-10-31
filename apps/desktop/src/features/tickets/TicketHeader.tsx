@@ -67,7 +67,6 @@ export function TicketHeader({
   onReturn,
   onClose,
   onOpenGraph,
-  select,
   refresh,
   updateTicket,
 }: {
@@ -85,6 +84,7 @@ export function TicketHeader({
 }) {
   const { copied, error: copyError, copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const actionsTrigger = useRef<HTMLButtonElement>(null);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
   async function setTrashed(value: boolean) {
@@ -158,6 +158,7 @@ export function TicketHeader({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
+                ref={actionsTrigger}
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Ticket actions"
@@ -255,7 +256,13 @@ export function TicketHeader({
       )}
       {ticket && (
         <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
-          <DialogContent className="duplicate-dialog">
+          <DialogContent
+            className="duplicate-dialog"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              actionsTrigger.current?.focus();
+            }}
+          >
             <DialogHeader>
               <DialogTitle>Mark as duplicate</DialogTitle>
               <DialogDescription>
@@ -266,11 +273,8 @@ export function TicketHeader({
             <Duplicates
               ticket={ticket}
               refresh={refresh}
-              select={(reference) => {
-                setDuplicateOpen(false);
-                select(reference);
-              }}
               onDone={() => setDuplicateOpen(false)}
+              onCancel={() => setDuplicateOpen(false)}
             />
           </DialogContent>
         </Dialog>

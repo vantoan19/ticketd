@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { DialogFooter } from "@/components/ui/dialog";
 import {
   Field,
   FieldError,
@@ -7,228 +8,357 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import {
+  applyLabel,
+  choiceLabels,
+  consequence,
+  replacementIssueReason,
+  summarize,
+  type Choice,
+} from "@/features/tickets/duplicate-review";
 import {
   client,
   type Ticket,
   type DuplicatePreview,
   type DependencyDecision,
 } from "@/lib/api/client";
+import "./duplicate-review.css";
 
+type Unchosen = Choice | "";
+
+function TicketSummary({
+  label,
+  ticket,
+  note,
+}: {
+  label: string;
+  ticket: Pick<Ticket, "reference" | "title" | "status">;
+  note: string;
+}) {
+  return (
+    <div className="duplicate-ticket" role="group" aria-label={label}>
+      <span className="duplicate-ticket-label">{label}</span>
+      <span className="duplicate-ticket-title">
+        <span className="duplicate-ticket-reference">{ticket.reference}</span>{" "}
+        {ticket.title}
+      </span>
+      <span className="duplicate-ticket-status">
+        <StatusIcon status={ticket.status} size={14} decorative />
+        {note}
+      </span>
+    </div>
+  );
+}
+
+/** The review that marks a ticket as a duplicate and decides each affected dependency. */
 export function Duplicates({
   ticket,
   refresh,
-  select,
   onDone,
+  onCancel,
 }: {
   ticket: Ticket;
   refresh: () => Promise<void>;
-  select: (reference: string) => void;
-  /** Called after a duplicate designation or dependency change is saved. */
+  /** Called after the duplicate and its dependency changes are saved. */
   onDone?: () => void;
+  onCancel?: () => void;
 }) {
-  const [editingGraph, setEditingGraph] = useState(false);
-  const [existingEndpoint, setExistingEndpoint] = useState("");
+  const canonicalInput = useRef<HTMLInputElement>(null);
   const [canonical, setCanonical] = useState("");
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
-  const [choices, setChoices] = useState<string[]>([]);
+  const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
+  const [choices, setChoices] = useState<Unchosen[]>([]);
   const [error, setError] = useState("");
+  const [stale, setStale] = useState(false);
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  async function save(target: string | null) {
-    const key =
-      target === null
-        ? "remove"
-        : JSON.stringify({
-            target,
-            preview,
-            choices,
-            editingGraph,
-            existingEndpoint,
-          });
+  const [separate, setSeparate] = useState(false);
+  const target = canonical.trim();
+  // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
+  const sourceRef = separate ? target : ticket.reference;
+
+  async function loadPreview() {
+    setPending(true);
+    setError("");
+    setStale(false);
+    try {
+      const result = await client.previewDuplicate(
+        sourceRef,
+        separate ? ticket.reference : target,
+      );
+      const resolved = separate
+        ? null
+        : await client.showTicket(result.canonical);
+      setPreview(result);
+      setCanonicalTicket(resolved);
+      setChoices(result.edges.map(() => ""));
+    } catch (reason) {
+      setPreview(null);
+      setError(String(reason));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void loadPreview();
+  }
+
+  function changeCanonical(nextSeparate = separate) {
+    setSeparate(nextSeparate);
+    setPreview(null);
+    setCanonicalTicket(null);
+    setChoices([]);
+    setError("");
+    setStale(false);
+    setTimeout(() => canonicalInput.current?.focus());
+  }
+
+  async function apply() {
+    if (!preview) return;
+    const key = JSON.stringify({ target, preview, choices, separate });
     const id = attempt?.key === key ? attempt.id : crypto.randomUUID();
     setAttempt({ key, id });
     setPending(true);
     setError("");
     try {
-      if (target === null) await client.removeDuplicate(ticket.reference, id);
-      else if (preview) {
-        const decisions: DependencyDecision[] = preview.edges.map(
-          (edge, index) => ({
-            edge,
-            choice: choices[index] as DependencyDecision["choice"],
-          }),
+      const decisions: DependencyDecision[] = preview.edges.map(
+        (edge, index) => ({ edge, choice: choices[index] as Choice }),
+      );
+      if (separate)
+        await client.editDependenciesReviewed(
+          target,
+          ticket.reference,
+          preview.canonical,
+          decisions,
+          id,
         );
-        if (editingGraph)
-          await client.editDependenciesReviewed(
-            existingEndpoint.trim(),
-            ticket.reference,
-            preview.canonical,
-            decisions,
-            id,
-          );
-        else
-          await client.markDuplicateReviewed(
-            ticket.reference,
-            target,
-            preview.canonical,
-            decisions,
-            id,
-          );
-      }
+      else
+        await client.markDuplicateReviewed(
+          ticket.reference,
+          target,
+          preview.canonical,
+          decisions,
+          id,
+        );
       setAttempt(null);
-      setCanonical("");
-      setPreview(null);
-      setChoices([]);
       await refresh();
       onDone?.();
     } catch (reason) {
-      setError(String(reason));
-      if (String(reason).includes("review has changed") && target !== null) {
-        setPreview(null);
-        setChoices([]);
-        try {
-          const updated = await client.previewDuplicate(
-            editingGraph ? existingEndpoint.trim() : ticket.reference,
-            editingGraph ? ticket.reference : target,
-          );
-          setPreview(updated);
-          setChoices(updated.edges.map(() => ""));
-          setError(
-            "Dependencies changed. Review the updated relationships and choose again.",
-          );
-        } catch (previewError) {
-          setError(String(previewError));
-        }
-      }
+      if (String(reason).includes("review has changed")) setStale(true);
+      else setError(String(reason));
     } finally {
       setPending(false);
     }
   }
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setError("");
-    void client
-      .previewDuplicate(
-        editingGraph ? existingEndpoint.trim() : ticket.reference,
-        editingGraph ? ticket.reference : canonical.trim(),
-      )
-      .then((result) => {
-        setPreview(result);
-        setChoices(result.edges.map(() => ""));
-      })
-      .catch((reason: unknown) => setError(String(reason)))
-      .finally(() => setPending(false));
-  }
+
+  const complete = !!preview && choices.every((choice) => choice);
   return (
-    <section className="relationship-section" aria-label="Duplicates">
-      <h3>Duplicates</h3>
+    <div className="duplicate-review" aria-label="Duplicate review">
       {ticket.duplicate_of && (
-        <p>
-          Duplicate of{" "}
-          <Button variant="link" onClick={() => select(ticket.duplicate_of!)}>
-            {ticket.duplicate_of}
-          </Button>{" "}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={() => void save(null)}
-          >
-            Remove duplicate designation
-          </Button>
+        <p className="duplicate-note">
+          {ticket.reference} is already a duplicate of {ticket.duplicate_of}.
+          Marking it again changes the canonical ticket.
         </p>
       )}
-      {(ticket.duplicates ?? []).map((reference) => (
-        <p key={reference}>
-          Duplicate:{" "}
-          <Button variant="link" onClick={() => select(reference)}>
-            {reference}
-          </Button>
-        </p>
-      ))}
-      <Button
-        type="button"
-        variant="outline"
-        onClick={() => {
-          setEditingGraph(!editingGraph);
-          setPreview(null);
-          setError("");
-        }}
-      >
-        {editingGraph
-          ? "Mark a duplicate"
-          : "Review separate dependency changes"}
-      </Button>
-      <form onSubmit={submit} className="relationship-form">
-        <FieldGroup>
-          <Field data-invalid={!!error}>
-            <FieldLabel htmlFor={`canonical-${ticket.id}`}>
-              {editingGraph
-                ? "Existing endpoint to replace"
-                : "Canonical ticket reference"}
-            </FieldLabel>
-            <div className="relationship-input">
-              <Input
-                id={`canonical-${ticket.id}`}
-                value={editingGraph ? existingEndpoint : canonical}
-                onChange={(event) => {
-                  if (editingGraph) setExistingEndpoint(event.target.value);
-                  else setCanonical(event.target.value);
-                  setPreview(null);
-                }}
-                required
-                aria-invalid={!!error}
+      {preview && (canonicalTicket || separate) ? (
+        <>
+          {separate && (
+            <p className="duplicate-note">
+              Replace {target} with {ticket.reference} in each dependency below.
+            </p>
+          )}
+          {canonicalTicket && (
+            <div className="duplicate-tickets">
+              <TicketSummary
+                label="Duplicate"
+                ticket={ticket}
+                note={`Canceled · Duplicate of ${preview.canonical}`}
               />
-              <Button type="submit" variant="outline" disabled={pending}>
-                Preview dependencies
+              <TicketSummary
+                label="Canonical ticket"
+                ticket={canonicalTicket}
+                note="Unchanged"
+              />
+            </div>
+          )}
+          <div>
+            <Button
+              type="button"
+              variant="link"
+              className="duplicate-change"
+              disabled={pending}
+              onClick={() => changeCanonical()}
+            >
+              {separate
+                ? "Change existing endpoint"
+                : "Change canonical ticket"}
+            </Button>
+            {!separate && preview.canonical !== target && (
+              <p className="duplicate-note">
+                {target} is itself a duplicate, so {ticket.reference} points to{" "}
+                {preview.canonical}.
+              </p>
+            )}
+          </div>
+          {preview.edges.length > 0 ? (
+            <section
+              aria-label="Affected dependencies"
+              className="dependencies"
+            >
+              <h3>Affected dependencies</h3>
+              <p className="duplicate-note">
+                A canceled ticket never satisfies a blocking dependency, so each
+                of these needs a decision.
+              </p>
+              <ul>
+                {preview.edges.map((edge, index) => {
+                  const issue = preview.replacement_issues[index] ?? null;
+                  const reason = issue
+                    ? `Replace unavailable: ${replacementIssueReason(edge, issue)}`
+                    : "";
+                  const name = `${edge.blocker} blocks ${edge.dependent}`;
+                  const choice = choices[index] ?? "";
+                  return (
+                    <li key={name} className="dependency-edge">
+                      <div className="dependency-edges">
+                        <span>
+                          <span className="dependency-edge-label">Current</span>{" "}
+                          {name}
+                        </span>
+                        <span>
+                          <span className="dependency-edge-label">
+                            Proposed
+                          </span>{" "}
+                          {edge.replacement_blocker} blocks{" "}
+                          {edge.replacement_dependent}
+                        </span>
+                      </div>
+                      <SegmentedControl<Unchosen>
+                        aria-label={`Choice for ${name}`}
+                        value={choice}
+                        onValueChange={(next) =>
+                          setChoices((current) =>
+                            current.map((value, i) =>
+                              i === index ? next : value,
+                            ),
+                          )
+                        }
+                        options={(["replace", "remove", "retain"] as const).map(
+                          (value) => ({
+                            value,
+                            label: choiceLabels[value],
+                            disabled: value === "replace" && !!issue,
+                            ...(value === "replace" && reason
+                              ? { title: reason }
+                              : {}),
+                          }),
+                        )}
+                      />
+                      {reason && <p className="dependency-reason">{reason}.</p>}
+                      <p className="dependency-consequence">
+                        {choice
+                          ? consequence(sourceRef, edge, choice)
+                          : "Choose what happens to this dependency."}
+                      </p>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : (
+            <p className="duplicate-note">
+              {sourceRef} has no dependencies to review.
+            </p>
+          )}
+          <p className="duplicate-summary">
+            {separate
+              ? "All of the chosen changes are applied together or not at all."
+              : summarize(ticket.reference, preview.canonical, choices)}
+          </p>
+          {!separate && (
+            <p className="duplicate-note">
+              Removing the duplicate link later restores the earlier status.
+              Dependency changes are reviewed separately then.
+            </p>
+          )}
+          {stale && (
+            <div role="alert" className="duplicate-stale">
+              <p>
+                Dependencies changed after this preview, so nothing was applied.
+                Refresh the preview to review the current dependencies.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => void loadPreview()}
+              >
+                Refresh preview
               </Button>
             </div>
-            <FieldError>{error}</FieldError>
-          </Field>
-        </FieldGroup>
-      </form>
-      {preview && (
-        <div>
-          <p>Canonical ticket: {preview.canonical}</p>
-          {preview.edges.map((edge, index) => (
-            <p key={`${edge.blocker}-${edge.dependent}`}>
-              {edge.blocker} blocks {edge.dependent}. Replacement:{" "}
-              {edge.replacement_blocker} blocks {edge.replacement_dependent}.
-              <label>
-                Choice for {edge.blocker} blocks {edge.dependent}
-                <select
-                  value={choices[index] ?? ""}
-                  onChange={(event) =>
-                    setChoices((current) =>
-                      current.map((choice, i) =>
-                        i === index ? event.target.value : choice,
-                      ),
-                    )
-                  }
-                >
-                  <option value="">Choose</option>
-                  <option value="replace">Replace</option>
-                  <option value="remove">Remove</option>
-                  <option value="retain">
-                    Retain (a canceled blocker remains unresolved)
-                  </option>
-                </select>
-              </label>
+          )}
+          {error && (
+            <p role="alert" className="duplicate-error">
+              {error}
             </p>
-          ))}
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending || stale || !complete}
+              onClick={() => void apply()}
+            >
+              {separate ? "Apply dependency changes" : applyLabel(choices)}
+            </Button>
+          </DialogFooter>
+        </>
+      ) : (
+        <form onSubmit={submit} className="relationship-form">
+          <FieldGroup>
+            <Field data-invalid={!!error}>
+              <FieldLabel htmlFor={`canonical-${ticket.id}`}>
+                {separate
+                  ? "Existing endpoint to replace"
+                  : "Canonical ticket reference"}
+              </FieldLabel>
+              <div className="relationship-input">
+                <Input
+                  ref={canonicalInput}
+                  id={`canonical-${ticket.id}`}
+                  value={canonical}
+                  onChange={(event) => setCanonical(event.target.value)}
+                  placeholder="T-1"
+                  required
+                  aria-invalid={!!error}
+                />
+                <Button type="submit" variant="outline" disabled={pending}>
+                  Review dependencies
+                </Button>
+              </div>
+              <FieldError>{error}</FieldError>
+            </Field>
+          </FieldGroup>
           <Button
-            disabled={pending || choices.some((choice) => !choice)}
-            onClick={() =>
-              void save(editingGraph ? ticket.reference : canonical.trim())
-            }
+            type="button"
+            variant="link"
+            className="duplicate-change"
+            onClick={() => changeCanonical(!separate)}
           >
-            {editingGraph ? "Apply dependency changes" : "Mark duplicate"}
+            {separate
+              ? "Mark a duplicate"
+              : "Review separate dependency changes"}
           </Button>
-        </div>
+        </form>
       )}
-    </section>
+    </div>
   );
 }

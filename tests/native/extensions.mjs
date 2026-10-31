@@ -250,9 +250,10 @@ try {
       ).getValue()) === target.title,
     "Inline reference did not navigate",
   );
-  await disclosure("Backlinks");
   await (
-    await (await detail()).$(`p*=See ${target.reference} for context.`)
+    await (
+      await (await detail()).$('section[aria-label="Mentioned in"]')
+    ).$("span*=for context.")
   ).waitForDisplayed({ timeout: 10000 });
   await click(
     await (
@@ -281,9 +282,12 @@ try {
     await detail()
   ).$('section[aria-label="Implementation evidence"]');
   await click(await evidence.$("button=Add evidence"));
-  await (await evidence.$("input[required]")).setValue("Native check");
-  await (await evidence.$("textarea")).setValue("https://example.com/pull/1");
-  await click(await evidence.$("button=Add evidence"));
+  const evidenceForm = await browser.$('[role="dialog"]');
+  await (await evidenceForm.$("input[required]")).setValue("Native check");
+  await (
+    await evidenceForm.$("textarea")
+  ).setValue("https://example.com/pull/1");
+  await click(await evidenceForm.$("button=Add evidence"));
   await waitFor(
     () =>
       run("evidence", "list", target.reference).some(
@@ -362,14 +366,16 @@ try {
   await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
   await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
   let section = await browser.$(
-    '[role="dialog"] section[aria-label="Duplicates"]',
+    '[role="dialog"] [aria-label="Duplicate review"]',
   );
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
-  await click(await section.$("button=Preview dependencies"));
-  const choice = await section.$("select");
+  await click(await section.$("button=Review dependencies"));
+  const choice = await section.$(
+    '[role="radiogroup"] [role="radio"][value="replace"]',
+  );
   await choice.waitForDisplayed({ timeout: 10000 });
-  await choice.selectByVisibleText("Replace");
-  await click(await section.$("button=Mark duplicate"));
+  await click(choice);
+  await click(await section.$("button=Mark duplicate and apply 1 change"));
   await waitFor(
     () => run("show", source.reference).duplicate_of === target.reference,
     "Duplicate was not marked",
@@ -396,13 +402,15 @@ try {
   );
   await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
   await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
-  section = await browser.$('[role="dialog"] section[aria-label="Duplicates"]');
+  section = await browser.$('[role="dialog"] [aria-label="Duplicate review"]');
   await click(await section.$("button=Review separate dependency changes"));
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
-  await click(await section.$("button=Preview dependencies"));
-  const separateChoice = await section.$("select");
+  await click(await section.$("button=Review dependencies"));
+  const separateChoice = await section.$(
+    '[role="radiogroup"] [role="radio"][value="replace"]',
+  );
   await separateChoice.waitForDisplayed({ timeout: 10000 });
-  await separateChoice.selectByVisibleText("Replace");
+  await click(separateChoice);
   await click(await section.$("button=Apply dependency changes"));
   await waitFor(
     () =>

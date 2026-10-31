@@ -1,8 +1,10 @@
 //! Desktop adapter for the shared ticketd core.
+mod cli_status;
+
 use ticketd_core::{
-    BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput, HistoryEntry,
-    InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket, TicketChange,
-    TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput,
+    HistoryEntry, InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket,
+    TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -629,6 +631,12 @@ fn backup_workspace(path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn last_backup() -> Result<Option<BackupRecord>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.last_backup())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn workspace_info() -> Result<WorkspaceInfo, String> {
     Workspace::open_default()
         .and_then(|w| w.workspace_info())
@@ -644,8 +652,10 @@ fn restore_workspace(path: String) -> Result<String, String> {
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
+            last_backup,
             workspace_info,
             restore_workspace,
             export_workspace,
@@ -654,6 +664,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_effort,
             change_effort,
             set_effort,
+            cli_status::check_cli,
             list_projects,
             register_checkout,
             remove_checkout,
