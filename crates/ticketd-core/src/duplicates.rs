@@ -21,10 +21,21 @@ pub struct DependencyDecision {
     pub edge: DependencyEdge,
     pub choice: DependencyChoice,
 }
+/// Why replacing an edge's duplicate endpoint with the canonical ticket is not possible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplacementIssue {
+    AlreadyExists,
+    SelfBlock,
+    Cycle,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DuplicateDependencyPreview {
     pub canonical: String,
     pub edges: Vec<DependencyEdge>,
+    /// Parallel to `edges`: the reason Replace is invalid for that edge, if any.
+    #[serde(default)]
+    pub replacement_issues: Vec<Option<ReplacementIssue>>,
 }
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
@@ -186,10 +197,40 @@ impl Workspace {
                 "dependency review exceeds 1000 edges".into(),
             ));
         }
+        let replacement_issues = edges
+            .iter()
+            .map(|edge| self.replacement_issue(edge))
+            .collect::<Result<_, _>>()?;
         Ok(DuplicateDependencyPreview {
             canonical: destination,
             edges,
+            replacement_issues,
         })
+    }
+
+    /// Judges the replacement against the graph without the edge it would replace.
+    fn replacement_issue(&self, edge: &DependencyEdge) -> Result<Option<ReplacementIssue>, Error> {
+        if edge.replacement_blocker == edge.replacement_dependent {
+            return Ok(Some(ReplacementIssue::SelfBlock));
+        }
+        let blocker = relationships::id(&self.connection, &edge.replacement_blocker)?;
+        let dependent = relationships::id(&self.connection, &edge.replacement_dependent)?;
+        let exists: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2)",
+            params![blocker, dependent],
+            |r| r.get(0),
+        )?;
+        if exists {
+            return Ok(Some(ReplacementIssue::AlreadyExists));
+        }
+        let original_blocker = relationships::id(&self.connection, &edge.blocker)?;
+        let original_dependent = relationships::id(&self.connection, &edge.dependent)?;
+        let cycle: bool = self.connection.query_row(
+            "WITH RECURSIVE reachable(id) AS (SELECT dependent_id FROM dependencies WHERE blocker_id = ?1 AND NOT (blocker_id = ?3 AND dependent_id = ?4) UNION SELECT d.dependent_id FROM dependencies d JOIN reachable ON d.blocker_id = reachable.id WHERE NOT (d.blocker_id = ?3 AND d.dependent_id = ?4)) SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2)",
+            params![dependent, blocker, original_blocker, original_dependent],
+            |r| r.get(0),
+        )?;
+        Ok(cycle.then_some(ReplacementIssue::Cycle))
     }
 
     pub fn mark_duplicate_reviewed(
