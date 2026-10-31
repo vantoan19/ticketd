@@ -127,15 +127,14 @@ try {
   );
   console.log(`Editor opening: ${Date.now() - clock} ms`);
   await (await (await detail()).$("button=Graph")).click();
+  const graphView = await browser.$('section[aria-label="Dependency graph"]');
   await browser.waitUntil(
-    async () =>
-      (await (await detail()).$$("[aria-label='Graph tickets'] li")).length ===
-      50,
+    async () => (await graphView.$$(".react-flow__node")).length === 50,
     { timeout: 15000 },
   );
   console.log(`50-node graph loading and layout: ${Date.now() - clock} ms`);
-  const pane = await (await detail()).$(".react-flow__pane");
-  const viewport = await (await detail()).$(".react-flow__viewport");
+  const pane = await graphView.$(".react-flow__pane");
+  const viewport = await graphView.$(".react-flow__viewport");
   const beforePan = await viewport.getCSSProperty("transform");
   clock = Date.now();
   await pane.scrollIntoView({ block: "center", inline: "center" });

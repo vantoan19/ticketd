@@ -1,27 +1,299 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
-  Controls,
+  Handle,
   MarkerType,
+  Panel,
   Position,
+  useReactFlow,
+  useStore,
+  type Edge,
+  type Node,
+  type NodeProps,
 } from "@xyflow/react";
-import dagre from "@dagrejs/dagre";
+import { ArrowLeft, Maximize, Minus, Plus } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { client, type DependencyGraph as Graph } from "@/lib/api/client";
+import { StatusDot } from "@/components/ui/status-dot";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import {
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  layoutGraph,
+  neighbours,
+  scopeNotice,
+  type GraphTicket,
+} from "@/features/tickets/dependency-graph-model";
+import {
+  client,
+  type DependencyGraph as Graph,
+  type Project,
+  type Ticket,
+} from "@/lib/api/client";
+import type { Effort } from "@/lib/api/efforts";
+import "./dependency-graph.css";
 
+type NodeData = {
+  ticket: GraphTicket;
+  origin: boolean;
+  selected: boolean;
+  onSelect: (reference: string) => void;
+};
+
+function AvailabilityMark({ availability }: { availability: string | null }) {
+  if (availability !== "Ready" && availability !== "Blocked") return null;
+  return (
+    <span className="graph-availability">
+      <StatusDot tone={availability === "Ready" ? "ready" : "blocked"} />
+      {availability}
+    </span>
+  );
+}
+
+function TicketNode({ data }: NodeProps<Node<NodeData>>) {
+  const { ticket, origin, selected, onSelect } = data;
+  return (
+    <>
+      <Handle type="target" position={Position.Top} isConnectable={false} />
+      <button
+        type="button"
+        className="graph-node"
+        data-selected={selected || undefined}
+        data-origin={origin || undefined}
+        aria-pressed={selected}
+        onClick={() => onSelect(ticket.reference)}
+      >
+        <span className="graph-node-line">
+          <StatusIcon status={ticket.status} size={14} decorative />
+          <span className="graph-node-reference">{ticket.reference}</span>{" "}
+          <span className="graph-node-status">{ticket.status}</span>{" "}
+          {ticket.trashed && <span className="graph-node-status">Trashed</span>}{" "}
+          {origin && <span className="graph-node-origin">Opened from</span>}
+        </span>{" "}
+        <span className="graph-node-title">{ticket.title}</span>{" "}
+        <AvailabilityMark availability={ticket.availability} />
+      </button>
+      <Handle type="source" position={Position.Bottom} isConnectable={false} />
+    </>
+  );
+}
+const nodeTypes = { ticket: TicketNode };
+
+function Toolbar() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const zoom = useStore((state) => state.transform[2]);
+  return (
+    <Panel position="top-left" className="graph-toolbar">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Zoom out"
+        onClick={() => void zoomOut()}
+      >
+        <Minus />
+      </Button>
+      <span className="graph-zoom" role="status" aria-label="Zoom level">
+        {Math.round(zoom * 100)}%
+      </span>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Zoom in"
+        onClick={() => void zoomIn()}
+      >
+        <Plus />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void fitView({ padding: 0.2 })}
+      >
+        <Maximize aria-hidden="true" />
+        Fit
+      </Button>
+    </Panel>
+  );
+}
+
+function Canvas({
+  graph,
+  origin,
+  selected,
+  onSelect,
+}: {
+  graph: Graph;
+  origin: string;
+  selected: string | null;
+  onSelect: (reference: string) => void;
+}) {
+  const positions = useMemo(() => layoutGraph(graph), [graph]);
+  const nodes: Node<NodeData>[] = graph.nodes.map((ticket) => ({
+    id: ticket.reference,
+    type: "ticket",
+    position: positions.get(ticket.reference) ?? { x: 0, y: 0 },
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT,
+    data: {
+      ticket,
+      origin: ticket.reference === origin,
+      selected: ticket.reference === selected,
+      onSelect,
+    },
+  }));
+  const edges: Edge[] = graph.edges.map((edge) => ({
+    id: `${edge.blocker}-${edge.dependent}`,
+    source: edge.blocker,
+    target: edge.dependent,
+    type: "smoothstep",
+    markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+  }));
+  return (
+    <ReactFlowProvider>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.2}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        nodesFocusable={false}
+        edgesFocusable={false}
+        elementsSelectable={false}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background />
+        <Toolbar />
+      </ReactFlow>
+    </ReactFlowProvider>
+  );
+}
+
+function Legend() {
+  return (
+    <ul className="graph-legend" aria-label="Legend">
+      <li>Arrows point to the work that waits.</li>
+      <li>A ticket is Ready once every ticket above it is Done.</li>
+      <li>In review and Canceled tickets still block.</li>
+      <li>
+        <StatusDot tone="ready" /> Ready
+      </li>
+      <li>
+        <StatusDot tone="blocked" /> Blocked
+      </li>
+    </ul>
+  );
+}
+
+function TicketList({ tickets }: { tickets: GraphTicket[] }) {
+  if (!tickets.length) return <p className="graph-none">None</p>;
+  return (
+    <ul>
+      {tickets.map((ticket) => (
+        <li key={ticket.reference}>
+          <span className="graph-node-reference">{ticket.reference}</span>{" "}
+          {ticket.title}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SelectionPanel({
+  graph,
+  ticket,
+  origin,
+  projects,
+  efforts,
+  onOpen,
+  onBack,
+}: {
+  graph: Graph;
+  ticket: GraphTicket;
+  origin: string;
+  projects: Project[];
+  efforts: Effort[];
+  onOpen: (reference: string) => void;
+  onBack: () => void;
+}) {
+  const [loaded, setLoaded] = useState<Ticket | null>(null);
+  useEffect(() => {
+    let active = true;
+    void client.showTicket(ticket.reference).then(
+      (value) => {
+        if (active) setLoaded(value);
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [ticket.reference]);
+  const detail = loaded?.reference === ticket.reference ? loaded : null;
+  const { blocks, blockedBy } = neighbours(graph, ticket.reference);
+  const project = projects.find((item) => item.id === detail?.project_id);
+  const effort = efforts.find((item) => item.id === detail?.effort_id);
+  const placeholder = detail ? "None" : "Loading…";
+  return (
+    <aside className="graph-panel" aria-label="Selected ticket">
+      <p className="graph-panel-status">
+        <StatusIcon status={ticket.status} size={14} decorative />
+        {ticket.status}
+        {ticket.trashed && " · Trashed"}
+      </p>
+      <h3>
+        <span className="graph-node-reference">{ticket.reference}</span>{" "}
+        {ticket.title}
+      </h3>
+      <AvailabilityMark availability={ticket.availability} />
+      <h4>Blocked by</h4>
+      <TicketList tickets={blockedBy} />
+      <h4>Blocks</h4>
+      <TicketList tickets={blocks} />
+      <dl className="graph-panel-facts">
+        <dt>Project</dt>
+        <dd>{project?.name ?? placeholder}</dd>
+        <dt>Effort</dt>
+        <dd>{effort?.name ?? placeholder}</dd>
+      </dl>
+      <div className="graph-panel-actions">
+        {ticket.reference !== origin && (
+          <Button size="sm" onClick={() => onOpen(ticket.reference)}>
+            Open {ticket.reference}
+          </Button>
+        )}
+        <Button variant="outline" size="sm" onClick={onBack}>
+          Back to original ticket
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+/** The dependency graph of one ticket, shown as a view of its own. */
 export default function DependencyGraph({
   reference,
   revision,
-  select,
+  projects,
+  efforts,
+  onBack,
+  onOpen,
 }: {
   reference: string;
   revision: number;
-  select: (reference: string, trashed: boolean) => void;
+  projects: Project[];
+  efforts: Effort[];
+  onBack: () => void;
+  onOpen: (reference: string) => void;
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => heading.current?.focus(), []);
   useEffect(() => {
     let active = true;
     void client.dependencyGraph(reference).then(
@@ -39,82 +311,58 @@ export default function DependencyGraph({
       active = false;
     };
   }, [reference, revision]);
-  if (error) return <p role="alert">Graph failed: {error}</p>;
-  if (!graph) return <p role="status">Loading graph…</p>;
-  const layout = new dagre.graphlib.Graph()
-    .setGraph({ rankdir: "LR", nodesep: 30, ranksep: 60 })
-    .setDefaultEdgeLabel(() => ({}));
-  for (const node of graph.nodes)
-    layout.setNode(node.reference, { width: 180, height: 70 });
-  for (const edge of graph.edges) layout.setEdge(edge.blocker, edge.dependent);
-  dagre.layout(layout);
-  const nodes = graph.nodes.map((node) => {
-    const position = layout.node(node.reference) as { x: number; y: number };
-    return {
-      id: node.reference,
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      position: { x: position.x - 90, y: position.y - 35 },
-      data: {
-        label: `${node.reference} ${node.title}\n${node.status}${node.trashed ? " · Trashed" : ""}${node.availability ? ` · ${node.availability}` : ""}`,
-      },
-      style: {
-        width: 180,
-        whiteSpace: "pre-wrap" as const,
-        background: "var(--surface)",
-        color: "var(--foreground)",
-        borderColor: "var(--border)",
-      },
-    };
-  });
-  const edges = graph.edges.map((edge) => ({
-    id: `${edge.blocker}-${edge.dependent}`,
-    source: edge.blocker,
-    target: edge.dependent,
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }));
+  const notice = graph ? scopeNotice(graph, reference) : null;
+  const selectedTicket = graph?.nodes.find(
+    (node) => node.reference === selected,
+  );
   return (
-    <section className="mt-5" aria-label="Dependency graph">
-      <h3 className="font-semibold">Dependency graph</h3>
-      <p>
-        Arrow: blocker → dependent. Up to {graph.max_depth} links from{" "}
-        {reference}, at most {graph.max_nodes} tickets.{" "}
-        {graph.truncated && "Some relationships are outside this scope."}
-      </p>
-      <div style={{ height: 350 }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodeClick={(_, node) => {
-            const ticket = graph.nodes.find(
-              (item) => item.reference === node.id,
-            );
-            if (ticket) select(ticket.reference, ticket.trashed);
-          }}
-          fitView
-          nodesDraggable={false}
-          nodesConnectable={false}
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </div>
-      <ul aria-label="Graph tickets">
-        {graph.nodes.map((node) => (
-          <li key={node.reference}>
-            <Button
-              type="button"
-              variant="link"
-              className="relationship-link"
-              onClick={() => select(node.reference, node.trashed)}
-            >
-              {node.reference} {node.title} · {node.status}
-              {node.trashed && " · Trashed"}
-              {node.availability && ` · ${node.availability}`}
-            </Button>
-          </li>
-        ))}
-      </ul>
+    <section className="dependency-graph-view" aria-label="Dependency graph">
+      <header className="graph-header">
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          <ArrowLeft aria-hidden="true" />
+          Back to {reference}
+        </Button>
+        <h2 ref={heading} tabIndex={-1}>
+          Dependency graph
+        </h2>
+      </header>
+      <Legend />
+      {notice && (
+        <p className="graph-notice" role="status">
+          {notice}
+        </p>
+      )}
+      {error && <p role="alert">Graph failed: {error}</p>}
+      {!graph && !error && <p role="status">Loading graph…</p>}
+      {graph && (
+        <div className="graph-body">
+          <div className="graph-canvas">
+            <Canvas
+              graph={graph}
+              origin={reference}
+              selected={selected}
+              onSelect={setSelected}
+            />
+          </div>
+          {selectedTicket ? (
+            <SelectionPanel
+              graph={graph}
+              ticket={selectedTicket}
+              origin={reference}
+              projects={projects}
+              efforts={efforts}
+              onOpen={onOpen}
+              onBack={onBack}
+            />
+          ) : (
+            <aside className="graph-panel" aria-label="Selected ticket">
+              <p className="graph-none">
+                Select a ticket to see what it blocks and what blocks it.
+              </p>
+            </aside>
+          )}
+        </div>
+      )}
     </section>
   );
 }

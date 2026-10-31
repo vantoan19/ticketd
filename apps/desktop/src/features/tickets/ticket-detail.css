@@ -25,6 +25,10 @@
 .ticket-properties[data-trashed] [data-slot="select-trigger"] {
   opacity: 1;
 }
+/* The dependency graph replaces the ticket; its drafts stay mounted. */
+.ticket-detail[data-graph] > :not(.dependency-graph-view) {
+  display: none;
+}
 .ticket-detail[data-expanded] .detail-content {
   max-width: 864px;
 }

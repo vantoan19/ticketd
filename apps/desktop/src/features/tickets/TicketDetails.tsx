@@ -40,6 +40,8 @@ export function TicketDetails({
   updateTicket: (ticket: Ticket) => void;
 }) {
   const [graphReference, setGraphReference] = useState<string | null>(null);
+  // The graph belongs to the ticket it opened from; selecting another closes it.
+  const graphOpen = graphReference !== null && graphReference === selected;
   const [mention, setMention] = useState<
     (MentionTarget & { key: number }) | null
   >(null);
@@ -50,8 +52,25 @@ export function TicketDetails({
     <section
       className="ticket-detail"
       data-expanded={expanded || undefined}
+      data-graph={graphOpen || undefined}
       aria-labelledby="detail-heading"
     >
+      {graphOpen && selected && (
+        <Suspense fallback={<p role="status">Loading graph…</p>}>
+          <DependencyGraph
+            key={selected}
+            reference={selected}
+            revision={revision}
+            projects={projects}
+            efforts={efforts}
+            onBack={() => setGraphReference(null)}
+            onOpen={(reference) => {
+              setGraphReference(null);
+              setSelected(reference);
+            }}
+          />
+        </Suspense>
+      )}
       <TicketHeader
         selected={selected}
         ticket={ticket}
@@ -60,15 +79,7 @@ export function TicketDetails({
         onExpand={onExpand}
         onReturn={onReturn}
         onClose={() => setSelected(null)}
-        onOpenGraph={() => {
-          if (!selected) return;
-          setGraphReference(selected);
-          window.requestAnimationFrame(() =>
-            document
-              .getElementById(`linked-work-${selected}`)
-              ?.scrollIntoView?.({ block: "start" }),
-          );
-        }}
+        onOpenGraph={() => setGraphReference(selected)}
         select={setSelected}
         refresh={refresh}
         updateTicket={updateTicket}
@@ -128,25 +139,7 @@ export function TicketDetails({
               revision={revision}
               refresh={refresh}
               select={setSelected}
-              graphOpen={graphReference === item.reference}
-              onToggleGraph={() =>
-                setGraphReference(
-                  graphReference === item.reference ? null : item.reference,
-                )
-              }
-              graph={
-                <Suspense fallback={<p role="status">Loading graph…</p>}>
-                  <DependencyGraph
-                    key={item.reference}
-                    reference={item.reference}
-                    revision={revision}
-                    select={(reference) => {
-                      setSelected(reference);
-                      setGraphReference(null);
-                    }}
-                  />
-                </Suspense>
-              }
+              onOpenGraph={() => setGraphReference(item.reference)}
             />
           )}
           {item.reference === selected && (
