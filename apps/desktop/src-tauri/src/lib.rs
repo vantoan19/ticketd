@@ -1,8 +1,44 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
-    BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project,
-    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
+    BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, InboxEntry, Note, NotePatch,
+    Project, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    WriteResult,
 };
+
+#[tauri::command]
+fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.inbox(100, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn is_following(reference: String) -> Result<bool, String> {
+    Workspace::open_default()
+        .and_then(|w| w.is_following(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_following(reference: String, following: bool, request_id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetFollowing {
+                    reference,
+                    following,
+                },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::SetInboxRead { ids, read }))
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn export_workspace(path: String) -> Result<(), String> {
@@ -326,6 +362,10 @@ pub fn run() -> Result<(), tauri::Error> {
             change_ticket,
             bulk_status,
             ticket_history,
+            inbox,
+            is_following,
+            set_following,
+            set_inbox_read,
             list_notes,
             add_note,
             edit_note,

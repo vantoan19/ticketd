@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import type { Project } from "@/lib/api/client";
 import type { RefObject } from "react";
 
-type View = "tickets" | "projects" | "efforts" | "settings";
+type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export function WorkspaceSidebar({
   view,
   setView,
@@ -77,6 +77,14 @@ export function WorkspaceSidebar({
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                className={view === "inbox" ? "active" : ""}
+                onClick={() => setView("inbox")}
+              >
+                <Inbox size={16} /> Attention inbox
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 className={

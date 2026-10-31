@@ -24,3 +24,46 @@ fn closed_stdout_reports_an_error_without_panicking() {
     assert!(stderr.starts_with("error:"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
+
+#[test]
+fn cli_status_change_appears_in_followed_inbox() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], input: Option<&str>| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    run(&["create", "CLI status"], None);
+    run(
+        &["write", "-", "--request-id", "follow"],
+        Some(r#"{"operation":"set_following","reference":"T-1","following":true}"#),
+    );
+    run(&["change", "T-1", "--status", "Done"], None);
+    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
+    assert_eq!(inbox[0]["reference"], "T-1");
+    assert_eq!(inbox[0]["to_value"], "Done");
+    assert_eq!(inbox[0]["read"], false);
+}

@@ -1,3 +1,4 @@
+import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ import { client } from "@/lib/api/client";
 
 export function App() {
   const [view, setView] = useState<
-    "tickets" | "projects" | "efforts" | "settings"
+    "tickets" | "projects" | "efforts" | "settings" | "inbox"
   >("tickets");
   const [creating, setCreating] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<string[]>([]);
@@ -118,11 +119,13 @@ export function App() {
               <strong>
                 {view === "tickets"
                   ? scopeName
-                  : view === "projects"
-                    ? "Projects"
-                    : view === "efforts"
-                      ? "Efforts"
-                      : "Settings"}
+                  : view === "inbox"
+                    ? "Attention inbox"
+                    : view === "projects"
+                      ? "Projects"
+                      : view === "efforts"
+                        ? "Efforts"
+                        : "Settings"}
               </strong>
             </div>
             <button
@@ -180,6 +183,15 @@ export function App() {
               <Efforts revision={revision} refresh={refresh} />
             </div>
           }
+          {view === "inbox" && (
+            <Inbox
+              revision={revision}
+              select={(reference) => {
+                setSelected(reference);
+                setView("tickets");
+              }}
+            />
+          )}
           <ResizablePanelGroup
             orientation="horizontal"
             className={cn(

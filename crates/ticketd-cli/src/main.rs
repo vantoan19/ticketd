@@ -14,6 +14,13 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List personal inbox entries (newest first)
+    Inbox {
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
@@ -313,6 +320,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut workspace = Workspace::open_default()?;
     let text = match args.command {
+        Command::Inbox { limit, offset } => {
+            serde_json::to_string(&workspace.inbox(limit, offset)?)?
+        }
         Command::Backup { path } => {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
