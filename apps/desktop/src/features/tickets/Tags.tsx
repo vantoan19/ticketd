@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { client } from "@/lib/api/client";
 import { useState, type FormEvent } from "react";
 
 export function Tags({
@@ -16,7 +16,7 @@ export function Tags({
   async function change(command: "add_tag" | "remove_tag", tag: string) {
     setSaving(true);
     try {
-      await invoke(command, { reference, tag });
+      await client.changeTag(command, reference, tag);
       setName("");
       setError("");
       await refresh();

@@ -1,28 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { effortsClient, type Effort, type View } from "@/lib/api/efforts";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { z } from "zod";
 
-const effortSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  archived: z.boolean(),
-});
-const viewSchema = z.object({
-  effort: effortSchema,
-  counts: z.object({
-    todo: z.number(),
-    in_progress: z.number(),
-    in_review: z.number(),
-    done: z.number(),
-    canceled: z.number(),
-  }),
-  members: z.array(
-    z.object({ reference: z.string(), title: z.string(), status: z.string() }),
-  ),
-});
-
-type Effort = z.infer<typeof effortSchema>;
-type View = z.infer<typeof viewSchema>;
 export function Efforts({
   revision,
   refresh,
@@ -38,12 +16,8 @@ export function Efforts({
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     try {
-      setEfforts(z.array(effortSchema).parse(await invoke("list_efforts")));
-      setView(
-        selected
-          ? viewSchema.parse(await invoke("show_effort", { id: selected }))
-          : null,
-      );
+      setEfforts(await effortsClient.list());
+      setView(selected ? await effortsClient.show(selected) : null);
       setError("");
     } catch (e) {
       setError(String(e));
@@ -65,9 +39,7 @@ export function Efforts({
   function create(e: FormEvent) {
     e.preventDefault();
     void action(async () => {
-      const result = effortSchema.parse(
-        await invoke("create_effort", { name }),
-      );
+      const result = await effortsClient.create(name);
       setName("");
       setSelected(result.id);
     });
@@ -113,11 +85,7 @@ export function Efforts({
               e.preventDefault();
               const form = new FormData(e.currentTarget);
               void action(() =>
-                invoke("change_effort", {
-                  id: selected,
-                  name: form.get("name"),
-                  archived: null,
-                }),
+                effortsClient.change(selected, String(form.get("name")), null),
               );
             }}
           >
@@ -137,11 +105,7 @@ export function Efforts({
             className="border px-2"
             onClick={() =>
               void action(() =>
-                invoke("change_effort", {
-                  id: selected,
-                  name: null,
-                  archived: !view.effort.archived,
-                }),
+                effortsClient.change(selected, null, !view.effort.archived),
               )
             }
           >
@@ -156,7 +120,7 @@ export function Efforts({
             onSubmit={(e) => {
               e.preventDefault();
               void action(async () => {
-                await invoke("set_effort", { reference, effort: selected });
+                await effortsClient.setMember(reference, selected);
                 setReference("");
               });
             }}
@@ -180,10 +144,7 @@ export function Efforts({
                   className="border px-2"
                   onClick={() =>
                     void action(() =>
-                      invoke("set_effort", {
-                        reference: t.reference,
-                        effort: null,
-                      }),
+                      effortsClient.setMember(t.reference, null),
                     )
                   }
                 >

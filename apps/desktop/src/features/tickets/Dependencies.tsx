@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { client } from "@/lib/api/client";
 import { useState, type FormEvent } from "react";
 import type { Ticket } from "@/lib/api/client";
 
@@ -11,12 +11,12 @@ export function Dependencies({
 }) {
   const [blocker, setBlocker] = useState("");
   const [error, setError] = useState("");
-  async function change(command: string, reference: string) {
+  async function change(
+    command: "add_dependency" | "remove_dependency",
+    reference: string,
+  ) {
     try {
-      await invoke(command, {
-        blocker: reference,
-        dependent: ticket.reference,
-      });
+      await client.changeDependency(command, reference, ticket.reference);
       setBlocker("");
       setError("");
       await refresh();
