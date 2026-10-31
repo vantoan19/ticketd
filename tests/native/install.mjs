@@ -19,7 +19,7 @@ const open = () =>
 let browser = await open();
 try {
   await (
-    await browser.$("p=No tickets yet.")
+    await browser.$("p=No tickets match the active filters.")
   ).waitForDisplayed({ timeout: 15000 });
 } finally {
   await browser.deleteSession();
