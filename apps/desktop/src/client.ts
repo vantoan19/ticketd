@@ -76,6 +76,9 @@ export type FindFilter = {
   offset: number;
 };
 export const client = {
+  async exportWorkspace(path: string) {
+    await invoke("export_workspace", { path });
+  },
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },

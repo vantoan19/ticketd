@@ -1,5 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
 mod context;
+mod export;
 pub use context::{ContextOptions, TicketContext};
 
 mod efforts;
