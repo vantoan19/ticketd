@@ -1001,3 +1001,67 @@ fn search_tracks_note_deletion() {
             .is_empty()
     );
 }
+
+#[test]
+fn combined_filters_search_flat_family_with_all_tags_and_paging() {
+    use ticketd_core::{Availability, TicketFilter};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Family needle").unwrap();
+    let child = w.create_ticket("Child needle").unwrap();
+    w.set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    for ticket in [&parent, &child] {
+        w.add_tag(&ticket.reference, "bug").unwrap();
+        w.add_tag(&ticket.reference, "urgent").unwrap();
+    }
+    let other = w.create_ticket("Other needle").unwrap();
+    w.add_tag(&other.reference, "bug").unwrap();
+    let filter = TicketFilter {
+        query: "needle".into(),
+        tags: vec!["BUG".into(), "urgent".into()],
+        family: Some(parent.reference.clone()),
+        availability: Some(Availability::Ready),
+        limit: 1,
+        ..Default::default()
+    };
+    assert_eq!(
+        w.find_tickets(&filter).unwrap()[0].reference,
+        child.reference
+    );
+    let filter = TicketFilter {
+        offset: 1,
+        ..filter
+    };
+    assert_eq!(
+        w.find_tickets(&filter).unwrap()[0].reference,
+        parent.reference
+    );
+}
+
+#[test]
+fn combined_filters_apply_project_effort_status_and_blocked_before_paging() {
+    use ticketd_core::{Availability, TicketFilter};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let effort = w.create_effort("Release").unwrap();
+    let blocker = w.create_ticket("Prerequisite").unwrap();
+    let blocked = w.create_ticket("Ship release").unwrap();
+    w.set_effort(&blocked.reference, Some(&effort.id), None)
+        .unwrap();
+    w.add_dependency(&blocker.reference, &blocked.reference, None)
+        .unwrap();
+    w.create_ticket("Newer unrelated ticket").unwrap();
+    let filter = TicketFilter {
+        query: "release".into(),
+        unlinked: true,
+        effort: Some(effort.id),
+        status: Some(Status::Todo),
+        availability: Some(Availability::Blocked),
+        limit: 1,
+        ..Default::default()
+    };
+    let results = w.find_tickets(&filter).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].reference, blocked.reference);
+}

@@ -1,7 +1,8 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::Read;
 use ticketd_core::{
-    BatchOperation, ContextOptions, NotePatch, Status, TicketPatch, Workspace, WriteRequest,
+    Availability, BatchOperation, ContextOptions, NotePatch, Status, TicketFilter, TicketPatch,
+    Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -102,12 +103,10 @@ enum Command {
         #[command(subcommand)]
         command: EffortCommand,
     },
-    /// List tickets
+    /// List tickets with combined filters
     List {
-        #[arg(long, conflicts_with = "unlinked")]
-        project: Option<String>,
-        #[arg(long)]
-        unlinked: bool,
+        #[command(flatten)]
+        filters: FindArgs,
     },
     /// Retrieve bounded context; select related scopes explicitly
     Context {
@@ -126,19 +125,62 @@ enum Command {
     /// Search saved ticket content (literal, ASCII case-insensitive substring)
     Search {
         query: String,
-        #[arg(long, conflicts_with = "unlinked")]
-        project: Option<String>,
-        #[arg(long)]
-        unlinked: bool,
-        #[arg(long, default_value_t = 50)]
-        limit: u32,
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        #[command(flatten)]
+        filters: FindArgs,
     },
     /// View a bounded dependency graph around a ticket
     Graph { reference: String },
     /// Show a ticket by its reference
     Show { reference: String },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AvailabilityArg {
+    Ready,
+    Blocked,
+}
+
+#[derive(Args)]
+struct FindArgs {
+    #[arg(long, conflicts_with = "unlinked")]
+    project: Option<String>,
+    #[arg(long)]
+    unlinked: bool,
+    #[arg(long)]
+    effort: Option<String>,
+    #[arg(long)]
+    status: Option<Status>,
+    /// Require every supplied tag (AND); repeat --tag for multiple tags
+    #[arg(long)]
+    tag: Vec<String>,
+    #[arg(long, value_enum)]
+    availability: Option<AvailabilityArg>,
+    /// Include the named parent ticket and its subtickets
+    #[arg(long)]
+    family: Option<String>,
+    #[arg(long, default_value_t = 50)]
+    limit: u32,
+    #[arg(long, default_value_t = 0)]
+    offset: u32,
+}
+impl FindArgs {
+    fn filter(self, query: String) -> TicketFilter {
+        TicketFilter {
+            query,
+            project: self.project,
+            unlinked: self.unlinked,
+            effort: self.effort,
+            status: self.status,
+            tags: self.tag,
+            availability: self.availability.map(|a| match a {
+                AvailabilityArg::Ready => Availability::Ready,
+                AvailabilityArg::Blocked => Availability::Blocked,
+            }),
+            family: self.family,
+            limit: self.limit,
+            offset: self.offset,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -443,24 +485,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.set_effort(&reference, None, agent.as_deref())?)?
             }
         },
-        Command::List { project, unlinked } => {
-            if let Some(ref id) = project {
-                workspace.show_project(id)?;
-            }
-            let tickets: Vec<_> = workspace
-                .list_tickets()?
-                .into_iter()
-                .filter(|ticket| {
-                    if unlinked {
-                        ticket.project_id.is_none()
-                    } else if let Some(ref id) = project {
-                        ticket.project_id.as_ref() == Some(id)
-                    } else {
-                        true
-                    }
-                })
-                .collect();
-            serde_json::to_string(&tickets)?
+        Command::List { filters } => {
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new()))?)?
+        }
+        Command::Search { query, filters } => {
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(query))?)?
         }
         Command::Context {
             reference,
@@ -479,19 +508,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 offset,
             },
         )?)?,
-        Command::Search {
-            query,
-            project,
-            unlinked,
-            limit,
-            offset,
-        } => serde_json::to_string(&workspace.search_tickets(
-            &query,
-            project.as_deref(),
-            unlinked,
-            limit,
-            offset,
-        )?)?,
+
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }
