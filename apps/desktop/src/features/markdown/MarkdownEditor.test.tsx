@@ -23,4 +23,46 @@ describe("Markdown draft editor", () => {
     ).toBe(editable);
     expect(onChange).not.toHaveBeenCalled();
   });
+  it("enforces read-only content and hides editing controls", () => {
+    render(<MarkdownEditor value="View only" onChange={vi.fn()} readOnly />);
+    expect(
+      screen
+        .getByLabelText("Markdown document rich text")
+        .getAttribute("contenteditable"),
+    ).toBe("false");
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+  });
+
+  it("accepts an explicit controlled reset without treating it as a user edit", async () => {
+    const onChange = vi.fn();
+    const view = render(
+      <MarkdownEditor value="Original draft" onChange={onChange} />,
+    );
+    view.rerender(
+      <MarkdownEditor value="Resolved external content" onChange={onChange} />,
+    );
+    await screen.findByText("Resolved external content");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+  it("locks and unlocks an already-mounted document during submission", () => {
+    const onChange = vi.fn();
+    const view = render(
+      <MarkdownEditor value="Pending note" onChange={onChange} />,
+    );
+    view.rerender(
+      <MarkdownEditor value="Pending note" onChange={onChange} readOnly />,
+    );
+    expect(
+      screen
+        .getByLabelText("Markdown document rich text")
+        .getAttribute("contenteditable"),
+    ).toBe("false");
+    view.rerender(<MarkdownEditor value="Pending note" onChange={onChange} />);
+    expect(
+      screen
+        .getByLabelText("Markdown document rich text")
+        .getAttribute("contenteditable"),
+    ).toBe("true");
+    expect(onChange).not.toHaveBeenCalled();
+  });
 });
