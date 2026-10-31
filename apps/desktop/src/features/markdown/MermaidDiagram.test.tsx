@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { MarkdownDocument } from "./MarkdownDocument";
 
 const engine = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn() }));
 vi.mock("mermaid", () => ({ default: engine }));
@@ -26,6 +27,39 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+test("keeps a rendered diagram and its zoom during unchanged document refreshes", async () => {
+  engine.render.mockResolvedValue({
+    svg: '<svg viewBox="0 0 100 50"><text>Stable diagram</text></svg>',
+  });
+  const source = "```mermaid\nflowchart LR\n  A --> B\n```\n";
+  const { rerender } = render(<MarkdownDocument source={source} />);
+  const diagram = await screen.findByRole("img", { name: "Mermaid diagram" });
+  const svg = diagram.querySelector("svg");
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+  for (let refresh = 0; refresh < 3; refresh++)
+    rerender(<MarkdownDocument source={source} />);
+
+  expect(screen.queryByText("Rendering diagram…")).toBeNull();
+  expect(screen.getByRole("img", { name: "Mermaid diagram" })).toBe(diagram);
+  expect(diagram.querySelector("svg")).toBe(svg);
+  expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe(
+    "125%",
+  );
+  expect(engine.render).toHaveBeenCalledTimes(1);
+
+  rerender(
+    <MarkdownDocument source={source.replace("A --> B", "A --> Updated")} />,
+  );
+  await waitFor(() =>
+    expect(engine.render).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "flowchart LR\n  A --> Updated\n",
+      expect.any(HTMLElement),
+    ),
+  );
+});
 
 test("discards an old diagram when source changes while rendering", async () => {
   let finish: (value: { svg: string }) => void = () => {};

@@ -1,8 +1,15 @@
-import ReactMarkdown, { type ExtraProps } from "react-markdown";
+import { createContext, useContext } from "react";
+import ReactMarkdown, {
+  type Components,
+  type ExtraProps,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { CopySourceButton } from "./CopySourceButton";
+
+const MarkdownSource = createContext("");
+const remarkPlugins = [remarkGfm];
 
 // Use the original fence interior: the Markdown AST normalizes CRLF and adds a
 // presentation newline. Container fences use the parser's de-indented content.
@@ -26,65 +33,71 @@ function fenceSource(
   return closing ? body.slice(0, closing.index) : body;
 }
 
+function CodeBlock({ node }: ExtraProps) {
+  const source = useContext(MarkdownSource);
+  const code = node?.children[0];
+  const language =
+    code?.type === "element"
+      ? String(code.properties.className ?? "").replace(/^language-/, "")
+      : "";
+  const text =
+    code?.type === "element"
+      ? code.children
+          .map((child) => (child.type === "text" ? child.value : ""))
+          .join("")
+      : "";
+  const content = fenceSource(source, node, text);
+  if (language.toLowerCase() === "mermaid")
+    return <MermaidDiagram source={content} />;
+  return (
+    <div className="markdown-code-block">
+      <div className="markdown-block-toolbar">
+        <span>{language || "Code"}</span>
+        <CopySourceButton label="Copy code" source={content} />
+      </div>
+      <pre tabIndex={0}>
+        <SyntaxCode source={content} language={language} />
+      </pre>
+    </div>
+  );
+}
+
+// React treats each component function as a type. Recreating these functions
+// during workspace polling would remount diagrams and discard their SVG/state.
+const components: Components = {
+  a: ({ href, children }) =>
+    href ? (
+      <a href={href} rel="noreferrer">
+        {children}
+      </a>
+    ) : (
+      <span>{children}</span>
+    ),
+  table: ({ children }) => (
+    <div
+      className="markdown-table-scroll"
+      tabIndex={0}
+      role="region"
+      aria-label="Table"
+    >
+      <table>{children}</table>
+    </div>
+  ),
+  pre: CodeBlock,
+};
+
 export function MarkdownDocument({ source }: { source: string }) {
   return (
     <div className="markdown-document">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        components={{
-          a: ({ href, children }) =>
-            href ? (
-              <a href={href} rel="noreferrer">
-                {children}
-              </a>
-            ) : (
-              <span>{children}</span>
-            ),
-          table: ({ children }) => (
-            <div
-              className="markdown-table-scroll"
-              tabIndex={0}
-              role="region"
-              aria-label="Table"
-            >
-              <table>{children}</table>
-            </div>
-          ),
-          pre: ({ node }) => {
-            const code = node?.children[0];
-            const language =
-              code?.type === "element"
-                ? String(code.properties.className ?? "").replace(
-                    /^language-/,
-                    "",
-                  )
-                : "";
-            const text =
-              code?.type === "element"
-                ? code.children
-                    .map((child) => (child.type === "text" ? child.value : ""))
-                    .join("")
-                : "";
-            const content = fenceSource(source, node, text);
-            if (language.toLowerCase() === "mermaid")
-              return <MermaidDiagram source={content} />;
-            return (
-              <div className="markdown-code-block">
-                <div className="markdown-block-toolbar">
-                  <span>{language || "Code"}</span>
-                  <CopySourceButton label="Copy code" source={content} />
-                </div>
-                <pre tabIndex={0}>
-                  <SyntaxCode source={content} language={language} />
-                </pre>
-              </div>
-            );
-          },
-        }}
-      >
-        {source}
-      </ReactMarkdown>
+      <MarkdownSource.Provider value={source}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          skipHtml
+          components={components}
+        >
+          {source}
+        </ReactMarkdown>
+      </MarkdownSource.Provider>
     </div>
   );
 }
