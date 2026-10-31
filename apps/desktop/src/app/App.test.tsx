@@ -30,6 +30,27 @@ const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
 
+vi.mock("@uiw/react-codemirror", () => ({
+  default: ({
+    value,
+    onChange,
+    readOnly,
+    "aria-label": label,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    readOnly: boolean;
+    "aria-label": string;
+  }) => (
+    <textarea
+      aria-label={label}
+      readOnly={readOnly}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
+}));
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -208,7 +229,8 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.change(screen.getByRole("textbox", { name: "New note" }), {
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
     target: { value: "Unfinished note" },
   });
   fireEvent.click(screen.getByRole("button", { name: /T-2 Second/ }));
@@ -223,10 +245,9 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByRole("textbox", { name: "New note" })).toHaveProperty(
-    "value",
-    "Unfinished note",
-  );
+  expect(
+    screen.getByRole("textbox", { name: "New note source" }),
+  ).toHaveProperty("value", "Unfinished note");
 });
 
 test("retains project drafts and clears filters when navigating scopes", async () => {
@@ -429,9 +450,13 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   fireEvent.change(screen.getByLabelText("New ticket title"), {
     target: { value: "Draft ticket" },
   });
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Draft body" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Description source" }),
+    {
+      target: { value: "Draft body" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await act(async () => {});
   expect(screen.getByRole("alert").textContent).toContain("Creation failed");
@@ -448,10 +473,10 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   );
   fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
   fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
-  expect(screen.getByLabelText("Description")).toHaveProperty(
-    "value",
-    "Draft body",
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  expect(
+    screen.getByRole("textbox", { name: "Description source" }),
+  ).toHaveProperty("value", "Draft body");
 });
 
 test("keeps ticket rows mounted while a filter refresh is pending", async () => {

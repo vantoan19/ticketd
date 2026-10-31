@@ -42,6 +42,10 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `a
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
+## Document editing
+
+Rich document editing uses Plate, with Markdown remaining canonical across storage and CLI operations. Editor document trees remain transient UI state; CodeMirror provides source editing, and Mermaid renders diagrams locally. See [Plate editing with canonical Markdown](adr/0005-plate-editor-with-canonical-markdown.md) for fidelity and integration boundaries.
+
 ## Interface direction
 
 | Caller intent           | Core behavior                                                                                 |

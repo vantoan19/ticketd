@@ -5,8 +5,8 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
@@ -84,7 +84,13 @@ export function Activity({
   }, [active, loadNotes, reference, revision, status]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy.current) return;
+    if (
+      event.target !== event.currentTarget ||
+      busy.current ||
+      trashed ||
+      !(edit ? edit.content : draft).trim()
+    )
+      return;
     busy.current = true;
     setPending(true);
     setError("");
@@ -198,9 +204,7 @@ export function Activity({
                   )}
                 </div>
                 <div className="markdown-preview activity-note">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {item.note.content}
-                  </ReactMarkdown>
+                  <MarkdownDocument source={item.note.content} />
                 </div>
                 {!trashed && (
                   <div className="activity-actions">
@@ -271,20 +275,18 @@ export function Activity({
           onSubmit={(event) => void save(event)}
         >
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`note-${reference}`}>
-                {edit ? "Edit note" : "New note"}
+            <Field data-disabled={pending}>
+              <FieldLabel asChild>
+                <span>{edit ? "Edit note" : "New note"}</span>
               </FieldLabel>
-              <textarea
-                id={`note-${reference}`}
+              <LazyMarkdownEditor
+                key={edit?.id ?? "new"}
+                label={edit ? "Edit note" : "New note"}
                 value={edit ? edit.content : draft}
-                onChange={(event) =>
-                  edit
-                    ? setEdit({ ...edit, content: event.target.value })
-                    : setDraft(event.target.value)
+                onChange={(content) =>
+                  edit ? setEdit({ ...edit, content }) : setDraft(content)
                 }
-                required
-                disabled={pending}
+                readOnly={pending}
               />
               <FieldDescription>Markdown is supported.</FieldDescription>
             </Field>
@@ -296,7 +298,11 @@ export function Activity({
             </p>
           )}
           <div className="activity-actions">
-            <Button type="submit" size="sm" disabled={pending}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={pending || !(edit ? edit.content : draft).trim()}
+            >
               {pending ? "Saving…" : edit ? "Save note" : "Add note"}
             </Button>
             {edit && (
