@@ -50,6 +50,8 @@ const prerequisite = (reference: string, status: string) => ({
   title: reference,
   status,
   trashed: false,
+  // The core says which statuses still block; only Done does.
+  unresolved: status !== "Done",
 });
 
 test("names an unfinished prerequisite on a blocked Todo ticket", () => {

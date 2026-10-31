@@ -9,6 +9,13 @@ pub struct Prerequisite {
     pub title: String,
     pub status: Status,
     pub trashed: bool,
+    /// Still has to be Done before the ticket that depends on it is Ready.
+    #[serde(default = "unresolved_by_default")]
+    pub unresolved: bool,
+}
+
+fn unresolved_by_default() -> bool {
+    true
 }
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
@@ -21,27 +28,25 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     ticket.prerequisites = statement
         .query_map([&ticket.id], |row| {
             let status: String = row.get(2)?;
+            let status: Status = status.parse().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
             Ok(Prerequisite {
                 reference: format!("T-{}", row.get::<_, i64>(0)?),
                 title: row.get(1)?,
                 trashed: row.get(3)?,
-                status: status.parse().map_err(|e| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        2,
-                        rusqlite::types::Type::Text,
-                        Box::new(e),
-                    )
-                })?,
+                unresolved: !status.satisfies_dependency(),
+                status,
             })
         })?
         .collect::<Result<_, _>>()?;
     ticket.availability = if ticket.status == Status::Todo {
         Some(
-            if ticket
-                .prerequisites
-                .iter()
-                .all(|p| p.status == Status::Done)
-            {
+            if ticket.prerequisites.iter().all(|p| !p.unresolved) {
                 "Ready"
             } else {
                 "Blocked"

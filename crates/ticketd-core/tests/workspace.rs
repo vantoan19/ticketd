@@ -3150,3 +3150,42 @@ fn a_replacement_that_became_a_cycle_since_the_preview_is_a_stale_review() {
         .unwrap_err();
     assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
 }
+
+#[test]
+fn a_prerequisite_is_unresolved_until_it_is_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let waiting = ws.create_ticket("Waiting").unwrap();
+    let mut blockers = Vec::new();
+    for (title, status) in [
+        ("Review", Status::InReview),
+        ("Canceled", Status::Canceled),
+        ("Finished", Status::Done),
+    ] {
+        let blocker = ws.create_ticket(title).unwrap();
+        ws.change_ticket(
+            &blocker.reference,
+            TicketPatch {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ws.add_dependency(&blocker.reference, &waiting.reference, None)
+            .unwrap();
+        blockers.push(blocker.reference);
+    }
+    let prerequisites = ws.show_ticket(&waiting.reference).unwrap().prerequisites;
+    let unresolved: Vec<_> = prerequisites
+        .iter()
+        .map(|item| (item.reference.clone(), item.unresolved))
+        .collect();
+    assert_eq!(
+        unresolved,
+        vec![
+            (blockers[0].clone(), true),
+            (blockers[1].clone(), true),
+            (blockers[2].clone(), false)
+        ]
+    );
+}

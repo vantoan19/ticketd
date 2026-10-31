@@ -31,6 +31,8 @@ const ticketSchema = z.object({
       title: z.string(),
       status: z.string(),
       trashed: z.boolean(),
+      /** Still has to be Done before the ticket that depends on it is Ready. */
+      unresolved: z.boolean(),
     }),
   ),
 });

@@ -19,7 +19,7 @@ export function readiness(ticket: Ticket): Readiness {
   if (ticket.status !== "Todo" || !ticket.availability)
     return { kind: "status", status: ticket.status };
   if (ticket.availability === "Ready") return { kind: "ready" };
-  const open = ticket.prerequisites.filter((item) => item.status !== "Done");
+  const open = ticket.prerequisites.filter((item) => item.unresolved);
   const [first] = open;
   if (!first) return { kind: "status", status: ticket.status };
   return { kind: "blocked", by: first.reference, more: open.length - 1 };

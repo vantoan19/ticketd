@@ -92,7 +92,10 @@ impl Workspace {
             if matches!(availability, Availability::Ready) {
                 sql.push_str("NOT ");
             }
-            sql.push_str("EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id WHERE d.dependent_id = t.id AND blocker.status != 'Done')");
+            sql.push_str(&format!(
+                "EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id WHERE d.dependent_id = t.id AND {})",
+                crate::history::unresolved_blocker_sql("blocker")
+            ));
         }
         if let Some(family) = family {
             sql.push_str(" AND (t.id = ? OR EXISTS (SELECT 1 FROM ticket_parents p WHERE p.parent_id = ? AND p.child_id = t.id))");

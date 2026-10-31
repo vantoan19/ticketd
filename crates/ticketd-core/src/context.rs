@@ -140,7 +140,7 @@ fn related(
                 title: text(r.get(1)?, LABEL),
                 status,
                 trashed: r.get(3)?,
-                unresolved: status != Status::Done,
+                unresolved: !status.satisfies_dependency(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -155,7 +155,14 @@ impl Workspace {
         let tx = self.connection.unchecked_transaction()?;
         let id = relationships::id(&tx, reference)?;
         let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
-        let blocked: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM dependencies d JOIN tickets t ON t.id = d.blocker_id WHERE d.dependent_id = ?1 AND t.status != 'Done')", [&id], |r| r.get(0))?;
+        let blocked: bool = tx.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM dependencies d JOIN tickets t ON t.id = d.blocker_id WHERE d.dependent_id = ?1 AND {})",
+                crate::history::unresolved_blocker_sql("t")
+            ),
+            [&id],
+            |r| r.get(0),
+        )?;
         let availability = if ticket.status == Status::Todo {
             Some(if blocked { "Blocked" } else { "Ready" }.to_owned())
         } else {

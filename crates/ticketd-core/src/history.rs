@@ -16,6 +16,20 @@ pub enum Status {
     Canceled,
 }
 
+impl Status {
+    /// Only Done satisfies a dependency on a ticket; In review and Canceled still block.
+    pub fn satisfies_dependency(self) -> bool {
+        self == Self::Done
+    }
+}
+
+/// SQL for a blocker, named by its table alias, that does not yet satisfy a
+/// dependency. Every readiness query uses it, so they agree with
+/// [`Status::satisfies_dependency`].
+pub(crate) fn unresolved_blocker_sql(alias: &str) -> String {
+    format!("{alias}.status != 'Done'")
+}
+
 impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
