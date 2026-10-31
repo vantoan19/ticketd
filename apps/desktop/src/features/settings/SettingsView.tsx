@@ -3,13 +3,18 @@ import {
   Copy,
   ExternalLink,
   FolderOpen,
+  Loader2,
   Monitor,
   Moon,
   Sun,
 } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { client } from "@/lib/api/client";
-import { workspaceClient, type WorkspaceInfo } from "@/lib/api/workspace";
+import {
+  workspaceClient,
+  type BackupRecord,
+  type WorkspaceInfo,
+} from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
 import { APP_VERSION } from "@/lib/app-version";
 import {
@@ -17,6 +22,7 @@ import {
   usePreferences,
   type OpenTicketsPreference,
 } from "@/lib/preferences";
+import { StatusDot } from "@/components/ui/status-dot";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
 import { SettingsCard } from "@/features/settings/SettingsCard";
@@ -243,41 +249,153 @@ function LocationCard() {
   );
 }
 
+/** Today's date as YYYY-MM-DD in local time, for suggested file names. */
+function localDate() {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function formatBackupTime(timestamp: string) {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+}
+
 function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
-  const [backupPath, setBackupPath] = useState("");
-  const [backupMessage, setBackupMessage] = useState("");
-  const [backupBusy, setBackupBusy] = useState(false);
+  const [last, setLast] = useState<BackupRecord | null>(null);
+  const [failure, setFailure] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [restorePath, setRestorePath] = useState("");
+  const [restoreMessage, setRestoreMessage] = useState("");
+  useEffect(() => {
+    let current = true;
+    workspaceClient
+      .lastBackup()
+      .then((value) => {
+        if (current) setLast(value);
+      })
+      .catch(() => {
+        // The status is informational; backing up still works without it.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+  async function backUp() {
+    setBusy(true);
+    setFailure("");
+    setMessage("");
+    try {
+      const path = await workspaceClient.chooseSavePath({
+        title: "Back up ticketd workspace",
+        defaultPath: `ticketd-backup-${localDate()}.sqlite3`,
+        filterName: "ticketd backup",
+        extension: "sqlite3",
+      });
+      if (path === null) return;
+      try {
+        await client.backupWorkspace(path);
+      } catch (reason) {
+        setFailure(
+          `The backup was not saved, and nothing was left at ${path}: ${String(reason)}`,
+        );
+        return;
+      }
+      setMessage("Backup saved and checked.");
+      try {
+        setLast(await workspaceClient.lastBackup());
+      } catch {
+        // Keep the previous status; the backup itself succeeded.
+      }
+    } catch (reason) {
+      setFailure(`Could not open the save dialog: ${String(reason)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function reveal(path: string) {
+    try {
+      await workspaceClient.reveal(path);
+    } catch (reason) {
+      setFailure(`Could not show the file: ${String(reason)}`);
+    }
+  }
   return (
     <SettingsCard id="backups" title="Backups">
-      <section aria-label="Workspace backup">
-        <label>
-          Backup file path{" "}
-          <input
-            value={backupPath}
-            onChange={(event) => setBackupPath(event.target.value)}
-          />
-        </label>
-        <button
+      <p className="settings-hint">
+        A backup is a complete copy of the workspace, checked for integrity
+        after it is saved. It never replaces an existing file.
+      </p>
+      <div className="settings-actions">
+        <Button
           type="button"
-          disabled={!backupPath || backupBusy}
-          onClick={() =>
-            void (async () => {
-              setBackupBusy(true);
-              try {
-                setBackupMessage(await client.backupWorkspace(backupPath));
-              } catch (reason) {
-                setBackupMessage(`Backup failed: ${String(reason)}`);
-              } finally {
-                setBackupBusy(false);
-              }
-            })()
-          }
+          size="sm"
+          disabled={busy}
+          onClick={() => void backUp()}
         >
-          Back up
-        </button>
+          {busy ? (
+            <>
+              <Loader2 aria-hidden="true" className="animate-spin" />
+              Backing up…
+            </>
+          ) : (
+            "Back up now…"
+          )}
+        </Button>
+      </div>
+      <div className="backup-status" role="group" aria-label="Last backup">
+        {last ? (
+          <>
+            <p className="settings-label">
+              Last backup{" "}
+              <span className="settings-hint">
+                {formatBackupTime(last.completed_at)}
+              </span>
+            </p>
+            <p className="workspace-path" aria-label="Last backup path">
+              {last.path}
+            </p>
+            <div className="settings-actions">
+              <span className="status-word">
+                <StatusDot tone="checked" />
+                Checked
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void reveal(last.path)}
+              >
+                <FolderOpen aria-hidden="true" />
+                Show in {fileManagerName()}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <p className="settings-hint">No backup has been made yet.</p>
+        )}
+      </div>
+      {failure && (
+        <p role="alert" className="settings-failure">
+          {failure}
+        </p>
+      )}
+      <p role="status" className="settings-hint">
+        {message}
+      </p>
+      {/* Typed-path restore stays until the restore review replaces it. */}
+      <section aria-label="Restore a backup" className="backup-restore">
+        <label>
+          Backup to restore{" "}
+          <input
+            value={restorePath}
+            onChange={(event) => setRestorePath(event.target.value)}
+          />
+        </label>{" "}
         <button
           type="button"
-          disabled={!backupPath || backupBusy}
+          disabled={!restorePath || busy}
           onClick={() =>
             void (async () => {
               if (
@@ -286,55 +404,105 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
                 )
               )
                 return;
-              setBackupBusy(true);
+              setBusy(true);
               try {
-                setBackupMessage(await client.restoreWorkspace(backupPath));
+                setRestoreMessage(await client.restoreWorkspace(restorePath));
                 await onRestore();
               } catch (reason) {
-                setBackupMessage(`Restore failed: ${String(reason)}`);
+                setRestoreMessage(`Restore failed: ${String(reason)}`);
               } finally {
-                setBackupBusy(false);
+                setBusy(false);
               }
             })()
           }
         >
           Restore backup
         </button>
-        <p role="status">{backupMessage}</p>
+        <p role="status">{restoreMessage}</p>
       </section>
     </SettingsCard>
   );
 }
 
+const EXPORT_COMMAND = "ticketd export --file PATH";
+
 function ExportCard() {
-  const [exportPath, setExportPath] = useState("");
-  const [exportMessage, setExportMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
+  const [message, setMessage] = useState("");
+  async function exportWorkspace() {
+    setBusy(true);
+    setFailure("");
+    setMessage("");
+    try {
+      const path = await workspaceClient.chooseSavePath({
+        title: "Export ticketd workspace",
+        defaultPath: `ticketd-export-${localDate()}.json`,
+        filterName: "JSON",
+        extension: "json",
+      });
+      if (path === null) return;
+      try {
+        await client.exportWorkspace(path);
+        setMessage(`Export saved to ${path}.`);
+      } catch (reason) {
+        setFailure(`The export was not saved: ${String(reason)}`);
+      }
+    } catch (reason) {
+      setFailure(`Could not open the save dialog: ${String(reason)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function copyCommand() {
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(EXPORT_COMMAND);
+      setMessage("Command copied.");
+    } catch (reason) {
+      setFailure(`Could not copy the command: ${String(reason)}`);
+    }
+  }
   return (
     <SettingsCard id="export" title="Export">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          setExportMessage("");
-          void client
-            .exportWorkspace(exportPath)
-            .then(() => setExportMessage("Export saved."))
-            .catch((reason: unknown) =>
-              setExportMessage(`Export failed: ${String(reason)}`),
-            );
-        }}
-      >
-        <label>
-          Export file path{" "}
-          <input
-            className="rounded border border-neutral-400 bg-white p-2"
-            value={exportPath}
-            onChange={(event) => setExportPath(event.target.value)}
-            required
-          />
-        </label>{" "}
-        <button type="submit">Export workspace</button>
-        {exportMessage && <p role="status">{exportMessage}</p>}
-      </form>
+      <p className="settings-hint">
+        An export is a readable JSON snapshot (format version 1) that includes
+        Trash. It cannot be imported and is not a full backup; use Backups to
+        keep a restorable copy. Exports never replace an existing file.
+      </p>
+      <div className="settings-actions">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void exportWorkspace()}
+        >
+          Export…
+        </Button>
+      </div>
+      <p className="settings-hint">From the command line:</p>
+      <div className="settings-actions">
+        <code className="workspace-path">{EXPORT_COMMAND}</code>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label="Copy export command"
+          onClick={() => void copyCommand()}
+        >
+          <Copy aria-hidden="true" />
+          Copy
+        </Button>
+      </div>
+      {failure && (
+        <p role="alert" className="settings-failure">
+          {failure}
+        </p>
+      )}
+      <p role="status" className="settings-hint">
+        {message}
+      </p>
     </SettingsCard>
   );
 }

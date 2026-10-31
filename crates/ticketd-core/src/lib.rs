@@ -2,6 +2,7 @@
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
+pub use backup::BackupRecord;
 mod context;
 mod duplicates;
 pub use duplicates::{
@@ -223,10 +224,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 19 {
+            if version > 20 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 19 {
+            if version == 20 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -247,10 +248,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 19 {
+            if version > 20 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 19 {
+            if version < 20 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -339,6 +340,9 @@ impl Workspace {
         }
         if version < 19 {
             transaction.execute_batch("CREATE TABLE contextual_relationships (kind TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES tickets(id), target_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(kind, source_id, target_id)); PRAGMA user_version = 19;")?;
+        }
+        if version < 20 {
+            transaction.execute_batch("CREATE TABLE last_backup (id INTEGER PRIMARY KEY CHECK (id = 1), path TEXT NOT NULL, completed_at TEXT NOT NULL); PRAGMA user_version = 20;")?;
         }
         transaction.commit()?;
         Ok(())
