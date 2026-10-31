@@ -183,7 +183,7 @@ try {
   await (
     await (await detail()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('[role="menuitem"]=Move to trash')).click();
+  await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
   await (
     await (
       await browser.$('nav[aria-label="Workspace views"]')
@@ -193,7 +193,7 @@ try {
   await (
     await (await detail()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('[role="menuitem"]=Restore')).click();
+  await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,

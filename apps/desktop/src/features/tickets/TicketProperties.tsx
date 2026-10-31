@@ -56,6 +56,7 @@ export function PropertyPicker({
   function choose(next: string) {
     setOpen(false);
     setQuery("");
+    onSearch?.("");
     onChoose(next);
   }
   return (
