@@ -88,6 +88,36 @@ const detail = () =>
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
 try {
+  const newTicket = await browser.$("button=New ticket");
+  await newTicket.waitForDisplayed({ timeout: 15000 });
+  await newTicket.click();
+  const creation = await browser.$('.create-panel[role="dialog"]');
+  await (
+    await creation.$('[aria-label="Description rich text"]')
+  ).waitForDisplayed({ timeout: 15000 });
+  await browser.waitUntil(
+    () =>
+      browser.execute(() => {
+        const dialog = document.querySelector('.create-panel[role="dialog"]');
+        if (!dialog) return false;
+        const bounds = dialog.getBoundingClientRect();
+        return (
+          bounds.left >= 0 &&
+          bounds.top >= 0 &&
+          bounds.right <= window.innerWidth &&
+          bounds.bottom <= window.innerHeight &&
+          Math.abs(bounds.x + bounds.width / 2 - window.innerWidth / 2) < 2 &&
+          Math.abs(bounds.y + bounds.height / 2 - window.innerHeight / 2) < 2
+        );
+      }),
+    {
+      timeout: 5000,
+      timeoutMsg: "New ticket dialog is off-center or outside the app window",
+    },
+  );
+  await (await creation.$('[aria-label="Close new ticket"]')).click();
+  await creation.waitForDisplayed({ reverse: true });
+
   const row = await browser.$(
     "button*=Exercise installed desktop and CLI together",
   );

@@ -468,12 +468,8 @@ select option {
   padding: 0;
   margin-top: 12px;
 }
+/* DialogContent owns positioning so production CSS applies centering once. */
 .create-panel {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  translate: none;
   width: min(500px, 80vw);
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
