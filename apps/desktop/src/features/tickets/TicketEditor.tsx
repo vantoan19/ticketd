@@ -2,8 +2,7 @@ import "./description.css";
 import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView } from "@codemirror/view";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
@@ -204,9 +203,7 @@ export function TicketEditor({
               setEditingBody(true);
             }}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {draft.body}
-            </ReactMarkdown>
+            <MarkdownDocument source={draft.body} />
           </div>
         ) : (
           <Button
