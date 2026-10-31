@@ -1,4 +1,5 @@
 import { Hierarchy } from "./Hierarchy";
+import { Efforts } from "./Efforts";
 import { Projects, TicketProject } from "./Projects";
 import { Dependencies } from "./Dependencies";
 import { Notes } from "./Notes";
@@ -125,6 +126,7 @@ export function App() {
           {error}
         </p>
       )}
+      <Efforts revision={revision} refresh={refresh} />
       <Projects
         projects={projects}
         filter={filter}

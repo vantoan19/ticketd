@@ -1,5 +1,7 @@
 //! Desktop adapter for the shared ticketd core.
-use ticketd_core::{HistoryEntry, Note, NotePatch, Project, Ticket, TicketPatch, Workspace};
+use ticketd_core::{
+    Effort, EffortView, HistoryEntry, Note, NotePatch, Project, Ticket, TicketPatch, Workspace,
+};
 
 #[tauri::command]
 fn list_projects() -> Result<Vec<Project>, String> {
@@ -108,9 +110,49 @@ fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, Strin
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn list_efforts() -> Result<Vec<Effort>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.list_efforts(true))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn show_effort(id: String) -> Result<EffortView, String> {
+    Workspace::open_default()
+        .and_then(|w| w.show_effort(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn create_effort(name: String) -> Result<Effort, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.create_effort(&name))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn change_effort(
+    id: String,
+    name: Option<String>,
+    archived: Option<bool>,
+) -> Result<Effort, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.change_effort(&id, name.as_deref(), archived))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_effort(reference: String, effort: Option<String>) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.set_effort(&reference, effort.as_deref(), None))
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            list_efforts,
+            show_effort,
+            create_effort,
+            change_effort,
+            set_effort,
             list_projects,
             create_project,
             edit_project,
