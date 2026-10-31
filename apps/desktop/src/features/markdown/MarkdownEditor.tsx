@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -466,7 +465,15 @@ export function MarkdownEditor({
   label = "Markdown document",
   autoFocus = false,
 }: MarkdownEditorProps) {
-  const document = useMemo(() => readMarkdown(value), [value]);
+  const [assessed, setAssessed] = useState<{
+    source: string;
+    document: Pick<ReturnType<typeof readMarkdown>, "value" | "reasons">;
+  }>(() => ({ source: value, document: readMarkdown(value) }));
+  let document = assessed.document;
+  if (assessed.source !== value) {
+    document = readMarkdown(value);
+    setAssessed({ source: value, document });
+  }
   const [sourceMode, setSourceMode] = useState(false);
   const [slash, setSlash] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -475,7 +482,8 @@ export function MarkdownEditor({
   const container = useRef<HTMLElement>(null);
   const emitted = useRef(value);
   const synchronizing = useRef(false);
-  const previousMarkdown = useRef(writeMarkdown(document.value));
+  const [initialMarkdown] = useState(() => writeMarkdown(document.value));
+  const previousMarkdown = useRef(initialMarkdown);
   const editor = usePlateEditor({
     plugins: [
       ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
@@ -565,11 +573,11 @@ export function MarkdownEditor({
     if (value === emitted.current) return;
     synchronizing.current = true;
     emitted.current = value;
-    const next = readMarkdown(value).value;
+    const next = document.value;
     previousMarkdown.current = writeMarkdown(next);
     editor.tf.setValue(next);
     synchronizing.current = false;
-  }, [value, editor]);
+  }, [value, document, editor]);
   const choices = insertions.filter(([, title]) =>
     title.toLowerCase().includes(slashQuery.toLowerCase()),
   );
@@ -684,9 +692,10 @@ export function MarkdownEditor({
             if (!readOnly && next !== value) {
               emitted.current = next;
               synchronizing.current = true;
-              const parsed = readMarkdown(next).value;
-              previousMarkdown.current = writeMarkdown(parsed);
-              editor.tf.setValue(parsed);
+              const parsed = readMarkdown(next);
+              setAssessed({ source: next, document: parsed });
+              previousMarkdown.current = writeMarkdown(parsed.value);
+              editor.tf.setValue(parsed.value);
               synchronizing.current = false;
               onChange(next);
             }
@@ -708,6 +717,12 @@ export function MarkdownEditor({
             const markdown = writeMarkdown(next);
             if (markdown !== previousMarkdown.current) {
               previousMarkdown.current = markdown;
+              // This controlled echo already consists of supported Plate nodes.
+              // Re-parsing it would repeat the entire fidelity check per keypress.
+              setAssessed({
+                source: markdown,
+                document: { value: next, reasons: [] },
+              });
               emitted.current = markdown;
               onChange(markdown);
             }
