@@ -269,9 +269,12 @@ test("retains project drafts and clears filters when navigating scopes", async (
   });
   expect(screen.queryByRole("button", { name: "Old effort" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
     target: { value: "Draft" },
   });
+  // Escape closes the dialog without discarding the draft.
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   expect(
     screen.queryByRole("navigation", { name: "Workspace views" }),
@@ -280,10 +283,12 @@ test("retains project drafts and clears filters when navigating scopes", async (
     screen.getByRole("navigation", { name: "Settings sections" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
     "value",
     "Draft",
   );
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Workspace views" }),

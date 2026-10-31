@@ -37,7 +37,7 @@ type Phase =
 
 const UNCHANGED = "Your workspace hasn't changed.";
 
-export function formatWhen(timestamp: string | null) {
+function formatWhen(timestamp: string | null) {
   if (!timestamp) return "No changes yet";
   const date = new Date(timestamp);
   return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
@@ -174,11 +174,8 @@ export function RestoreDialog({
   const [copied, setCopied] = useState("");
   const latest = useRef(0);
 
-  const inspect = useCallback(async (next: string) => {
+  const check = useCallback(async (next: string) => {
     const request = ++latest.current;
-    setFile(next);
-    setFailure("");
-    setPhase({ name: "checking" });
     let result: Phase;
     try {
       result = {
@@ -190,10 +187,16 @@ export function RestoreDialog({
     }
     if (request === latest.current) setPhase(result);
   }, []);
-  // Check the first file when the dialog opens.
+  function inspect(next: string) {
+    setFile(next);
+    setFailure("");
+    setPhase({ name: "checking" });
+    return check(next);
+  }
+  // The dialog starts in "checking", so only the result is set from here.
   useEffect(() => {
-    void inspect(path);
-  }, [inspect, path]);
+    void check(path);
+  }, [check, path]);
 
   async function chooseAnother() {
     try {

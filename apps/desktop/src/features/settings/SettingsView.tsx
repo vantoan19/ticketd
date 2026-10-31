@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Copy,
   ExternalLink,
@@ -25,37 +25,12 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
-import {
-  settingsCardId,
-  type SettingsSectionId,
-} from "@/features/settings/settings-sections";
+import { SettingsCard } from "@/features/settings/SettingsCard";
+import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import { fileManagerName } from "@/features/settings/file-manager";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import "@/features/settings/settings.css";
-
-function SettingsCard({
-  id,
-  title,
-  children,
-}: {
-  id: SettingsSectionId;
-  title: string;
-  children: ReactNode;
-}) {
-  const headingId = `${settingsCardId(id)}-heading`;
-  return (
-    <section
-      id={settingsCardId(id)}
-      className="settings-card"
-      aria-labelledby={headingId}
-      tabIndex={-1}
-    >
-      <h2 id={headingId}>{title}</h2>
-      {children}
-    </section>
-  );
-}
 
 const THEME_OPTIONS = [
   { value: "system", label: "System", icon: <Monitor aria-hidden="true" /> },
@@ -656,6 +631,7 @@ export function SettingsView({
         <LocationCard />
         <BackupsCard onRestore={onRestore} />
         <ExportCard />
+        <CommandLineCard />
         <KeyboardShortcutsCard />
         <AboutCard />
       </div>

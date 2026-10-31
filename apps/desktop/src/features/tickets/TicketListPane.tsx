@@ -1,11 +1,15 @@
 import type { RefObject } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EffortHeader } from "@/features/efforts/EffortHeader";
+import { useEffortView } from "@/features/efforts/useEffortView";
+import { effortsClient } from "@/lib/api/efforts";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
+import type { Ticket } from "@/lib/api/client";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
 const PAGE_SIZE = 50;
@@ -51,7 +55,12 @@ export function TicketListPane({
     navigation,
     clearFilters,
     queryError,
+    revision,
   } = workspace;
+  // An Effort scope shows the Effort's own header instead of a plain title.
+  const effortScope = !trash && navigation.effort ? navigation.effort : "";
+  const scopedEffort = efforts.find((item) => item.id === effortScope);
+  const effortState = useEffortView(effortScope, revision, refresh);
   const filtered =
     navigation.effort !== effort ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
@@ -73,24 +82,33 @@ export function TicketListPane({
       ref={listRef}
       aria-labelledby="tickets-heading"
     >
-      <div className="list-header">
-        <h1 id="tickets-heading" tabIndex={-1}>
-          {scopeName}
-        </h1>
-        <p>
-          {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
-          {tickets.length === PAGE_SIZE ? " shown" : ""}
-        </p>
-        <Button
-          className="list-refresh"
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Refresh"
-          onClick={() => void refresh()}
-        >
-          <RefreshCw />
-        </Button>
-      </div>
+      {scopedEffort ? (
+        <EffortHeader
+          effort={scopedEffort}
+          efforts={efforts}
+          projects={projects}
+          state={effortState}
+        />
+      ) : (
+        <div className="list-header">
+          <h1 id="tickets-heading" tabIndex={-1}>
+            {scopeName}
+          </h1>
+          <p>
+            {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
+            {tickets.length === PAGE_SIZE ? " shown" : ""}
+          </p>
+          <Button
+            className="list-refresh"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Refresh"
+            onClick={() => void refresh()}
+          >
+            <RefreshCw />
+          </Button>
+        </div>
+      )}
       {!trash && (
         <TicketFilters
           {...{
@@ -146,6 +164,11 @@ export function TicketListPane({
                 Clear filters
               </Button>
             </>
+          ) : effortScope ? (
+            <>
+              <strong>No tickets in this Effort</strong>
+              <p>Use Add tickets to bring existing tickets into it.</p>
+            </>
           ) : navigation.project !== "all" ||
             navigation.effort ||
             navigation.kind !== "all" ? (
@@ -184,6 +207,24 @@ export function TicketListPane({
           bulkSelection={bulk.selection}
           onToggle={bulk.toggle}
           onOpen={onOpen}
+          {...(scopedEffort && {
+            rowAction: (ticket: Ticket) => (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={effortState.pending}
+                aria-label={`Remove ${ticket.reference} from ${scopedEffort.name}`}
+                title="Remove from Effort"
+                onClick={() =>
+                  void effortState.run(() =>
+                    effortsClient.setMember(ticket.reference, null),
+                  )
+                }
+              >
+                <X />
+              </Button>
+            ),
+          })}
         />
       )}
       {!trash && (offset > 0 || tickets.length === PAGE_SIZE) && (

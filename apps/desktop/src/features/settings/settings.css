@@ -109,6 +109,57 @@
   font-size: 13px;
 }
 
+/* Command line card: detection summary and the agent quick reference. */
+.cli-summary {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.cli-summary .settings-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cli-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.cli-details dt {
+  color: var(--muted-foreground);
+}
+.cli-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cli-reference-heading {
+  margin: 24px 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.cli-reference {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cli-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cli-command code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
 /* Open tickets: two selectable cards with small layout previews. */
 .layout-choices {
   display: grid;

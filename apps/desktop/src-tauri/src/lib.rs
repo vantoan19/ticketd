@@ -1,4 +1,6 @@
 //! Desktop adapter for the shared ticketd core.
+mod cli_status;
+
 use ticketd_core::{
     BackupInspection, BackupRecord, BatchOperation, SafetyBackup, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput,
     HistoryEntry, InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket,
@@ -676,6 +678,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_effort,
             change_effort,
             set_effort,
+            cli_status::check_cli,
             list_projects,
             register_checkout,
             remove_checkout,

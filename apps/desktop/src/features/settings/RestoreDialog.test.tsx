@@ -157,7 +157,7 @@ test.each([
     vi.mocked(workspaceClient.inspectBackup).mockResolvedValue({
       path: BACKUP,
       current,
-      check,
+      check: check as unknown as BackupInspection["check"],
     });
     const dialog = await openReview();
     const alert = await within(dialog).findByRole("alert");
