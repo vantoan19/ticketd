@@ -2,6 +2,7 @@ import { Notes } from "./Notes";
 import { History } from "./History";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { client, type Ticket } from "./client";
+import { Tags } from "./Tags";
 import { TicketEditor } from "./TicketEditor";
 
 export function App() {
@@ -97,6 +98,11 @@ export function App() {
                       {item.reference}
                     </span>
                     {item.title}
+                    {item.tags.length > 0 && (
+                      <span className="ml-2 text-sm text-neutral-600">
+                        {item.tags.join(", ")}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -121,6 +127,11 @@ export function App() {
               )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
               {item.id === selected && <Notes reference={item.reference} />}
+              <Tags
+                reference={item.reference}
+                tags={item.tags}
+                refresh={refresh}
+              />
             </div>
           ))}
         </section>

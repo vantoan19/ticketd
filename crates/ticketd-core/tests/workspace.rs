@@ -125,3 +125,64 @@ fn notes_can_be_paged_edited_and_deleted_after_reopening() {
     );
     assert_eq!(workspace.show_ticket(&ticket.reference).unwrap().body, "");
 }
+
+#[test]
+fn tags_are_shared_and_independent_additions_are_preserved() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut first = Workspace::open(&path).unwrap();
+    let ticket = first.create_ticket("Outcome").unwrap();
+    let other = first.create_ticket("Another outcome").unwrap();
+    let mut second = Workspace::open(&path).unwrap();
+    first.add_tag(&ticket.reference, " Bug ").unwrap();
+    second.add_tag(&ticket.reference, "research").unwrap();
+    second.add_tag(&other.reference, "BUG").unwrap();
+    first.add_tag(&ticket.reference, "bug").unwrap();
+    assert_eq!(
+        first.show_ticket(&ticket.reference).unwrap().tags,
+        vec!["bug", "research"]
+    );
+    assert_eq!(
+        first.show_ticket(&other.reference).unwrap().tags,
+        vec!["bug"]
+    );
+    first.remove_tag(&ticket.reference, " BUG ").unwrap();
+    assert_eq!(
+        second
+            .list_tickets()
+            .unwrap()
+            .iter()
+            .find(|t| t.reference == ticket.reference)
+            .unwrap()
+            .tags,
+        vec!["research"]
+    );
+}
+
+#[test]
+fn version_one_workspace_upgrades_content_history_and_tags() {
+    use ticketd_core::{Status, TicketPatch};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL); INSERT INTO tickets (id, title, status) VALUES ('old-id', 'Existing', 'Todo'); PRAGMA user_version = 1;").unwrap();
+    drop(connection);
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.add_tag("T-1", "Bug").unwrap();
+    let updated = workspace
+        .change_ticket(
+            "T-1",
+            TicketPatch {
+                body: Some("Details".into()),
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.body, "Details");
+    assert_eq!(updated.tags, vec!["bug"]);
+    assert_eq!(workspace.ticket_history("T-1").unwrap().len(), 1);
+    drop(workspace);
+    let reopened = Workspace::open(&path).unwrap();
+    assert_eq!(reopened.show_ticket("T-1").unwrap(), updated);
+}

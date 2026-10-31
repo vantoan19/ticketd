@@ -1,4 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod tags;
+
 use std::{path::Path, time::Duration};
 
 use directories::ProjectDirs;
@@ -13,6 +15,8 @@ pub use notes::{Note, NotePatch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("tag name must not be empty")]
+    EmptyTag,
     #[error("ticket title must not be empty")]
     EmptyTitle,
     #[error("ticket '{0}' was not found")]
@@ -36,6 +40,7 @@ pub struct Ticket {
     pub title: String,
     pub status: Status,
     pub body: String,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -60,6 +65,7 @@ impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let mut connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_secs(10))?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
@@ -75,6 +81,10 @@ impl Workspace {
         }
         if version < 3 {
             history::migrate(&transaction)?;
+        }
+        if version < 4 {
+            tags::migrate(&transaction)?;
+            transaction.pragma_update(None, "user_version", 4)?;
         }
         if version < 5 {
             notes::migrate(&transaction)?;
@@ -99,6 +109,7 @@ impl Workspace {
             title: title.to_owned(),
             status: Status::Todo,
             body: String::new(),
+            tags: Vec::new(),
         })
     }
 
@@ -133,11 +144,12 @@ impl Workspace {
                 patch.editing_agent.as_deref(),
             )?;
         }
-        let updated = transaction.query_row(
+        let mut updated = transaction.query_row(
             "SELECT id, number, title, status, body FROM tickets WHERE number = ?1",
             [number],
             ticket_from_row,
         )?;
+        updated.tags = tags::for_ticket(&transaction, &updated.id)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -178,9 +190,12 @@ impl Workspace {
         let mut statement = self
             .connection
             .prepare("SELECT id, number, title, status, body FROM tickets ORDER BY number DESC")?;
-        let tickets = statement
+        let mut tickets = statement
             .query_map([], ticket_from_row)?
             .collect::<Result<Vec<_>, _>>()?;
+        for ticket in &mut tickets {
+            ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
+        }
         Ok(tickets)
     }
 
@@ -196,7 +211,9 @@ impl Workspace {
                 ticket_from_row,
             )
             .optional()?;
-        ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))
+        let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
+        ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
+        Ok(ticket)
     }
 }
 
@@ -213,5 +230,6 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
             )
         })?,
         body: row.get(4)?,
+        tags: Vec::new(),
     })
 }
