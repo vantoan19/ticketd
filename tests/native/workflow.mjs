@@ -96,9 +96,7 @@ try {
   await (await detail()).waitForDisplayed({ timeout: 10000 });
   const title = await (await detail()).$('textarea[aria-label="Title"]');
   await title.waitForDisplayed();
-  await title.click();
-  await browser.keys(["End"]);
-  await browser.keys(" (reviewed)");
+  await title.setValue(`${harness.title} (reviewed)`);
   await browser.waitUntil(
     () => run("show", harness.reference).title.endsWith(" (reviewed)"),
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
