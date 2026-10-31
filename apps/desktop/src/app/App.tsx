@@ -10,14 +10,19 @@ import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Menu } from "lucide-react";
-import { Efforts } from "@/features/efforts/Efforts";
+import { EffortList } from "@/features/efforts/EffortList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 export function App() {
   const [view, setView] = useState<
-    "tickets" | "projects" | "efforts" | "settings" | "inbox"
+    | "tickets"
+    | "projects"
+    | "efforts"
+    | "archived-efforts"
+    | "settings"
+    | "inbox"
   >("tickets");
   useThemeSync();
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
@@ -165,13 +170,14 @@ export function App() {
               />
             </div>
           }
-          {
-            <div className="management" hidden={view !== "efforts"}>
-              <h1>Efforts</h1>
-              <p>Organize tickets into shared efforts.</p>
-              <Efforts revision={revision} refresh={refresh} />
-            </div>
-          }
+          {(view === "efforts" || view === "archived-efforts") && (
+            <EffortList
+              efforts={efforts}
+              archived={view === "archived-efforts"}
+              onOpen={(id) => scope("all", "all", id)}
+              refresh={refresh}
+            />
+          )}
           {view === "inbox" && (
             <Inbox
               revision={revision}

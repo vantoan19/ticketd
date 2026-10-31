@@ -16,9 +16,26 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
 import { client, type Note, type Project } from "@/lib/api/client";
+import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
+import { historySentence } from "./history-sentence";
+import { EmphasizedPassage } from "./reference-passage";
+import { formatWhen } from "./format-when";
 import "./activity.css";
+
+/**
+ * Unsubmitted note drafts by ticket reference. They outlive this component so
+ * switching tickets, or the detail remounting, never loses typed text.
+ */
+const noteDrafts = new Map<string, string>();
 
 export function Activity({
   reference,
@@ -29,6 +46,8 @@ export function Activity({
   trashed,
   select,
   target,
+  efforts = [],
+  mention = null,
 }: {
   reference: string;
   status: string;
@@ -38,15 +57,21 @@ export function Activity({
   trashed: boolean;
   select?: (reference: string) => void;
   target?: { id: string; key: number } | null;
+  efforts?: Effort[];
+  /** A description passage the person navigated here to read. */
+  mention?: { passage: string; mentioned: string; key: number } | null;
 }) {
   const [loadError, setLoadError] = useState("");
   const [targetNote, setTargetNote] = useState<Note | null>(null);
   const targetRef = useRef<HTMLDivElement>(null);
+  const mentionRef = useRef<HTMLDivElement>(null);
+  const targetId = target?.id;
+  const targetKey = target?.key;
   useEffect(() => {
-    if (!active || !target) return;
+    if (!active || targetId === undefined) return;
     let current = true;
     void client
-      .note(reference, target.id)
+      .note(reference, targetId)
       .then((note) => {
         if (current) setTargetNote(note);
       })
@@ -56,17 +81,29 @@ export function Activity({
     return () => {
       current = false;
     };
-  }, [active, reference, target]);
+  }, [active, reference, targetId, targetKey]);
   useEffect(() => {
-    if (active && target && targetNote?.id === target.id)
+    if (active && targetId !== undefined && targetNote?.id === targetId)
       targetRef.current?.scrollIntoView?.({ block: "center" });
-  }, [active, target, targetNote]);
+  }, [active, targetId, targetKey, targetNote]);
+  const mentionKey = mention?.key;
+  useEffect(() => {
+    if (active && mentionKey !== undefined)
+      mentionRef.current?.scrollIntoView?.({ block: "center" });
+  }, [active, mentionKey]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState("");
-  const [composing, setComposing] = useState(false);
+  const [draft, setDraftValue] = useState(
+    () => noteDrafts.get(reference) ?? "",
+  );
+  const [composing, setComposing] = useState(() => noteDrafts.has(reference));
+  function setDraft(content: string) {
+    if (content) noteDrafts.set(reference, content);
+    else noteDrafts.delete(reference);
+    setDraftValue(content);
+  }
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
@@ -186,12 +223,13 @@ export function Activity({
       index,
     })),
   ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  function historyValue(entry: Entry, value: string) {
-    if (entry.kind !== "project") return value;
-    return value
-      ? (projects.find((project) => project.id === value)?.name ?? value)
-      : "Unlinked";
-  }
+  const lookups = {
+    project: (id: string) =>
+      projects.find((project) => project.id === id)?.name,
+    effort: (id: string) => efforts.find((effort) => effort.id === id)?.name,
+  };
+  const [dismissedMention, setDismissedMention] = useState<number | null>(null);
+  const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
       {active && target && targetNote?.id === target.id && (
@@ -204,9 +242,34 @@ export function Activity({
           />
         </div>
       )}
+      {active && mention && dismissedMention !== mention.key && (
+        <div
+          ref={mentionRef}
+          tabIndex={-1}
+          className="activity-mention"
+          aria-label="Mentioned passage"
+        >
+          <div className="activity-mention-heading">
+            <strong>Mentions {mention.mentioned} in the description</strong>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDismissedMention(mention.key)}
+            >
+              Dismiss
+            </Button>
+          </div>
+          <p>
+            <EmphasizedPassage
+              text={mention.passage}
+              reference={mention.mentioned}
+            />
+          </p>
+        </div>
+      )}
       <div className="activity-heading">
         <h3>Activity</h3>
-        <span>Notes and recorded changes</span>
       </div>
       {(error || loadError) && (
         <Alert variant="destructive">
@@ -231,15 +294,54 @@ export function Activity({
             item.type === "note" ? (
               <li key={`note-${item.note.id}`} className="activity-entry">
                 <div className="activity-meta">
-                  <strong>Note</strong>
-                  <time dateTime={item.note.created_at}>
-                    {item.note.created_at}
+                  <time
+                    dateTime={item.note.created_at}
+                    title={item.note.created_at}
+                  >
+                    {formatWhen(item.note.created_at)}
                   </time>
                   {item.note.updated_at !== item.note.created_at && (
-                    <span>Edited {item.note.updated_at}</span>
+                    <span title={item.note.updated_at}>
+                      Edited {formatWhen(item.note.updated_at)}
+                    </span>
                   )}
                   {item.note.editing_agent && (
                     <span>Agent: {item.note.editing_agent}</span>
+                  )}
+                  {!trashed && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="activity-menu"
+                          disabled={pending}
+                          aria-label={`Actions for note from ${formatWhen(item.note.created_at)}`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            setEdit({
+                              id: item.note.id,
+                              original: item.note.content,
+                              content: item.note.content,
+                            })
+                          }
+                        >
+                          Edit note
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => void remove(item.note.id)}
+                        >
+                          Delete note
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   )}
                 </div>
                 <div className="markdown-preview activity-note">
@@ -249,53 +351,19 @@ export function Activity({
                     revision={revision}
                   />
                 </div>
-                {!trashed && (
-                  <div className="activity-actions">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={pending}
-                      aria-label={`Edit note from ${item.note.created_at}`}
-                      onClick={() =>
-                        setEdit({
-                          id: item.note.id,
-                          original: item.note.content,
-                          content: item.note.content,
-                        })
-                      }
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={pending}
-                      aria-label={`Delete note from ${item.note.created_at}`}
-                      onClick={() => void remove(item.note.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                )}
               </li>
             ) : (
-              <li key={`history-${item.index}`} className="activity-entry">
-                <div className="activity-meta">
-                  <strong>History</strong>
-                  <time dateTime={item.entry.timestamp}>
-                    {item.entry.timestamp}
-                  </time>
-                  {item.entry.editing_agent && (
-                    <span>Agent: {item.entry.editing_agent}</span>
-                  )}
-                </div>
-                <p>
-                  {item.entry.kind}:{" "}
-                  {historyValue(item.entry, item.entry.from_value)} →{" "}
-                  {historyValue(item.entry, item.entry.to_value)}
-                </p>
+              <li key={`history-${item.index}`} className="activity-history">
+                <span>{historySentence(item.entry, lookups)}</span>
+                <time
+                  dateTime={item.entry.timestamp}
+                  title={item.entry.timestamp}
+                >
+                  {formatWhen(item.entry.timestamp)}
+                </time>
+                {item.entry.editing_agent && (
+                  <span>Agent: {item.entry.editing_agent}</span>
+                )}
               </li>
             ),
           )}
@@ -313,14 +381,13 @@ export function Activity({
         </Button>
       )}
       {!trashed && !composing && !edit && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-start"
+        <button
+          type="button"
+          className="activity-compact-composer"
           onClick={() => setComposing(true)}
         >
           Add a note
-        </Button>
+        </button>
       )}
       {!trashed && (composing || edit) && (
         <form
@@ -335,7 +402,7 @@ export function Activity({
               <LazyMarkdownEditor
                 key={edit?.id ?? "new"}
                 label={edit ? "Edit note" : "New note"}
-                value={edit ? edit.content : draft}
+                value={draftText}
                 onChange={(content) =>
                   edit ? setEdit({ ...edit, content }) : setDraft(content)
                 }
@@ -354,11 +421,11 @@ export function Activity({
             <Button
               type="submit"
               size="sm"
-              disabled={pending || !(edit ? edit.content : draft).trim()}
+              disabled={pending || !draftText.trim()}
             >
               {pending ? "Saving…" : edit ? "Save note" : "Add note"}
             </Button>
-            {edit && (
+            {edit ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -367,6 +434,19 @@ export function Activity({
                 onClick={() => setEdit(null)}
               >
                 Cancel edit
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  setDraft("");
+                  setComposing(false);
+                }}
+              >
+                Discard draft
               </Button>
             )}
           </div>

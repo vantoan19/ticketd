@@ -1,0 +1,74 @@
+.backlinks {
+  margin-top: 24px;
+}
+.backlinks h3 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.backlink-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.backlink-source {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.backlink-source:hover {
+  background: var(--accent);
+}
+.backlink-source:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.backlink-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.backlink-heading strong {
+  font-weight: 500;
+}
+.backlink-where {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.mention-passage {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.backlink-pages {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.mention-passage mark {
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 600;
+}
