@@ -87,6 +87,8 @@ const detail = () =>
   browser.$(
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
+const header = () =>
+  browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
 try {
   const newTicket = await browser.$("button=New ticket");
   await newTicket.waitForDisplayed({ timeout: 15000 });
@@ -241,7 +243,7 @@ try {
     { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
   );
   await (
-    await (await detail()).$('button[aria-label="Ticket actions"]')
+    await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
   await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
   await (
@@ -251,7 +253,7 @@ try {
   ).click();
   await (await browser.$("button*=Record native workflow evidence")).click();
   await (
-    await (await detail()).$('button[aria-label="Ticket actions"]')
+    await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
   await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);

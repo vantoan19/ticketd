@@ -102,7 +102,7 @@ try {
   let clock = Date.now();
   await projectButton.click();
   await browser.waitUntil(
-    async () => (await projectButton.getAttribute("aria-pressed")) === "true",
+    async () => (await projectButton.getAttribute("aria-current")) === "page",
   );
   await (
     await browser.$("button*=Benchmark ticket 999")

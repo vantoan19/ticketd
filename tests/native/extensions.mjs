@@ -43,6 +43,8 @@ const detail = () =>
   browser.$(
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
+const header = () =>
+  browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
 async function click(element) {
   await element.waitForDisplayed({ timeout: 15000 });
   await element.waitForEnabled({ timeout: 15000 });
@@ -59,17 +61,6 @@ async function open(title) {
       ).getValue()) === title,
     { timeout: 10000 },
   );
-}
-async function disclosure(label) {
-  const labelled = await (await detail()).$(`summary[aria-label="${label}"]`);
-  const summary = (await labelled.isExisting())
-    ? labelled
-    : await (await detail()).$(`summary=${label}`);
-  const isOpen = await browser.execute(
-    (element) => element.parentElement.open,
-    summary,
-  );
-  if (!isOpen) await click(summary);
 }
 const waitFor = (fn, message, timeout = 12000) =>
   browser.waitUntil(fn, { timeout, interval: 200, timeoutMsg: message });
@@ -91,7 +82,7 @@ const waitForSelectionReset = () =>
 try {
   // Follow in desktop, observe external CLI changes and navigate to the note.
   await open(source.title);
-  await click(await (await detail()).$("button=Follow"));
+  await click(await (await header()).$("button=Follow"));
   run("change", source.reference, "--status", "In progress");
   run(
     "note",
@@ -133,7 +124,9 @@ try {
   const local = new Date(future.getTime() - future.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
-  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
+  await click(
+    await (await header()).$('button[aria-label^="Manage reminder"]'),
+  );
   const input = await browser.$('input[type="datetime-local"]');
   await input.scrollIntoView();
   await browser.execute(
@@ -204,7 +197,9 @@ try {
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
+  await click(
+    await (await header()).$('button[aria-label^="Manage reminder"]'),
+  );
   await click(await browser.$("button=Snooze 1 hour"));
   await waitFor(() => {
     const value = command(["reminder", "show", source.reference]).match(
@@ -255,12 +250,17 @@ try {
       await (await detail()).$('section[aria-label="Mentioned in"]')
     ).$("span*=for context.")
   ).waitForDisplayed({ timeout: 10000 });
-  await click(
-    await (
-      await detail()
-    ).$('section[aria-label="Linked work"] button=Link ticket'),
-  );
+  // WebdriverIO's text selector only works at the start of a selector, so find
+  // the section first.
+  const linkedWork = await (
+    await detail()
+  ).$('section[aria-label="Linked work"]');
+  await click(await linkedWork.$("button=Link ticket"));
   const dialog = await browser.$('[role="dialog"]');
+  // The dialog starts on "is blocked by"; this check is about a related link.
+  await (
+    await dialog.$('select[id^="link-kind-"]')
+  ).selectByAttribute("value", "related");
   await (
     await dialog.$('input[id^="link-search-"]')
   ).setValue(source.reference);
@@ -363,7 +363,7 @@ try {
 
   // Review the blocker replacement, then undo the duplicate designation.
   await open(source.title);
-  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await (await header()).$('button[aria-label="Ticket actions"]'));
   await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
   let section = await browser.$(
     '[role="dialog"] [aria-label="Duplicate review"]',
@@ -385,13 +385,14 @@ try {
     target.reference,
   );
   assert.equal(run("show", dependent.reference).availability, "Blocked");
-  await click(
-    await (
-      await detail()
-    ).$(
-      `button[aria-label="Remove relationship: Duplicate of ${target.reference}"]`,
-    ),
+  // The remove button stays transparent until its row is hovered or focused.
+  const duplicateRow = await (
+    await detail()
+  ).$(
+    `button[aria-label="Remove relationship: Duplicate of ${target.reference}"]`,
   );
+  await duplicateRow.moveTo();
+  await click(duplicateRow);
   await waitFor(
     () => run("show", source.reference).duplicate_of === null,
     "Duplicate undo failed",
@@ -400,7 +401,7 @@ try {
     run("show", dependent.reference).prerequisites[0].reference,
     target.reference,
   );
-  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await (await header()).$('button[aria-label="Ticket actions"]'));
   await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
   section = await browser.$('[role="dialog"] [aria-label="Duplicate review"]');
   await click(await section.$("button=Review separate dependency changes"));
@@ -424,7 +425,9 @@ try {
     () => browser.execute(() => window.innerWidth <= 767),
     "Narrow viewport not applied",
   );
-  await click(await (await detail()).$('button[aria-label="Manage reminder"]'));
+  await click(
+    await (await header()).$('button[aria-label^="Manage reminder"]'),
+  );
   const reminderRect = await browser.execute(() => {
     const field = document.querySelector(
       '[data-slot="popover-content"] input[type="datetime-local"]',
