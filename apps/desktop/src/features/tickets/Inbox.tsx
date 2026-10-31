@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlarmClock,
   Check,
@@ -121,30 +121,29 @@ export function Inbox({
   const [entries, setEntries] = useState<Entry[]>([]);
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
-  const latest = useRef(0);
-  const load = useCallback(async () => {
-    const ticket = ++latest.current;
-    try {
-      const result = await fetchEntries(filter, pages);
-      if (ticket !== latest.current) return;
-      setEntries(result.entries);
-      setMore(result.more);
-      setError("");
-    } catch (e) {
-      if (ticket === latest.current) setError(String(e));
-    }
-  }, [filter, pages]);
+  const [tick, setTick] = useState(0);
+  const reload = () => setTick((value) => value + 1);
   useEffect(() => {
-    // Reads run through `load`; `revision` re-runs it after workspace changes.
-    void load();
+    let active = true;
+    void fetchEntries(filter, pages).then(
+      (result) => {
+        if (!active) return;
+        setEntries(result.entries);
+        setMore(result.more);
+        setError("");
+      },
+      (e: unknown) => {
+        if (active) setError(String(e));
+      },
+    );
     return () => {
-      latest.current++;
+      active = false;
     };
-  }, [load, revision]);
+  }, [filter, pages, revision, tick]);
   useEffect(() => {
-    const timer = window.setInterval(() => void load(), 2000);
+    const timer = window.setInterval(() => setTick((value) => value + 1), 2000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, []);
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)
@@ -153,7 +152,7 @@ export function Inbox({
           read,
           requestId: crypto.randomUUID(),
         });
-      await load();
+      reload();
     } catch (e) {
       setError(String(e));
     }
@@ -170,7 +169,7 @@ export function Inbox({
         read: true,
         requestId: crypto.randomUUID(),
       });
-      await load();
+      reload();
     } catch (e) {
       setError(String(e));
     }
