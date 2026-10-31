@@ -29,6 +29,15 @@ export function App() {
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
   const [viewBeforeSettings, setViewBeforeSettings] =
     useState<typeof view>("tickets");
+  // Leaving Settings unmounts its navigation, so focus returns to the sidebar
+  // entry that opened it.
+  const returnToSettingsEntry = useRef(false);
+  useEffect(() => {
+    if (view !== "settings" && returnToSettingsEntry.current) {
+      returnToSettingsEntry.current = false;
+      document.getElementById("sidebar-settings")?.focus();
+    }
+  }, [view]);
   const openView = (next: typeof view) => {
     if (next === "settings" && view !== "settings") setViewBeforeSettings(view);
     setView(next);
@@ -107,7 +116,12 @@ export function App() {
         }
       >
         {view === "settings" ? (
-          <SettingsNav onBack={() => setView(viewBeforeSettings)} />
+          <SettingsNav
+            onBack={() => {
+              returnToSettingsEntry.current = true;
+              setView(viewBeforeSettings);
+            }}
+          />
         ) : (
           <WorkspaceSidebar
             counts={counts}

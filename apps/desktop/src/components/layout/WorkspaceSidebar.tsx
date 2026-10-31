@@ -265,6 +265,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
+                id="sidebar-settings"
                 isActive={view === "settings"}
                 onClick={() => setView("settings")}
               >

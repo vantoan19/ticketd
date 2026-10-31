@@ -4,6 +4,7 @@ import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { Button } from "@/components/ui/button";
+import { useFocusReturn } from "@/components/ui/use-focus-return";
 
 function Dialog({
   ...props
@@ -46,10 +47,19 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  returnFocus,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  /** Where focus goes on close when the opener no longer exists. */
+  returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
+  const focus = useFocusReturn(returnFocus, {
+    ...(onOpenAutoFocus && { onOpenAutoFocus }),
+    ...(onCloseAutoFocus && { onCloseAutoFocus }),
+  });
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -60,6 +70,7 @@ function DialogContent({
           className,
         )}
         {...props}
+        {...focus}
       >
         {children}
         {showCloseButton && (

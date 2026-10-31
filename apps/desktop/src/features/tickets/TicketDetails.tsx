@@ -1,6 +1,6 @@
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { Evidence } from "@/features/tickets/Evidence";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
@@ -42,6 +42,18 @@ export function TicketDetails({
   const [graphReference, setGraphReference] = useState<string | null>(null);
   // The graph belongs to the ticket it opened from; selecting another closes it.
   const graphOpen = graphReference !== null && graphReference === selected;
+  // Closing the graph unmounts the control that had focus; land on the ticket heading.
+  const returnFromGraph = useRef(false);
+  useEffect(() => {
+    if (!graphOpen && returnFromGraph.current) {
+      returnFromGraph.current = false;
+      document.getElementById("detail-heading")?.focus();
+    }
+  }, [graphOpen]);
+  const closeGraph = () => {
+    returnFromGraph.current = true;
+    setGraphReference(null);
+  };
   const [mention, setMention] = useState<
     (MentionTarget & { key: number }) | null
   >(null);
@@ -63,9 +75,9 @@ export function TicketDetails({
             revision={revision}
             projects={projects}
             efforts={efforts}
-            onBack={() => setGraphReference(null)}
+            onBack={closeGraph}
             onOpen={(reference) => {
-              setGraphReference(null);
+              closeGraph();
               setSelected(reference);
             }}
           />

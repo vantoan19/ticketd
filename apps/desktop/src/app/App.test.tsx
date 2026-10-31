@@ -927,3 +927,77 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   );
   expect(container.querySelector(".ticket-workspace.expanded")).toBeNull();
 });
+
+test("the narrow navigation trigger shows its label and gets focus back when the sheet closes", async () => {
+  vi.useFakeTimers();
+  narrowViewport = true;
+  bridge.invoke.mockImplementation(async () => []);
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const trigger = screen.getByRole("button", { name: "Open navigation" });
+  expect(trigger.textContent).toContain("Navigation");
+  trigger.focus();
+  fireEvent.click(trigger);
+  expect(screen.getByRole("dialog", { name: "Navigation" })).toBeTruthy();
+  // Focus lands on a control with a tooltip; the first Escape closes the tooltip.
+  fireEvent.keyDown(document, { key: "Escape" });
+  fireEvent.keyDown(document, { key: "Escape" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+});
+
+test("Settings reads fresh data on every visit, checks the CLI only once opened, and moves focus in and out", async () => {
+  vi.useFakeTimers();
+  let tickets = 1;
+  const calls: string[] = [];
+  bridge.invoke.mockImplementation(async (command: string) => {
+    calls.push(command);
+    if (command === "list_projects" || command === "list_efforts") return [];
+    if (command === "find_tickets") return [];
+    if (command === "workspace_info")
+      return {
+        path: "/data/ticketd.sqlite3",
+        tickets,
+        projects: 0,
+        active_efforts: 0,
+        size_bytes: 4096,
+        format_version: 20,
+      };
+    if (command === "last_backup") return null;
+    if (command === "check_cli") throw new Error("not installed");
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(calls).not.toContain("check_cli");
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(calls).toContain("check_cli");
+  expect(
+    screen.getByRole("region", { name: "Location" }).textContent,
+  ).toContain("Tickets1");
+  expect(document.activeElement).toBe(
+    screen.getByRole("heading", { name: "Settings" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Settings" }),
+  );
+  tickets = 7;
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(
+    screen.getByRole("region", { name: "Location" }).textContent,
+  ).toContain("Tickets7");
+});

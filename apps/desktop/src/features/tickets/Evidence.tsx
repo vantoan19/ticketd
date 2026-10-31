@@ -79,6 +79,8 @@ export function Evidence({
   }
   const [more, setMore] = useState(false);
   const pages = useRef(1);
+  const menuTriggers = useRef(new Map<string, HTMLElement>());
+  const returnFocus = useRef<HTMLElement | null>(null);
   const load = useCallback(async () => {
     const all: EvidenceRecord[] = [];
     let page: EvidenceRecord[] = [];
@@ -161,6 +163,7 @@ export function Evidence({
       .catch(() => setError(failure));
   }
   function startAdding() {
+    returnFocus.current = null;
     if (editing) {
       setEditing(null);
       setDraft(blank);
@@ -218,6 +221,11 @@ export function Evidence({
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
+                        ref={(element) => {
+                          if (element)
+                            menuTriggers.current.set(item.id, element);
+                          else menuTriggers.current.delete(item.id);
+                        }}
                         variant="ghost"
                         size="icon-sm"
                         type="button"
@@ -230,6 +238,10 @@ export function Evidence({
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
                         onSelect={() => {
+                          // The menu closes as the dialog opens, so name the
+                          // control focus should come back to.
+                          returnFocus.current =
+                            menuTriggers.current.get(item.id) ?? null;
                           setComposing(true);
                           setEditing(item);
                           setDraft({
@@ -280,7 +292,7 @@ export function Evidence({
         // Closing keeps the draft; only Cancel or a save clears it.
         onOpenChange={setComposing}
       >
-        <DialogContent>
+        <DialogContent returnFocus={returnFocus}>
           <DialogHeader>
             <DialogTitle>
               {editing ? "Edit evidence" : "Add evidence"}

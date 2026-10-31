@@ -3,6 +3,8 @@ import { cn } from "cn";
 import { XIcon } from "lucide-react";
 import { Dialog as SheetPrimitive } from "radix-ui";
 
+import { useFocusReturn } from "@/components/ui/use-focus-return";
+
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
 }
@@ -43,11 +45,20 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  returnFocus,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
   showCloseButton?: boolean;
+  /** Where focus goes on close when the opener no longer exists. */
+  returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
+  const focus = useFocusReturn(returnFocus, {
+    ...(onOpenAutoFocus && { onOpenAutoFocus }),
+    ...(onCloseAutoFocus && { onCloseAutoFocus }),
+  });
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -63,6 +74,7 @@ function SheetContent({
           className,
         )}
         {...props}
+        {...focus}
       >
         {children}
         {showCloseButton && (
