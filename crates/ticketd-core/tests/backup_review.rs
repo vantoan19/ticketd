@@ -1,0 +1,216 @@
+#![allow(clippy::unwrap_used)]
+
+use rusqlite::Connection;
+use ticketd_core::{
+    BackupCheck, EvidenceInput, EvidenceKind, SafetyBackupKind, Workspace, WorkspaceSummary,
+};
+
+fn populated(path: &std::path::Path) -> Workspace {
+    let mut workspace = Workspace::open(path).unwrap();
+    let first = workspace.create_ticket("First").unwrap();
+    let second = workspace.create_ticket("Second").unwrap();
+    workspace.create_ticket("Trashed").unwrap();
+    workspace.set_trashed("T-3", true, None).unwrap();
+    workspace
+        .add_note(&first.reference, "A note", None)
+        .unwrap();
+    workspace
+        .add_note(&second.reference, "Another", None)
+        .unwrap();
+    workspace
+        .add_evidence(
+            &first.reference,
+            EvidenceInput {
+                kind: EvidenceKind::Verification,
+                name: "Tests".into(),
+                value: "passed".into(),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    workspace.create_project("App", "/tmp/app").unwrap();
+    workspace.create_effort("Release").unwrap();
+    workspace.create_effort("Cleanup").unwrap();
+    workspace
+}
+
+#[test]
+fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = populated(&path);
+    workspace.backup(&backup).unwrap();
+    workspace.create_ticket("After the backup").unwrap();
+    let before = std::fs::read(&backup).unwrap();
+    let inspection = workspace.inspect_backup(&backup).unwrap();
+    let BackupCheck::Valid {
+        format_version,
+        summary,
+    } = inspection.check
+    else {
+        panic!("expected a valid backup, got {:?}", inspection.check);
+    };
+    assert_eq!(format_version, 20);
+    assert_eq!(
+        (
+            summary.tickets,
+            summary.notes,
+            summary.evidence,
+            summary.projects,
+            summary.efforts
+        ),
+        (2, 2, 1, 1, 2)
+    );
+    assert!(summary.last_change.is_some());
+    assert_eq!(inspection.current.tickets, 3);
+    assert_eq!(inspection.path, backup.display().to_string());
+    assert_eq!(std::fs::read(&backup).unwrap(), before);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 3);
+}
+
+#[test]
+fn an_empty_workspace_has_no_last_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = Workspace::open(&path).unwrap();
+    workspace.backup(&backup).unwrap();
+    let inspection = workspace.inspect_backup(&backup).unwrap();
+    let expected = WorkspaceSummary {
+        last_change: None,
+        tickets: 0,
+        notes: 0,
+        evidence: 0,
+        projects: 0,
+        efforts: 0,
+    };
+    assert_eq!(inspection.current, expected);
+    assert_eq!(
+        inspection.check,
+        BackupCheck::Valid {
+            format_version: 20,
+            summary: expected
+        }
+    );
+}
+
+#[test]
+fn a_newer_format_names_both_versions() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let newer = dir.path().join("newer.sqlite3");
+    let connection = Connection::open(&newer).unwrap();
+    connection.pragma_update(None, "user_version", 21).unwrap();
+    drop(connection);
+    assert_eq!(
+        workspace.inspect_backup(&newer).unwrap().check,
+        BackupCheck::NewerFormat {
+            backup_version: 21,
+            supported_version: 20
+        }
+    );
+}
+
+#[test]
+fn files_that_are_not_ticketd_backups_are_named_as_such() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let text = dir.path().join("notes.sqlite3");
+    std::fs::write(&text, b"this is not a database at all, just text").unwrap();
+    let unrelated = dir.path().join("other.sqlite3");
+    let connection = Connection::open(&unrelated).unwrap();
+    connection
+        .execute_batch("CREATE TABLE photos (id INTEGER); PRAGMA user_version = 20;")
+        .unwrap();
+    drop(connection);
+    let blank = dir.path().join("blank.sqlite3");
+    Connection::open(&blank)
+        .unwrap()
+        .execute_batch("PRAGMA user_version = 0; CREATE TABLE t (x);")
+        .unwrap();
+    for file in [&text, &unrelated, &blank] {
+        assert_eq!(
+            workspace.inspect_backup(file).unwrap().check,
+            BackupCheck::NotTicketd,
+            "{}",
+            file.display()
+        );
+    }
+}
+
+#[test]
+fn a_backup_missing_tables_lists_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let damaged = dir.path().join("damaged.sqlite3");
+    let connection = Connection::open(&damaged).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE tickets (number INTEGER PRIMARY KEY, id TEXT, title TEXT, status TEXT); PRAGMA user_version = 5;",
+        )
+        .unwrap();
+    drop(connection);
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&damaged).unwrap().check
+    else {
+        panic!("expected missing tables");
+    };
+    assert!(tables.contains(&"ticket_history".to_owned()));
+    assert!(tables.contains(&"notes".to_owned()));
+}
+
+#[test]
+fn the_current_workspace_file_cannot_be_restored_over_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    assert_eq!(
+        workspace.inspect_backup(&path).unwrap().check,
+        BackupCheck::CurrentWorkspace
+    );
+}
+
+#[test]
+fn a_missing_file_is_an_error_and_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let missing = dir.path().join("missing.sqlite3");
+    assert!(workspace.inspect_backup(&missing).is_err());
+    assert!(!missing.exists());
+}
+
+#[test]
+fn safety_backups_list_restore_and_migration_copies_newest_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let workspace = populated(&path);
+    assert!(workspace.safety_backups().unwrap().is_empty());
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let safety = Workspace::restore(&path, &backup).unwrap();
+    std::fs::write(dir.path().join("workspace.sqlite3.lock.bak"), b"x").unwrap();
+    let migration = dir
+        .path()
+        .join("workspace.sqlite3.pre-migration-abc.sqlite3");
+    std::fs::copy(&backup, &migration).unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&migration)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    let listed = workspace.safety_backups().unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].kind, SafetyBackupKind::Safety);
+    assert_eq!(
+        std::fs::canonicalize(&listed[0].path).unwrap(),
+        std::fs::canonicalize(&safety).unwrap()
+    );
+    assert_eq!(listed[1].kind, SafetyBackupKind::PreMigration);
+    assert!(listed[0].saved_at > listed[1].saved_at);
+    assert!(listed[0].size_bytes > 0);
+    assert!(listed[0].saved_at.ends_with('Z'));
+}

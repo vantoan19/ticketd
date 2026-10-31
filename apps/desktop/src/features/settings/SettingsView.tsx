@@ -28,6 +28,9 @@ import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
+import { fileManagerName } from "@/features/settings/file-manager";
+import { RestoreDialog } from "@/features/settings/RestoreDialog";
+import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import "@/features/settings/settings.css";
 
 const THEME_OPTIONS = [
@@ -131,14 +134,6 @@ function AppearanceCard() {
       )}
     </SettingsCard>
   );
-}
-
-function fileManagerName() {
-  const platform =
-    typeof navigator === "undefined" ? "" : navigator.platform || "";
-  if (/mac/i.test(platform)) return "Finder";
-  if (/win/i.test(platform)) return "Explorer";
-  return "File Manager";
 }
 
 function formatSize(bytes: number) {
@@ -267,8 +262,9 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
   const [failure, setFailure] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [restorePath, setRestorePath] = useState("");
-  const [restoreMessage, setRestoreMessage] = useState("");
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [showSafety, setShowSafety] = useState(false);
+  const [restoredCount, setRestoredCount] = useState(0);
   useEffect(() => {
     let current = true;
     workspaceClient
@@ -320,6 +316,17 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
       await workspaceClient.reveal(path);
     } catch (reason) {
       setFailure(`Could not show the file: ${String(reason)}`);
+    }
+  }
+  async function chooseBackup() {
+    setFailure("");
+    try {
+      const path = await workspaceClient.chooseBackupFile({
+        title: "Choose a ticketd backup",
+      });
+      if (path !== null) setRestoring(path);
+    } catch (reason) {
+      setFailure(`Could not open the file dialog: ${String(reason)}`);
     }
   }
   return (
@@ -385,42 +392,55 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
       <p role="status" className="settings-hint">
         {message}
       </p>
-      {/* Typed-path restore stays until the restore review replaces it. */}
-      <section aria-label="Restore a backup" className="backup-restore">
-        <label>
-          Backup to restore{" "}
-          <input
-            value={restorePath}
-            onChange={(event) => setRestorePath(event.target.value)}
-          />
-        </label>{" "}
-        <button
+      <div className="backup-restore-row">
+        <div>
+          <p className="settings-label">Restore from a backup</p>
+          <p className="settings-hint">
+            Review what a backup contains before anything changes.
+          </p>
+        </div>
+        <Button
           type="button"
-          disabled={!restorePath || busy}
-          onClick={() =>
-            void (async () => {
-              if (
-                !window.confirm(
-                  "Restore this backup? Current workspace data will be replaced after a safety backup is made.",
-                )
-              )
-                return;
-              setBusy(true);
-              try {
-                setRestoreMessage(await client.restoreWorkspace(restorePath));
-                await onRestore();
-              } catch (reason) {
-                setRestoreMessage(`Restore failed: ${String(reason)}`);
-              } finally {
-                setBusy(false);
-              }
-            })()
-          }
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void chooseBackup()}
         >
-          Restore backup
-        </button>
-        <p role="status">{restoreMessage}</p>
-      </section>
+          Restore from backup…
+        </Button>
+      </div>
+      <div className="backup-footer">
+        <div className="backup-footer-row">
+          <p className="settings-hint">
+            Restoring saves a safety backup of the current workspace first.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={showSafety}
+            onClick={() => setShowSafety((shown) => !shown)}
+          >
+            {showSafety ? "Hide safety backups" : "Show safety backups"}
+          </Button>
+        </div>
+        {showSafety && <SafetyBackups key={restoredCount} />}
+      </div>
+      {restoring !== null && (
+        <RestoreDialog
+          path={restoring}
+          onClose={() => setRestoring(null)}
+          onRestored={async () => {
+            setRestoredCount((count) => count + 1);
+            try {
+              setLast(await workspaceClient.lastBackup());
+            } catch {
+              // The status is informational.
+            }
+            await onRestore();
+          }}
+        />
+      )}
     </SettingsCard>
   );
 }

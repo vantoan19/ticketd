@@ -2,9 +2,10 @@
 mod cli_status;
 
 use ticketd_core::{
-    BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket,
-    TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence,
+    EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Project, SafetyBackup, SidebarCounts,
+    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo,
+    WriteRequest, WriteResult,
 };
 
 #[tauri::command]
@@ -651,7 +652,19 @@ fn workspace_info() -> Result<WorkspaceInfo, String> {
 #[tauri::command]
 fn restore_workspace(path: String) -> Result<String, String> {
     Workspace::restore_default(path)
-        .map(|safety| format!("Workspace restored. Safety backup: {}", safety.display()))
+        .map(|safety| safety.display().to_string())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn inspect_backup(path: String) -> Result<BackupInspection, String> {
+    Workspace::open_default()
+        .and_then(|w| w.inspect_backup(path))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn safety_backups() -> Result<Vec<SafetyBackup>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.safety_backups())
         .map_err(|e| e.to_string())
 }
 
@@ -665,6 +678,8 @@ pub fn run() -> Result<(), tauri::Error> {
             last_backup,
             workspace_info,
             restore_workspace,
+            inspect_backup,
+            safety_backups,
             export_workspace,
             list_efforts,
             show_effort,
