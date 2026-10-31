@@ -292,11 +292,10 @@ try {
   // Bulk organization and status through UI, then verify an invalid batch is atomic.
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected status"]'));
-  await (
-    await browser.$('[aria-label="Status for selected tickets"]')
-  ).selectByVisibleText("In review");
-  await click(await browser.$("button=Apply status"));
+  await click(
+    await browser.$('[aria-label="Change status of selected tickets"]'),
+  );
+  await click(await browser.$('[role="menuitem"]=In review'));
   await waitFor(
     () => run("show", target.reference).status === "In review",
     "Bulk status did not persist",
@@ -304,11 +303,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected project"]'));
-  await (
-    await browser.$('[aria-label="Project for selected tickets"]')
-  ).selectByVisibleText(project.name);
-  await click(await browser.$("button=Apply project"));
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Move to project'));
+  await click(await browser.$(`[role="menuitem"]=${project.name}`));
   await waitFor(
     () =>
       run("show", source.reference).project_id === project.id &&
@@ -318,11 +315,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected effort"]'));
-  await (
-    await browser.$('[aria-label="Effort for selected tickets"]')
-  ).selectByVisibleText(effort.name);
-  await click(await browser.$("button=Apply Effort"));
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Set Effort'));
+  await click(await browser.$(`[role="menuitem"]*=${effort.name}`));
   await waitFor(
     () =>
       run("show", source.reference).effort_id === effort.id &&
@@ -332,10 +327,9 @@ try {
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
-  await click(await browser.$('[aria-label="Change selected tags"]'));
-  await (
-    await browser.$('[aria-label="Tag for selected tickets"]')
-  ).setValue("native");
+  await click(await browser.$('[aria-label="Organize selected tickets"]'));
+  await click(await browser.$('[role="menuitem"]=Add or remove tags…'));
+  await (await browser.$('[aria-label="Tag name"]')).setValue("native");
   await click(await browser.$("button=Add tag"));
   await waitFor(
     () =>

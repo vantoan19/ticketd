@@ -646,56 +646,69 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   expect(document.activeElement).toBe(row);
 });
 
-test("selects tickets independently and applies one bulk status change", async () => {
+const bulkTicket = (index: number, overrides = {}) => ({
+  id: String(index),
+  reference: `T-${index}`,
+  title: ["First", "Second", "Third"][index - 1],
+  body: "",
+  status: "Todo",
+  trashed: false,
+  tags: [] as string[],
+  project_id: null,
+  effort_id: null,
+  availability: "Ready",
+  prerequisites: [],
+  parent: null,
+  children: [],
+  ...overrides,
+});
+
+function openMenu(name: string) {
+  fireEvent.keyDown(screen.getByRole("button", { name }), { key: "Enter" });
+}
+
+function openSubmenu(name: string) {
+  fireEvent.keyDown(screen.getByRole("menuitem", { name }), {
+    key: "ArrowRight",
+  });
+}
+
+async function renderBulk(handlers: Record<string, unknown>) {
   vi.useFakeTimers();
-  let tickets = ["First", "Second"].map((title, index) => ({
-    id: String(index + 1),
-    reference: `T-${index + 1}`,
-    title,
-    body: "",
-    status: "Todo",
-    trashed: false,
-    tags: [],
-    project_id: null,
-    effort_id: null,
-    availability: "Ready",
-    prerequisites: [],
-    parent: null,
-    children: [],
-  }));
-  bridge.invoke.mockImplementation(
-    async (
-      command: string,
-      args?: { references?: string[]; status?: string },
-    ) => {
-      if (command === "find_tickets") return tickets;
-      if (command === "show_ticket") return tickets[0];
-      if (command === "bulk_status") {
-        tickets = tickets.map((ticket) =>
-          args?.references?.includes(ticket.reference)
-            ? { ...ticket, status: args.status! }
-            : ticket,
-        );
-        return tickets;
-      }
-      return [];
-    },
-  );
+  bridge.invoke.mockImplementation(async (command: string, args?: unknown) => {
+    const handler = handlers[command];
+    if (typeof handler === "function") return handler(args);
+    return handler ?? [];
+  });
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+}
+
+test("shows the bulk bar only while tickets are selected and applies one status change", async () => {
+  let tickets = [bulkTicket(1), bulkTicket(2)];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: () => tickets[0],
+    bulk_status: (args: { references: string[]; status: string }) => {
+      tickets = tickets.map((ticket) =>
+        args.references.includes(ticket.reference)
+          ? { ...ticket, status: args.status }
+          : ticket,
+      );
+      return tickets;
+    },
+  });
+  expect(screen.queryByRole("region", { name: "Bulk edit" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Change selected status" }),
-  );
-  fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
-    target: { value: "Done" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Apply status" }));
+  expect(screen.queryByRole("button", { name: "Select all 2" })).toBeNull();
+  openMenu("Change status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   expect(
     screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
@@ -703,152 +716,125 @@ test("selects tickets independently and applies one bulk status change", async (
   expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
     "Done",
   );
-  expect(screen.queryByLabelText("Status for selected tickets")).toBeNull();
-});
-
-test("keeps keyboard selection and reports a failed bulk change for retry", async () => {
-  vi.useFakeTimers();
-  const ticket = {
-    id: "1",
-    reference: "T-1",
-    title: "First",
-    body: "",
-    status: "Todo",
-    trashed: false,
-    tags: [],
-    project_id: null,
-    effort_id: null,
-    availability: "Ready",
-    prerequisites: [],
-    parent: null,
-    children: [],
-  };
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "find_tickets") return [ticket];
-    if (command === "bulk_status")
-      throw new Error("batch operation 0: ticket is trashed");
-    return [];
-  });
-  render(<App />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
-  const checkbox = screen.getByRole("checkbox", { name: "Select T-1" });
-  checkbox.focus();
-  fireEvent.click(checkbox);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Change selected status" }),
-  );
-  fireEvent.change(screen.getByLabelText("Status for selected tickets"), {
-    target: { value: "Todo" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Apply status" }));
-  await act(async () => {});
-  expect(screen.getByRole("alert").textContent).toContain("ticket is trashed");
-  expect(screen.getByText("1 selected")).toBeTruthy();
+  expect(screen.queryByText("2 selected")).toBeNull();
   expect(
-    within(screen.getByRole("button", { name: /First/ })).getByRole("img", {
-      name: "Todo",
-    }),
-  ).toBeTruthy();
+    within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
+      "status",
+    ).textContent,
+  ).toContain("Set 2 tickets to Done");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+  expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
 });
 
-test("applies a project to selected tickets without replacing other fields", async () => {
-  vi.useFakeTimers();
-  const ticket = {
-    id: "1",
-    reference: "T-1",
-    title: "First",
-    body: "",
-    status: "Todo",
-    trashed: false,
-    tags: ["existing"],
-    project_id: null,
-    effort_id: null,
-    availability: "Ready",
-    prerequisites: [],
-    parent: null,
-    children: [],
-  };
-  bridge.invoke.mockImplementation(
-    async (
-      command: string,
-      args?: { references?: string[]; change?: { project_id?: string } },
-    ) => {
-      if (command === "find_tickets") return [ticket];
-      if (command === "list_projects")
-        return [{ id: "p1", name: "Project one", path: "/p", paths: ["/p"] }];
-      if (command === "bulk_change") {
-        expect(args?.references).toEqual(["T-1"]);
-        expect(args?.change).toEqual({ project_id: "p1" });
-        return [{ ...ticket, project_id: "p1" }];
-      }
+test("names the ticket that blocked a bulk change, keeps the selection, and retries with the same request ID", async () => {
+  const requests: string[] = [];
+  let fail = true;
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    bulk_status: (args: { requestId: string }) => {
+      requests.push(args.requestId);
+      if (fail) throw new Error("batch operation 1: ticket is trashed");
       return [];
     },
-  );
-  render(<App />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Change selected project" }),
-  );
-  fireEvent.change(screen.getByLabelText("Project for selected tickets"), {
-    target: { value: "p1" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Apply project" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Change status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
-  expect(screen.queryByLabelText("Status for selected tickets")).toBeNull();
+  const alert = screen.getByRole("alert").textContent;
+  expect(alert).toContain("Nothing changed");
+  expect(alert).toContain("T-2");
+  expect(alert).toContain("ticket is trashed");
+  expect(screen.getByText("2 selected")).toBeTruthy();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => {});
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toBe(requests[0]);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText("2 selected")).toBeNull();
 });
 
-test("clears Effort and removes a tag with explicit bulk actions", async () => {
-  vi.useFakeTimers();
-  const ticket = {
-    id: "1",
-    reference: "T-1",
-    title: "First",
-    body: "",
-    status: "Todo",
-    trashed: false,
-    tags: ["keep", "old"],
-    project_id: null,
-    effort_id: "e1",
-    availability: "Ready",
-    prerequisites: [],
-    parent: null,
-    children: [],
-  };
+test("moves selected tickets to a project from the Organize menu", async () => {
   const changes: unknown[] = [];
-  bridge.invoke.mockImplementation(
-    async (command: string, args?: { change?: unknown }) => {
-      if (command === "find_tickets") return [ticket];
-      if (command === "bulk_change") {
-        changes.push(args?.change);
-        return [ticket];
-      }
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    list_projects: () => [
+      { id: "p1", name: "Project one", path: "/p", paths: ["/p"] },
+    ],
+    bulk_change: (args: { references: string[]; change: unknown }) => {
+      expect(args.references).toEqual(["T-1"]);
+      changes.push(args.change);
       return [];
     },
-  );
-  render(<App />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Change selected effort" }),
-  );
-  fireEvent.change(screen.getByLabelText("Effort for selected tickets"), {
-    target: { value: "__clear__" },
+  openMenu("Organize selected tickets");
+  openSubmenu("Move to project");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Project one" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ project_id: "p1" }]);
+});
+
+test("sets an Effort in one request and shows how many selected tickets already have each", async () => {
+  const changes: unknown[] = [];
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { effort_id: "e1" }),
+      bulkTicket(2),
+      bulkTicket(3),
+    ],
+    list_efforts: () => [
+      { id: "e1", name: "Launch", archived: false },
+      { id: "e2", name: "Polish", archived: false },
+      { id: "e3", name: "Old", archived: true },
+    ],
+    bulk_change: (args: { change: unknown }) => {
+      changes.push(args.change);
+      return [];
+    },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Apply Effort" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all 3" }));
+  openMenu("Organize selected tickets");
+  openSubmenu("Set Effort");
+  expect(screen.getByRole("menuitem", { name: "Launch 1 of 3" })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: "Polish 0 of 3" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: /Old/ })).toBeNull();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Polish 0 of 3" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ effort_id: "e2" }]);
+});
+
+test("removes an Effort and adds or removes a tag from the Organize menu", async () => {
+  const changes: unknown[] = [];
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1, { effort_id: "e1", tags: ["old"] })],
+    bulk_change: (args: { change: unknown }) => {
+      changes.push(args.change);
+      return [];
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  openMenu("Organize selected tickets");
+  openSubmenu("Set Effort");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Effort" }));
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
-  fireEvent.click(screen.getByRole("button", { name: "Change selected tags" }));
-  fireEvent.change(screen.getByLabelText("Tag for selected tickets"), {
+  openMenu("Organize selected tickets");
+  fireEvent.click(
+    screen.getByRole("menuitem", { name: "Add or remove tags…" }),
+  );
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", {
+    name: "Add or remove tag",
+  });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "Tag name" }), {
     target: { value: "old" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Remove tag" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ effort_id: null }, { remove_tags: ["old"] }]);
 });
