@@ -672,21 +672,6 @@
   font-size: 12px;
   line-height: 16px;
 }
-.list-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 12px 24px;
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
-.list-heading span {
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
 .list-controls {
   display: flex;
   align-items: center;
@@ -809,16 +794,7 @@
   gap: 4px;
   margin-left: auto;
 }
-.detail-reference-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.ticket-ref,
-.editor-reference {
+.ticket-ref {
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
@@ -880,122 +856,6 @@
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
-}
-.detail-disclosure {
-  margin-top: 8px;
-}
-.detail-disclosure > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 8px 12px;
-  color: var(--muted-foreground);
-  border-radius: 6px;
-  font-size: 14px;
-  line-height: 20px;
-  cursor: pointer;
-  list-style: none;
-}
-.detail-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-.detail-disclosure > summary::before {
-  content: "›";
-  width: 12px;
-  font-size: 20px;
-  line-height: 20px;
-}
-.detail-disclosure[open] > summary::before {
-  content: "⌄";
-}
-.detail-disclosure > summary:hover {
-  color: var(--foreground);
-  background: var(--accent);
-}
-.detail-disclosure[open] > summary {
-  color: var(--foreground);
-  background: var(--recessed);
-}
-.detail-disclosure > summary span {
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.detail-disclosure > :not(summary) {
-  margin-inline: 12px;
-}
-.relationship-section {
-  padding-block: 16px;
-}
-.relationship-section h3,
-.relationship-section h4 {
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
-  letter-spacing: -0.28px;
-}
-.relationship-section h4 {
-  margin-top: 16px;
-  color: var(--muted-foreground);
-}
-.relationship-section h3 span {
-  color: var(--muted-foreground);
-  font-weight: 400;
-  margin-left: 4px;
-}
-.relationship-empty,
-.relationship-ticket p {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
-}
-.relationship-empty {
-  margin-top: 8px;
-}
-.relationship-list {
-  margin-top: 8px;
-}
-.relationship-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 0;
-}
-.relationship-ticket {
-  min-width: 0;
-}
-.relationship-link {
-  height: auto;
-  padding: 0;
-  white-space: normal;
-  text-align: left;
-  justify-content: flex-start;
-  line-height: 20px;
-}
-.relationship-form {
-  margin-top: 16px;
-}
-.relationship-input {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: end;
-}
-.relationship-input > input {
-  flex: 1;
-  min-width: 120px;
-}
-.relationship-input > label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 100%;
-}
-.relationship-input select {
-  max-width: 100%;
 }
 .reminder-popover {
   display: flex;
@@ -1307,9 +1167,6 @@
   .content-panel {
     margin: 8px;
   }
-  .detail-reference-row {
-    align-items: start;
-  }
   .ticket-personal-actions {
     margin-left: auto;
   }
@@ -1328,8 +1185,7 @@
   .list-header {
     padding-inline: 16px 8px;
   }
-  .list-controls,
-  .list-heading {
+  .list-controls {
     padding-inline: 16px;
   }
   .create-actions {

@@ -102,3 +102,18 @@
 .duplicate-stale p {
   margin: 0;
 }
+
+/* The form that asks for the canonical ticket, or the endpoint to replace. */
+.duplicate-form {
+  margin-top: 16px;
+}
+.duplicate-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+.duplicate-input > input {
+  flex: 1;
+  min-width: 120px;
+}

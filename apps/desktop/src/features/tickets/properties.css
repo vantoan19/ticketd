@@ -37,21 +37,6 @@
   width: 280px;
   padding: 8px;
 }
-.property-choices {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  max-height: 240px;
-  overflow-y: auto;
-  margin-top: 4px;
-}
-.property-choices button {
-  justify-content: start;
-}
-.property-choices p {
-  color: var(--muted-foreground);
-  padding: 8px;
-}
 .ticket-properties > [data-slot="dropdown-menu-trigger"] {
   margin-left: auto;
 }

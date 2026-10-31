@@ -109,7 +109,6 @@ export function TicketDetails({
         onReturn={onReturn}
         onClose={() => setSelected(null)}
         onOpenGraph={() => setGraphReference(selected)}
-        select={setSelected}
         refresh={refresh}
         updateTicket={updateTicket}
       />

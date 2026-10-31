@@ -70,11 +70,6 @@ export function WorkspaceSidebar({
   view: View;
   counts: SidebarCounts;
   setView: (view: View) => void;
-  filter: string;
-  effort: string;
-  status: string;
-  availability: string;
-  trash: boolean;
   projects: Project[];
   efforts: { id: string; name: string; archived: boolean }[];
   scope: (

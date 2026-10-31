@@ -15,11 +15,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { client, type Project, type Ticket } from "@/lib/api/client";
+import { client, type Project } from "@/lib/api/client";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { CopyButton } from "@/components/ui/copy-button";
 import { FormDialog } from "@/features/projects/FormDialog";
-import "../management.css";
 import "./projects.css";
 
 type Draft = { name: string; path: string };
@@ -112,8 +111,6 @@ export function Projects({
 }: {
   projects: Project[];
   loading: boolean;
-  filter: string;
-  onFilter: (filter: string) => void;
   onChange: () => Promise<void>;
 }) {
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
@@ -437,43 +434,5 @@ export function Projects({
         </FieldGroup>
       </FormDialog>
     </section>
-  );
-}
-
-export function TicketProject({
-  ticket,
-  projects,
-  onSaved,
-}: {
-  ticket: Ticket;
-  projects: Project[];
-  onSaved: (ticket: Ticket) => void;
-}) {
-  const [error, setError] = useState("");
-  async function change(project_id: string | null) {
-    try {
-      onSaved(await client.changeTicket(ticket.reference, { project_id }));
-      setError("");
-    } catch (reason) {
-      setError(String(reason));
-    }
-  }
-  return (
-    <label className="block mt-3">
-      Project{" "}
-      <select
-        value={ticket.project_id ?? ""}
-        onChange={(e) => void change(e.target.value || null)}
-        className="border p-1"
-      >
-        <option value="">Unlinked</option>
-        {projects.map((project) => (
-          <option key={project.id} value={project.id}>
-            {project.name}
-          </option>
-        ))}
-      </select>
-      {error && <span role="alert">{error}</span>}
-    </label>
   );
 }

@@ -62,12 +62,19 @@ beforeEach(() => {
         children: [],
         // Links beyond the drawn graph still show in the panel.
         prerequisites: [
-          { reference: "T-2", title: "Build", status: "Todo", trashed: false },
+          {
+            reference: "T-2",
+            title: "Build",
+            status: "Todo",
+            trashed: false,
+            unresolved: true,
+          },
           {
             reference: "T-40",
             title: "Offscreen",
             status: "Todo",
             trashed: false,
+            unresolved: true,
           },
         ],
       };

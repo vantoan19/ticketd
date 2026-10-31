@@ -74,13 +74,6 @@ export function App() {
   const {
     projects,
     efforts,
-    filter,
-    setFilter,
-    setOffset,
-    effort,
-    status,
-    availability,
-    trash,
     setSelected,
     setDetails,
     error,
@@ -127,11 +120,6 @@ export function App() {
             counts={counts}
             view={view}
             setView={openView}
-            filter={filter}
-            effort={effort}
-            status={status}
-            availability={availability}
-            trash={trash}
             projects={projects}
             efforts={efforts}
             scope={scope}
@@ -183,11 +171,6 @@ export function App() {
               <Projects
                 projects={projects}
                 loading={loading}
-                filter={filter}
-                onFilter={(value) => {
-                  setFilter(value);
-                  setOffset(0);
-                }}
                 onChange={refresh}
               />
             </div>

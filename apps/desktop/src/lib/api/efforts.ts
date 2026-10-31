@@ -27,9 +27,6 @@ const viewSchema = z.object({
 export type Effort = z.infer<typeof effortSchema>;
 export type View = z.infer<typeof viewSchema>;
 export const effortsClient = {
-  async list() {
-    return z.array(effortSchema).parse(await invoke("list_efforts"));
-  },
   async show(id: string) {
     return viewSchema.parse(await invoke("show_effort", { id }));
   },

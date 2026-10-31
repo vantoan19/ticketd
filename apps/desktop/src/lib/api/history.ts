@@ -34,7 +34,4 @@ export const historyClient = {
   async list(reference: string) {
     return parseEntries(await invoke("ticket_history", { reference }));
   },
-  async changeStatus(reference: string, status: string) {
-    await invoke("change_ticket", { reference, patch: { status } });
-  },
 };

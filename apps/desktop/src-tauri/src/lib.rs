@@ -154,13 +154,6 @@ fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
 }
 
 #[tauri::command]
-fn list_tickets() -> Result<Vec<Ticket>, String> {
-    Workspace::open_default()
-        .and_then(|workspace| workspace.list_tickets())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn ticket_backlinks(
     reference: String,
     limit: u32,
@@ -452,26 +445,6 @@ fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
 }
 
 #[tauri::command]
-fn mark_duplicate(source: String, canonical: String, request_id: String) -> Result<Ticket, String> {
-    let result = Workspace::open_default()
-        .and_then(|mut workspace| {
-            workspace.write(
-                Some(&request_id),
-                WriteRequest::MarkDuplicate {
-                    source,
-                    canonical,
-                    agent: None,
-                },
-            )
-        })
-        .map_err(|e| e.to_string())?;
-    match result {
-        WriteResult::Ticket(ticket) => Ok(ticket),
-        _ => Err("Unexpected write result".into()),
-    }
-}
-
-#[tauri::command]
 fn preview_duplicate_dependencies(
     source: String,
     canonical: String,
@@ -731,7 +704,6 @@ pub fn run() -> Result<(), tauri::Error> {
             remove_checkout,
             create_project,
             edit_project,
-            list_tickets,
             show_ticket,
             search_tickets,
             find_tickets,
@@ -763,7 +735,6 @@ pub fn run() -> Result<(), tauri::Error> {
             search_tags,
             add_tag,
             remove_tag,
-            mark_duplicate,
             preview_duplicate_dependencies,
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,

@@ -58,7 +58,6 @@ export function TicketHeader({
   onReturn: () => void;
   onClose: () => void;
   onOpenGraph: () => void;
-  select: (reference: string | null) => void;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {

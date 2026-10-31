@@ -246,11 +246,6 @@ export const client = {
       ),
     );
   },
-  async markDuplicate(source: string, canonical: string, requestId: string) {
-    return ticketSchema.parse(
-      await invoke("mark_duplicate", { source, canonical, requestId }),
-    );
-  },
   async removeDuplicate(source: string, requestId: string) {
     return ticketSchema.parse(
       await invoke("remove_duplicate", { source, requestId }),
@@ -384,9 +379,6 @@ export const client = {
     return z
       .array(ticketSchema)
       .parse(await invoke("find_tickets", { filter }));
-  },
-  async listTickets() {
-    return z.array(ticketSchema).parse(await invoke("list_tickets"));
   },
   async searchTickets(query: string, filter: string, offset: number) {
     return z.array(ticketSchema).parse(

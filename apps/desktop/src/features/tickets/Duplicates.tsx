@@ -332,7 +332,7 @@ export function Duplicates({
           </DialogFooter>
         </>
       ) : (
-        <form onSubmit={submit} className="relationship-form">
+        <form onSubmit={submit} className="duplicate-form">
           <FieldGroup>
             <Field data-invalid={!!error}>
               <FieldLabel htmlFor={`canonical-${ticket.id}`}>
@@ -340,7 +340,7 @@ export function Duplicates({
                   ? "Existing endpoint to replace"
                   : "Canonical ticket reference"}
               </FieldLabel>
-              <div className="relationship-input">
+              <div className="duplicate-input">
                 <Input
                   ref={canonicalInput}
                   id={`canonical-${ticket.id}`}
