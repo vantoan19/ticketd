@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Copy,
   ExternalLink,
@@ -148,7 +148,7 @@ function formatSize(bytes: number) {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
-function LocationCard() {
+function LocationCard({ refreshKey }: { refreshKey: number }) {
   const [info, setInfo] = useState<WorkspaceInfo | null>(null);
   const [loadFailure, setLoadFailure] = useState("");
   const [message, setMessage] = useState("");
@@ -166,7 +166,7 @@ function LocationCard() {
     return () => {
       current = false;
     };
-  }, []);
+  }, [refreshKey]);
   async function copyPath(path: string) {
     try {
       if (!navigator.clipboard) throw new Error("Clipboard unavailable");
@@ -619,21 +619,33 @@ function AboutCard() {
 export function SettingsView({
   onRestore,
   onOpenInbox,
-  hidden,
 }: {
-  hidden: boolean;
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
 }) {
+  // The parent mounts this page only while Settings is open, so every card
+  // reads fresh data on each visit. A restore replaces the workspace under an
+  // open page, so the Location card reads again afterwards.
+  const [restores, setRestores] = useState(0);
+  const heading = useRef<HTMLHeadingElement>(null);
+  // Opening Settings replaces the sidebar, which held focus; land on the title.
+  useEffect(() => heading.current?.focus(), []);
   return (
-    <div className="management settings-page" hidden={hidden}>
+    <div className="management settings-page">
       <div className="settings-column">
-        <h1>Settings</h1>
+        <h1 ref={heading} tabIndex={-1}>
+          Settings
+        </h1>
         <p>Changes apply right away.</p>
         <AppearanceCard />
         <AttentionCard onOpenInbox={onOpenInbox} />
-        <LocationCard />
-        <BackupsCard onRestore={onRestore} />
+        <LocationCard refreshKey={restores} />
+        <BackupsCard
+          onRestore={async () => {
+            setRestores((count) => count + 1);
+            await onRestore();
+          }}
+        />
         <ExportCard />
         <CommandLineCard />
         <KeyboardShortcutsCard />

@@ -153,16 +153,17 @@ export function App() {
             efforts={efforts}
             create={create}
           />
-          <SettingsView
-            hidden={view !== "settings"}
-            onOpenInbox={() => setView("inbox")}
-            onRestore={async () => {
-              setSelected(null);
-              setDetails({});
-              bulk.reset();
-              await refresh();
-            }}
-          />
+          {view === "settings" && (
+            <SettingsView
+              onOpenInbox={() => setView("inbox")}
+              onRestore={async () => {
+                setSelected(null);
+                setDetails({});
+                bulk.reset();
+                await refresh();
+              }}
+            />
+          )}
           {
             <div className="management" hidden={view !== "projects"}>
               <Projects
