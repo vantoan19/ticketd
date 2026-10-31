@@ -18,10 +18,12 @@ test("refreshes clean content and preserves a draft when saved content changes",
     reference: "T-1",
     title: "First",
     body: "Old",
-    status: "todo",
+    status: "Todo",
+    tags: [],
   };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_tickets") return [saved];
+    if (command === "ticket_history") return [];
     throw new Error("unexpected write");
   });
   render(<App />);

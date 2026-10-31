@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
-use ticketd_core::{TicketPatch, Workspace};
+use ticketd_core::{Status, TicketPatch, Workspace};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -22,7 +22,17 @@ enum Command {
         body: Option<String>,
         #[arg(long)]
         body_file: Option<String>,
+        #[arg(long)]
+        status: Option<Status>,
+        #[arg(long)]
+        agent: Option<String>,
     },
+    /// Show ticket history
+    History { reference: String },
+    /// Add a tag (trimmed and lowercased; duplicates are ignored)
+    AddTag { reference: String, tag: String },
+    /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
+    RemoveTag { reference: String, tag: String },
     /// List tickets
     List,
     /// Show a ticket by its reference
@@ -39,6 +49,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             title,
             body,
             body_file,
+            status,
+            agent,
         } => {
             let body = match body_file {
                 Some(path) if path == "-" => {
@@ -49,9 +61,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Some(path) => Some(std::fs::read_to_string(path)?),
                 None => body,
             };
-            serde_json::to_string(
-                &workspace.change_ticket(&reference, TicketPatch { title, body })?,
-            )?
+            serde_json::to_string(&workspace.change_ticket(
+                &reference,
+                TicketPatch {
+                    title,
+                    body,
+                    status,
+                    editing_agent: agent,
+                },
+            )?)?
+        }
+        Command::History { reference } => {
+            serde_json::to_string(&workspace.ticket_history(&reference)?)?
+        }
+        Command::AddTag { reference, tag } => {
+            serde_json::to_string(&workspace.add_tag(&reference, &tag)?)?
+        }
+        Command::RemoveTag { reference, tag } => {
+            serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
         }
         Command::List => serde_json::to_string(&workspace.list_tickets()?)?,
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,

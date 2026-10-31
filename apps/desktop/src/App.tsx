@@ -5,7 +5,9 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { History } from "./History";
 import { client, type Ticket } from "./client";
+import { Tags } from "./Tags";
 import { TicketEditor } from "./TicketEditor";
 
 export function App() {
@@ -15,6 +17,7 @@ export function App() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
   const generation = useRef(0);
   const refreshing = useRef(false);
   const refresh = useCallback(async () => {
@@ -34,6 +37,7 @@ export function App() {
       ]);
       if (request !== generation.current) return;
       setTickets(result);
+      setRevision((value) => value + 1);
       setError("");
     } catch (reason) {
       if (request !== generation.current) return;
@@ -136,6 +140,11 @@ export function App() {
                       {item.reference}
                     </span>
                     {item.title}
+                    {item.tags.length > 0 && (
+                      <span className="ml-2 text-sm text-neutral-600">
+                        {item.tags.join(", ")}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -151,7 +160,20 @@ export function App() {
           )}
           {tickets.map((item) => (
             <div key={item.id} hidden={item.id !== selected}>
+              {item.id === selected && (
+                <History
+                  reference={item.reference}
+                  status={item.status}
+                  revision={revision}
+                  onChange={refresh}
+                />
+              )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
+              <Tags
+                reference={item.reference}
+                tags={item.tags}
+                refresh={refresh}
+              />
             </div>
           ))}
         </section>
