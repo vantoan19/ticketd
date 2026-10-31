@@ -1,3 +1,4 @@
+import { Follow } from "@/features/tickets/Inbox";
 import { lazy, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Maximize2, X } from "lucide-react";
@@ -80,6 +81,9 @@ export function TicketDetails({
           key={item.id}
           hidden={item.reference !== selected}
         >
+          {item.reference === selected && (
+            <Follow reference={item.reference} revision={revision} />
+          )}
           {item.trashed ? (
             <>
               <h3>

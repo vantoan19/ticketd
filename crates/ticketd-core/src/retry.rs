@@ -12,6 +12,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    SetFollowing {
+        reference: String,
+        following: bool,
+    },
+    SetInboxRead {
+        ids: Vec<i64>,
+        read: bool,
+    },
     CreateTicket {
         title: String,
         project_id: Option<String>,
@@ -168,6 +176,17 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::SetFollowing {
+                reference,
+                following,
+            } => {
+                self.set_following(&reference, following)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetInboxRead { ids, read } => {
+                self.set_inbox_read(&ids, read)?;
+                WriteResult::Deleted
+            }
             WriteRequest::CreateTicket { title, project_id } => {
                 WriteResult::Ticket(self.create_ticket_in_project(&title, project_id.as_deref())?)
             }
