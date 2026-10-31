@@ -21,11 +21,17 @@ test("refreshes clean content and preserves a draft when saved content changes",
     status: "Todo",
     tags: [],
   };
-  bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_tickets") return [saved];
-    if (command === "ticket_history") return [];
-    throw new Error("unexpected write");
-  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { patch?: { title?: string } }) => {
+      if (command === "list_tickets") return [saved];
+      if (command === "ticket_history") return [];
+      if (command === "change_ticket" && args?.patch?.title) {
+        saved = { ...saved, title: args.patch.title };
+        return saved;
+      }
+      throw new Error("unexpected write");
+    },
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -53,4 +59,19 @@ test("refreshes clean content and preserves a draft when saved content changes",
     "value",
     "Another change",
   );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1900);
+  });
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Overwrite" },
+  });
+  saved = { ...saved, title: "External again" };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(saved.title).toBe("Overwrite");
 });
