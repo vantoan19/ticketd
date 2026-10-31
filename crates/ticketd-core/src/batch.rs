@@ -156,10 +156,7 @@ impl Workspace {
         }
         if follow_created {
             for id in created {
-                self.connection.execute(
-                    "INSERT OR IGNORE INTO ticket_follows (person, ticket_id) VALUES (?1, ?2)",
-                    rusqlite::params![crate::inbox::LOCAL_PERSON, id],
-                )?;
+                crate::inbox::follow(&self.connection, &id)?;
             }
         }
         Ok(results)

@@ -40,6 +40,15 @@ pub(crate) fn record(
     Ok(())
 }
 
+/// Makes the local person follow a ticket; following twice changes nothing.
+pub(crate) fn follow(connection: &rusqlite::Connection, ticket_id: &str) -> Result<(), Error> {
+    connection.execute(
+        "INSERT OR IGNORE INTO ticket_follows (person, ticket_id) VALUES (?1, ?2)",
+        params![LOCAL_PERSON, ticket_id],
+    )?;
+    Ok(())
+}
+
 impl Workspace {
     /// Return the scheduled instant in UTC, independent of following.
     pub fn reminder(&self, reference: &str) -> Result<Option<String>, Error> {
@@ -111,10 +120,7 @@ impl Workspace {
                 }
             })?;
         if following {
-            tx.execute(
-                "INSERT OR IGNORE INTO ticket_follows (person, ticket_id) VALUES (?1, ?2)",
-                params![LOCAL_PERSON, id],
-            )?;
+            follow(&tx, &id)?;
         } else {
             tx.execute(
                 "DELETE FROM ticket_follows WHERE person = ?1 AND ticket_id = ?2",
