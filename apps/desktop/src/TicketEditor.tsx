@@ -27,12 +27,23 @@ export function TicketEditor({
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const inFlight = useRef(false);
+  const [saving, setSaving] = useState(false);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
+  const externalChange =
+    ticket.title !== saved.title || ticket.body !== saved.body;
+  // Adopt fresh content only while there is no draft to protect.
+  if (externalChange && !dirty && !saving) {
+    const content = { title: ticket.title, body: ticket.body };
+    setSaved(content);
+    setDraft(content);
+  }
 
   useEffect(() => {
-    if (!dirty || inFlight.current || state === "failed") return;
+    if (!dirty || externalChange || inFlight.current || state === "failed")
+      return;
     const timer = window.setTimeout(() => {
       inFlight.current = true;
+      setSaving(true);
       setState("pending");
       const patch: { title?: string; body?: string } = {};
       if (draft.title !== saved.title) patch.title = draft.title;
@@ -61,13 +72,21 @@ export function TicketEditor({
         })
         .finally(() => {
           inFlight.current = false;
+          setSaving(false);
         });
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [draft, saved, dirty, ticket.reference, onSaved, state, retry]);
+  }, [
+    draft,
+    saved,
+    dirty,
+    externalChange,
+    ticket.reference,
+    onSaved,
+    state,
+    retry,
+  ]);
 
-  const externalChange =
-    ticket.title !== saved.title || ticket.body !== saved.body;
   function edit(next: Content) {
     setDraft(next);
     setState("pending");
@@ -77,7 +96,7 @@ export function TicketEditor({
       <p className="text-neutral-600">
         {ticket.reference} · {ticket.status}
       </p>
-      {externalChange && (
+      {externalChange && dirty && (
         <p role="status">
           Saved content changed.{" "}
           <button
@@ -90,6 +109,16 @@ export function TicketEditor({
             }}
           >
             Reload saved content
+          </button>{" "}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              setSaved({ title: ticket.title, body: ticket.body });
+              setState("pending");
+            }}
+          >
+            Save my draft
           </button>
         </p>
       )}
