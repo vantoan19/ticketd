@@ -1,0 +1,36 @@
+import { expect, test } from "vitest";
+import { historySentence } from "./history-sentence";
+
+const lookups = {
+  project: (id: string) => (id === "p1" ? "Platform" : undefined),
+  effort: (id: string) => (id === "e1" ? "Quarter" : undefined),
+};
+const sentence = (kind: string, from_value: string, to_value: string) =>
+  historySentence(
+    { kind, from_value, to_value, timestamp: "", editing_agent: null },
+    lookups,
+  );
+
+test("describes recorded changes as sentences without event keys", () => {
+  expect(sentence("status", "Todo", "In progress")).toBe(
+    "Status changed from Todo to In progress",
+  );
+  expect(sentence("project", "", "p1")).toBe("Added to project Platform");
+  expect(sentence("project", "p1", "gone")).toBe(
+    "Project changed from Platform to gone",
+  );
+  expect(sentence("effort", "e1", "")).toBe("Effort cleared");
+  expect(sentence("dependency", "", "T-3")).toBe("Now blocked by T-3");
+  expect(sentence("relationship:blocks", "T-4", "")).toBe(
+    "No longer blocks T-4",
+  );
+  expect(sentence("relationship:duplicate", "", "T-2")).toBe(
+    "Marked as duplicate of T-2",
+  );
+  expect(sentence("evidence", "", "Review")).toBe("Added evidence “Review”");
+  expect(sentence("trash", "active", "trashed")).toBe("Moved to trash");
+});
+
+test("falls back to a generic sentence for unknown kinds", () => {
+  expect(sentence("future:kind", "a", "b")).not.toContain("future:kind");
+});

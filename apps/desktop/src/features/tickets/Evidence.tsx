@@ -2,7 +2,22 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { MoreHorizontal, Plus } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { formatWhen } from "./format-when";
+import "./evidence.css";
 import {
   useCallback,
   useEffect,
@@ -28,6 +43,13 @@ const labels = {
   branch: "Branch",
   worktree: "Worktree path",
   verification: "Verification result",
+} as const;
+const typeNames = {
+  pull_request: "Pull request",
+  commit: "Commit",
+  branch: "Branch",
+  worktree: "Worktree",
+  verification: "Verification",
 } as const;
 
 export function Evidence({
@@ -124,6 +146,27 @@ export function Evidence({
       current.value !== editing.value ||
       current.name !== editing.name ||
       current.kind !== editing.kind);
+  function copy(item: EvidenceRecord) {
+    const failure = "Could not copy the value. Select it above to copy it.";
+    if (!navigator.clipboard) {
+      setError(failure);
+      return;
+    }
+    void navigator.clipboard
+      .writeText(item.value)
+      .then(() => {
+        setCopied(item.id);
+        setError("");
+      })
+      .catch(() => setError(failure));
+  }
+  function startAdding() {
+    if (editing) {
+      setEditing(null);
+      setDraft(blank);
+    }
+    setComposing(true);
+  }
   return (
     <section aria-label="Implementation evidence" className="evidence-section">
       <div className="evidence-heading">
@@ -131,94 +174,91 @@ export function Evidence({
           Implementation evidence{" "}
           <span className="text-muted-foreground">{items.length || ""}</span>
         </h3>
-        {!trashed && !composing && (
-          <Button variant="ghost" size="sm" onClick={() => setComposing(true)}>
+        {!trashed && items.length > 0 && (
+          <Button variant="ghost" size="sm" onClick={startAdding}>
             <Plus data-icon="inline-start" />
             Add evidence
           </Button>
         )}
       </div>
-      {!items.length && !composing && (
-        <p className="text-muted-foreground text-xs">
-          Link a pull request, commit, or verification result.
-        </p>
+      {!items.length && (
+        <div className="evidence-empty">
+          <p className="text-muted-foreground text-xs">
+            Link a pull request, commit, or verification result.
+          </p>
+          {!trashed && (
+            <Button variant="ghost" size="sm" onClick={startAdding}>
+              <Plus data-icon="inline-start" />
+              Add evidence
+            </Button>
+          )}
+        </div>
       )}
-      {error && <p role="alert">{error}</p>}
-      <ol>
+      {error && !composing && <p role="alert">{error}</p>}
+      <ol className="evidence-list">
         {items.map((item) => (
           <li key={item.id} className="evidence-item">
             <div className="evidence-item-heading">
               <strong>{item.name}</strong>
-              <span>{labels[item.kind]}</span>
+              <span title={item.updated_at}>
+                {typeNames[item.kind]} · {formatWhen(item.updated_at)}
+                {item.editing_agent && ` · ${item.editing_agent}`}
+              </span>
+              <span className="evidence-item-actions">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  aria-label={`Copy ${item.name}`}
+                  onClick={() => copy(item)}
+                >
+                  {copied === item.id ? "Copied" : "Copy"}
+                </Button>
+                {!trashed && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        type="button"
+                        disabled={pending}
+                        aria-label={`Actions for ${item.name}`}
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setComposing(true);
+                          setEditing(item);
+                          setDraft({
+                            kind: item.kind,
+                            name: item.name,
+                            value: item.value,
+                            editing_agent: item.editing_agent,
+                          });
+                        }}
+                      >
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onSelect={() => void remove(item.id)}
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </span>
             </div>
-            <p className="evidence-item-value">{item.value}</p>
-            {item.kind === "pull_request" &&
-              /^https?:\/\//i.test(item.value) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="self-start"
-                  type="button"
-                  onClick={() => {
-                    if (!navigator.clipboard) {
-                      setError(
-                        "Could not copy the URL. Select the address above to copy it.",
-                      );
-                      return;
-                    }
-                    void navigator.clipboard
-                      .writeText(item.value)
-                      .then(() => {
-                        setCopied(item.id);
-                        setError("");
-                      })
-                      .catch(() =>
-                        setError(
-                          "Could not copy the URL. Select the address above to copy it.",
-                        ),
-                      );
-                  }}
-                >
-                  {copied === item.id
-                    ? "Copied pull request URL"
-                    : "Copy pull request URL"}
-                </Button>
-              )}
-            <p className="evidence-item-meta">
-              {new Date(item.updated_at).toLocaleDateString()}
-              {item.editing_agent && ` · ${item.editing_agent}`}
+            <p
+              className="evidence-item-value"
+              data-kind={item.kind === "verification" ? "text" : "code"}
+            >
+              {item.value}
             </p>
-            {!trashed && (
-              <div className="evidence-item-actions">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  disabled={pending}
-                  onClick={() => {
-                    setComposing(true);
-                    setEditing(item);
-                    setDraft({
-                      kind: item.kind,
-                      name: item.name,
-                      value: item.value,
-                      editing_agent: item.editing_agent,
-                    });
-                  }}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  disabled={pending}
-                  onClick={() => void remove(item.id)}
-                >
-                  Delete
-                </Button>
-              </div>
-            )}
           </li>
         ))}
       </ol>
@@ -235,74 +275,88 @@ export function Evidence({
           Load more evidence
         </Button>
       )}
-      {changed && (
-        <p role="status">
-          Saved evidence changed while you were editing. Your draft is
-          preserved; saving will replace it.
-        </p>
-      )}
-      {!trashed && composing && (
-        <form onSubmit={(event) => void save(event)} className="mt-3">
-          <fieldset disabled={pending}>
-            <FieldGroup>
-              <Field>
-                <label className="evidence-label">
-                  Type
-                  <select
-                    value={draft.kind}
-                    onChange={(event) => {
-                      const kind = Object.keys(labels).find(
-                        (key) => key === event.target.value,
-                      );
-                      if (
-                        kind === "pull_request" ||
-                        kind === "commit" ||
-                        kind === "branch" ||
-                        kind === "worktree" ||
-                        kind === "verification"
-                      )
-                        setDraft({ ...draft, kind });
-                    }}
-                  >
-                    {Object.entries(labels).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </Field>
-              <Field>
-                <label className="evidence-label">
-                  Name
-                  <Input
-                    required
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDraft({ ...draft, name: event.target.value })
-                    }
-                  />
-                </label>
-              </Field>
-              <Field>
-                <label className="evidence-label">
-                  {draft.kind === "verification"
-                    ? "What was checked and its outcome"
-                    : "URL, reference, or path"}
-                  <Textarea
-                    required
-                    value={draft.value}
-                    onChange={(event) =>
-                      setDraft({ ...draft, value: event.target.value })
-                    }
-                  />
-                </label>
-              </Field>
-              <div className="flex gap-2">
-                <Button size="sm" type="submit">
-                  {editing ? "Save evidence" : "Add evidence"}
-                </Button>
-                {composing && (
+      <Dialog
+        open={!trashed && composing}
+        // Closing keeps the draft; only Cancel or a save clears it.
+        onOpenChange={setComposing}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? "Edit evidence" : "Add evidence"}
+            </DialogTitle>
+            <DialogDescription>
+              Record a pull request, commit, branch, worktree, or verification
+              result for this ticket.
+            </DialogDescription>
+          </DialogHeader>
+          {error && <p role="alert">{error}</p>}
+          {changed && (
+            <p role="status">
+              Saved evidence changed while you were editing. Your draft is
+              preserved; saving will replace it.
+            </p>
+          )}
+          <form onSubmit={(event) => void save(event)}>
+            <fieldset disabled={pending}>
+              <FieldGroup>
+                <Field>
+                  <label className="evidence-label">
+                    Type
+                    <select
+                      value={draft.kind}
+                      onChange={(event) => {
+                        const kind = Object.keys(labels).find(
+                          (key) => key === event.target.value,
+                        );
+                        if (
+                          kind === "pull_request" ||
+                          kind === "commit" ||
+                          kind === "branch" ||
+                          kind === "worktree" ||
+                          kind === "verification"
+                        )
+                          setDraft({ ...draft, kind });
+                      }}
+                    >
+                      {Object.entries(labels).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </Field>
+                <Field>
+                  <label className="evidence-label">
+                    Name
+                    <Input
+                      required
+                      value={draft.name}
+                      onChange={(event) =>
+                        setDraft({ ...draft, name: event.target.value })
+                      }
+                    />
+                  </label>
+                </Field>
+                <Field>
+                  <label className="evidence-label">
+                    {draft.kind === "verification"
+                      ? "What was checked and its outcome"
+                      : "URL, reference, or path"}
+                    <Textarea
+                      required
+                      value={draft.value}
+                      onChange={(event) =>
+                        setDraft({ ...draft, value: event.target.value })
+                      }
+                    />
+                  </label>
+                </Field>
+                <div className="flex gap-2">
+                  <Button size="sm" type="submit">
+                    {editing ? "Save evidence" : "Add evidence"}
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -315,12 +369,12 @@ export function Evidence({
                   >
                     Cancel
                   </Button>
-                )}
-              </div>
-            </FieldGroup>
-          </fieldset>
-        </form>
-      )}
+                </div>
+              </FieldGroup>
+            </fieldset>
+          </form>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

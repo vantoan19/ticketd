@@ -15,7 +15,12 @@ const viewSchema = z.object({
     canceled: z.number(),
   }),
   members: z.array(
-    z.object({ reference: z.string(), title: z.string(), status: z.string() }),
+    z.object({
+      reference: z.string(),
+      title: z.string(),
+      status: z.string(),
+      project_id: z.string().nullable(),
+    }),
   ),
 });
 

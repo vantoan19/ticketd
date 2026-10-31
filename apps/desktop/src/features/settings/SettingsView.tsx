@@ -27,6 +27,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
+import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import "@/features/settings/settings.css";
 
 const THEME_OPTIONS = [
@@ -614,6 +615,7 @@ export function SettingsView({
         <LocationCard />
         <BackupsCard onRestore={onRestore} />
         <ExportCard />
+        <CommandLineCard />
         <KeyboardShortcutsCard />
         <AboutCard />
       </div>

@@ -2146,6 +2146,49 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
 }
 
 #[test]
+fn duplicate_preview_explains_why_a_replacement_is_invalid() {
+    use ticketd_core::ReplacementIssue;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Duplicate").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let exists = workspace.create_ticket("Already blocked").unwrap();
+    let cycle = workspace.create_ticket("Blocks canonical").unwrap();
+    let fine = workspace.create_ticket("Plain dependent").unwrap();
+    let (s, c) = (&source.reference, &canonical.reference);
+    workspace
+        .add_dependency(s, &exists.reference, None)
+        .unwrap();
+    workspace
+        .add_dependency(c, &exists.reference, None)
+        .unwrap();
+    workspace.add_dependency(s, &cycle.reference, None).unwrap();
+    workspace.add_dependency(&cycle.reference, c, None).unwrap();
+    workspace.add_dependency(s, &fine.reference, None).unwrap();
+    workspace.add_dependency(s, c, None).unwrap();
+    let preview = workspace.preview_duplicate_dependencies(s, c).unwrap();
+    assert_eq!(preview.edges.len(), preview.replacement_issues.len());
+    let issue_for = |blocker: &str, dependent: &str| {
+        let index = preview
+            .edges
+            .iter()
+            .position(|e| e.blocker == blocker && e.dependent == dependent)
+            .unwrap();
+        preview.replacement_issues[index]
+    };
+    assert_eq!(
+        issue_for(s, &exists.reference),
+        Some(ReplacementIssue::AlreadyExists)
+    );
+    assert_eq!(
+        issue_for(s, &cycle.reference),
+        Some(ReplacementIssue::Cycle)
+    );
+    assert_eq!(issue_for(s, c), Some(ReplacementIssue::SelfBlock));
+    assert_eq!(issue_for(s, &fine.reference), None);
+}
+
+#[test]
 fn duplicate_review_replaces_a_blocker_atomically() {
     use ticketd_core::{DependencyChoice, DependencyDecision};
     let dir = tempfile::tempdir().unwrap();

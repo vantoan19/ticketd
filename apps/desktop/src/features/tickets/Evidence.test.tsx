@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
 import { Evidence } from "./Evidence";
+
+afterEach(cleanup);
 
 vi.mock("@tauri-apps/api/core", () => {
   let items: unknown[] = [];
@@ -49,7 +57,11 @@ test("adds and removes a verification result", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
   expect(await screen.findByText("Unit tests passed")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Actions for Tests" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
   await waitFor(() =>
     expect(screen.queryByText("Unit tests passed")).toBeNull(),
   );
@@ -170,7 +182,7 @@ test("disables evidence controls while a write is pending", async () => {
   view.unmount();
 });
 
-test("copies a pull request address on explicit request", async () => {
+test("copies any evidence value on explicit request", async () => {
   const { invoke } = await import("@tauri-apps/api/core");
   const copy = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
@@ -199,11 +211,9 @@ test("copies a pull request address on explicit request", async () => {
       refresh={async () => {}}
     />,
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Copy pull request URL" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Copy Review" }));
   expect(copy).toHaveBeenCalledWith("https://example.com/pr/1");
-  await screen.findByRole("button", { name: "Copied pull request URL" });
+  await screen.findByText("Copied");
   view.unmount();
   Reflect.deleteProperty(navigator, "clipboard");
 });

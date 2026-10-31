@@ -2,7 +2,7 @@ export type SettingsGroup = "Preferences" | "Workspace" | "Help";
 
 /**
  * The Settings cards in page order. The section list is built from the same
- * array, so it only offers sections whose cards exist; add and Command line here when their cards arrive.
+ * array, so it only offers sections whose cards exist; add a card here and in the page together.
  */
 export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = [
   { id: "location", label: "Location", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },
+  { id: "command-line", label: "Command line", group: "Workspace" },
   { id: "keyboard-shortcuts", label: "Keyboard shortcuts", group: "Help" },
   { id: "about", label: "About", group: "Help" },
 ] as const satisfies readonly {
@@ -26,6 +27,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Help",
 ];
 
-export function settingsCardId(id: SettingsSectionId) {
+/** A card id: a Settings section, or another page borrowing the card (Projects). */
+export type SettingsCardKey = SettingsSectionId | `project-${string}`;
+
+export function settingsCardId(id: SettingsCardKey) {
   return `settings-${id}`;
 }

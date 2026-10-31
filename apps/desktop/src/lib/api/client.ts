@@ -59,6 +59,9 @@ const dependencyEdgeSchema = z.object({
 const duplicatePreviewSchema = z.object({
   canonical: z.string(),
   edges: z.array(dependencyEdgeSchema),
+  replacement_issues: z
+    .array(z.enum(["already_exists", "self_block", "cycle"]).nullable())
+    .default([]),
 });
 export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>;
 export type DuplicatePreview = z.infer<typeof duplicatePreviewSchema>;
