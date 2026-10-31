@@ -37,6 +37,7 @@ test("the section list only offers sections that have cards", () => {
     "Appearance",
     "Backups",
     "Export",
+    "Command line",
     "Keyboard shortcuts",
     "About",
   ]);

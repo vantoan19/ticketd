@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { client } from "@/lib/api/client";
@@ -10,34 +10,9 @@ import {
 } from "@/lib/preferences";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
-import {
-  settingsCardId,
-  type SettingsSectionId,
-} from "@/features/settings/settings-sections";
+import { SettingsCard } from "@/features/settings/SettingsCard";
+import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import "@/features/settings/settings.css";
-
-function SettingsCard({
-  id,
-  title,
-  children,
-}: {
-  id: SettingsSectionId;
-  title: string;
-  children: ReactNode;
-}) {
-  const headingId = `${settingsCardId(id)}-heading`;
-  return (
-    <section
-      id={settingsCardId(id)}
-      className="settings-card"
-      aria-labelledby={headingId}
-      tabIndex={-1}
-    >
-      <h2 id={headingId}>{title}</h2>
-      {children}
-    </section>
-  );
-}
 
 const THEME_OPTIONS = [
   { value: "system", label: "System", icon: <Monitor aria-hidden="true" /> },
@@ -304,6 +279,7 @@ export function SettingsView({
         <AppearanceCard />
         <BackupsCard onRestore={onRestore} />
         <ExportCard />
+        <CommandLineCard />
         <KeyboardShortcutsCard />
         <AboutCard />
       </div>
