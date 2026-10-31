@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -48,6 +48,13 @@ export function Reminder({
   const [occurrence, setOccurrence] = useState("");
   const options = localInstants(draft);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const busy = useRef(false);
+  const attempt = useRef<{
+    key: string;
+    id: string;
+    dueAt: string | null;
+  } | null>(null);
   useEffect(() => {
     let active = true;
     void invoke("reminder", { reference })
@@ -63,20 +70,36 @@ export function Reminder({
       active = false;
     };
   }, [reference, revision]);
-  async function save(dueAt: string | null) {
+  async function save(key: string, makeDue: () => string | null) {
+    if (busy.current) return;
+    busy.current = true;
+    setPending(true);
+    const intent = JSON.stringify([reference, key]);
+    if (attempt.current?.key !== intent) {
+      attempt.current = {
+        key: intent,
+        id: crypto.randomUUID(),
+        dueAt: makeDue(),
+      };
+    }
+    const request = attempt.current;
     try {
       await invoke("set_reminder", {
         reference,
-        dueAt,
-        requestId: crypto.randomUUID(),
+        dueAt: request.dueAt,
+        requestId: request.id,
       });
       const value: unknown = await invoke("reminder", { reference });
       if (value !== null && typeof value !== "string")
         throw new Error("Invalid reminder");
       setDue(value);
+      attempt.current = null;
       setError("");
     } catch (e) {
       setError(String(e));
+    } finally {
+      busy.current = false;
+      setPending(false);
     }
   }
   return (
@@ -86,6 +109,7 @@ export function Reminder({
       <Input
         id="reminder-time"
         type="datetime-local"
+        disabled={pending}
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);
@@ -107,6 +131,7 @@ export function Reminder({
           Clock change: choose which occurrence
           <select
             value={occurrence}
+            disabled={pending}
             onChange={(e) => setOccurrence(e.target.value)}
           >
             <option value="">Choose an offset</option>
@@ -120,15 +145,39 @@ export function Reminder({
       )}
       <Button
         size="sm"
-        disabled={options.length === 0 || (options.length > 1 && !occurrence)}
-        onClick={() => void save(occurrence || options[0]!.toISOString())}
+        disabled={
+          pending || options.length === 0 || (options.length > 1 && !occurrence)
+        }
+        onClick={() => {
+          const selected = occurrence || options[0]!.toISOString();
+          void save(`schedule:${selected}`, () => selected);
+        }}
       >
         {due ? "Reschedule reminder" : "Set reminder"}
       </Button>
       {due && (
-        <Button size="sm" variant="outline" onClick={() => void save(null)}>
-          Dismiss reminder
-        </Button>
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() =>
+              void save("snooze-hour", () =>
+                new Date(Date.now() + 3600000).toISOString(),
+              )
+            }
+          >
+            Snooze 1 hour
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => void save("dismiss", () => null)}
+          >
+            Dismiss reminder
+          </Button>
+        </>
       )}
       {error && <p role="alert">{error}</p>}
     </div>

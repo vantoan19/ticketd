@@ -162,11 +162,33 @@ try {
     run("inbox").filter((item) => item.kind === "reminder").length,
     2,
   );
+  write(
+    {
+      operation: "set_reminder",
+      reference: source.reference,
+      due_at: "2020-01-01T00:00:00Z",
+    },
+    "reopen-reminder",
+  );
+  assert.equal(
+    run("inbox").filter((item) => item.kind === "reminder").length,
+    2,
+    "Replaying a delivered reminder created another occurrence",
+  );
   await click(
     await (await browser.$(".inbox-entry")).$(`button*=${source.reference}`),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
+  await click(await (await detail()).$("button=Snooze 1 hour"));
+  await waitFor(() => {
+    const value = command(["reminder", "show", source.reference]).match(
+      /UTC: ([^)]+)/,
+    )?.[1];
+    const remaining = Date.parse(value ?? "") - Date.now();
+    return remaining > 50 * 60000 && remaining < 70 * 60000;
+  }, "One-hour snooze did not persist");
   const reschedule = await (await detail()).$('input[type="datetime-local"]');
+  await reschedule.waitForEnabled({ timeout: 10000 });
   await browser.execute(
     (element, value) => {
       Object.getOwnPropertyDescriptor(
@@ -179,7 +201,11 @@ try {
     reschedule,
     "2030-01-01T12:00",
   );
-  await click(await (await detail()).$("button=Reschedule reminder"));
+  const rescheduleButton = await (
+    await detail()
+  ).$("button=Reschedule reminder");
+  await rescheduleButton.waitForEnabled({ timeout: 10000 });
+  await click(rescheduleButton);
   await waitFor(
     () => command(["reminder", "show", source.reference]).includes("2030"),
     "Reminder was not rescheduled",
