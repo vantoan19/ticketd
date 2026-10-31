@@ -44,7 +44,7 @@ npm run build                    # Frontend production build
 ./scripts/check                  # Formatting, lint, types, and tests
 ```
 
-Build the frontend before running `cargo build --workspace --locked`. For a packaged desktop build, use `npm run desktop -- build`. The scaffold has no ticket operations or database yet, and no placeholder behavior tests.
+Build the frontend before running `cargo build --workspace --locked`. For a packaged desktop build, use `npm run desktop -- build`. See [installation and distribution](docs/install.md) for packaged builds and CLI discovery.
 
 The layout follows [Cargo workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html) and [Tauri's project structure](https://v2.tauri.app/start/project-structure/).
 
