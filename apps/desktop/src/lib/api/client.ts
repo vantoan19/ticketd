@@ -99,6 +99,45 @@ export type FindFilter = {
   offset: number;
 };
 export const client = {
+  async contextualRelationships(reference: string, offset = 0) {
+    const item = z.object({
+      reference: z.string(),
+      title: z.object({ text: z.string() }),
+      status: z.string(),
+      trashed: z.boolean(),
+    });
+    const page = z.object({
+      items: z.array(item),
+      next_offset: z.number().nullable(),
+    });
+    return z
+      .object({
+        relationships: z.object({
+          related: page,
+          discovered_while: page,
+          discoveries: page,
+        }),
+      })
+      .parse(await invoke("contextual_relationships", { reference, offset }))
+      .relationships;
+  },
+  async changeContextualRelationship(
+    source: string,
+    target: string,
+    kind: "related" | "discovered",
+    add: boolean,
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("change_contextual_relationship", {
+        source,
+        target,
+        kind,
+        add,
+        requestId,
+      }),
+    );
+  },
   async bulkStatus(references: string[], status: string, requestId: string) {
     return z
       .array(ticketSchema)

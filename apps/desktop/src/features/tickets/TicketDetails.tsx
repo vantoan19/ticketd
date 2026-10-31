@@ -8,6 +8,7 @@ import { Backlinks } from "@/features/tickets/Backlinks";
 import { Hierarchy } from "@/features/tickets/Hierarchy";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
+import { ContextualRelationships } from "@/features/tickets/ContextualRelationships";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { Dependencies } from "@/features/tickets/Dependencies";
 import { Activity } from "@/features/tickets/Activity";
@@ -155,6 +156,13 @@ export function TicketDetails({
                   </>
                 ) : (
                   <>
+                    <ContextualRelationships
+                      key={item.reference}
+                      ticket={item}
+                      refresh={refresh}
+                      revision={revision}
+                      select={setSelected}
+                    />
                     <Duplicates
                       ticket={item}
                       refresh={refresh}

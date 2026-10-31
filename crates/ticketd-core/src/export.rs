@@ -43,6 +43,7 @@ impl Workspace {
                 "source_id, canonical_id, restore_status",
             ),
             ("dependencies", "blocker_id, dependent_id"),
+            ("contextual_relationships", "kind, source_id, target_id"),
             ("ticket_parents", "child_id, parent_id"),
         ] {
             let mut statement =

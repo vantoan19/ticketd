@@ -17,6 +17,7 @@ mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
 mod projects;
 mod relationships;
+pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter};
 mod tags;
@@ -95,6 +96,8 @@ pub enum Error {
         "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
     )]
     DuplicateDependencies,
+    #[error("a ticket cannot be related to itself")]
+    RelationshipSelfLink,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
@@ -210,10 +213,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 17 {
+            if version > 18 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 17 {
+            if version == 18 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -234,10 +237,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 17 {
+            if version > 18 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 17 {
+            if version < 18 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -320,6 +323,9 @@ impl Workspace {
         }
         if version < 17 {
             transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 17;")?;
+        }
+        if version < 18 {
+            transaction.execute_batch("CREATE TABLE contextual_relationships (kind TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES tickets(id), target_id TEXT NOT NULL REFERENCES tickets(id), PRIMARY KEY(kind, source_id, target_id)); PRAGMA user_version = 18;")?;
         }
         transaction.commit()?;
         Ok(())
