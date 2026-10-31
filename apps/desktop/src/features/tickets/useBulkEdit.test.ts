@@ -2,6 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
+import { BridgeFailure } from "@/lib/api/bridge-failure";
 import { useBulkEdit } from "./useBulkEdit";
 
 afterEach(() => vi.restoreAllMocks());
@@ -27,7 +28,7 @@ test("a retry of the same bulk change reuses its request ID", async () => {
 
 test("a rejected batch names the ticket that prevented it and keeps the selection", async () => {
   vi.spyOn(client, "bulkChange").mockRejectedValue(
-    new Error("batch operation 1: ticket is trashed"),
+    new BridgeFailure("batch_operation", "ticket is trashed", 1),
   );
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.selectAll(["T-1", "T-2", "T-3"]));

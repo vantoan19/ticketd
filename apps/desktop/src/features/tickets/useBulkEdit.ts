@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type BulkChange } from "@/lib/api/client";
+import { toFailure } from "@/lib/api/bridge-failure";
 
 const NOTICE_MS = 4000;
 
@@ -105,12 +106,14 @@ export function useBulkEdit(refresh: () => Promise<void>) {
 
 export type BulkEdit = ReturnType<typeof useBulkEdit>;
 
-/** Names the ticket the core rejected (`batch operation <index>: <reason>`). */
+/** Names the ticket the core rejected, when it said which operation failed. */
 function describeFailure(reason: unknown, selection: string[]): BulkFailure {
-  const text = reason instanceof Error ? reason.message : String(reason);
-  const match = /batch operation (\d+): (.*)/s.exec(text);
-  const reference = match ? (selection[Number(match[1])] ?? null) : null;
-  const detail = (match?.[2] ?? text).trim().replace(/\.$/, "");
+  const failure = toFailure(reason);
+  const reference =
+    failure.code === "batch_operation" && failure.index !== null
+      ? (selection[failure.index] ?? null)
+      : null;
+  const detail = failure.message.trim().replace(/\.$/, "");
   return {
     reference,
     message: reference

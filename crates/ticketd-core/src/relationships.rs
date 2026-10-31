@@ -54,6 +54,31 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     Ok(())
 }
 
+/// Whether `to` can be reached from `from` by following dependencies from a
+/// blocker to its dependents, as if the optional `excluding` edge (blocker id,
+/// dependent id) did not exist. Adding a dependency from `to` to `from` would
+/// close a cycle exactly when this is true.
+pub(crate) fn reaches(
+    connection: &Connection,
+    from: &str,
+    to: &str,
+    excluding: Option<(&str, &str)>,
+) -> Result<bool, Error> {
+    // Ticket ids are never empty, so an empty pair excludes nothing.
+    let (excluded_blocker, excluded_dependent) = excluding.unwrap_or(("", ""));
+    Ok(connection.query_row(
+        "WITH RECURSIVE reachable(id) AS (\
+           SELECT dependent_id FROM dependencies \
+             WHERE blocker_id = ?1 AND NOT (blocker_id = ?3 AND dependent_id = ?4) \
+           UNION \
+           SELECT d.dependent_id FROM dependencies d JOIN reachable ON d.blocker_id = reachable.id \
+             WHERE NOT (d.blocker_id = ?3 AND d.dependent_id = ?4)) \
+         SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2)",
+        params![from, to, excluded_blocker, excluded_dependent],
+        |row| row.get(0),
+    )?)
+}
+
 pub(crate) fn id(connection: &Connection, reference: &str) -> Result<String, Error> {
     let number = reference
         .strip_prefix("T-")
@@ -81,7 +106,7 @@ impl Workspace {
         let dependent_id = id(&tx, dependent)?;
         crate::ensure_editable(&tx, &blocker_id)?;
         crate::ensure_editable(&tx, &dependent_id)?;
-        let cycle: bool = tx.query_row("WITH RECURSIVE reachable(id) AS (SELECT dependent_id FROM dependencies WHERE blocker_id = ?1 UNION SELECT dependencies.dependent_id FROM dependencies JOIN reachable ON dependencies.blocker_id = reachable.id) SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2)", params![dependent_id, blocker_id], |row| row.get(0))?;
+        let cycle = reaches(&tx, &dependent_id, &blocker_id, None)?;
         if blocker_id == dependent_id || cycle {
             return Err(Error::DependencyCycle);
         }

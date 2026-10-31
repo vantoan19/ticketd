@@ -8,6 +8,49 @@ use ticketd_core::{
     WriteRequest, WriteResult,
 };
 
+/// A failure the interface acts on by kind. The message is only for reading, so
+/// the interface never has to parse it to decide what to do.
+#[derive(Debug, serde::Serialize)]
+struct BridgeFailure {
+    /// `batch_operation` (see `index`), `review_changed`, or `failed`.
+    code: &'static str,
+    /// For `batch_operation`, which operation of the batch was rejected.
+    index: Option<usize>,
+    message: String,
+}
+
+impl BridgeFailure {
+    fn plain(message: &str) -> Self {
+        Self {
+            code: "failed",
+            index: None,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<ticketd_core::Error> for BridgeFailure {
+    fn from(error: ticketd_core::Error) -> Self {
+        match error {
+            ticketd_core::Error::BatchOperation { index, source } => Self {
+                code: "batch_operation",
+                index: Some(index),
+                message: source.to_string(),
+            },
+            ticketd_core::Error::DependencyReviewChanged => Self {
+                code: "review_changed",
+                index: None,
+                message: ticketd_core::Error::DependencyReviewChanged.to_string(),
+            },
+            other => Self {
+                code: "failed",
+                index: None,
+                message: other.to_string(),
+            },
+        }
+    }
+}
+
 #[tauri::command]
 fn reminder(reference: String) -> Result<Option<String>, String> {
     Workspace::open_default()
@@ -228,7 +271,7 @@ fn bulk_change(
     references: Vec<String>,
     change: TicketChange,
     request_id: String,
-) -> Result<Vec<Ticket>, String> {
+) -> Result<Vec<Ticket>, BridgeFailure> {
     let operations = references
         .into_iter()
         .map(|ticket| BatchOperation::Change {
@@ -240,10 +283,10 @@ fn bulk_change(
         .and_then(|mut workspace| {
             workspace.write(Some(&request_id), WriteRequest::Batch { operations })
         })
-        .map_err(|error| error.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Tickets(tickets) => Ok(tickets),
-        _ => Err("Unexpected batch result".into()),
+        _ => Err(BridgeFailure::plain("Unexpected batch result")),
     }
 }
 
@@ -252,7 +295,7 @@ fn bulk_status(
     references: Vec<String>,
     status: Status,
     request_id: String,
-) -> Result<Vec<Ticket>, String> {
+) -> Result<Vec<Ticket>, BridgeFailure> {
     let operations = references
         .into_iter()
         .map(|ticket| BatchOperation::Change {
@@ -270,10 +313,10 @@ fn bulk_status(
         .and_then(|mut workspace| {
             workspace.write(Some(&request_id), WriteRequest::Batch { operations })
         })
-        .map_err(|error| error.to_string())?
+        .map_err(BridgeFailure::from)?
     {
         WriteResult::Tickets(tickets) => Ok(tickets),
-        _ => Err("Unexpected batch result".into()),
+        _ => Err(BridgeFailure::plain("Unexpected batch result")),
     }
 }
 
@@ -445,7 +488,7 @@ fn mark_duplicate_reviewed(
     expected_canonical: String,
     decisions: Vec<ticketd_core::DependencyDecision>,
     request_id: String,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     let result = Workspace::open_default()
         .and_then(|mut workspace| {
             workspace.write(
@@ -459,10 +502,10 @@ fn mark_duplicate_reviewed(
                 },
             )
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     match result {
         WriteResult::Ticket(ticket) => Ok(ticket),
-        _ => Err("Unexpected write result".into()),
+        _ => Err(BridgeFailure::plain("Unexpected write result")),
     }
 }
 
@@ -473,7 +516,7 @@ fn edit_dependencies_reviewed(
     expected_canonical: String,
     decisions: Vec<ticketd_core::DependencyDecision>,
     request_id: String,
-) -> Result<Ticket, String> {
+) -> Result<Ticket, BridgeFailure> {
     let result = Workspace::open_default()
         .and_then(|mut workspace| {
             workspace.write(
@@ -487,10 +530,10 @@ fn edit_dependencies_reviewed(
                 },
             )
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(BridgeFailure::from)?;
     match result {
         WriteResult::Ticket(ticket) => Ok(ticket),
-        _ => Err("Unexpected write result".into()),
+        _ => Err(BridgeFailure::plain("Unexpected write result")),
     }
 }
 

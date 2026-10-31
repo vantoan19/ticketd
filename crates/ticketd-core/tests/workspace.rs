@@ -3112,3 +3112,41 @@ fn restoring_keeps_the_last_backup_record_from_before_the_restore() {
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.last_backup().unwrap().unwrap(), recorded);
 }
+
+#[test]
+fn a_replacement_that_became_a_cycle_since_the_preview_is_a_stale_review() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, Error};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    assert!(preview.replacement_issues.iter().all(Option::is_none));
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    // An unrelated edit, perhaps from the CLI, makes the replacement circular.
+    ws.add_dependency(&dependent.reference, &canonical.reference, None)
+        .unwrap();
+    let error = ws
+        .mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            decisions,
+            None,
+        )
+        .unwrap_err();
+    assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
+}

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { structured } from "@/lib/api/bridge-failure";
 
 const ticketSchema = z.object({
   id: z.string(),
@@ -132,7 +133,11 @@ export const client = {
   ) {
     return z
       .array(ticketSchema)
-      .parse(await invoke("bulk_change", { references, change, requestId }));
+      .parse(
+        await structured(
+          invoke("bulk_change", { references, change, requestId }),
+        ),
+      );
   },
   async contextualRelationships(reference: string, offset = 0) {
     const item = z.object({
@@ -176,7 +181,11 @@ export const client = {
   async bulkStatus(references: string[], status: string, requestId: string) {
     return z
       .array(ticketSchema)
-      .parse(await invoke("bulk_status", { references, status, requestId }));
+      .parse(
+        await structured(
+          invoke("bulk_status", { references, status, requestId }),
+        ),
+      );
   },
   async previewDuplicate(source: string, canonical: string) {
     return duplicatePreviewSchema.parse(
@@ -191,13 +200,15 @@ export const client = {
     requestId: string,
   ) {
     return ticketSchema.parse(
-      await invoke("mark_duplicate_reviewed", {
-        source,
-        canonical,
-        expectedCanonical,
-        decisions,
-        requestId,
-      }),
+      await structured(
+        invoke("mark_duplicate_reviewed", {
+          source,
+          canonical,
+          expectedCanonical,
+          decisions,
+          requestId,
+        }),
+      ),
     );
   },
   async editDependenciesReviewed(
@@ -208,13 +219,15 @@ export const client = {
     requestId: string,
   ) {
     return ticketSchema.parse(
-      await invoke("edit_dependencies_reviewed", {
-        source,
-        canonical,
-        expectedCanonical,
-        decisions,
-        requestId,
-      }),
+      await structured(
+        invoke("edit_dependencies_reviewed", {
+          source,
+          canonical,
+          expectedCanonical,
+          decisions,
+          requestId,
+        }),
+      ),
     );
   },
   async markDuplicate(source: string, canonical: string, requestId: string) {

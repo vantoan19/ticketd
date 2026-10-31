@@ -30,18 +30,25 @@ export function replacementIssueReason(
   }
 }
 
-/** One line describing what a choice does to the ticket that waits on the edge. */
+/**
+ * One line describing what a choice does to the ticket that waits on the edge.
+ * In a separate review the existing endpoint is not canceled, so Keep leaves a
+ * live dependency rather than one on a canceled ticket.
+ */
 export function consequence(
   source: string,
   edge: DependencyEdge,
   choice: Choice,
+  separate = false,
 ): string {
   if (edge.blocker === source) {
     if (choice === "replace")
       return `${edge.dependent} waits for ${edge.replacement_blocker} to be Done instead`;
     if (choice === "remove")
       return `${edge.dependent} no longer waits on ${source}`;
-    return `${edge.dependent} stays blocked by a canceled ticket`;
+    return separate
+      ? `${edge.dependent} stays blocked by ${source}`
+      : `${edge.dependent} stays blocked by a canceled ticket`;
   }
   if (choice === "replace")
     return `${edge.replacement_dependent} waits for ${edge.blocker} to be Done`;

@@ -163,6 +163,26 @@ impl Workspace {
         source: &str,
         canonical: &str,
     ) -> Result<DuplicateDependencyPreview, Error> {
+        let (destination, edges) = self.dependency_edges(source, canonical)?;
+        let replacement_issues = edges
+            .iter()
+            .map(|edge| self.replacement_issue(edge))
+            .collect::<Result<_, _>>()?;
+        Ok(DuplicateDependencyPreview {
+            canonical: destination,
+            edges,
+            replacement_issues,
+        })
+    }
+
+    /// The canonical a review would move edges to, and the source's edges with
+    /// where each would go. This is the part a review must still match when it
+    /// is applied; it does not judge the replacements.
+    fn dependency_edges(
+        &self,
+        source: &str,
+        canonical: &str,
+    ) -> Result<(String, Vec<DependencyEdge>), Error> {
         let source_id = relationships::id(&self.connection, source)?;
         let canonical_id = relationships::id(&self.connection, canonical)?;
         let source: String = self.connection.query_row(
@@ -197,15 +217,7 @@ impl Workspace {
                 "dependency review exceeds 1000 edges".into(),
             ));
         }
-        let replacement_issues = edges
-            .iter()
-            .map(|edge| self.replacement_issue(edge))
-            .collect::<Result<_, _>>()?;
-        Ok(DuplicateDependencyPreview {
-            canonical: destination,
-            edges,
-            replacement_issues,
-        })
+        Ok((destination, edges))
     }
 
     /// Judges the replacement against the graph without the edge it would replace.
@@ -225,10 +237,11 @@ impl Workspace {
         }
         let original_blocker = relationships::id(&self.connection, &edge.blocker)?;
         let original_dependent = relationships::id(&self.connection, &edge.dependent)?;
-        let cycle: bool = self.connection.query_row(
-            "WITH RECURSIVE reachable(id) AS (SELECT dependent_id FROM dependencies WHERE blocker_id = ?1 AND NOT (blocker_id = ?3 AND dependent_id = ?4) UNION SELECT d.dependent_id FROM dependencies d JOIN reachable ON d.blocker_id = reachable.id WHERE NOT (d.blocker_id = ?3 AND d.dependent_id = ?4)) SELECT EXISTS(SELECT 1 FROM reachable WHERE id = ?2)",
-            params![dependent, blocker, original_blocker, original_dependent],
-            |r| r.get(0),
+        let cycle = relationships::reaches(
+            &self.connection,
+            &dependent,
+            &blocker,
+            Some((&original_blocker, &original_dependent)),
         )?;
         Ok(cycle.then_some(ReplacementIssue::Cycle))
     }
@@ -298,10 +311,19 @@ impl Workspace {
         decisions: &[DependencyDecision],
         agent: Option<&str>,
     ) -> Result<(), Error> {
-        let preview = self.preview_duplicate_dependencies(source, canonical)?;
+        let (destination, current_edges) = self.dependency_edges(source, canonical)?;
         let edges: Vec<_> = decisions.iter().map(|d| d.edge.clone()).collect();
-        if edges != preview.edges || expected_canonical != preview.canonical {
+        if edges != current_edges || expected_canonical != destination {
             return Err(Error::DependencyReviewChanged);
+        }
+        // A replacement that became a cycle or a duplicate since the review was
+        // shown, through an unrelated change, is as stale as a changed edge.
+        for decision in decisions {
+            if decision.choice == DependencyChoice::Replace
+                && self.replacement_issue(&decision.edge)?.is_some()
+            {
+                return Err(Error::DependencyReviewChanged);
+            }
         }
         for decision in decisions {
             if decision.choice != DependencyChoice::Retain {

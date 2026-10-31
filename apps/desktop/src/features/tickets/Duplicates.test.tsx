@@ -44,7 +44,7 @@ const preview = {
   edges: [edge("T-1", "T-3"), edge("T-1", "T-4"), edge("T-5", "T-1")],
   replacement_issues: [null, "already_exists", null],
 };
-let reviewError: string | null = null;
+let reviewError: unknown = null;
 let current = preview;
 
 beforeEach(() => {
@@ -78,13 +78,6 @@ const choose = (edgeName: string, label: string) =>
       .getAllByRole("radiogroup", { name: `Choice for ${edgeName}` })[0]!
       .querySelector(`[role="radio"][value="${label}"]`)!,
   );
-
-test("shows both tickets, the resulting state, and the unchanged canonical ticket", async () => {
-  await openReview();
-  expect(screen.getByText("Canceled · Duplicate of T-2")).toBeTruthy();
-  expect(screen.getByText("Unchanged")).toBeTruthy();
-  expect(screen.getByText("Canonical")).toBeTruthy();
-});
 
 test("disables an invalid Replace with the reason", async () => {
   await openReview();
@@ -156,7 +149,11 @@ test("a stale preview keeps the review open, applies nothing, and refreshes on r
   choose("T-1 blocks T-3", "replace");
   choose("T-1 blocks T-4", "retain");
   choose("T-5 blocks T-1", "remove");
-  reviewError = "dependency review has changed; preview and choose again";
+  reviewError = {
+    code: "review_changed",
+    index: null,
+    message: "dependency review has changed; preview and choose again",
+  };
   fireEvent.click(
     screen.getByRole("button", { name: "Mark duplicate and apply 2 changes" }),
   );
@@ -221,4 +218,33 @@ test("reviews separate dependency changes for an existing endpoint", async () =>
       expect.objectContaining({ source: "T-9", canonical: "T-1" }),
     ),
   );
+});
+
+test("shows both tickets with their statuses, and the duplicate's status change", async () => {
+  await openReview();
+  expect(screen.getByText("Canonical")).toBeTruthy();
+  const duplicate = screen.getByRole("group", { name: "Duplicate" });
+  expect(duplicate.textContent).toContain("Todo → Canceled · Duplicate of T-2");
+  const canonical = screen.getByRole("group", { name: "Canonical ticket" });
+  expect(canonical.textContent).toContain("Todo · unchanged");
+});
+
+test("a separate review does not claim the kept endpoint is canceled", async () => {
+  current = {
+    canonical: "T-1",
+    edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
+    replacement_issues: [null],
+  };
+  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review separate dependency changes" }),
+  );
+  fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
+    target: { value: "T-9" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  await screen.findByText("Affected dependencies");
+  choose("T-9 blocks T-3", "retain");
+  expect(screen.getByText("T-3 stays blocked by T-9")).toBeTruthy();
+  expect(screen.queryByText(/canceled ticket/)).toBeNull();
 });

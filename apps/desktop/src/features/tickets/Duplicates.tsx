@@ -24,6 +24,7 @@ import {
   type DuplicatePreview,
   type DependencyDecision,
 } from "@/lib/api/client";
+import { toFailure } from "@/lib/api/bridge-failure";
 import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
@@ -31,10 +32,13 @@ type Unchosen = Choice | "";
 function TicketSummary({
   label,
   ticket,
+  icon = ticket.status,
   note,
 }: {
   label: string;
   ticket: Pick<Ticket, "reference" | "title" | "status">;
+  /** The status whose icon to show; defaults to the ticket's own. */
+  icon?: string;
   note: string;
 }) {
   return (
@@ -45,7 +49,7 @@ function TicketSummary({
         {ticket.title}
       </span>
       <span className="duplicate-ticket-status">
-        <StatusIcon status={ticket.status} size={14} decorative />
+        <StatusIcon status={icon} size={14} decorative />
         {note}
       </span>
     </div>
@@ -150,8 +154,9 @@ export function Duplicates({
       await refresh();
       onDone?.();
     } catch (reason) {
-      if (String(reason).includes("review has changed")) setStale(true);
-      else setError(String(reason));
+      const failure = toFailure(reason);
+      if (failure.code === "review_changed") setStale(true);
+      else setError(failure.message);
     } finally {
       setPending(false);
     }
@@ -178,12 +183,13 @@ export function Duplicates({
               <TicketSummary
                 label="Duplicate"
                 ticket={ticket}
-                note={`Canceled · Duplicate of ${preview.canonical}`}
+                icon="Canceled"
+                note={`${ticket.status} → Canceled · Duplicate of ${preview.canonical}`}
               />
               <TicketSummary
                 label="Canonical ticket"
                 ticket={canonicalTicket}
-                note="Unchanged"
+                note={`${canonicalTicket.status} · unchanged`}
               />
             </div>
           )}
@@ -213,8 +219,9 @@ export function Duplicates({
             >
               <h3>Affected dependencies</h3>
               <p className="duplicate-note">
-                A canceled ticket never satisfies a blocking dependency, so each
-                of these needs a decision.
+                {separate
+                  ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
+                  : "A canceled ticket never satisfies a blocking dependency, so each of these needs a decision."}
               </p>
               <ul>
                 {preview.edges.map((edge, index) => {
@@ -263,7 +270,7 @@ export function Duplicates({
                       {reason && <p className="dependency-reason">{reason}.</p>}
                       <p className="dependency-consequence">
                         {choice
-                          ? consequence(sourceRef, edge, choice)
+                          ? consequence(sourceRef, edge, choice, separate)
                           : "Choose what happens to this dependency."}
                       </p>
                     </li>

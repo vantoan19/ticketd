@@ -745,7 +745,12 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
     find_tickets: () => [bulkTicket(1), bulkTicket(2)],
     bulk_status: (args: { requestId: string }) => {
       requests.push(args.requestId);
-      if (fail) throw new Error("batch operation 1: ticket is trashed");
+      if (fail)
+        throw {
+          code: "batch_operation",
+          index: 1,
+          message: "ticket is trashed",
+        };
       return [];
     },
   });
