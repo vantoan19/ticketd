@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EffortHeader } from "@/features/efforts/EffortHeader";
@@ -73,6 +73,28 @@ export function TicketListPane({
         ? item.project_id === null
         : item.project_id === filter),
   );
+  // A selection belongs to the page it was made on. Moving to another page,
+  // scope, search or filter drops it, so the bar never acts on tickets that are
+  // no longer listed.
+  const viewKey = JSON.stringify([
+    offset,
+    filter,
+    query,
+    effort,
+    status,
+    tags,
+    availability,
+    family,
+    trash,
+    navigation,
+  ]);
+  const previousView = useRef(viewKey);
+  const { clearSelection } = bulk;
+  useEffect(() => {
+    if (previousView.current === viewKey) return;
+    previousView.current = viewKey;
+    clearSelection();
+  }, [viewKey, clearSelection]);
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
@@ -193,39 +215,54 @@ export function TicketListPane({
           )}
         </div>
       ) : (
-        <TicketList
-          tickets={visibleTickets}
-          scope={{
-            showEffort: !navigation.effort,
-            showProject: navigation.project === "all",
-            efforts,
-            projects,
-          }}
-          selected={selected}
-          selectable={!trash}
-          selectionDisabled={bulk.pending}
-          bulkSelection={bulk.selection}
-          onToggle={bulk.toggle}
-          onOpen={onOpen}
-          {...(scopedEffort && {
-            rowAction: (ticket: Ticket) => (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                disabled={effortState.pending}
-                aria-label={`Remove ${ticket.reference} from ${scopedEffort.name}`}
-                title="Remove from Effort"
-                onClick={() =>
-                  void effortState.run(() =>
-                    effortsClient.setMember(ticket.reference, null),
-                  )
-                }
-              >
-                <X />
-              </Button>
-            ),
-          })}
-        />
+        <>
+          {showBulk && bulk.selection.length > 0 && (
+            // The bar is last in the page but is the next thing to reach.
+            <a
+              className="skip-link"
+              href="#bulk-controls"
+              onClick={(event) => {
+                event.preventDefault();
+                document.getElementById("bulk-controls")?.focus();
+              }}
+            >
+              Skip to selection actions
+            </a>
+          )}
+          <TicketList
+            tickets={visibleTickets}
+            scope={{
+              showEffort: !navigation.effort,
+              showProject: navigation.project === "all",
+              efforts,
+              projects,
+            }}
+            selected={selected}
+            selectable={!trash}
+            selectionDisabled={bulk.pending}
+            bulkSelection={bulk.selection}
+            onToggle={bulk.toggle}
+            onOpen={onOpen}
+            {...(scopedEffort && {
+              rowAction: (ticket: Ticket) => (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={effortState.pending}
+                  aria-label={`Remove ${ticket.reference} from ${scopedEffort.name}`}
+                  title="Remove from Effort"
+                  onClick={() =>
+                    void effortState.run(() =>
+                      effortsClient.setMember(ticket.reference, null),
+                    )
+                  }
+                >
+                  <X />
+                </Button>
+              ),
+            })}
+          />
+        </>
       )}
       {!trash && (offset > 0 || tickets.length === PAGE_SIZE) && (
         <div className="pagination">

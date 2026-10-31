@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +37,17 @@ export function BulkControls({
   efforts: TicketWorkspace["efforts"];
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
+  const retry = useRef<HTMLButtonElement>(null);
   const { pending, failure, notice, selection } = bulk;
+  // The menu that started a change is disabled, then gone, while it applies.
+  // Say where focus goes next: Retry after a failure, the list heading after
+  // success (its confirmation is already in the live region below).
+  useEffect(() => {
+    if (failure) retry.current?.focus();
+  }, [failure]);
+  useEffect(() => {
+    if (notice) document.getElementById("tickets-heading")?.focus();
+  }, [notice]);
   const count = selection.length;
   const selectedTickets = visible.filter((ticket) =>
     selection.includes(ticket.reference),
@@ -54,7 +64,13 @@ export function BulkControls({
   ) => void bulk.applyOrganization(change, summary);
 
   return (
-    <div className="bulk-controls" role="region" aria-label="Bulk edit">
+    <div
+      id="bulk-controls"
+      tabIndex={-1}
+      className="bulk-controls"
+      role="region"
+      aria-label="Bulk edit"
+    >
       {count > 0 && (
         <div className="bulk-bar">
           <span className="bulk-count" aria-live="polite">
@@ -201,6 +217,7 @@ export function BulkControls({
         <div className="bulk-message bulk-error" role="alert">
           <span>{failure.message}</span>
           <Button
+            ref={retry}
             variant="outline"
             size="sm"
             disabled={pending}

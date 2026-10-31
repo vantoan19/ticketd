@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
 /** Adds or removes one tag on every selected ticket. */
@@ -46,14 +47,18 @@ export function BulkTagDialog({
             apply("add");
           }}
         >
-          <Input
-            aria-label="Tag name"
-            placeholder="Tag name"
-            autoComplete="off"
-            value={tag}
-            onChange={(event) => setTag(event.target.value)}
-          />
-          <DialogFooter>
+          <Field>
+            <FieldLabel htmlFor="bulk-tag-name">Tag name</FieldLabel>
+            <Input
+              id="bulk-tag-name"
+              placeholder="For example, needs-review"
+              autoComplete="off"
+              value={tag}
+              onChange={(event) => setTag(event.target.value)}
+            />
+          </Field>
+          {/* Removing sits at the far end from the submit button, which adds. */}
+          <DialogFooter className="sm:justify-between">
             <Button
               type="button"
               variant="outline"

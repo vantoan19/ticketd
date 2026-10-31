@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type BulkChange } from "@/lib/api/client";
 
 const NOTICE_MS = 4000;
@@ -38,6 +38,12 @@ export function useBulkEdit(refresh: () => Promise<void>) {
     setFailure(null);
     lastChange.current = null;
   }
+
+  const clearSelection = useCallback(() => {
+    setSelection([]);
+    setFailure(null);
+    lastChange.current = null;
+  }, []);
 
   async function submit(change: Change) {
     const payload = change.kind === "status" ? change.status : change.change;
@@ -80,9 +86,8 @@ export function useBulkEdit(refresh: () => Promise<void>) {
     selectAll(references: string[]) {
       select([...new Set([...selection, ...references])]);
     },
-    clearSelection() {
-      select([]);
-    },
+    // Stable, so effects that clear the selection do not rerun on every render.
+    clearSelection,
     /** Drops the selection and any pending retry, e.g. after a restore. */
     reset() {
       select([]);

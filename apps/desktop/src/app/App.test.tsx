@@ -755,6 +755,9 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert").textContent;
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Retry" }),
+  );
   expect(alert).toContain("Nothing changed");
   expect(alert).toContain("T-2");
   expect(alert).toContain("ticket is trashed");
@@ -766,6 +769,10 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   expect(requests[1]).toBe(requests[0]);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText("2 selected")).toBeNull();
+  // The menu that started the change is gone; focus lands on the list heading.
+  expect(document.activeElement).toBe(
+    document.getElementById("tickets-heading"),
+  );
 });
 
 test("moves selected tickets to a project from the Organize menu", async () => {
@@ -1000,4 +1007,25 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   expect(
     screen.getByRole("region", { name: "Location" }).textContent,
   ).toContain("Tickets7");
+});
+
+test("a selection ends when the search or filters change, and the bar can be skipped to", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1), bulkTicket(2)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  expect(screen.getByText("1 selected")).toBeTruthy();
+  const skip = screen.getByRole("link", { name: "Skip to selection actions" });
+  fireEvent.click(skip);
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "Bulk edit" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
+    target: { value: "second" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(screen.queryByText("1 selected")).toBeNull();
+  expect(
+    screen.queryByRole("link", { name: "Skip to selection actions" }),
+  ).toBeNull();
 });
