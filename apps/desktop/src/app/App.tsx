@@ -2,26 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
-import { Button } from "@/components/ui/button";
-import { TicketFilters } from "@/features/tickets/TicketFilters";
-import { TicketList } from "@/features/tickets/TicketList";
-import { TicketDetails } from "@/features/tickets/TicketDetails";
+import { useBulkEdit } from "@/features/tickets/useBulkEdit";
+import { TicketWorkspaceView } from "@/features/tickets/TicketWorkspaceView";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { Plus, RefreshCw, X } from "lucide-react";
-import { BulkAction } from "@/features/tickets/BulkAction";
+import { RefreshCw } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import { cn } from "cn";
-import { client, type BulkChange } from "@/lib/api/client";
+import { useEffect, useRef, useState } from "react";
 
 export function App() {
   const [view, setView] = useState<
@@ -49,133 +38,30 @@ export function App() {
     };
   }, []);
   const [creating, setCreating] = useState(false);
-  const [bulkSelection, setBulkSelection] = useState<string[]>([]);
-  const [bulkStatus, setBulkStatus] = useState("");
-  const [bulkProject, setBulkProject] = useState("");
-  const [bulkEffort, setBulkEffort] = useState("");
-  const [bulkTag, setBulkTag] = useState("");
-  const [bulkError, setBulkError] = useState("");
-  const [bulkAction, setBulkAction] = useState<string | null>(null);
-  const [bulkPending, setBulkPending] = useState(false);
-  const bulkRequest = useRef<{ key: string; id: string } | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [narrowDetail, setNarrowDetail] = useState(false);
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "ticketd.workspace",
-  });
-  const listRef = useRef<HTMLElement>(null);
-  const focusPane = useRef<"detail" | "list" | null>(null);
-  useLayoutEffect(() => {
-    if (focusPane.current === "detail")
-      document.getElementById("detail-heading")?.focus();
-    if (focusPane.current === "list") {
-      const target = listRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
-      );
-      (target ?? document.getElementById("tickets-heading"))?.focus();
-    }
-    focusPane.current = null;
-  });
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
     efforts,
     filter,
     setFilter,
-    query,
-    setQuery,
-    offset,
     setOffset,
     effort,
-    setEffort,
     status,
-    setStatus,
-    tags,
-    setTags,
     availability,
-    setAvailability,
-    family,
-    setFamily,
     trash,
-    tickets,
-    selected,
     setSelected,
-    details,
     setDetails,
     error,
     loading,
     revision,
     refresh,
     create,
-    updateTicket,
     scopeName,
     scope,
     navigation,
-    clearFilters,
-    queryError,
-  } = useTicketWorkspace(setView, setCreating);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1063px)");
-    const showSelected = (event: MediaQueryListEvent) => {
-      if (event.matches && selected) setNarrowDetail(true);
-    };
-    media.addEventListener("change", showSelected);
-    return () => media.removeEventListener("change", showSelected);
-  }, [selected]);
-  async function applyOrganization(change: BulkChange) {
-    const key = JSON.stringify([bulkSelection, change]);
-    if (bulkRequest.current?.key !== key)
-      bulkRequest.current = { key, id: crypto.randomUUID() };
-    setBulkPending(true);
-    setBulkError("");
-    try {
-      await client.bulkChange(bulkSelection, change, bulkRequest.current.id);
-      bulkRequest.current = null;
-      setBulkSelection([]);
-      setBulkAction(null);
-      setBulkProject("");
-      setBulkEffort("");
-      setBulkTag("");
-      await refresh();
-    } catch (reason) {
-      setBulkError(
-        `Could not change selected tickets: ${String(reason)}. Check the selection and retry.`,
-      );
-    } finally {
-      setBulkPending(false);
-    }
-  }
-  async function applyStatus() {
-    const key = JSON.stringify([bulkSelection, bulkStatus]);
-    if (bulkRequest.current?.key !== key)
-      bulkRequest.current = { key, id: crypto.randomUUID() };
-    setBulkPending(true);
-    setBulkError("");
-    try {
-      await client.bulkStatus(
-        bulkSelection,
-        bulkStatus,
-        bulkRequest.current.id,
-      );
-      bulkRequest.current = null;
-      setBulkSelection([]);
-      setBulkAction(null);
-      setBulkStatus("");
-      await refresh();
-    } catch (reason) {
-      setBulkError(
-        `Could not change selected tickets: ${String(reason)}. Check the selection and retry.`,
-      );
-    } finally {
-      setBulkPending(false);
-    }
-  }
-  const [previousSelection, setPreviousSelection] = useState(selected);
-  if (previousSelection !== selected) {
-    setPreviousSelection(selected);
-    setNarrowDetail(selected !== null);
-    if (!selected) setExpanded(false);
-  }
+  } = workspace;
+  const bulk = useBulkEdit(refresh);
   return (
     <SidebarProvider>
       <main className="workspace">
@@ -250,9 +136,7 @@ export function App() {
             onRestore={async () => {
               setSelected(null);
               setDetails({});
-              setBulkSelection([]);
-              setBulkAction(null);
-              bulkRequest.current = null;
+              bulk.reset();
               await refresh();
             }}
           />
@@ -291,416 +175,16 @@ export function App() {
               }}
             />
           )}
-          <ResizablePanelGroup
-            orientation="horizontal"
-            className={cn(
-              "ticket-workspace",
-              expanded && "expanded",
-              narrowDetail && "narrow-detail",
-            )}
-            defaultLayout={defaultLayout}
-            onLayoutChanged={onLayoutChanged}
+          <TicketWorkspaceView
+            workspace={workspace}
+            bulk={bulk}
             hidden={view !== "tickets"}
-          >
-            <ResizablePanel
-              id="list"
-              minSize={360}
-              defaultSize={480}
-              className="list-panel"
-            >
-              <section
-                className="ticket-list"
-                ref={listRef}
-                aria-labelledby="tickets-heading"
-              >
-                <div className="list-header">
-                  <h1 id="tickets-heading" tabIndex={-1}>
-                    {scopeName}
-                  </h1>
-                  <p>
-                    {tickets.length}{" "}
-                    {tickets.length === 1 ? "ticket" : "tickets"}
-                    {tickets.length === 50 ? " shown" : ""}
-                  </p>
-                </div>
-                {!trash && (
-                  <TicketFilters
-                    {...{
-                      query,
-                      setQuery,
-                      effort,
-                      setEffort,
-                      status,
-                      setStatus,
-                      tags,
-                      setTags,
-                      availability,
-                      setAvailability,
-                      family,
-                      setFamily,
-                      efforts,
-                      setOffset,
-                      navigation,
-                      clearFilters,
-                    }}
-                  />
-                )}
-
-                {!trash && (bulkSelection.length > 0 || bulkError) && (
-                  <div
-                    className="bulk-controls"
-                    role="region"
-                    aria-label="Bulk edit"
-                  >
-                    <span aria-live="polite" title={bulkSelection.join(", ")}>
-                      {bulkSelection.length} selected
-                    </span>
-                    {bulkSelection.length > 0 && (
-                      <div className="bulk-actions">
-                        <BulkAction
-                          label="Status"
-                          disabled={bulkPending}
-                          open={bulkAction === "Status"}
-                          onOpenChange={(open) =>
-                            setBulkAction(open ? "Status" : null)
-                          }
-                          error={bulkError}
-                        >
-                          <label>
-                            Status for selected tickets
-                            <select
-                              aria-label="Status for selected tickets"
-                              value={bulkStatus}
-                              onChange={(event) =>
-                                setBulkStatus(event.target.value)
-                              }
-                              disabled={bulkPending}
-                            >
-                              <option value="">Choose status</option>
-                              {[
-                                "Todo",
-                                "In progress",
-                                "In review",
-                                "Done",
-                                "Canceled",
-                              ].map((value) => (
-                                <option key={value}>{value}</option>
-                              ))}
-                            </select>
-                          </label>
-                          <Button
-                            disabled={!bulkStatus || bulkPending}
-                            onClick={() => void applyStatus()}
-                          >
-                            {bulkPending ? "Applying…" : "Apply status"}
-                          </Button>
-                        </BulkAction>
-                        <BulkAction
-                          label="Project"
-                          disabled={bulkPending}
-                          open={bulkAction === "Project"}
-                          onOpenChange={(open) =>
-                            setBulkAction(open ? "Project" : null)
-                          }
-                          error={bulkError}
-                        >
-                          <label>
-                            Project for selected tickets
-                            <select
-                              aria-label="Project for selected tickets"
-                              value={bulkProject}
-                              onChange={(event) =>
-                                setBulkProject(event.target.value)
-                              }
-                              disabled={bulkPending}
-                            >
-                              <option value="">Choose project</option>
-                              <option value="__clear__">Clear project</option>
-                              {projects.map((project) => (
-                                <option key={project.id} value={project.id}>
-                                  {project.name}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <Button
-                            disabled={!bulkProject || bulkPending}
-                            onClick={() =>
-                              void applyOrganization({
-                                project_id:
-                                  bulkProject === "__clear__"
-                                    ? null
-                                    : bulkProject,
-                              })
-                            }
-                          >
-                            {bulkPending ? "Applying…" : "Apply project"}
-                          </Button>
-                        </BulkAction>
-                        <BulkAction
-                          label="Effort"
-                          disabled={bulkPending}
-                          open={bulkAction === "Effort"}
-                          onOpenChange={(open) =>
-                            setBulkAction(open ? "Effort" : null)
-                          }
-                          error={bulkError}
-                        >
-                          <label>
-                            Effort for selected tickets
-                            <select
-                              aria-label="Effort for selected tickets"
-                              value={bulkEffort}
-                              onChange={(event) =>
-                                setBulkEffort(event.target.value)
-                              }
-                              disabled={bulkPending}
-                            >
-                              <option value="">Choose Effort</option>
-                              <option value="__clear__">Clear Effort</option>
-                              {efforts
-                                .filter((item) => !item.archived)
-                                .map((item) => (
-                                  <option key={item.id} value={item.id}>
-                                    {item.name}
-                                  </option>
-                                ))}
-                            </select>
-                          </label>
-                          <Button
-                            disabled={!bulkEffort || bulkPending}
-                            onClick={() =>
-                              void applyOrganization({
-                                effort_id:
-                                  bulkEffort === "__clear__"
-                                    ? null
-                                    : bulkEffort,
-                              })
-                            }
-                          >
-                            {bulkPending ? "Applying…" : "Apply Effort"}
-                          </Button>
-                        </BulkAction>
-                        <BulkAction
-                          label="Tags"
-                          disabled={bulkPending}
-                          open={bulkAction === "Tags"}
-                          onOpenChange={(open) =>
-                            setBulkAction(open ? "Tags" : null)
-                          }
-                          error={bulkError}
-                        >
-                          <label>
-                            Tag for selected tickets
-                            <input
-                              aria-label="Tag for selected tickets"
-                              placeholder="Tag name"
-                              value={bulkTag}
-                              onChange={(event) =>
-                                setBulkTag(event.target.value)
-                              }
-                              disabled={bulkPending}
-                            />
-                          </label>
-                          <Button
-                            disabled={!bulkTag.trim() || bulkPending}
-                            onClick={() =>
-                              void applyOrganization({
-                                add_tags: [bulkTag.trim()],
-                              })
-                            }
-                          >
-                            Add tag
-                          </Button>
-                          <Button
-                            variant="outline"
-                            disabled={!bulkTag.trim() || bulkPending}
-                            onClick={() =>
-                              void applyOrganization({
-                                remove_tags: [bulkTag.trim()],
-                              })
-                            }
-                          >
-                            Remove tag
-                          </Button>
-                        </BulkAction>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Clear selection"
-                          disabled={bulkPending}
-                          onClick={() => {
-                            setBulkSelection([]);
-                            setBulkAction(null);
-                          }}
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    )}
-                    {bulkError && !bulkAction && (
-                      <p role="alert">{bulkError}</p>
-                    )}
-                  </div>
-                )}
-                {queryError ? (
-                  <div className="empty-state" role="alert">
-                    <strong>Could not load tickets</strong>
-                    <p>Try refreshing the current view.</p>
-                    <Button variant="outline" onClick={() => void refresh()}>
-                      Retry
-                    </Button>
-                  </div>
-                ) : loading && tickets.length === 0 ? (
-                  <p role="status" className="mt-3">
-                    Loading tickets…
-                  </p>
-                ) : tickets.length === 0 ? (
-                  <div className="empty-state">
-                    {trash ? (
-                      <p>No tickets in trash.</p>
-                    ) : query ||
-                      tags ||
-                      family ||
-                      effort !== navigation.effort ||
-                      status !==
-                        (navigation.kind === "progress" ? "In progress" : "") ||
-                      availability !==
-                        (navigation.kind === "ready" ? "Ready" : "") ? (
-                      <>
-                        <strong>No matching tickets</strong>
-                        <p>Try clearing your search and filters.</p>
-                        <Button variant="outline" onClick={clearFilters}>
-                          Clear filters
-                        </Button>
-                      </>
-                    ) : navigation.project !== "all" ||
-                      navigation.effort ||
-                      navigation.kind !== "all" ? (
-                      <>
-                        <strong>No tickets in this scope</strong>
-                        <p>Create a ticket or choose another view.</p>
-                        <Button
-                          variant="outline"
-                          onClick={(event) => {
-                            createTriggerRef.current = event.currentTarget;
-                            setCreating(true);
-                          }}
-                        >
-                          Create ticket
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <strong>Your workspace is ready</strong>
-                        <p>
-                          Create your first ticket to start keeping track of
-                          work.
-                        </p>
-                        <Button
-                          onClick={(event) => {
-                            createTriggerRef.current = event.currentTarget;
-                            setCreating(true);
-                          }}
-                        >
-                          <Plus data-icon="inline-start" /> Create your first
-                          ticket
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <TicketList
-                    tickets={tickets.filter(
-                      (item) =>
-                        filter === "all" ||
-                        (filter === "unlinked"
-                          ? item.project_id === null
-                          : item.project_id === filter),
-                    )}
-                    selected={selected}
-                    selectable={!trash}
-                    selectionDisabled={bulkPending}
-                    bulkSelection={bulkSelection}
-                    onToggle={(reference) => {
-                      const next = bulkSelection.includes(reference)
-                        ? bulkSelection.filter((item) => item !== reference)
-                        : [...bulkSelection, reference];
-                      setBulkSelection(next);
-                      if (next.length === 0) setBulkAction(null);
-                    }}
-                    onOpen={(reference) => {
-                      setSelected(reference);
-                      setNarrowDetail(true);
-                      if (window.matchMedia("(max-width: 1063px)").matches)
-                        focusPane.current = "detail";
-                    }}
-                  />
-                )}
-                {!trash && (offset > 0 || tickets.length === 50) && (
-                  <div className="pagination">
-                    <button
-                      type="button"
-                      disabled={offset === 0}
-                      onClick={() => {
-                        setOffset(Math.max(0, offset - 50));
-                      }}
-                    >
-                      Previous
-                    </button>
-                    <span> Page {Math.floor(offset / 50) + 1} </span>
-                    <button
-                      type="button"
-                      disabled={tickets.length < 50}
-                      onClick={() => {
-                        setOffset(offset + 50);
-                      }}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-              </section>
-            </ResizablePanel>
-            <ResizableHandle
-              className="split-handle"
-              aria-label="Resize ticket list"
-            />
-            <ResizablePanel id="detail" minSize={480} className="detail-panel">
-              {selected &&
-                !loading &&
-                !queryError &&
-                !tickets.some((ticket) => ticket.reference === selected) && (
-                  <p className="selection-context" role="status">
-                    This ticket is outside the current results.
-                  </p>
-                )}
-              <TicketDetails
-                expanded={expanded}
-                onExpand={() => {
-                  setExpanded(true);
-                  focusPane.current = "detail";
-                }}
-                onReturn={() => {
-                  setExpanded(false);
-                  setNarrowDetail(false);
-                  focusPane.current = "list";
-                }}
-                selected={selected}
-                inboxTarget={inboxTarget}
-                setSelected={(value) => {
-                  if (value === null) focusPane.current = "list";
-                  setSelected(value);
-                }}
-                details={details}
-                projects={projects}
-                efforts={efforts}
-                revision={revision}
-                refresh={refresh}
-                updateTicket={updateTicket}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+            inboxTarget={inboxTarget}
+            onCreate={(trigger) => {
+              createTriggerRef.current = trigger;
+              setCreating(true);
+            }}
+          />
         </div>
       </main>
     </SidebarProvider>
