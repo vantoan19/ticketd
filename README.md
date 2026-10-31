@@ -20,7 +20,10 @@ Read the [quality guidelines](docs/agents/quality.md) before implementing change
 
 ```text
 apps/desktop/
-  src/                 React views and styles
+  src/app/             Application composition
+  src/features/        Feature views and state
+  src/components/      Shared layout and UI components
+  src/lib/api/         Typed desktop bridge clients
   src-tauri/           Tauri desktop adapter, configuration, capabilities
 crates/
   ticketd-core/        Shared Rust library; domain and persistence stay here
@@ -29,7 +32,7 @@ scripts/               Shared development checks
 docs/                  Product, domain, architecture, and agent guidance
 ```
 
-The root Cargo workspace shares dependency versions, lint settings, and one lockfile. The npm workspace manages the desktop frontend. Core internals and feature folders are added when their first implementation needs them.
+The root Cargo workspace shares dependency versions, lint settings, and one lockfile. The npm workspace manages the desktop frontend.
 
 ## Development
 

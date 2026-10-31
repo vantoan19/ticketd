@@ -231,6 +231,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     ).getByRole("button", { name: "All tickets" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
     target: { value: "bug" },
   });

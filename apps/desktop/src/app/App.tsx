@@ -218,7 +218,11 @@ export function App() {
                           ? " • Active"
                           : ""}
                       </PopoverTrigger>
-                      <PopoverContent className="filters-content" align="end">
+                      <PopoverContent
+                        className="filters-content"
+                        align="end"
+                        aria-label="Ticket filters"
+                      >
                         <fieldset>
                           <legend>Filters</legend>
                           <label>
