@@ -171,6 +171,7 @@ export function App() {
               <p>Manage projects and registered checkouts.</p>{" "}
               <Projects
                 projects={projects}
+                loading={loading}
                 filter={filter}
                 onFilter={(value) => {
                   setFilter(value);
