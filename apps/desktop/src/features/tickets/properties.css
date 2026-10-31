@@ -62,3 +62,6 @@
   background: var(--accent);
   outline: 2px solid var(--ring);
 }
+.ticket-properties > [data-slot="dropdown-menu-trigger"] {
+  margin-left: auto;
+}

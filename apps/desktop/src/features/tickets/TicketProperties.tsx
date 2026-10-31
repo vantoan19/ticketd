@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Command,
   CommandEmpty,
@@ -131,6 +131,7 @@ export function TicketProperties({
   onSaved: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
 }) {
+  const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [vocabulary, setVocabulary] = useState<string[]>([]);
@@ -160,6 +161,24 @@ export function TicketProperties({
     };
   }, [tagQuery]);
   async function save(key: string, action: () => Promise<Ticket>) {
+    const returnFocus =
+      document.activeElement instanceof HTMLElement &&
+      (document.activeElement.closest('[role="dialog"]') !== null ||
+        document.activeElement.closest('[role="menu"]') !== null ||
+        propertiesRef.current?.contains(document.activeElement));
+    function restoreFocus() {
+      if (!returnFocus) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement !== document.body) return;
+        const selector =
+          key === "Action"
+            ? '[aria-label="Ticket actions"]'
+            : key === "Status"
+              ? '[aria-label="Status"]'
+              : `[aria-label^="${key}:"]`;
+        propertiesRef.current?.querySelector<HTMLElement>(selector)?.focus();
+      });
+    }
     setPending(key);
     setErrors((old) => ({ ...old, [key]: "" }));
     let updated: Ticket;
@@ -171,6 +190,7 @@ export function TicketProperties({
         [key]: `Could not save ${key.toLowerCase()}: ${String(reason)}`,
       }));
       setPending("");
+      restoreFocus();
       return;
     }
     onSaved(updated);
@@ -183,6 +203,7 @@ export function TicketProperties({
       }));
     } finally {
       setPending("");
+      restoreFocus();
     }
   }
   const disabled = ticket.trashed || !!pending;
@@ -204,7 +225,11 @@ export function TicketProperties({
     );
   }
   return (
-    <div className="ticket-properties" aria-label="Ticket properties">
+    <div
+      ref={propertiesRef}
+      className="ticket-properties"
+      aria-label="Ticket properties"
+    >
       {property(
         "Status",
         <Select

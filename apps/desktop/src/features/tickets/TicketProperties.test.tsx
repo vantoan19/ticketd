@@ -46,13 +46,21 @@ test("keeps the saved project and reports a failed change", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /Project: Unlinked/ }));
-  fireEvent.click(screen.getByRole("option", { name: "Project" }));
+  const search = await screen.findByLabelText("Search Project");
+  fireEvent.change(search, {
+    target: { value: "Project" },
+  });
+  fireEvent.keyDown(search, {
+    key: "Enter",
+  });
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain(
       "Database busy; retry",
     ),
   );
-  expect(
-    screen.getByRole("button", { name: /Project: Unlinked/ }),
-  ).toBeTruthy();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: /Project: Unlinked/ }),
+    ),
+  );
 });
