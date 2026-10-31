@@ -86,3 +86,10 @@ JSON ticket snapshots in operation order. Failures identify the zero-based
 operation index and roll back the entire request. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
 between operations.
+
+Search saved titles, bodies, and notes with `ticketd search QUERY`. The query is a
+literal substring (ASCII letters match without case); an empty query returns no
+matches. Results exclude trash and are ordered by descending ticket reference.
+Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
+or `--unlinked` to restrict results. The desktop search uses the same matching
+and pages through 50 results at a time.

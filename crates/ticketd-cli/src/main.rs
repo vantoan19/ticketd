@@ -101,6 +101,18 @@ enum Command {
         #[arg(long)]
         unlinked: bool,
     },
+    /// Search saved ticket content (literal, ASCII case-insensitive substring)
+    Search {
+        query: String,
+        #[arg(long, conflicts_with = "unlinked")]
+        project: Option<String>,
+        #[arg(long)]
+        unlinked: bool,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     /// View a bounded dependency graph around a ticket
     Graph { reference: String },
     /// Show a ticket by its reference
@@ -423,6 +435,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .collect();
             serde_json::to_string(&tickets)?
         }
+        Command::Search {
+            query,
+            project,
+            unlinked,
+            limit,
+            offset,
+        } => serde_json::to_string(&workspace.search_tickets(
+            &query,
+            project.as_deref(),
+            unlinked,
+            limit,
+            offset,
+        )?)?,
         Command::Graph { reference } => {
             serde_json::to_string(&workspace.dependency_graph(&reference)?)?
         }
