@@ -107,9 +107,10 @@ test("opens the selected note even when it is outside the loaded page", async ()
       target={{ id: "older", key: 1 }}
     />,
   );
-  expect((await screen.findByLabelText("Selected note")).textContent).toContain(
-    "Edited finding",
-  );
+  const note = await screen.findByLabelText("Selected note");
+  expect(note.textContent).toContain("Edited finding");
+  // Revealing a note also moves focus to it, so the keyboard lands there.
+  expect(document.activeElement).toBe(note);
 });
 
 const props = {

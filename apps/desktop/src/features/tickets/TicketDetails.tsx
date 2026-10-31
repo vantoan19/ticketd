@@ -9,6 +9,17 @@ import { LinkedWork } from "@/features/tickets/LinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
+type NoteTarget = { id: string; key: number };
+
+/** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
+function newest(
+  first: NoteTarget | null,
+  second: NoteTarget | null,
+): NoteTarget | null {
+  if (first && second) return second.key >= first.key ? second : first;
+  return first ?? second;
+}
+
 const DependencyGraph = lazy(
   () => import("@/features/tickets/DependencyGraph"),
 );
@@ -174,13 +185,12 @@ export function TicketDetails({
           )}
           <Activity
             reference={item.reference}
-            target={
-              inboxTarget?.reference === item.reference
-                ? inboxTarget
-                : mention?.reference === item.reference && mention.noteId
-                  ? { id: mention.noteId, key: mention.key }
-                  : null
-            }
+            target={newest(
+              inboxTarget?.reference === item.reference ? inboxTarget : null,
+              mention?.reference === item.reference && mention.noteId
+                ? { id: mention.noteId, key: mention.key }
+                : null,
+            )}
             mention={
               mention?.reference === item.reference && !mention.noteId
                 ? mention

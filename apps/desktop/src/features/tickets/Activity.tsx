@@ -83,13 +83,17 @@ export function Activity({
     };
   }, [active, reference, targetId, targetKey]);
   useEffect(() => {
-    if (active && targetId !== undefined && targetNote?.id === targetId)
+    if (active && targetId !== undefined && targetNote?.id === targetId) {
       targetRef.current?.scrollIntoView?.({ block: "center" });
+      targetRef.current?.focus({ preventScroll: true });
+    }
   }, [active, targetId, targetKey, targetNote]);
   const mentionKey = mention?.key;
   useEffect(() => {
-    if (active && mentionKey !== undefined)
+    if (active && mentionKey !== undefined) {
       mentionRef.current?.scrollIntoView?.({ block: "center" });
+      mentionRef.current?.focus({ preventScroll: true });
+    }
   }, [active, mentionKey]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
