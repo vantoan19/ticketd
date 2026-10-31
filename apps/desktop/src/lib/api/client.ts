@@ -77,6 +77,11 @@ export type FindFilter = {
   offset: number;
 };
 export const client = {
+  async bulkStatus(references: string[], status: string, requestId: string) {
+    return z
+      .array(ticketSchema)
+      .parse(await invoke("bulk_status", { references, status, requestId }));
+  },
   async changeDependency(
     command: "add_dependency" | "remove_dependency",
     blocker: string,
