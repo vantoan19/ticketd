@@ -1,26 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-
-type Ticket = { id: string; reference: string; title: string; status: string };
-
-function parseTicket(value: unknown): Ticket {
-  if (typeof value !== "object" || value === null)
-    throw new Error("Invalid ticket returned by workspace");
-  const ticket = value as Record<string, unknown>;
-  if (
-    typeof ticket.id !== "string" ||
-    typeof ticket.reference !== "string" ||
-    typeof ticket.title !== "string" ||
-    typeof ticket.status !== "string"
-  )
-    throw new Error("Invalid ticket returned by workspace");
-  return {
-    id: ticket.id,
-    reference: ticket.reference,
-    title: ticket.title,
-    status: ticket.status,
-  };
-}
+import { client, type Ticket } from "./client";
+import { TicketEditor } from "./TicketEditor";
 
 export function App() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -30,10 +10,7 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const refresh = useCallback(async () => {
     try {
-      const result: unknown = await invoke("list_tickets");
-      if (!Array.isArray(result))
-        throw new Error("Invalid ticket list returned by workspace");
-      setTickets(result.map(parseTicket));
+      setTickets(await client.listTickets());
       setError("");
     } catch (reason) {
       setError(String(reason));
@@ -47,7 +24,7 @@ export function App() {
     event.preventDefault();
     setSaving(true);
     try {
-      const ticket = parseTicket(await invoke("create_ticket", { title }));
+      const ticket = await client.createTicket(title);
       setTitle("");
       await refresh();
       setSelected(ticket.id);
@@ -57,7 +34,11 @@ export function App() {
       setSaving(false);
     }
   }
-  const ticket = tickets.find((item) => item.id === selected);
+  const updateTicket = useCallback((updated: Ticket) => {
+    setTickets((items) =>
+      items.map((item) => (item.id === updated.id ? updated : item)),
+    );
+  }, []);
   return (
     <main className="mx-auto max-w-4xl p-8">
       <h1 className="text-3xl font-semibold">ticketd</h1>
@@ -124,16 +105,14 @@ export function App() {
           <h2 id="detail-heading" className="text-xl font-semibold">
             Ticket details
           </h2>
-          {ticket ? (
-            <div className="mt-3">
-              <p className="text-neutral-600">
-                {ticket.reference} · {ticket.status}
-              </p>
-              <h3 className="mt-2 text-lg">{ticket.title}</h3>
-            </div>
-          ) : (
+          {selected === null && (
             <p className="mt-3">Select a ticket to see its details.</p>
           )}
+          {tickets.map((item) => (
+            <div key={item.id} hidden={item.id !== selected}>
+              <TicketEditor ticket={item} onSaved={updateTicket} />
+            </div>
+          ))}
         </section>
       </div>
     </main>
