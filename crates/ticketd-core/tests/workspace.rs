@@ -888,3 +888,27 @@ fn failed_request_id_can_be_reused_and_clearing_is_distinct_from_omission() {
             .is_err()
     );
 }
+
+#[test]
+fn search_tracks_note_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let ticket = workspace.create_ticket("Example").unwrap();
+    let note = workspace
+        .add_note(&ticket.reference, "A [literal] finding", None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .search_tickets("[literal]", None, false, 50, 0)
+            .unwrap()
+            .len(),
+        1
+    );
+    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    assert!(
+        workspace
+            .search_tickets("[literal]", None, false, 50, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
