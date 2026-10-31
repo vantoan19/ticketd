@@ -173,6 +173,7 @@ export function TicketDetails({
               reference={item.reference}
               revision={revision}
               trashed={item.trashed}
+              refresh={refresh}
             />
           )}
           {item.reference === selected && (

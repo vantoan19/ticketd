@@ -29,10 +29,12 @@ export function Evidence({
   reference,
   revision,
   trashed,
+  refresh,
 }: {
   reference: string;
   revision: number;
   trashed: boolean;
+  refresh: () => Promise<void>;
 }) {
   const [items, setItems] = useState<EvidenceRecord[]>([]);
   const [draft, setDraft] = useState<EvidenceInput>(blank);
@@ -52,7 +54,9 @@ export function Evidence({
     setMore(page.length === 50);
   }, [reference]);
   useEffect(() => {
-    void load().catch((reason: unknown) => setError(String(reason)));
+    void Promise.resolve()
+      .then(load)
+      .catch((reason: unknown) => setError(String(reason)));
   }, [load, revision]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,6 +67,7 @@ export function Evidence({
       setEditing(null);
       setError("");
       await load();
+      await refresh();
     } catch (reason) {
       setError(String(reason));
     }
@@ -72,6 +77,7 @@ export function Evidence({
       await client.deleteEvidence(reference, id);
       setError("");
       await load();
+      await refresh();
     } catch (reason) {
       setError(String(reason));
     }

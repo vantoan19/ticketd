@@ -1721,3 +1721,35 @@ fn evidence_retry_context_export_and_trash_rules() {
     assert!(ws.write(None, request()).is_err());
     assert_eq!(ws.evidence(&ticket.reference, 50, 0).unwrap().len(), 1);
 }
+
+#[test]
+fn backup_restores_evidence_and_its_retry_outcome() {
+    use ticketd_core::{EvidenceInput, EvidenceKind, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let ticket = ws.create_ticket("Ship").unwrap();
+    let request = || WriteRequest::AddEvidence {
+        reference: ticket.reference.clone(),
+        input: EvidenceInput {
+            kind: EvidenceKind::Commit,
+            name: "Commit".into(),
+            value: "abcdef0123456789".into(),
+            editing_agent: None,
+        },
+    };
+    let original = ws.write(Some("save-evidence"), request()).unwrap();
+    ws.backup(&backup).unwrap();
+    drop(ws);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut ws = Workspace::open(&path).unwrap();
+    assert_eq!(
+        ws.write(Some("save-evidence"), request()).unwrap(),
+        original
+    );
+    assert_eq!(
+        ws.evidence(&ticket.reference, 50, 0).unwrap()[0].value,
+        "abcdef0123456789"
+    );
+}

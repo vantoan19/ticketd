@@ -28,7 +28,14 @@ vi.mock("@tauri-apps/api/core", () => {
   };
 });
 test("adds and removes a verification result", async () => {
-  render(<Evidence reference="T-1" revision={0} trashed={false} />);
+  render(
+    <Evidence
+      reference="T-1"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
   fireEvent.change(screen.getByLabelText("Type"), {
     target: { value: "verification" },
   });
