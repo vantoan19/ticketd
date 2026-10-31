@@ -6,6 +6,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { cn } from "cn";
+import { usePreferences } from "@/lib/preferences";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
 import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
@@ -31,6 +32,7 @@ export function TicketWorkspaceView({
   onCreate: (trigger: HTMLButtonElement) => void;
 }) {
   const { selected, setSelected } = workspace;
+  const { openTickets } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -89,8 +91,14 @@ export function TicketWorkspaceView({
           onOpen={(reference) => {
             setSelected(reference);
             setNarrowDetail(true);
-            if (window.matchMedia(NARROW_QUERY).matches)
+            const narrow = window.matchMedia(NARROW_QUERY).matches;
+            if (narrow) focusPane.current = "detail";
+            // The Open tickets preference: a ticket opened from the list may
+            // take the full width. Narrow windows already show it that way.
+            else if (openTickets === "expanded") {
+              setExpanded(true);
               focusPane.current = "detail";
+            }
           }}
         />
       </ResizablePanel>

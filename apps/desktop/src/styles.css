@@ -40,7 +40,7 @@
   line-height: normal;
   color: var(--foreground);
   background: var(--background);
-  color-scheme: light dark;
+  color-scheme: light;
   --background: #fafafa;
   --surface: #fff;
   --recessed: #f2f2f2;
@@ -112,41 +112,43 @@
   --syntax-title: #953800;
 }
 
-/* The reference has no dark palette. These are ticketd's matching dark roles. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --surface: #171717;
-    --recessed: #1a1a1a;
-    --foreground: #ededed;
-    --muted-foreground: #a1a1a1;
-    --disabled-foreground: #737373;
-    --primary: #ededed;
-    --primary-foreground: #171717;
-    --primary-hover: #d4d4d4;
-    --secondary: #1a1a1a;
-    --secondary-foreground: #a1a1a1;
-    --accent: #262626;
-    --accent-foreground: #ededed;
-    --muted: #1a1a1a;
-    --border: #ffffff24;
-    --input: #ffffff24;
-    --header-boundary: #ffffff24;
-    --error-surface: #2b1414;
-    --error-foreground: #fecaca;
-    --destructive: #fecaca;
-    --shadow-border-base: 0 0 0 1px #ffffff24;
-    --status-ready: #45a557;
-    --status-checked: #45a557;
-    --status-blocked: #ff990a;
-    --status-unread: #0062d1;
-    --status-neutral: var(--disabled-foreground);
-    --syntax-keyword: #d2a8ff;
-    --syntax-string: #a5d6ff;
-    --syntax-number: #79c0ff;
-    --syntax-comment: #9da7b1;
-    --syntax-title: #ffa657;
-  }
+/*
+ * The reference has no dark palette. These are ticketd's matching dark roles.
+ * The theme preference sets data-theme on the root (see lib/preferences.ts).
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --surface: #171717;
+  --recessed: #1a1a1a;
+  --foreground: #ededed;
+  --muted-foreground: #a1a1a1;
+  --disabled-foreground: #737373;
+  --primary: #ededed;
+  --primary-foreground: #171717;
+  --primary-hover: #d4d4d4;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #a1a1a1;
+  --accent: #262626;
+  --accent-foreground: #ededed;
+  --muted: #1a1a1a;
+  --border: #ffffff24;
+  --input: #ffffff24;
+  --header-boundary: #ffffff24;
+  --error-surface: #2b1414;
+  --error-foreground: #fecaca;
+  --destructive: #fecaca;
+  --shadow-border-base: 0 0 0 1px #ffffff24;
+  --status-ready: #45a557;
+  --status-checked: #45a557;
+  --status-blocked: #ff990a;
+  --status-unread: #0062d1;
+  --status-neutral: var(--disabled-foreground);
+  --syntax-keyword: #d2a8ff;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #9da7b1;
+  --syntax-title: #ffa657;
 }
 
 @theme inline {
