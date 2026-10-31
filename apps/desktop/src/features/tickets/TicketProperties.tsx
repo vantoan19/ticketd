@@ -19,14 +19,10 @@ import {
   Folder,
   Layers,
   Tag,
-  Circle,
-  CircleDot,
-  CircleDashed,
-  CheckCircle2,
-  CircleSlash,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StatusIcon, ticketStatuses } from "./StatusIcon";
 import {
   Popover,
   PopoverContent,
@@ -263,28 +259,16 @@ export function TicketProperties({
             aria-label="Status"
             title="Status"
           >
-            {ticket.status === "In progress" ? (
-              <CircleDot />
-            ) : ticket.status === "In review" ? (
-              <CircleDashed />
-            ) : ticket.status === "Done" ? (
-              <CheckCircle2 />
-            ) : ticket.status === "Canceled" ? (
-              <CircleSlash />
-            ) : (
-              <Circle />
-            )}
+            <StatusIcon status={ticket.status} decorative />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              {["Todo", "In progress", "In review", "Done", "Canceled"].map(
-                (status) => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ),
-              )}
+              {ticketStatuses.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
             </SelectGroup>
           </SelectContent>
         </Select>,

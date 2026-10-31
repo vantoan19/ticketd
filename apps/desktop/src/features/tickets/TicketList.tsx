@@ -1,22 +1,7 @@
 import { useRef } from "react";
-import {
-  CheckCircle2,
-  Circle,
-  CircleDot,
-  CircleSlash,
-  CircleDashed,
-  type LucideIcon,
-} from "lucide-react";
+import { StatusIcon } from "./StatusIcon";
 import type { Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
-
-const statusIcons: Record<string, LucideIcon> = {
-  Todo: Circle,
-  "In progress": CircleDot,
-  "In review": CircleDashed,
-  Done: CheckCircle2,
-  Canceled: CircleSlash,
-};
 
 export function TicketList({
   tickets,
@@ -39,7 +24,6 @@ export function TicketList({
   return (
     <ul className="ticket-rows">
       {tickets.map((ticket, index) => {
-        const StatusIcon = statusIcons[ticket.status] ?? Circle;
         return (
           <li key={ticket.id}>
             {selectable && (
@@ -83,7 +67,7 @@ export function TicketList({
                 role="img"
                 aria-label={ticket.status}
               >
-                <StatusIcon aria-hidden="true" size={16} />
+                <StatusIcon status={ticket.status} decorative />
                 <span className="ticket-status-label">{ticket.status}</span>
               </span>
               <span className="ticket-ref">{ticket.reference}</span>

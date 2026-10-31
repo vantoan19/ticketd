@@ -90,6 +90,11 @@
   --shadow-modal:
     var(--shadow-border-base), 0 1px 1px #00000005, 0 8px 16px -4px #0000000a,
     0 24px 32px -8px #0000000f, var(--shadow-background-border);
+  --status-ready: #45a557;
+  --status-checked: #45a557;
+  --status-blocked: #ff990a;
+  --status-unread: #0062d1;
+  --status-neutral: var(--disabled-foreground);
   --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--ring);
   --motion-swift: cubic-bezier(0.175, 0.885, 0.32, 1.1);
   --sidebar: var(--background);
@@ -131,6 +136,11 @@
     --error-foreground: #fecaca;
     --destructive: #fecaca;
     --shadow-border-base: 0 0 0 1px #ffffff24;
+    --status-ready: #45a557;
+    --status-checked: #45a557;
+    --status-blocked: #ff990a;
+    --status-unread: #0062d1;
+    --status-neutral: var(--disabled-foreground);
     --syntax-keyword: #d2a8ff;
     --syntax-string: #a5d6ff;
     --syntax-number: #79c0ff;

@@ -1,0 +1,56 @@
+import type { ReactNode } from "react";
+import { cn } from "cn";
+import { RadioGroup } from "radix-ui";
+
+export type SegmentedOption<T extends string> = {
+  value: T;
+  label: string;
+  icon?: ReactNode;
+  disabled?: boolean;
+  title?: string;
+};
+
+/** An exclusive choice among a few options. Never empty; arrow keys move the selection. */
+export function SegmentedControl<T extends string>({
+  value,
+  onValueChange,
+  options,
+  className,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledby,
+}: {
+  value: T;
+  onValueChange: (value: T) => void;
+  options: SegmentedOption<T>[];
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  className?: string;
+}) {
+  return (
+    <RadioGroup.Root
+      value={value}
+      onValueChange={(next) => onValueChange(next as T)}
+      orientation="horizontal"
+      data-slot="segmented-control"
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledby}
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-md bg-(--recessed) p-0.5 shadow-(--shadow-border-base)",
+        className,
+      )}
+    >
+      {options.map((option) => (
+        <RadioGroup.Item
+          key={option.value}
+          value={option.value}
+          disabled={option.disabled ?? false}
+          title={option.title}
+          className="inline-flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0"
+        >
+          {option.icon}
+          {option.label}
+        </RadioGroup.Item>
+      ))}
+    </RadioGroup.Root>
+  );
+}
