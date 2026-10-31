@@ -67,6 +67,20 @@ pub enum WriteRequest {
         canonical: String,
         agent: Option<String>,
     },
+    MarkDuplicateReviewed {
+        source: String,
+        canonical: String,
+        expected_canonical: String,
+        decisions: Vec<crate::DependencyDecision>,
+        agent: Option<String>,
+    },
+    EditDependenciesReviewed {
+        source: String,
+        canonical: String,
+        expected_canonical: String,
+        decisions: Vec<crate::DependencyDecision>,
+        agent: Option<String>,
+    },
     RemoveDuplicate {
         source: String,
         agent: Option<String>,
@@ -240,6 +254,32 @@ impl Workspace {
                 canonical,
                 agent,
             } => WriteResult::Ticket(self.mark_duplicate(&source, &canonical, agent.as_deref())?),
+            WriteRequest::MarkDuplicateReviewed {
+                source,
+                canonical,
+                expected_canonical,
+                decisions,
+                agent,
+            } => WriteResult::Ticket(self.mark_duplicate_reviewed(
+                &source,
+                &canonical,
+                &expected_canonical,
+                decisions,
+                agent.as_deref(),
+            )?),
+            WriteRequest::EditDependenciesReviewed {
+                source,
+                canonical,
+                expected_canonical,
+                decisions,
+                agent,
+            } => WriteResult::Ticket(self.edit_dependencies_reviewed(
+                &source,
+                &canonical,
+                &expected_canonical,
+                decisions,
+                agent.as_deref(),
+            )?),
             WriteRequest::RemoveDuplicate { source, agent } => {
                 WriteResult::Ticket(self.remove_duplicate(&source, agent.as_deref())?)
             }

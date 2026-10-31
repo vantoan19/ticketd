@@ -4,6 +4,9 @@ pub use backlinks::Backlink;
 mod backup;
 mod context;
 mod duplicates;
+pub use duplicates::{
+    DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
+};
 mod export;
 pub use context::{ContextOptions, TicketContext};
 
@@ -93,6 +96,8 @@ pub enum Error {
         "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
     )]
     DuplicateDependencies,
+    #[error("dependency review has changed; preview and choose again")]
+    DependencyReviewChanged,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
