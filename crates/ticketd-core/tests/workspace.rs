@@ -1174,3 +1174,69 @@ fn restore_rejects_open_workspace_and_invalid_backup_without_changing_data() {
         "Keep me"
     );
 }
+
+#[test]
+fn migration_preserves_workspace_and_recovers_from_failure() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let request = || WriteRequest::CreateTicket {
+        title: "Saved".into(),
+        project_id: None,
+    };
+    let original = workspace.write(Some("request-1"), request()).unwrap();
+    let reference = match &original {
+        WriteResult::Ticket(ticket) => ticket.reference.clone(),
+        _ => panic!("expected ticket"),
+    };
+    workspace.add_tag(&reference, "kept").unwrap();
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; PRAGMA user_version = 12;")
+        .unwrap();
+    drop(db);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let handles: Vec<_> = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                Workspace::open(path).unwrap()
+            })
+        })
+        .collect();
+    let mut workspaces: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(
+        workspaces[0].show_ticket(&reference).unwrap().tags,
+        vec!["kept"]
+    );
+    assert_eq!(
+        workspaces[0].write(Some("request-1"), request()).unwrap(),
+        original
+    );
+    workspaces.clear();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA user_version = 12;").unwrap();
+    drop(db);
+    let error = match Workspace::open(&path) {
+        Ok(_) => panic!("migration should fail"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("restore-workspace"));
+    let backup = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().path()).filter(|p| p.to_string_lossy().contains("pre-migration")).find(|p| {
+        let db = rusqlite::Connection::open(p).unwrap();
+        db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='ticket_history_ticket_id'", [], |r| r.get::<_, i64>(0)).unwrap() == 1
+    }).unwrap();
+    Workspace::restore(&path, &backup).unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP INDEX ticket_history_ticket_id;")
+        .unwrap();
+    drop(db);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&reference).unwrap().tags,
+        vec!["kept"]
+    );
+}

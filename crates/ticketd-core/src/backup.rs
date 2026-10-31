@@ -9,7 +9,7 @@ use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags, backup::Backup};
 use uuid::Uuid;
 
-fn lock_file(path: &Path) -> Result<File, Error> {
+pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
     let resolved = match path.canonicalize() {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -40,17 +40,17 @@ pub(crate) fn shared_lock(path: &Path) -> Result<File, Error> {
     Ok(file)
 }
 
-fn copy(source: &Connection, destination: &mut Connection) -> Result<(), Error> {
+pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<(), Error> {
     Backup::new(source, destination)?.run_to_completion(100, Duration::from_millis(25), None)?;
     Ok(())
 }
 
 fn validate(connection: &Connection) -> Result<(), Error> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 12 {
+    if version > 13 {
         return Err(Error::NewerSchema(version));
     }
-    if version != 12 {
+    if !(1..=13).contains(&version) {
         return Err(Error::Backup(format!(
             "unsupported backup schema version {version}"
         )));
@@ -67,19 +67,22 @@ fn validate(connection: &Connection) -> Result<(), Error> {
         return Err(Error::Backup("foreign key check failed".into()));
     }
     // Verify this is a ticketd database, not an unrelated database with a matching version.
-    for table in [
-        "tickets",
-        "request_outcomes",
-        "ticket_history",
-        "notes",
-        "projects",
-        "efforts",
-        "project_checkouts",
-        "ticket_parents",
-        "dependencies",
-        "tags",
-        "ticket_tags",
+    for (table, introduced) in [
+        ("tickets", 1),
+        ("ticket_history", 3),
+        ("tags", 4),
+        ("ticket_tags", 4),
+        ("notes", 5),
+        ("dependencies", 6),
+        ("projects", 7),
+        ("efforts", 8),
+        ("ticket_parents", 9),
+        ("project_checkouts", 10),
+        ("request_outcomes", 12),
     ] {
+        if version < introduced {
+            continue;
+        }
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
             [table],
@@ -109,6 +112,30 @@ impl Workspace {
         result
     }
 
+    pub(crate) fn migration_backup(
+        connection: &Connection,
+        workspace: &Path,
+    ) -> Result<PathBuf, Error> {
+        let mut name = workspace.as_os_str().to_os_string();
+        name.push(format!(".pre-migration-{}.sqlite3", Uuid::new_v4()));
+        let path = PathBuf::from(name);
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        drop(file);
+        let result = (|| {
+            let mut destination = Connection::open(&path)?;
+            copy(connection, &mut destination)?;
+            Ok::<_, Error>(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&path);
+        }
+        result?;
+        Ok(path)
+    }
+
     pub fn restore_default(path: impl AsRef<Path>) -> Result<PathBuf, Error> {
         Self::restore(default_path()?, path)
     }
@@ -134,6 +161,11 @@ impl Workspace {
         }
         let mut current = Connection::open(workspace)?;
         current.busy_timeout(Duration::from_secs(10))?;
+        let current_version: i64 =
+            current.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if current_version > 13 {
+            return Err(Error::NewerSchema(current_version));
+        }
         let mut name = workspace.as_os_str().to_os_string();
         name.push(format!(".safety-{}.sqlite3", Uuid::new_v4()));
         let safety = PathBuf::from(name);
@@ -144,7 +176,6 @@ impl Workspace {
         drop(file);
         let mut safety_db = Connection::open(&safety)?;
         copy(&current, &mut safety_db)?;
-        validate(&safety_db)?;
         drop(safety_db);
         copy(&source, &mut current).map_err(|e| {
             Error::Backup(format!(
