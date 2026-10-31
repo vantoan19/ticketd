@@ -15,6 +15,10 @@ fn closed_stdout_reports_an_error_without_panicking() {
         .arg("list")
         .env("HOME", &directory)
         .env("XDG_DATA_HOME", &directory)
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            directory.join("workspace.sqlite3"),
+        )
         .stdout(Stdio::from(std::os::fd::OwnedFd::from(writer)))
         .output()
         .unwrap();
@@ -35,6 +39,10 @@ fn cli_status_change_appears_in_followed_inbox() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -87,6 +95,10 @@ fn cli_manages_and_reads_named_evidence() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .output()
             .unwrap();
         assert!(
@@ -148,6 +160,10 @@ fn backlinks_command_returns_source_and_passage() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .output()
             .unwrap();
         assert!(
@@ -174,6 +190,10 @@ fn cli_marks_and_removes_duplicate_designation() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .output()
             .unwrap();
         assert!(
@@ -203,6 +223,10 @@ fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -248,6 +272,10 @@ fn cli_schedules_and_dismisses_reminders() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .output()
             .unwrap();
         assert!(
@@ -275,6 +303,10 @@ fn cli_context_shows_discovery_direction() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .output()
             .unwrap();
         assert!(
@@ -313,6 +345,10 @@ fn cli_batch_organizes_mixed_tickets_without_replacing_tags() {
             .args(args)
             .env("HOME", dir.path())
             .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -353,4 +389,35 @@ fn cli_batch_organizes_mixed_tickets_without_replacing_tags() {
         serde_json::json!(["keep", "new"])
     );
     assert_eq!(result["value"][1]["tags"], serde_json::json!(["new"]));
+}
+
+#[test]
+fn cli_test_storage_isolated_from_platform_workspace_and_other_tests() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("private.sqlite3");
+    let invoke = |path: &std::path::Path, args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("TICKETD_TEST_WORKSPACE", path)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    invoke(&workspace, &["create", "Private test ticket"]);
+    assert_eq!(
+        invoke(&workspace, &["list"])[0]["title"],
+        "Private test ticket"
+    );
+    assert!(
+        invoke(&dir.path().join("other.sqlite3"), &["list"])
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

@@ -774,3 +774,35 @@ test("clears Effort and removes a tag with explicit bulk actions", async () => {
   await act(async () => {});
   expect(changes).toEqual([{ effort_id: null }, { remove_tags: ["old"] }]);
 });
+
+test("shows attention for a reminder while another view is active and after reopening", async () => {
+  vi.useFakeTimers();
+  let unread = false;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "has_unread_inbox") return unread;
+    if (
+      command === "list_projects" ||
+      command === "list_efforts" ||
+      command === "find_tickets"
+    )
+      return [];
+    throw new Error(`unexpected ${command}`);
+  });
+  const app = render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  unread = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("button", { name: "Unread inbox" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+  app.unmount();
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("button", { name: "Unread inbox" })).toBeTruthy();
+});

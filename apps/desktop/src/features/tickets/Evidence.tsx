@@ -40,6 +40,15 @@ export function Evidence({
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const request = useRef<{ key: string; id: string } | null>(null);
+  const pendingRef = useRef(false);
+  function requestId(key: string) {
+    if (request.current?.key !== key)
+      request.current = { key, id: crypto.randomUUID() };
+    return request.current.id;
+  }
   const [more, setMore] = useState(false);
   const pages = useRef(1);
   const load = useCallback(async () => {
@@ -60,9 +69,16 @@ export function Evidence({
   }, [load, revision]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    const id = requestId(
+      JSON.stringify(["save", reference, editing?.id, draft]),
+    );
     try {
-      if (editing) await client.editEvidence(reference, editing.id, draft);
-      else await client.addEvidence(reference, draft);
+      if (editing) await client.editEvidence(reference, editing.id, draft, id);
+      else await client.addEvidence(reference, draft, id);
+      request.current = null;
       setDraft(blank);
       setEditing(null);
       setError("");
@@ -70,16 +86,27 @@ export function Evidence({
       await refresh();
     } catch (reason) {
       setError(String(reason));
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
   }
   async function remove(id: string) {
+    if (pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    const writeId = requestId(JSON.stringify(["delete", reference, id]));
     try {
-      await client.deleteEvidence(reference, id);
+      await client.deleteEvidence(reference, id, writeId);
+      request.current = null;
       setError("");
       await load();
       await refresh();
     } catch (reason) {
       setError(String(reason));
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
     }
   }
   const current = editing && items.find((item) => item.id === editing.id);
@@ -99,6 +126,35 @@ export function Evidence({
           <li key={item.id} className="my-3 border-b pb-2">
             <strong>{item.name}</strong> · {labels[item.kind]}
             <p className="whitespace-pre-wrap break-all">{item.value}</p>
+            {item.kind === "pull_request" &&
+              /^https?:\/\//i.test(item.value) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!navigator.clipboard) {
+                      setError(
+                        "Could not copy the URL. Select the address above to copy it.",
+                      );
+                      return;
+                    }
+                    void navigator.clipboard
+                      .writeText(item.value)
+                      .then(() => {
+                        setCopied(item.id);
+                        setError("");
+                      })
+                      .catch(() =>
+                        setError(
+                          "Could not copy the URL. Select the address above to copy it.",
+                        ),
+                      );
+                  }}
+                >
+                  {copied === item.id
+                    ? "Copied pull request URL"
+                    : "Copy pull request URL"}
+                </button>
+              )}
             <p>
               {item.updated_at}
               {item.editing_agent && ` · ${item.editing_agent}`}
@@ -107,6 +163,7 @@ export function Evidence({
               <>
                 <button
                   type="button"
+                  disabled={pending}
                   onClick={() => {
                     setEditing(item);
                     setDraft({
@@ -120,7 +177,11 @@ export function Evidence({
                   Edit
                 </button>
                 {" · "}
-                <button type="button" onClick={() => void remove(item.id)}>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => void remove(item.id)}
+                >
                   Delete
                 </button>
               </>
@@ -147,70 +208,72 @@ export function Evidence({
       )}
       {!trashed && (
         <form onSubmit={(event) => void save(event)} className="mt-3">
-          <label className="block">
-            Type
-            <select
-              value={draft.kind}
-              onChange={(event) => {
-                const kind = Object.keys(labels).find(
-                  (key) => key === event.target.value,
-                );
-                if (
-                  kind === "pull_request" ||
-                  kind === "commit" ||
-                  kind === "branch" ||
-                  kind === "worktree" ||
-                  kind === "verification"
-                )
-                  setDraft({ ...draft, kind });
-              }}
-            >
-              {Object.entries(labels).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            Name
-            <input
-              className="block w-full rounded border p-2"
-              required
-              value={draft.name}
-              onChange={(event) =>
-                setDraft({ ...draft, name: event.target.value })
-              }
-            />
-          </label>
-          <label className="block">
-            {draft.kind === "verification"
-              ? "What was checked and its outcome"
-              : "URL, reference, or path"}
-            <textarea
-              className="block w-full rounded border p-2"
-              required
-              value={draft.value}
-              onChange={(event) =>
-                setDraft({ ...draft, value: event.target.value })
-              }
-            />
-          </label>
-          <button type="submit">
-            {editing ? "Save evidence" : "Add evidence"}
-          </button>
-          {editing && (
-            <button
-              type="button"
-              className="ml-3"
-              onClick={() => {
-                setEditing(null);
-                setDraft(blank);
-              }}
-            >
-              Cancel
+          <fieldset disabled={pending}>
+            <label className="block">
+              Type
+              <select
+                value={draft.kind}
+                onChange={(event) => {
+                  const kind = Object.keys(labels).find(
+                    (key) => key === event.target.value,
+                  );
+                  if (
+                    kind === "pull_request" ||
+                    kind === "commit" ||
+                    kind === "branch" ||
+                    kind === "worktree" ||
+                    kind === "verification"
+                  )
+                    setDraft({ ...draft, kind });
+                }}
+              >
+                {Object.entries(labels).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              Name
+              <input
+                className="block w-full rounded border p-2"
+                required
+                value={draft.name}
+                onChange={(event) =>
+                  setDraft({ ...draft, name: event.target.value })
+                }
+              />
+            </label>
+            <label className="block">
+              {draft.kind === "verification"
+                ? "What was checked and its outcome"
+                : "URL, reference, or path"}
+              <textarea
+                className="block w-full rounded border p-2"
+                required
+                value={draft.value}
+                onChange={(event) =>
+                  setDraft({ ...draft, value: event.target.value })
+                }
+              />
+            </label>
+            <button type="submit">
+              {editing ? "Save evidence" : "Add evidence"}
             </button>
-          )}
+            {editing && (
+              <button
+                type="button"
+                className="ml-3"
+                onClick={() => {
+                  setEditing(null);
+                  setDraft(blank);
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </fieldset>
         </form>
       )}
     </section>

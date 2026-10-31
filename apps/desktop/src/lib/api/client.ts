@@ -287,18 +287,27 @@ export const client = {
       .array(evidenceSchema)
       .parse(await invoke("list_evidence", { reference, offset }));
   },
-  async addEvidence(reference: string, input: EvidenceInput) {
+  async addEvidence(
+    reference: string,
+    input: EvidenceInput,
+    requestId: string,
+  ) {
     return evidenceSchema.parse(
-      await invoke("add_evidence", { reference, input }),
+      await invoke("add_evidence", { reference, input, requestId }),
     );
   },
-  async editEvidence(reference: string, id: string, input: EvidenceInput) {
+  async editEvidence(
+    reference: string,
+    id: string,
+    input: EvidenceInput,
+    requestId: string,
+  ) {
     return evidenceSchema.parse(
-      await invoke("edit_evidence", { reference, id, input }),
+      await invoke("edit_evidence", { reference, id, input, requestId }),
     );
   },
-  async deleteEvidence(reference: string, id: string) {
-    await invoke("delete_evidence", { reference, id });
+  async deleteEvidence(reference: string, id: string, requestId: string) {
+    await invoke("delete_evidence", { reference, id, requestId });
   },
   async backlinks(reference: string, offset: number) {
     return z

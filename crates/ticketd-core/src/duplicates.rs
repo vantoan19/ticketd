@@ -265,58 +265,17 @@ impl Workspace {
         for decision in decisions {
             if decision.choice != DependencyChoice::Retain {
                 self.remove_dependency(&decision.edge.blocker, &decision.edge.dependent, agent)?;
-                record_edge_change(
-                    &self.connection,
-                    &decision.edge.blocker,
-                    &decision.edge.dependent,
-                    false,
-                    agent,
-                )?;
             }
         }
         for decision in decisions {
             if decision.choice == DependencyChoice::Replace {
-                let blocker_id =
-                    relationships::id(&self.connection, &decision.edge.replacement_blocker)?;
-                let dependent_id =
-                    relationships::id(&self.connection, &decision.edge.replacement_dependent)?;
-                let existed: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id=?1 AND dependent_id=?2)", params![blocker_id, dependent_id], |r| r.get(0))?;
                 self.add_dependency(
                     &decision.edge.replacement_blocker,
                     &decision.edge.replacement_dependent,
                     agent,
                 )?;
-                if !existed {
-                    record_edge_change(
-                        &self.connection,
-                        &decision.edge.replacement_blocker,
-                        &decision.edge.replacement_dependent,
-                        true,
-                        agent,
-                    )?;
-                }
             }
         }
         Ok(())
     }
-}
-
-fn record_edge_change(
-    conn: &Connection,
-    blocker: &str,
-    dependent: &str,
-    added: bool,
-    agent: Option<&str>,
-) -> Result<(), Error> {
-    let description = format!("{blocker} blocks {dependent}");
-    let (from, to) = if added {
-        ("", description.as_str())
-    } else {
-        (description.as_str(), "")
-    };
-    for reference in [blocker, dependent] {
-        let id = relationships::id(conn, reference)?;
-        history::record(conn, &id, "relationship:dependency_review", from, to, agent)?;
-    }
-    Ok(())
 }

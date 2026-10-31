@@ -2377,8 +2377,7 @@ fn retained_duplicate_blocker_stays_unresolved_and_review_notifies_followers() {
         ws.inbox(100, 0)
             .unwrap()
             .iter()
-            .any(|entry| entry.kind == "relationship:dependency_review"
-                && entry.reference == moved.reference)
+            .any(|entry| entry.kind == "dependency" && entry.reference == moved.reference)
     );
 }
 
@@ -2694,4 +2693,124 @@ fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection()
     assert_eq!(saved.project_id, None);
     assert_eq!(saved.effort_id, None);
     assert_eq!(saved.tags, vec!["keep", "new"]);
+}
+
+#[test]
+fn reviewed_dependency_replacement_records_each_change_once_and_replay_is_silent() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    for ticket in [&source, &canonical, &dependent] {
+        ws.set_following(&ticket.reference, true).unwrap();
+    }
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let request = || WriteRequest::MarkDuplicateReviewed {
+        source: source.reference.clone(),
+        canonical: canonical.reference.clone(),
+        expected_canonical: preview.canonical.clone(),
+        decisions: preview
+            .edges
+            .iter()
+            .cloned()
+            .map(|edge| DependencyDecision {
+                edge,
+                choice: DependencyChoice::Replace,
+            })
+            .collect(),
+        agent: None,
+    };
+    let history_before: Vec<_> = [&source, &canonical, &dependent]
+        .iter()
+        .map(|ticket| ws.ticket_history(&ticket.reference).unwrap().len())
+        .collect();
+    ws.write(Some("review-once"), request()).unwrap();
+    let histories: Vec<_> = [&source, &canonical, &dependent]
+        .iter()
+        .map(|ticket| ws.ticket_history(&ticket.reference).unwrap())
+        .collect();
+    for (history, start) in histories.iter().zip(history_before) {
+        assert!(
+            !history[start..]
+                .iter()
+                .any(|entry| entry.kind == "relationship:dependency_review")
+        );
+    }
+    let edge_counts: Vec<_> = histories
+        .iter()
+        .map(|history| {
+            history
+                .iter()
+                .filter(|entry| entry.kind == "dependency" || entry.kind == "relationship:blocks")
+                .count()
+        })
+        .collect();
+    assert_eq!(edge_counts, vec![2, 1, 3]);
+    let entries = ws.inbox(100, 0).unwrap();
+    let edge_entries: Vec<_> = entries
+        .iter()
+        .filter(|e| {
+            e.kind == "dependency"
+                || e.kind.starts_with("relationship:blocks")
+                || e.kind == "relationship:dependency_review"
+        })
+        .collect();
+    assert_eq!(edge_entries.len(), 4);
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == source.reference)
+            .count(),
+        1
+    );
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == canonical.reference)
+            .count(),
+        1
+    );
+    assert_eq!(
+        edge_entries
+            .iter()
+            .filter(|e| e.reference == dependent.reference)
+            .count(),
+        2
+    );
+    ws.write(Some("review-once"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), entries.len());
+    assert!(ws.write(Some("different-review"), request()).is_err());
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), entries.len());
+    for (ticket, history) in [&source, &canonical, &dependent].iter().zip(histories) {
+        assert_eq!(ws.ticket_history(&ticket.reference).unwrap(), history);
+    }
+}
+
+#[test]
+fn unread_observation_delivers_reminders_once_across_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Remember").unwrap();
+    assert!(!workspace.has_unread_inbox().unwrap());
+    workspace
+        .set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.has_unread_inbox().unwrap());
+    assert!(workspace.has_unread_inbox().unwrap());
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    workspace.set_inbox_read(&[entries[0].id], true).unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(!workspace.has_unread_inbox().unwrap());
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }

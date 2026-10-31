@@ -48,6 +48,40 @@ function parseEntries(value: unknown): Entry[] {
     };
   });
 }
+function readableTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+function eventDescription(e: Entry) {
+  const target = e.to_value || e.from_value;
+  const action = e.to_value ? "Added" : "Removed";
+  switch (e.kind) {
+    case "reminder":
+      return `Reminder due ${readableTime(e.to_value)}`;
+    case "note":
+      return `New note: ${e.to_value}`;
+    case "status":
+      return `Status changed from ${e.from_value} to ${e.to_value}`;
+    case "parent":
+      return `${action} parent ${target}`;
+    case "dependency":
+      return `${action} prerequisite ${target}`;
+    case "relationship:blocks":
+      return `${action} dependent ${target}`;
+    case "relationship:related":
+      return `${action} related ticket ${target}`;
+    case "relationship:discovery":
+      return `${action} discovered ticket ${target}`;
+    case "relationship:discovered-while":
+      return `${action} discovery source ${target}`;
+    case "relationship:duplicate":
+      return e.to_value
+        ? `Marked duplicate of ${e.to_value}`
+        : `Duplicate link to ${e.from_value} removed`;
+    default:
+      return `Ticket relationship changed: ${target}`;
+  }
+}
 export function Inbox({
   revision,
   select,
@@ -116,25 +150,27 @@ export function Inbox({
         Mark displayed read
       </Button>
       {error && <p role="alert">{error}</p>}
-      <ul>
+      <ul className="inbox-entries">
         {entries.map((e) => (
-          <li key={e.id}>
-            <button
-              onClick={() =>
-                e.kind === "note"
-                  ? select(e.reference, e.from_value)
-                  : select(e.reference)
-              }
-            >
-              {e.reference} · {e.title}
-            </button>{" "}
-            ·{" "}
-            {e.kind === "note"
-              ? `New note: ${e.to_value}`
-              : `${e.kind}: ${e.from_value} → ${e.to_value}`}{" "}
-            · {e.timestamp}
-            {e.editing_agent && ` · Agent: ${e.editing_agent}`} ·{" "}
-            <span>{e.read ? "Read" : "Unread"}</span>{" "}
+          <li key={e.id} className="inbox-entry">
+            <div>
+              <button
+                className="inbox-ticket"
+                onClick={() =>
+                  e.kind === "note"
+                    ? select(e.reference, e.from_value)
+                    : select(e.reference)
+                }
+              >
+                {e.reference} · {e.title}
+              </button>
+              <p>{eventDescription(e)}</p>
+              <p className="inbox-meta">
+                <time dateTime={e.timestamp}>{readableTime(e.timestamp)}</time>
+                {e.editing_agent && ` · Agent: ${e.editing_agent}`} ·{" "}
+                <span>{e.read ? "Read" : "Unread"}</span>
+              </p>
+            </div>
             <Button
               variant="outline"
               size="sm"

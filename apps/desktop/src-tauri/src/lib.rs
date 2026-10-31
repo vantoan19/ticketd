@@ -34,6 +34,12 @@ fn inbox(offset: u32) -> Result<Vec<InboxEntry>, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn has_unread_inbox() -> Result<bool, String> {
+    Workspace::open_default()
+        .and_then(|w| w.has_unread_inbox())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn is_following(reference: String) -> Result<bool, String> {
     Workspace::open_default()
         .and_then(|w| w.is_following(&reference))
@@ -277,21 +283,58 @@ fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, String
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn add_evidence(reference: String, input: EvidenceInput) -> Result<Evidence, String> {
-    Workspace::open_default()
-        .and_then(|mut w| w.add_evidence(&reference, input))
-        .map_err(|e| e.to_string())
+fn add_evidence(
+    reference: String,
+    input: EvidenceInput,
+    request_id: String,
+) -> Result<Evidence, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::AddEvidence { reference, input },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Evidence(value) => Ok(value),
+        _ => Err("Unexpected evidence result".into()),
+    }
 }
 #[tauri::command]
-fn edit_evidence(reference: String, id: String, input: EvidenceInput) -> Result<Evidence, String> {
-    Workspace::open_default()
-        .and_then(|mut w| w.edit_evidence(&reference, &id, input))
-        .map_err(|e| e.to_string())
+fn edit_evidence(
+    reference: String,
+    id: String,
+    input: EvidenceInput,
+    request_id: String,
+) -> Result<Evidence, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::EditEvidence {
+                    reference,
+                    id,
+                    input,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Evidence(value) => Ok(value),
+        _ => Err("Unexpected evidence result".into()),
+    }
 }
 #[tauri::command]
-fn delete_evidence(reference: String, id: String) -> Result<(), String> {
+fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), String> {
     Workspace::open_default()
-        .and_then(|mut w| w.delete_evidence(&reference, &id))
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::DeleteEvidence { reference, id },
+            )
+        })
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -616,6 +659,7 @@ pub fn run() -> Result<(), tauri::Error> {
             is_following,
             set_following,
             set_inbox_read,
+            has_unread_inbox,
             list_evidence,
             add_evidence,
             edit_evidence,
