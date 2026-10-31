@@ -238,7 +238,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
     target: { value: "Unfinished note" },
   });
-  fireEvent.click(screen.getByRole("button", { name: /T-2 Second/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Second" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });

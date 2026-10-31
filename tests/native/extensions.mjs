@@ -254,14 +254,17 @@ try {
   await (
     await (await detail()).$(`p*=See ${target.reference} for context.`)
   ).waitForDisplayed({ timeout: 10000 });
-  await disclosure("Related work");
-  let section = await (
-    await detail()
-  ).$('section[aria-label="Contextual relationships"]');
+  await click(
+    await (
+      await detail()
+    ).$('section[aria-label="Linked work"] button=Link ticket'),
+  );
+  const dialog = await browser.$('[role="dialog"]');
   await (
-    await section.$('input[id^="context-target-"]')
+    await dialog.$('input[id^="link-search-"]')
   ).setValue(source.reference);
-  await click(await section.$("button=Add relationship"));
+  await click(await dialog.$(`button*=${source.reference}`));
+  await click(await dialog.$("button=Link ticket"));
   await waitFor(
     () =>
       run(
@@ -362,8 +365,11 @@ try {
 
   // Review the blocker replacement, then undo the duplicate designation.
   await open(source.title);
-  await disclosure("Duplicates");
-  section = await (await detail()).$('section[aria-label="Duplicates"]');
+  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
+  let section = await browser.$(
+    '[role="dialog"] section[aria-label="Duplicates"]',
+  );
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
   await click(await section.$("button=Preview dependencies"));
   const choice = await section.$("select");
@@ -379,7 +385,13 @@ try {
     target.reference,
   );
   assert.equal(run("show", dependent.reference).availability, "Blocked");
-  await click(await section.$("button=Remove duplicate designation"));
+  await click(
+    await (
+      await detail()
+    ).$(
+      `button[aria-label="Remove relationship: Duplicate of ${target.reference}"]`,
+    ),
+  );
   await waitFor(
     () => run("show", source.reference).duplicate_of === null,
     "Duplicate undo failed",
@@ -388,6 +400,9 @@ try {
     run("show", dependent.reference).prerequisites[0].reference,
     target.reference,
   );
+  await click(await (await detail()).$('button[aria-label="Ticket actions"]'));
+  await click(await browser.$('[role="menuitem"]=Mark as duplicate…'));
+  section = await browser.$('[role="dialog"] section[aria-label="Duplicates"]');
   await click(await section.$("button=Review separate dependency changes"));
   await (await section.$('input[id^="canonical-"]')).setValue(target.reference);
   await click(await section.$("button=Preview dependencies"));
