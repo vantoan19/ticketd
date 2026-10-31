@@ -169,11 +169,12 @@ try {
   );
   await search.clearValue();
   await (await (await detail()).$("button=Graph")).click();
-  const graphNode = await (
-    await (await detail()).$('[aria-label="Graph tickets"]')
-  ).$(`button*=${evidence.reference}`);
+  const graphView = await browser.$('section[aria-label="Dependency graph"]');
+  await graphView.waitForDisplayed({ timeout: 10000 });
+  const graphNode = await graphView.$(`button*=${evidence.reference}`);
   await graphNode.waitForDisplayed({ timeout: 10000 });
   await graphNode.click();
+  await (await graphView.$(`button*=Open ${evidence.reference}`)).click();
   await browser.waitUntil(
     async () =>
       (await (

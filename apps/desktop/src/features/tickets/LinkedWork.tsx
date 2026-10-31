@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
@@ -46,18 +46,13 @@ export function LinkedWork({
   revision,
   refresh,
   select,
-  graphOpen,
-  onToggleGraph,
-  graph,
+  onOpenGraph,
 }: {
   ticket: Ticket;
   revision: number;
   refresh: () => Promise<void>;
   select: (reference: string) => void;
-  graphOpen: boolean;
-  onToggleGraph: () => void;
-  /** The inline graph, shown below the rows while open. */
-  graph: ReactNode;
+  onOpenGraph: () => void;
 }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reload, setReload] = useState(0);
@@ -195,7 +190,7 @@ export function LinkedWork({
       }}
     />
   );
-  if (count === 0 && !graphOpen)
+  if (count === 0)
     return (
       <section
         id={`linked-work-${reference}`}
@@ -222,12 +217,7 @@ export function LinkedWork({
           Linked work <span className="linked-work-count">{count}</span>
         </h3>
         <div className="linked-work-actions">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-pressed={graphOpen}
-            onClick={onToggleGraph}
-          >
+          <Button variant="ghost" size="sm" onClick={onOpenGraph}>
             <Network aria-hidden="true" />
             Graph
           </Button>
@@ -283,7 +273,6 @@ export function LinkedWork({
           Show more links
         </Button>
       )}
-      {graphOpen && graph}
       {dialog}
     </section>
   );

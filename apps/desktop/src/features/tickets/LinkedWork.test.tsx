@@ -92,16 +92,18 @@ function bridge(
     return base;
   });
 }
-function renderSection(ticket: Ticket, refresh = vi.fn(async () => {})) {
+function renderSection(
+  ticket: Ticket,
+  refresh = vi.fn(async () => {}),
+  onOpenGraph = vi.fn(),
+) {
   render(
     <LinkedWork
       ticket={ticket}
       revision={0}
       refresh={refresh}
       select={vi.fn()}
-      graphOpen={false}
-      onToggleGraph={vi.fn()}
-      graph={null}
+      onOpenGraph={onOpenGraph}
     />,
   );
   return refresh;
@@ -148,6 +150,23 @@ test("shows every kind of link grouped in order, without expanding anything", as
   expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
   expect(screen.getByRole("heading").textContent).toContain("5");
   expect(document.querySelector("details")).toBeNull();
+});
+
+test("the Graph action opens the dependency graph", async () => {
+  bridge();
+  const onOpenGraph = vi.fn();
+  renderSection(
+    {
+      ...base,
+      prerequisites: [
+        { reference: "T-2", title: "Blocker", status: "Todo", trashed: false },
+      ],
+    },
+    undefined,
+    onOpenGraph,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Graph" }));
+  expect(onOpenGraph).toHaveBeenCalled();
 });
 
 test("Remove relationship takes the link off the ticket", async () => {

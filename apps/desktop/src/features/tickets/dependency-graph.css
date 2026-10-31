@@ -1,0 +1,203 @@
+.dependency-graph-view {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+  padding: 12px 24px 24px;
+}
+.graph-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.graph-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.graph-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-notice {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+.graph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  flex: 1;
+  min-height: 420px;
+}
+@container (max-width: 720px) {
+  .graph-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 420px auto;
+  }
+}
+.graph-canvas {
+  min-height: 420px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
+}
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+.graph-zoom {
+  min-width: 40px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.dependency-graph-view .react-flow__node {
+  width: 224px;
+}
+.dependency-graph-view .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.dependency-graph-view .react-flow__edge-path {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+.dependency-graph-view .react-flow__arrowhead * {
+  stroke: var(--muted-foreground);
+  fill: var(--muted-foreground);
+}
+.graph-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 224px;
+  height: 76px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  text-align: left;
+  cursor: pointer;
+}
+.graph-node:hover {
+  background: var(--muted);
+}
+/* Selection is a solid ring; keyboard focus is the offset focus ring. */
+.graph-node[data-selected] {
+  box-shadow: 0 0 0 2px var(--foreground);
+}
+.graph-node:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.graph-node-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 16px;
+}
+.graph-node-reference {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+.graph-node-status {
+  color: var(--muted-foreground);
+}
+.graph-node-origin {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--muted);
+  font-size: 11px;
+}
+.graph-node-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+.graph-availability {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.graph-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border-base);
+  font-size: 13px;
+}
+.graph-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.graph-panel h4 {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+}
+.graph-panel ul {
+  padding: 0;
+  list-style: none;
+}
+.graph-panel-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.graph-panel-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+}
+.graph-panel-facts dt {
+  color: var(--muted-foreground);
+}
+.graph-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.graph-none {
+  color: var(--muted-foreground);
+}
