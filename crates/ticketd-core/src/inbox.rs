@@ -125,6 +125,16 @@ impl Workspace {
         Ok(())
     }
     pub fn inbox(&self, limit: u32, offset: u32) -> Result<Vec<InboxEntry>, Error> {
+        self.inbox_page(limit, offset, false)
+    }
+    /// Read newest-first inbox entries. With `unread_only`, the filter applies before
+    /// paging so every page holds only unread entries.
+    pub fn inbox_page(
+        &self,
+        limit: u32,
+        offset: u32,
+        unread_only: bool,
+    ) -> Result<Vec<InboxEntry>, Error> {
         // Insertion and marking delivered commit together, including across processes.
         let tx = self.connection.unchecked_transaction()?;
         super::transaction_write_lock(&tx)?;
@@ -135,21 +145,24 @@ impl Workspace {
         tx.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value) SELECT person, ticket_id, 'reminder', '', due_at FROM ticket_reminders WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
         tx.execute("UPDATE ticket_reminders SET delivered = 1 WHERE person = ?1 AND delivered = 0 AND julianday(due_at) <= julianday(?2)", params![LOCAL_PERSON, now])?;
         tx.commit()?;
-        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
-            .query_map(params![LOCAL_PERSON, limit.min(100), offset], |row| {
-                Ok(InboxEntry {
-                    id: row.get(0)?,
-                    reference: format!("T-{}", row.get::<_, i64>(1)?),
-                    title: row.get(2)?,
-                    kind: row.get(3)?,
-                    from_value: row.get(4)?,
-                    to_value: row.get(5)?,
-                    timestamp: row.get(6)?,
-                    read: row.get(7)?,
-                    editing_agent: row.get(8)?,
-                })
-            })?
+            .query_map(
+                params![LOCAL_PERSON, limit.min(100), offset, unread_only],
+                |row| {
+                    Ok(InboxEntry {
+                        id: row.get(0)?,
+                        reference: format!("T-{}", row.get::<_, i64>(1)?),
+                        title: row.get(2)?,
+                        kind: row.get(3)?,
+                        from_value: row.get(4)?,
+                        to_value: row.get(5)?,
+                        timestamp: row.get(6)?,
+                        read: row.get(7)?,
+                        editing_agent: row.get(8)?,
+                    })
+                },
+            )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
     }
