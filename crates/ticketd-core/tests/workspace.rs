@@ -83,3 +83,45 @@ fn status_changes_are_recorded_with_optional_agent() {
     assert_eq!(history[1].editing_agent, None);
     assert!(!history[0].timestamp.is_empty());
 }
+
+#[test]
+fn notes_can_be_paged_edited_and_deleted_after_reopening() {
+    use ticketd_core::NotePatch;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Notes").unwrap();
+    let first = workspace
+        .add_note(&ticket.reference, "First\nline", Some("codex"))
+        .unwrap();
+    let second = workspace
+        .add_note(&ticket.reference, "Second", None)
+        .unwrap();
+    let edited = workspace
+        .edit_note(
+            &ticket.reference,
+            &first.id,
+            NotePatch {
+                content: Some("Revised".into()),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(edited.editing_agent.as_deref(), Some("codex"));
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.notes(&ticket.reference, 1, 0).unwrap(),
+        vec![edited]
+    );
+    assert_eq!(
+        workspace.notes(&ticket.reference, 1, 1).unwrap(),
+        vec![second.clone()]
+    );
+    workspace.delete_note(&ticket.reference, &first.id).unwrap();
+    assert_eq!(
+        workspace.notes(&ticket.reference, 10, 0).unwrap(),
+        vec![second]
+    );
+    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap().body, "");
+}

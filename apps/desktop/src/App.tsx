@@ -1,3 +1,4 @@
+import { Notes } from "./Notes";
 import { History } from "./History";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { client, type Ticket } from "./client";
@@ -119,6 +120,7 @@ export function App() {
                 />
               )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
+              {item.id === selected && <Notes reference={item.reference} />}
             </div>
           ))}
         </section>

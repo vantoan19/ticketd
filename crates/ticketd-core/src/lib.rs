@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod history;
+mod notes;
 pub use history::{HistoryEntry, Status};
+pub use notes::{Note, NotePatch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -15,6 +17,8 @@ pub enum Error {
     EmptyTitle,
     #[error("ticket '{0}' was not found")]
     NotFound(String),
+    #[error("note '{0}' was not found")]
+    NoteNotFound(String),
     #[error("could not determine the application data directory")]
     NoDataDirectory,
     #[error("could not access workspace directory: {0}")]
@@ -60,7 +64,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 3 {
+        if version > 5 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -71,6 +75,9 @@ impl Workspace {
         }
         if version < 3 {
             history::migrate(&transaction)?;
+        }
+        if version < 5 {
+            notes::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -138,6 +145,33 @@ impl Workspace {
     pub fn ticket_history(&self, reference: &str) -> Result<Vec<HistoryEntry>, Error> {
         let ticket = self.show_ticket(reference)?;
         history::read(&self.connection, &ticket.id)
+    }
+
+    pub fn add_note(
+        &mut self,
+        reference: &str,
+        content: &str,
+        agent: Option<&str>,
+    ) -> Result<Note, Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::add(&self.connection, &ticket.id, content, agent)
+    }
+    pub fn edit_note(
+        &mut self,
+        reference: &str,
+        id: &str,
+        patch: NotePatch,
+    ) -> Result<Note, Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::edit(&self.connection, &ticket.id, id, patch)
+    }
+    pub fn delete_note(&mut self, reference: &str, id: &str) -> Result<(), Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::delete(&self.connection, &ticket.id, id)
+    }
+    pub fn notes(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Note>, Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::read(&self.connection, &ticket.id, limit, offset)
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
