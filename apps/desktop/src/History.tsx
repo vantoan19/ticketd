@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import type { Project } from "./client";
 
 type Entry = {
   kind: string;
@@ -37,11 +38,13 @@ export function History({
   status,
   revision,
   onChange,
+  projects,
 }: {
   reference: string;
   status: string;
   revision: number;
   onChange: () => Promise<void>;
+  projects: Project[];
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState("");
@@ -67,6 +70,12 @@ export function History({
       setError(String(reason));
     }
   }
+  function historyValue(entry: Entry, value: string) {
+    if (entry.kind !== "project") return value;
+    return value
+      ? (projects.find((project) => project.id === value)?.name ?? value)
+      : "Unlinked";
+  }
   return (
     <div className="mt-4">
       <label>
@@ -91,8 +100,9 @@ export function History({
         <ol>
           {entries.map((entry, index) => (
             <li key={index}>
-              {entry.kind}: {entry.from_value} → {entry.to_value} ·{" "}
-              {entry.timestamp} · {entry.editing_agent ?? "Unknown"}
+              {entry.kind}: {historyValue(entry, entry.from_value)} →{" "}
+              {historyValue(entry, entry.to_value)} · {entry.timestamp} ·{" "}
+              {entry.editing_agent ?? "Unknown"}
             </li>
           ))}
         </ol>

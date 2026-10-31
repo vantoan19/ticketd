@@ -8,7 +8,14 @@ const ticketSchema = z.object({
   status: z.string(),
   body: z.string(),
   tags: z.array(z.string()),
+  project_id: z.string().nullable(),
 });
+const projectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+});
+export type Project = z.infer<typeof projectSchema>;
 const noteSchema = z.object({
   id: z.string(),
   content: z.string(),
@@ -19,6 +26,17 @@ const noteSchema = z.object({
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export const client = {
+  async listProjects() {
+    return z.array(projectSchema).parse(await invoke("list_projects"));
+  },
+  async createProject(name: string, path: string) {
+    return projectSchema.parse(await invoke("create_project", { name, path }));
+  },
+  async editProject(id: string, name: string, path: string) {
+    return projectSchema.parse(
+      await invoke("edit_project", { id, name, path }),
+    );
+  },
   async notes(reference: string, offset: number) {
     return z
       .array(noteSchema)
@@ -38,12 +56,14 @@ export const client = {
   async listTickets() {
     return z.array(ticketSchema).parse(await invoke("list_tickets"));
   },
-  async createTicket(title: string) {
-    return ticketSchema.parse(await invoke("create_ticket", { title }));
+  async createTicket(title: string, projectId: string | null) {
+    return ticketSchema.parse(
+      await invoke("create_ticket", { title, projectId }),
+    );
   },
   async changeTicket(
     reference: string,
-    patch: { title?: string; body?: string },
+    patch: { title?: string; body?: string; project_id?: string | null },
   ) {
     return ticketSchema.parse(
       await invoke("change_ticket", { reference, patch }),
