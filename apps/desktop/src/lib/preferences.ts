@@ -5,6 +5,8 @@ import { z } from "zod";
 const preferencesSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).catch("system"),
   openTickets: z.enum(["split", "expanded"]).catch("split"),
+  followCreated: z.boolean().catch(true),
+  notifyReminders: z.boolean().catch(false),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -12,7 +14,12 @@ export type ThemePreference = Preferences["theme"];
 export type OpenTicketsPreference = Preferences["openTickets"];
 
 const STORAGE_KEY = "ticketd.preferences";
-const DEFAULTS: Preferences = { theme: "system", openTickets: "split" };
+const DEFAULTS: Preferences = {
+  theme: "system",
+  openTickets: "split",
+  followCreated: true,
+  notifyReminders: false,
+};
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
 function readRaw(): string | null {

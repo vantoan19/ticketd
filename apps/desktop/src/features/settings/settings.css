@@ -109,6 +109,21 @@
   font-size: 13px;
 }
 
+/* Attention footer */
+.settings-footer {
+  margin-top: 4px;
+}
+.settings-link {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.settings-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 2px;
+}
+
 /* Open tickets: two selectable cards with small layout previews. */
 .layout-choices {
   display: grid;

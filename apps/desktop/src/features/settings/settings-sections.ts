@@ -2,11 +2,11 @@ export type SettingsGroup = "Preferences" | "Workspace" | "Help";
 
 /**
  * The Settings cards in page order. The section list is built from the same
- * array, so it only offers sections whose cards exist; add Attention,
- * Location, and Command line here when their cards arrive.
+ * array, so it only offers sections whose cards exist; add and Command line here when their cards arrive.
  */
 export const SETTINGS_SECTIONS = [
   { id: "appearance", label: "Appearance", group: "Preferences" },
+  { id: "attention", label: "Attention", group: "Preferences" },
   { id: "location", label: "Location", group: "Workspace" },
   { id: "backups", label: "Backups", group: "Workspace" },
   { id: "export", label: "Export", group: "Workspace" },

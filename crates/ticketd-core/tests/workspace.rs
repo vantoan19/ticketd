@@ -1375,6 +1375,45 @@ fn followed_status_changes_persist_and_reading_a_snapshot_leaves_new_entries_unr
 }
 
 #[test]
+fn batch_creates_and_follows_a_ticket_in_one_write() {
+    use ticketd_core::BatchOperation;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("follow.sqlite")).unwrap();
+    let plan = |title: &str| -> Vec<BatchOperation> {
+        serde_json::from_value(serde_json::json!([
+            {"operation":"create", "name":"new", "title":title},
+            {"operation":"change", "ticket":"$new", "change":{"status":"In progress"}}
+        ]))
+        .unwrap()
+    };
+    let followed = workspace
+        .apply_batch_following(plan("Followed"), true)
+        .unwrap();
+    let plain = workspace.apply_batch(plan("Plain")).unwrap();
+    assert!(workspace.is_following(&followed[0].reference).unwrap());
+    assert!(!workspace.is_following(&plain[0].reference).unwrap());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace
+        .change_ticket(
+            &followed[0].reference,
+            ticketd_core::TicketPatch {
+                status: Some(ticketd_core::Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+
+    let failing: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"create", "name":"new", "title":"Rolled back"},
+        {"operation":"change", "ticket":"T-999", "change":{"status":"Done"}}
+    ]))
+    .unwrap();
+    assert!(workspace.apply_batch_following(failing, true).is_err());
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+#[test]
 fn inbox_writes_replay_and_failed_batches_leave_no_events() {
     use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
     let dir = tempfile::tempdir().unwrap();

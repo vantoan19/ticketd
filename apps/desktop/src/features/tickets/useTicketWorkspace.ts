@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
+import { loadPreferences } from "@/lib/preferences";
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
 export function useTicketWorkspace(
@@ -144,6 +145,7 @@ export function useTicketWorkspace(
       project,
       effortId,
       tags,
+      loadPreferences().followCreated,
     );
     setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
     if (!keepOpen) {

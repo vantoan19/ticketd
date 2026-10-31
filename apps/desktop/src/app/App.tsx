@@ -7,6 +7,7 @@ import { TicketWorkspaceView } from "@/features/tickets/TicketWorkspaceView";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
+import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Menu } from "lucide-react";
@@ -77,6 +78,11 @@ export function App() {
     navigation,
   } = workspace;
   const bulk = useBulkEdit(refresh);
+  useReminderNotifications((reference) => {
+    setInboxTarget(null);
+    setSelected(reference);
+    setView("tickets");
+  });
   const isMobile = useIsMobile();
   return (
     <SidebarProvider>
@@ -144,6 +150,7 @@ export function App() {
           />
           <SettingsView
             hidden={view !== "settings"}
+            onOpenInbox={() => setView("inbox")}
             onRestore={async () => {
               setSelected(null);
               setDetails({});

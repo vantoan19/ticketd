@@ -20,15 +20,23 @@ test("System follows the operating system while Light and Dark override it", () 
 });
 
 test("choices persist and unknown stored values fall back to defaults", () => {
-  expect(loadPreferences()).toEqual({ theme: "system", openTickets: "split" });
+  expect(loadPreferences()).toEqual({
+    theme: "system",
+    openTickets: "split",
+    followCreated: true,
+    notifyReminders: false,
+  });
   expect(setPreference("theme", "dark")).toBe(true);
   expect(setPreference("openTickets", "expanded")).toBe(true);
-  expect(loadPreferences()).toEqual({ theme: "dark", openTickets: "expanded" });
+  expect(loadPreferences()).toMatchObject({
+    theme: "dark",
+    openTickets: "expanded",
+  });
   localStorage.setItem(
     "ticketd.preferences",
     JSON.stringify({ theme: "neon", openTickets: "expanded" }),
   );
-  expect(loadPreferences()).toEqual({
+  expect(loadPreferences()).toMatchObject({
     theme: "system",
     openTickets: "expanded",
   });

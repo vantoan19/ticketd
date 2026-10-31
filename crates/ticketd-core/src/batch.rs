@@ -46,6 +46,17 @@ pub enum BatchOperation {
 impl Workspace {
     /// Apply a plan atomically. References prefixed with `$` refer to earlier creates.
     pub fn apply_batch(&mut self, operations: Vec<BatchOperation>) -> Result<Vec<Ticket>, Error> {
+        self.apply_batch_following(operations, false)
+    }
+
+    /// Apply a plan atomically and, when `follow_created` is set, make the local person
+    /// follow every ticket the plan creates in the same write. Following starts after the
+    /// plan's own edits, so setting up a new ticket does not fill the inbox.
+    pub fn apply_batch_following(
+        &mut self,
+        operations: Vec<BatchOperation>,
+        follow_created: bool,
+    ) -> Result<Vec<Ticket>, Error> {
         if operations.is_empty()
             || operations.len() > 100
             || serde_json::to_vec(&operations)
@@ -82,7 +93,7 @@ impl Workspace {
                 .execute_batch("ROLLBACK TO batch; RELEASE batch");
             return Err(error);
         }
-        let result = self.apply_batch_inner(operations);
+        let result = self.apply_batch_inner(operations, follow_created);
         match result {
             Ok(tickets) => {
                 if let Err(error) = self.connection.execute_batch("RELEASE batch") {
@@ -101,10 +112,15 @@ impl Workspace {
         }
     }
 
-    fn apply_batch_inner(&mut self, operations: Vec<BatchOperation>) -> Result<Vec<Ticket>, Error> {
+    fn apply_batch_inner(
+        &mut self,
+        operations: Vec<BatchOperation>,
+        follow_created: bool,
+    ) -> Result<Vec<Ticket>, Error> {
         let started = Instant::now();
         let mut names = HashMap::new();
         let mut results = Vec::new();
+        let mut created = Vec::new();
         for (index, operation) in operations.into_iter().enumerate() {
             let result = (|| {
                 if started.elapsed() > Duration::from_secs(10) {
@@ -124,6 +140,7 @@ impl Workspace {
                         let ticket =
                             self.create_ticket_in_project(&title, project_id.as_deref())?;
                         names.insert(name, ticket.reference.clone());
+                        created.push(ticket.id.clone());
                         Ok(ticket)
                     }
                     BatchOperation::Change { ticket, change } => {
@@ -136,6 +153,14 @@ impl Workspace {
                 index,
                 source: Box::new(source),
             })?);
+        }
+        if follow_created {
+            for id in created {
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO ticket_follows (person, ticket_id) VALUES (?1, ?2)",
+                    rusqlite::params![crate::inbox::LOCAL_PERSON, id],
+                )?;
+            }
         }
         Ok(results)
     }

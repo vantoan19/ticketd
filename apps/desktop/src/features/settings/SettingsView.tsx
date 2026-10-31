@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import {
   Copy,
   ExternalLink,
@@ -25,34 +25,9 @@ import {
 import { StatusDot } from "@/components/ui/status-dot";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
-import {
-  settingsCardId,
-  type SettingsSectionId,
-} from "@/features/settings/settings-sections";
+import { SettingsCard } from "@/features/settings/SettingsCard";
+import { AttentionCard } from "@/features/settings/AttentionCard";
 import "@/features/settings/settings.css";
-
-function SettingsCard({
-  id,
-  title,
-  children,
-}: {
-  id: SettingsSectionId;
-  title: string;
-  children: ReactNode;
-}) {
-  const headingId = `${settingsCardId(id)}-heading`;
-  return (
-    <section
-      id={settingsCardId(id)}
-      className="settings-card"
-      aria-labelledby={headingId}
-      tabIndex={-1}
-    >
-      <h2 id={headingId}>{title}</h2>
-      {children}
-    </section>
-  );
-}
 
 const THEME_OPTIONS = [
   { value: "system", label: "System", icon: <Monitor aria-hidden="true" /> },
@@ -622,10 +597,12 @@ function AboutCard() {
 /** The Settings page: one centered column of cards. */
 export function SettingsView({
   onRestore,
+  onOpenInbox,
   hidden,
 }: {
   hidden: boolean;
   onRestore: () => Promise<void>;
+  onOpenInbox: () => void;
 }) {
   return (
     <div className="management settings-page" hidden={hidden}>
@@ -633,6 +610,7 @@ export function SettingsView({
         <h1>Settings</h1>
         <p>Changes apply right away.</p>
         <AppearanceCard />
+        <AttentionCard onOpenInbox={onOpenInbox} />
         <LocationCard />
         <BackupsCard onRestore={onRestore} />
         <ExportCard />

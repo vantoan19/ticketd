@@ -188,29 +188,35 @@ fn create_ticket(
     project_id: Option<String>,
     effort_id: Option<String>,
     tags: Vec<String>,
+    follow: bool,
 ) -> Result<Ticket, String> {
     Workspace::open_default()
         .and_then(|mut workspace| {
-            let mut tickets = workspace.apply_batch(vec![
-                BatchOperation::Create {
-                    name: "new".into(),
-                    title,
-                    project_id,
-                },
-                BatchOperation::Change {
-                    ticket: "$new".into(),
-                    change: Box::new(TicketChange {
-                        patch: TicketPatch {
-                            body: Some(body),
-                            status: Some(status),
-                            effort_id: effort_id.map(Some),
+            // `follow` is the desktop's "Follow tickets I create" preference; creating and
+            // following commit together.
+            let mut tickets = workspace.apply_batch_following(
+                vec![
+                    BatchOperation::Create {
+                        name: "new".into(),
+                        title,
+                        project_id,
+                    },
+                    BatchOperation::Change {
+                        ticket: "$new".into(),
+                        change: Box::new(TicketChange {
+                            patch: TicketPatch {
+                                body: Some(body),
+                                status: Some(status),
+                                effort_id: effort_id.map(Some),
+                                ..Default::default()
+                            },
+                            add_tags: tags,
                             ..Default::default()
-                        },
-                        add_tags: tags,
-                        ..Default::default()
-                    }),
-                },
-            ])?;
+                        }),
+                    },
+                ],
+                follow,
+            )?;
             tickets
                 .pop()
                 .ok_or_else(|| ticketd_core::Error::InvalidBatch("missing result".into()))
@@ -651,6 +657,7 @@ pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
             last_backup,
