@@ -42,7 +42,7 @@ These values come directly from the linked reference. The semantic names map the
 | Role / token                                  | Reference value       | Ticketd use                                 |
 | --------------------------------------------- | --------------------- | ------------------------------------------- |
 | Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation             |
-| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Document plane, menus, dialogs              |
+| Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs               |
 | Recessed / `--muted`, `--secondary`           | `#F2F2F2`             | Quiet control surfaces and placeholders     |
 | Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values     |
 | Secondary text / `--secondary-foreground`     | `#4D4D4D`             | Navigation, labels, readable captions       |
@@ -51,13 +51,13 @@ These values come directly from the linked reference. The semantic names map the
 | Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents |
 | Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                         |
 | Boundary / `--ds-shadow-border-base`          | `0 0 0 1px #00000014` | Shadow-based surface boundary               |
-| Header boundary                               | `0 1px 0 0 #0000001A` | Workspace header separator                  |
+| Header boundary                               | `0 1px 0 0 #0000001A` | Pane header separator                       |
 
 Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
 
 Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue.
 
-The reference also supplies indicator colors: blue `#0062D1`, cyan `#52AEFF`, teal `#45DEC5` / `#067A6E`, green `#398E4A` / `#45A557` / `#6CDA75`, orange `#FF990A`, red `#E5484D`, pink `#EA3E83`, and purple `#7820BC` / `#BF89EC`. Reserve these for small indicators, approximately 10px, when the meaning requires color. Do not introduce colored status panels. Ticketd starts with neutral status shapes and labels rather than assigning arbitrary category colors.
+The reference also supplies indicator colors: blue `#0062D1`, cyan `#52AEFF`, teal `#45DEC5` / `#067A6E`, green `#398E4A` / `#45A557` / `#6CDA75`, orange `#FF990A`, red `#E5484D`, pink `#EA3E83`, and purple `#7820BC` / `#BF89EC`. Reserve these for small indicators, approximately 10px, when the meaning requires color. Do not introduce colored status panels. Ticketd keeps status icons neutral; status color appears only as a small dot beside a word (see Status and state vocabulary), never as a fill, panel, or icon tint.
 
 ### Dark theme and error extensions
 
@@ -78,13 +78,13 @@ The linked reference does not specify a dark palette or complete error callouts.
 
 Errors use local `error-surface` / `error-foreground` pairs: `#FEF2F2` / `#991B1B` in light and `#2B1414` / `#FECACA` in dark. Destructive labels use the corresponding error foreground. These roles exist for readable failure explanations, not status decoration.
 
-Follow the operating system preference. Theme changes apply without reloading. Sidebar and portaled surfaces use the same semantic roles. Every overlay has an opaque surface; never depend on a parent pane’s background.
+The theme preference is System, Light, or Dark, chosen in Settings. System is the default and follows the operating system preference live; Light and Dark override it. Theme changes apply immediately without reloading. Sidebar and portaled surfaces use the same semantic roles. Every overlay has an opaque surface; never depend on a parent pane’s background.
 
 Normal text must meet 4.5:1 contrast against its actual surface; large text and essential non-text indicators need 3:1. Decorative shadow boundaries need not act as a control’s sole identifier. Verify composed states rather than treating this palette as proof of accessibility. Use labels, shapes, and focus outlines to keep the reference’s subtle surfaces usable. Never apply opacity to an entire panel of readable content.
 
 ### Status and state vocabulary
 
-Use a 16px Lucide status icon plus text. Keep these neutral initially; shape and label provide the distinction.
+Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
 | Meaning     | Icon treatment                               | Visible label     |
 | ----------- | -------------------------------------------- | ----------------- |
@@ -93,10 +93,10 @@ Use a 16px Lucide status icon plus text. Keep these neutral initially; shape and
 | In review   | Dashed circle                                | In review         |
 | Done        | Circle with check                            | Done              |
 | Canceled    | Circle with slash                            | Canceled          |
-| Ready       | Supporting text next to Todo context         | Ready             |
-| Blocked     | Supporting text with access to the reason    | Blocked by T-18   |
+| Ready       | Status dot beside the word, on Todo tickets  | Ready             |
+| Blocked     | Status dot beside the word, with the reason  | Blocked by T-18   |
 | Duplicate   | Canceled status plus a canonical-ticket link | Duplicate of T-10 |
-| Unread      | Small dot plus accessible unread state       | Unread            |
+| Unread      | Status dot plus accessible unread state      | Unread            |
 
 Ready and Blocked are availability indicators, not extra statuses. Canceled must never look completed. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
 
@@ -158,15 +158,15 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Large control          | 48px   | Deliberately prominent actions / coarse-pointer forms |
 | Default radius         | 6px    | Inputs, buttons, small controls                       |
 | Marketing radius       | 8px    | Reserved; not a replacement control radius            |
-| Elevated panel radius  | 12px   | Menus, popovers, dialogs, sheets                      |
+| Elevated panel radius  | 12px   | Content panel, Settings cards, menus, dialogs, sheets |
 | Pill radius            | 9999px | Tags or compact badges only                           |
-| Header height          | 48px   | Workspace header                                      |
+| Header height          | 48px   | List pane header and detail pane header               |
 | Sub-navigation height  | 46px   | Compact pane/header row                               |
 | Page gutter            | 24px   | Workspace and management content gutters              |
 | Standard content width | 1200px | Management content maximum                            |
 | Wide content width     | 1400px | Wide content views where useful                       |
 
-Pane widths and row columns are ticketd geometry, defined below. The full application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/list/detail shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
+Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
 Lucide icons remain 16px inside ordinary controls, with consistent stroke weight. Icon-only actions have accessible names and hover/focus tooltips. A 16px icon sits inside a 32px or larger hit area.
 
@@ -198,41 +198,44 @@ The document plane, ticket rows, and inline sections remain flat. Floating menus
 
 ### Wide-window composition
 
+Navigation stays on the canvas surface. Every view sits in one inset, elevated content panel: 12px radius, the small elevation shadow ring, and 8px from the window edges. There is no global top bar. The list pane has its own header and the detail pane has its own header, both inside the panel.
+
 ```text
-┌───────────────┬────────────────────────────────────────────────────┐
-│ ticketd       │ Project / View                         Search / … │
-│ New ticket    ├────────────────────────┬───────────────────────────┤
-│               │ View title + count     │ T-42              Follow …│
-│ Inbox         │ Search   Filters       │ Ticket title              │
-│ All tickets   ├────────────────────────┤ Status · Project · Effort │
-│ Ready         │ T-41  Ticket title     │                           │
-│ In progress   │ T-42  Selected ticket  │ Description               │
-│               │ T-43  Ticket title     │                           │
-│ Projects      │                        │ Linked work / evidence    │
-│ Efforts       │                        │ Activity                  │
-│ Trash         │                        │                           │
-│ Settings      │                        │                           │
-└───────────────┴────────────────────────┴───────────────────────────┘
+┌───────────────┬──────────────────────────────────────────────────────┐
+│ ticketd    +  │ ┌────────────────────────┬─────────────────────────┐ │
+│               │ │ View title  12   ⟳ 🔍 ≡│ T-42 ⧉   Follow ⏰ … ⤢ ✕ │ │
+│ Inbox     3   │ ├────────────────────────┤                         │ │
+│ All tickets   │ │ ○ T-41  Ticket title   │ Ticket title            │ │
+│ Ready         │ │ ◐ T-42  Selected       │ Status · Project · …    │ │
+│ In progress   │ │ ○ T-43  Ticket title   │                         │ │
+│               │ │                        │ Description             │ │
+│ Projects  ⚙   │ │                        │ Linked work             │ │
+│ Efforts   ⚙   │ │                        │ Activity                │ │
+│ Archived …    │ │                        │                         │ │
+│ Trash         │ └────────────────────────┴─────────────────────────┘ │
+│ Settings      │                                                      │
+└───────────────┴──────────────────────────────────────────────────────┘
 ```
 
-The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list toolbar; the top bar shows location and workspace-level actions.
+The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar.
 
-| Region          | Geometry and behavior                                                                   |
-| --------------- | --------------------------------------------------------------------------------------- |
-| Navigation      | 208px default width; 12px outer inset; independently scrollable groups                  |
-| Top bar         | 48px height; 24px horizontal inset; no decorative second header                         |
-| List toolbar    | 46px title/count row; 32px search and Filters with 16px horizontal inset                |
-| List pane       | At least 360px in split mode; remaining width allocated with the detail pane            |
-| Detail pane     | At least 480px in split mode; start near 55% of workspace content width                 |
-| Detail content  | 32px desktop gutters, 16px on narrow windows; content capped at 800px including gutters |
-| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing          |
-| Expanded detail | Center reading column up to 800px; keep navigation and return context                   |
+| Region          | Geometry and behavior                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------- |
+| Navigation      | 208px default width on the canvas; 12px outer inset; independently scrollable groups            |
+| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                   |
+| List header     | 48px: view title, count, Refresh, then search and Filters (32px small controls)                 |
+| Detail header   | 48px: ticket reference and actions (see Ticket detail)                                          |
+| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                    |
+| Detail pane     | At least 480px in split mode; start near 55% of content panel width                             |
+| Detail content  | 32px desktop gutters, 16px on narrow windows; split view capped at 800px including gutters      |
+| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                  |
+| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context |
 
 List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty note editor must not push the title down.
 
 ### Responsive rules
 
-Measure the available content width after navigation, not just the screen width. Preserve readable minimums rather than squeezing three panes together.
+Measure the available content panel width after navigation, not just the screen width. Preserve readable minimums rather than squeezing three panes together.
 
 | Available space              | Behavior                                                                                              |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -249,17 +252,22 @@ Switching pane modes, resizing, or opening navigation must not remount drafts, r
 
 ### Navigation
 
-Keep the product name quiet. Place a 32px New ticket icon button beside it with an accessible name and tooltip. Do not use a full-width primary creation button in persistent navigation. Group personal work views, Projects, and Efforts with 20px between groups. Use 8px between a group heading and its rows. Keep Settings at the bottom without forcing navigation items off-screen.
+The sidebar sits on the canvas surface, top to bottom:
 
-Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention may use a small dot or count; do not add a permanent high-contrast banner.
+- **Brand:** the product name in plain type beside a 32px New ticket icon button with an accessible name and tooltip. Do not use a full-width primary creation button in persistent navigation.
+- **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count.
+- **Projects and Efforts:** two groups, each with manage actions in its heading, plus an Archived Efforts entry under Efforts.
+- **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
+
+Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
 ### List anatomy
 
 Use stable columns: selection, status, reference, title, then optional supporting metadata. Titles receive flexible width. Reference and status columns do not move when a checkbox becomes checked.
 
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
-- Status uses a 16px icon and a visible label when space allows. Compact icon-only presentation retains an accessible status name and tooltip.
-- Show at most one supporting line: blocked reason, parent, or project/Effort context relevant to the current view. Do not repeat the current project on every row.
+- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, then the title. Line two: the status word or, for Todo tickets, a small status dot with Ready or "Blocked by T-n"; then one context item (parent, project, or Effort relevant to the current view) and tag pills. Do not repeat the current project on every row.
+- Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
 - Row hover uses a quieter fill than selection. Hover actions also appear on focus; essential actions cannot be hover-only.
@@ -272,12 +280,14 @@ Search retains its query while opening details. Filter controls show active cons
 
 ### Required reading order
 
-1. **Compact header:** reference, return/expand controls, and a small action group. Avoid repeating “Ticket details” above the reference and title.
+1. **Detail header:** the ticket reference with Copy, then Follow, the reminder summary, an actions menu, expand, and close. Avoid repeating “Ticket details” above the reference and title.
 2. **Title:** wraps to its content height. Reading must not look like an empty resizable form. Editing retains a clear focus treatment.
 3. **Properties:** Status, Project, Effort, and Tags appear as 32px ghost controls with identifying icons in a wrapping inline band. Keep their accessible names; visible field labels and outlined boxes belong in creation forms, not the reading view. Hover and keyboard focus reveal interactivity.
 4. **Description:** primary reading surface, with editing on demand.
-5. **Linked work and evidence:** concise existing information with contextual add/edit actions.
+5. **Linked work and evidence:** one flat Linked work section instead of nested disclosures, with concise existing information and contextual add/edit actions.
 6. **Activity:** authored notes, distinguishable recorded changes, and explicit note submission.
+
+In split view, description text is 14px. In the full-width (expanded) view, content is a centered column of at most 800px and description text is 16px.
 
 Use 8px from reference to title, 16px from title to properties, and 24px from properties to description. Use 24px between major reading sections. Use section spacing instead of divider lines; shadow boundaries belong to pane edges and floating surfaces.
 
@@ -299,7 +309,7 @@ A save state belongs next to the edited content, in 12px supporting text. Stable
 | Backlinks                  | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                       |
 | Activity                   | Notes and history readable in one chronological area               | Add note; edit/delete beside the relevant note       |
 
-Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups may collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
+Linked work is one flat section. Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups may collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
 
 Destructive actions belong in a labeled menu or focused review surface. Describe the result precisely: Trash ticket, Remove relationship, or Delete note. Duplicate handling is not a generic delete operation.
 
@@ -351,7 +361,25 @@ Project and Effort views reuse list typography, filters, row density, and select
 
 The dependency graph uses a neutral canvas, readable reference/title nodes, and explicit edge direction with a legend explaining which ticket blocks which. Selection and keyboard focus remain visible without relying on colored edges. Keep zoom, fit, and return controls in one compact toolbar. Node selection opens ticket context; graph navigation must retain a way back to the prior ticket. Large graphs need bounded loading and a clear explanation when the displayed scope is limited.
 
-Settings use a single column up to 720px wide, with 32px between groups. Keep export and backup/restore explanations near their actions. Place risky restore actions in a separate review flow. Do not add platform integration settings before those integrations exist.
+Settings are described in the next section.
+
+### Settings
+
+Settings is a dedicated page. It replaces the sidebar with its own section list and a Back to tickets action; the content panel keeps the same inset and shadow ring.
+
+| Group       | Sections                                |
+| ----------- | --------------------------------------- |
+| Preferences | Appearance, Attention                   |
+| Workspace   | Location, Backups, Export, Command line |
+| Help        | Keyboard shortcuts, About               |
+
+- **Page:** one centered column of cards. Each card has a 12px radius and the shadow ring (no separate border), with 32px between cards.
+- **Card footer:** a card may end with a recessed footer (recessed surface) for explanations and secondary actions. Keep export and backup explanations in the footer beside their actions.
+- **Controls:** use a segmented control for an exclusive choice among two to four options and a switch for an on/off preference.
+- **Applying changes:** changes apply immediately. There is no Save button for preferences; show a failure beside the control if one cannot be applied.
+- **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
+- **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
+- Do not add platform integration settings before those integrations exist.
 
 ## 11. Shared control and state recipes
 
@@ -435,8 +463,8 @@ A design change is ready for implementation review only when these questions can
 
 ### Compact workspace density
 
-Keep the 16px root so rem-based shared controls remain predictable. Working-pane text and ticket-row titles use 14px/20px; captions stay 12px/16px. Ticket and view titles use the ticketd-specific 24px/32px heading above. Navigation items are 32px high, the brand and workspace header are 48px high, and ticket rows have a 48px minimum with 8px vertical padding and no inter-row margin. List headers use 16px top and 12px bottom padding. Use 32px desktop document gutters and 16px narrow-window gutters. These application density choices take precedence over spacious display roles; preserve the reference palette, font families, shadows, and focus treatment.
+Keep the 16px root so rem-based shared controls remain predictable. Working-pane text and ticket-row titles use 14px/20px; captions stay 12px/16px. Ticket and view titles use the ticketd-specific 24px/32px heading above. Navigation items are 32px high, the brand row and the list and detail pane headers are 48px high, and ticket rows have a 48px minimum with 8px vertical padding and no inter-row margin. List headers use 16px top and 12px bottom padding. Use 32px desktop document gutters and 16px narrow-window gutters. These application density choices take precedence over spacious display roles; preserve the reference palette, font families, shadows, and focus treatment.
 
 ### Workspace hierarchy
 
-The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the working panes. Preserve one subtle boundary between navigation, list, and detail; do not add nested cards around these regions. Properties use the shared ghost button and select variants. The full creation form keeps labeled, outlined controls.
+The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the content panel. Preserve one subtle boundary between the list and detail panes; do not add nested cards around these regions. Properties use the shared ghost button and select variants. The full creation form keeps labeled, outlined controls.
