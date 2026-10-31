@@ -56,3 +56,33 @@ nested directories. `--project PROJECT_ID` overrides inference. Multiple matchin
 projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
+
+### Atomic batches
+
+`ticketd batch plan.json` accepts a JSON array; use `ticketd batch -` to read
+standard input. A create names a ticket for later operations using `$name`:
+
+```json
+[
+  { "operation": "create", "name": "parent", "title": "Ship the feature" },
+  { "operation": "create", "name": "child", "title": "Implement it" },
+  {
+    "operation": "change",
+    "ticket": "$child",
+    "change": {
+      "parent": "$parent",
+      "add_blockers": ["$parent"],
+      "add_tags": ["feature"],
+      "notes": ["Plan agreed"]
+    }
+  }
+]
+```
+
+Changes also accept `title`, `body`, `status`, `editing_agent`, `project_id`,
+`effort_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
+`effort_id` to null to clear it; omit a field to leave it unchanged. Results are
+JSON ticket snapshots in operation order. Failures identify the zero-based
+operation index and roll back the entire request. Requests are limited to 1 MiB,
+100 operations, and 1,000 individual edits; execution checks a 10-second limit
+between operations.

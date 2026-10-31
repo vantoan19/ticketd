@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
-use ticketd_core::{NotePatch, Status, TicketPatch, Workspace};
+use ticketd_core::{BatchOperation, NotePatch, Status, TicketPatch, Workspace};
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -11,6 +11,8 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Apply a JSON array of operations from a file or - for stdin
+    Batch { file: String },
     /// Manage repository projects
     Project {
         #[command(subcommand)]
@@ -215,6 +217,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
+        Command::Batch { file } => {
+            let reader: Box<dyn Read> = if file == "-" {
+                Box::new(std::io::stdin())
+            } else {
+                Box::new(std::fs::File::open(file)?)
+            };
+            let mut bytes = Vec::new();
+            reader.take(1_048_577).read_to_end(&mut bytes)?;
+            if bytes.len() > 1_048_576 {
+                return Err("batch exceeds 1 MiB".into());
+            }
+            let operations: Vec<BatchOperation> = serde_json::from_slice(&bytes)?;
+            serde_json::to_string(&workspace.apply_batch(operations)?)?
+        }
         Command::Project { command } => match command {
             ProjectCommand::Create { name, path } => {
                 serde_json::to_string(&workspace.create_project(&name, &path)?)?

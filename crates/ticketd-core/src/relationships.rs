@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::{Error, Status, Ticket, Workspace, history};
@@ -75,9 +75,8 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
         let blocker_id = id(&tx, blocker)?;
         let dependent_id = id(&tx, dependent)?;
         crate::ensure_editable(&tx, &blocker_id)?;
@@ -102,9 +101,8 @@ impl Workspace {
         dependent: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
         let blocker_id = id(&tx, blocker)?;
         let dependent_id = id(&tx, dependent)?;
         // Either visible endpoint may detach an edge to a trashed ticket.

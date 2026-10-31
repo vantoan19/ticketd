@@ -21,6 +21,14 @@ pub use projects::Project;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("batch operation {index}: {source}")]
+    BatchOperation {
+        index: usize,
+        #[source]
+        source: Box<Error>,
+    },
+    #[error("invalid batch: {0}")]
+    InvalidBatch(String),
     #[error("effort name must not be empty")]
     EmptyEffortName,
     #[error("effort '{0}' was not found")]
@@ -76,7 +84,7 @@ pub struct Ticket {
     pub children: Vec<hierarchy::RelatedTicket>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TicketPatch {
     pub title: Option<String>,
     pub body: Option<String>,
@@ -171,9 +179,8 @@ impl Workspace {
         if title.is_empty() {
             return Err(Error::EmptyTitle);
         }
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let transaction = self.connection.savepoint()?;
+        transaction_write_lock(&transaction)?;
         if let Some(id) = project_id {
             projects::find(&transaction, id)?;
         }
@@ -212,9 +219,8 @@ impl Workspace {
         let number = reference
             .strip_prefix("T-")
             .and_then(|value| value.parse::<i64>().ok());
-        let transaction = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let transaction = self.connection.savepoint()?;
+        transaction_write_lock(&transaction)?;
         let ticket = transaction
             .query_row(
                 "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
@@ -292,9 +298,8 @@ impl Workspace {
         trashed: bool,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        transaction_write_lock(&tx)?;
         let id = relationships::id(&tx, reference)?;
         let old: bool =
             tx.query_row("SELECT trashed FROM tickets WHERE id = ?1", [&id], |row| {
@@ -329,9 +334,8 @@ impl Workspace {
         content: &str,
         agent: Option<&str>,
     ) -> Result<Note, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
         let result = notes::add(&tx, &id_ticket, content, agent)?;
@@ -344,9 +348,8 @@ impl Workspace {
         id: &str,
         patch: NotePatch,
     ) -> Result<Note, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
         let result = notes::edit(&tx, &id_ticket, id, patch)?;
@@ -354,9 +357,8 @@ impl Workspace {
         Ok(result)
     }
     pub fn delete_note(&mut self, reference: &str, id: &str) -> Result<(), Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
         notes::delete(&tx, &id_ticket, id)?;
@@ -447,3 +449,12 @@ pub(crate) fn ensure_editable(connection: &Connection, id: &str) -> Result<(), E
     }
     Ok(())
 }
+
+// A savepoint used independently acquires the write lock before reading invariants.
+fn transaction_write_lock(connection: &Connection) -> Result<(), Error> {
+    connection.execute("UPDATE tickets SET number = number WHERE 0", [])?;
+    Ok(())
+}
+
+mod batch;
+pub use batch::{BatchOperation, TicketChange};
