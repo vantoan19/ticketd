@@ -1438,3 +1438,23 @@ fn long_backlink_passage_keeps_the_reference_visible() {
     assert!(links[0].passage.contains("T-1"));
     assert!(links[0].passage.chars().count() <= 512);
 }
+
+#[test]
+fn backlinks_recognize_escaped_markdown_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some("See T\\-1 and &#84;-1".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].source_reference, source.reference);
+}
