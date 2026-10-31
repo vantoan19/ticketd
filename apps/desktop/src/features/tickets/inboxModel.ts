@@ -1,52 +1,7 @@
-export type Entry = {
-  id: number;
-  reference: string;
-  title: string;
-  kind: string;
-  from_value: string;
-  to_value: string;
-  timestamp: string;
-  read: boolean;
-  editing_agent: string | null;
-};
+export type { Entry } from "@/lib/api/inbox";
+import type { Entry } from "@/lib/api/inbox";
 
 export type DayGroup = "Today" | "Yesterday" | "Earlier";
-
-export function parseEntries(value: unknown): Entry[] {
-  if (!Array.isArray(value))
-    throw new Error("Invalid inbox returned by workspace");
-  return value.map((item: unknown) => {
-    if (typeof item !== "object" || item === null)
-      throw new Error("Invalid inbox entry");
-    const e = item as Record<string, unknown>;
-    if (
-      typeof e.id !== "number" ||
-      typeof e.reference !== "string" ||
-      typeof e.title !== "string" ||
-      typeof e.kind !== "string" ||
-      typeof e.from_value !== "string" ||
-      typeof e.to_value !== "string" ||
-      typeof e.timestamp !== "string" ||
-      typeof e.read !== "boolean" ||
-      (e.editing_agent !== null &&
-        e.editing_agent !== undefined &&
-        typeof e.editing_agent !== "string")
-    )
-      throw new Error("Invalid inbox entry");
-    return {
-      id: e.id,
-      reference: e.reference,
-      title: e.title,
-      kind: e.kind,
-      from_value: e.from_value,
-      to_value: e.to_value,
-      timestamp: e.timestamp,
-      read: e.read,
-      editing_agent:
-        typeof e.editing_agent === "string" ? e.editing_agent : null,
-    };
-  });
-}
 
 /** What kind of thing happened, in words suitable for an accessible name. */
 export function entryNoun(entry: Entry): string {

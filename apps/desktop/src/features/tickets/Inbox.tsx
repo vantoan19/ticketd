@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import {
   AlarmClock,
@@ -16,12 +15,12 @@ import {
 } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
+import { inboxClient } from "@/lib/api/inbox";
 import { StatusIcon } from "./StatusIcon";
 import {
   entryNoun,
   entryTime,
   groupEntries,
-  parseEntries,
   snoozeChoices,
   snoozeInstant,
   summarize,
@@ -42,13 +41,11 @@ async function fetchEntries(
   const entries: Entry[] = [];
   let more = false;
   for (let page = 0; page < pages; page++) {
-    const chunk = parseEntries(
-      await invoke("inbox", {
-        offset: page * PAGE_SIZE,
-        limit: PAGE_SIZE,
-        unreadOnly: filter === "unread",
-      }),
-    );
+    const chunk = await inboxClient.list({
+      offset: page * PAGE_SIZE,
+      limit: PAGE_SIZE,
+      unreadOnly: filter === "unread",
+    });
     entries.push(...chunk);
     more = chunk.length === PAGE_SIZE;
     if (!more) break;
@@ -147,11 +144,7 @@ export function Inbox({
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)
-        await invoke("set_inbox_read", {
-          ids: ids.slice(start, start + MARK_BATCH),
-          read,
-          requestId: crypto.randomUUID(),
-        });
+        await inboxClient.setRead(ids.slice(start, start + MARK_BATCH), read);
       reload();
     } catch (e) {
       setError(String(e));
@@ -159,16 +152,11 @@ export function Inbox({
   }
   async function snooze(entry: Entry, choice: SnoozeChoice) {
     try {
-      await invoke("set_reminder", {
-        reference: entry.reference,
-        dueAt: snoozeInstant(choice, new Date()),
-        requestId: crypto.randomUUID(),
-      });
-      await invoke("set_inbox_read", {
-        ids: [entry.id],
-        read: true,
-        requestId: crypto.randomUUID(),
-      });
+      await inboxClient.snooze(
+        entry.reference,
+        snoozeInstant(choice, new Date()),
+      );
+      await inboxClient.setRead([entry.id], true);
       reload();
     } catch (e) {
       setError(String(e));
@@ -306,9 +294,9 @@ export function Follow({
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    void invoke("is_following", { reference })
+    void inboxClient
+      .isFollowing(reference)
       .then((value) => {
-        if (typeof value !== "boolean") throw new Error("Invalid follow state");
         if (active) {
           setFollowing(value);
           setError("");
@@ -323,11 +311,7 @@ export function Follow({
   }, [reference, revision]);
   async function toggle() {
     try {
-      await invoke("set_following", {
-        reference,
-        following: !following,
-        requestId: crypto.randomUUID(),
-      });
+      await inboxClient.setFollowing(reference, !following);
       setFollowing(!following);
       setError("");
     } catch (e) {

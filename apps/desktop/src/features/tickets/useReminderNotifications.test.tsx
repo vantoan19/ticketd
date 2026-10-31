@@ -12,6 +12,7 @@ vi.mock("@/lib/api/notifications", () => ({
     permitted: vi.fn(),
     requestPermission: vi.fn(),
     notify: vi.fn(),
+    onClick: vi.fn(),
   },
 }));
 
@@ -28,12 +29,19 @@ const entry = (id: number, kind: string) => ({
 });
 
 let inbox: ReturnType<typeof entry>[] = [];
+let click: ((reference: string) => void) | null = null;
+const stopListening = vi.fn();
 
 beforeEach(() => {
   vi.useFakeTimers();
   inbox = [entry(5, "reminder")];
   bridge.invoke.mockImplementation(async () => inbox);
   vi.mocked(notificationClient.permitted).mockResolvedValue(true);
+  click = null;
+  vi.mocked(notificationClient.onClick).mockImplementation(async (open) => {
+    click = open;
+    return stopListening;
+  });
 });
 
 afterEach(() => {
@@ -63,12 +71,54 @@ test("a reminder that becomes due while open notifies once; earlier ones stay in
   expect(notificationClient.notify).toHaveBeenCalledWith(
     "Ticket 7",
     "T-7: reminder is due",
+    "T-7",
   );
+});
 
+test("clicking a notification opens its ticket, and regaining focus does not", async () => {
+  setPreference("notifyReminders", true);
+  const open = vi.fn();
+  renderHook(() => useReminderNotifications(open));
+  await act(async () => {});
+  inbox = [entry(7, "reminder"), entry(5, "reminder")];
+  await tick();
+  await tick();
   act(() => {
     window.dispatchEvent(new Event("focus"));
   });
+  expect(open).not.toHaveBeenCalled();
+  // A click that comes long after the reminder still opens the ticket.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+  });
+  act(() => click?.("T-7"));
   expect(open).toHaveBeenCalledWith("T-7");
+});
+
+test("the click listener exists before any notification and stops with the preference", async () => {
+  setPreference("notifyReminders", true);
+  const view = renderHook(() => useReminderNotifications(() => {}));
+  await act(async () => {});
+  expect(notificationClient.onClick).toHaveBeenCalledTimes(1);
+  view.unmount();
+  expect(stopListening).toHaveBeenCalledTimes(1);
+});
+
+test("reminders still notify after a restore replaced the inbox with lower ids", async () => {
+  setPreference("notifyReminders", true);
+  inbox = [entry(40, "reminder")];
+  renderHook(() => useReminderNotifications(() => {}));
+  await act(async () => {});
+  inbox = [entry(12, "status")];
+  await tick();
+  inbox = [entry(13, "reminder"), entry(12, "status")];
+  await tick();
+  expect(notificationClient.notify).toHaveBeenCalledTimes(1);
+  expect(notificationClient.notify).toHaveBeenCalledWith(
+    "Ticket 13",
+    "T-13: reminder is due",
+    "T-13",
+  );
 });
 
 test("nothing is shown while the preference is off", async () => {

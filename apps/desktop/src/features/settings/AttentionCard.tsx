@@ -95,7 +95,9 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
           </p>
           <p className="settings-hint">
             Shows a system notification while ticketd is open. Reminders that
-            come due while it is closed appear only in the inbox.
+            come due while it is closed appear only in the inbox. If no
+            notification appears, allow ticketd in System Settings →
+            Notifications.
           </p>
         </div>
         <Switch

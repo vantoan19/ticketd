@@ -1,3 +1,4 @@
+import { windowClient } from "@/lib/api/window";
 import { useEffect, useSyncExternalStore } from "react";
 import { z } from "zod";
 
@@ -130,8 +131,14 @@ export function useDarkTheme(): boolean {
 /** Keeps the document root in step with the choice and the operating system. */
 export function useThemeSync() {
   const dark = useDarkTheme();
+  const { theme } = usePreferences();
   // main.tsx applies the stored theme before the first paint.
   useEffect(() => applyTheme(dark ? "dark" : "light"), [dark]);
+  // The title bar and native dialogs follow the choice too; System hands
+  // control back to the operating system.
+  useEffect(() => {
+    void windowClient.setTheme(theme === "system" ? null : theme);
+  }, [theme]);
 }
 
 /** Applies the stored theme before the first render. */

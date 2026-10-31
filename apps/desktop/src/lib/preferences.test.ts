@@ -56,3 +56,25 @@ test("applying a theme marks the document root", () => {
   applyTheme("light");
   expect(document.documentElement.classList.contains("dark")).toBe(false);
 });
+
+test("the native window follows Light and Dark, and System hands control back", async () => {
+  const { renderHook, act, cleanup } = await import("@testing-library/react");
+  const { windowClient } = await import("@/lib/api/window");
+  const { useThemeSync } = await import("@/lib/preferences");
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {},
+    }),
+  });
+  const setTheme = vi.spyOn(windowClient, "setTheme").mockResolvedValue();
+  renderHook(() => useThemeSync());
+  expect(setTheme).toHaveBeenLastCalledWith(null);
+  act(() => void setPreference("theme", "dark"));
+  expect(setTheme).toHaveBeenLastCalledWith("dark");
+  act(() => void setPreference("theme", "system"));
+  expect(setTheme).toHaveBeenLastCalledWith(null);
+  cleanup();
+});
