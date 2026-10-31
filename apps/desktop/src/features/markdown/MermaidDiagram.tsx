@@ -42,7 +42,7 @@ export function MermaidDiagram({ source }: { source: string }) {
             source,
             dark,
             svg: "",
-            error: `Could not render this diagram. ${reason instanceof Error && /limit|configuration/.test(reason.message) ? reason.message : "Check its source in the editor."}`,
+            error: `Could not render this diagram. ${reason instanceof Error && /limit|configuration|external resources/.test(reason.message) ? reason.message : "Check its source in the editor."}`,
           });
       },
     );
@@ -96,7 +96,7 @@ export function MermaidDiagram({ source }: { source: string }) {
     >
       <div
         className="mermaid-canvas"
-        style={{ width: `${zoom}%` }}
+        style={{ zoom: zoom / 100 }}
         role="img"
         aria-label="Mermaid diagram"
         dangerouslySetInnerHTML={{ __html: current.svg }}

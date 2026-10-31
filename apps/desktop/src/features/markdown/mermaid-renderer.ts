@@ -20,6 +20,11 @@ export function renderDiagram(
       throw new Error(
         "Diagram configuration directives and frontmatter are unsupported. Edit the diagram source to remove configuration.",
       );
+    // Image nodes may fetch during Mermaid's layout, before output sanitation.
+    if (/\b(?:img|image)\s*:|!\[[^\]]*\]\s*\(/i.test(source))
+      throw new Error(
+        "Diagrams with external resources are unsupported. Remove image resources to render locally.",
+      );
     const { default: mermaid } = await import("mermaid");
     if (!active()) return "";
     const id = `ticketd-mermaid-${++nextId}`;
@@ -90,6 +95,8 @@ export function renderDiagram(
       const root = sanitized.querySelector("svg");
       if (!root) throw new Error("Renderer returned no SVG");
       root.style.removeProperty("max-width");
+      const width = Number(root.getAttribute("viewBox")?.split(/[ ,]+/)[2]);
+      if (Number.isFinite(width) && width > 0) root.style.width = `${width}px`;
       return root.outerHTML;
     } finally {
       scratch.remove();
