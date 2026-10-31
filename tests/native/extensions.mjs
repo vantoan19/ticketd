@@ -45,6 +45,7 @@ const detail = () =>
   );
 async function click(element) {
   await element.waitForDisplayed({ timeout: 15000 });
+  await element.waitForEnabled({ timeout: 15000 });
   await element.scrollIntoView({ block: "center" });
   await element.click();
 }
@@ -69,6 +70,21 @@ async function disclosure(label) {
 }
 const waitFor = (fn, message, timeout = 12000) =>
   browser.waitUntil(fn, { timeout, interval: 200, timeoutMsg: message });
+const waitForSelectionReset = () =>
+  waitFor(
+    () =>
+      browser.execute(
+        (references) =>
+          references.every((reference) => {
+            const input = document.querySelector(
+              `input[aria-label="Select ${reference}"]`,
+            );
+            return input && !input.checked && !input.disabled;
+          }),
+        [source.reference, target.reference],
+      ),
+    "Bulk selection did not reset",
+  );
 try {
   // Follow in desktop, observe external CLI changes and navigate to the note.
   await open(source.title);
@@ -98,7 +114,9 @@ try {
     "Unread indicator did not clear",
   );
   await click(
-    await (await browser.$(".inbox-entry")).$(`button*=${source.reference}`),
+    await browser.$(
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+    ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
   const selectedNote = await (await detail()).$('[aria-label="Selected note"]');
@@ -176,7 +194,9 @@ try {
     "Replaying a delivered reminder created another occurrence",
   );
   await click(
-    await (await browser.$(".inbox-entry")).$(`button*=${source.reference}`),
+    await browser.$(
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "Reminder due")] and .//span[normalize-space()="Unread"]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+    ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
   await click(await (await detail()).$("button=Snooze 1 hour"));
@@ -213,7 +233,11 @@ try {
   await click(await (await detail()).$("button=Dismiss reminder"));
 
   // Backlinks, contextual links and evidence cross the real bridge.
-  await click(await (await detail()).$(`button=${target.reference}`));
+  await click(
+    await (
+      await (await detail()).$(".description-document")
+    ).$(`button=${target.reference}`),
+  );
   await waitFor(
     async () =>
       (await (
@@ -270,6 +294,7 @@ try {
     () => run("show", target.reference).status === "In review",
     "Bulk status did not persist",
   );
+  await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await (
@@ -282,6 +307,7 @@ try {
       run("show", target.reference).project_id === project.id,
     "Bulk project did not persist",
   );
+  await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await (
@@ -294,6 +320,7 @@ try {
       run("show", target.reference).effort_id === effort.id,
     "Bulk Effort did not persist",
   );
+  await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await (
@@ -306,6 +333,7 @@ try {
       run("show", target.reference).tags.includes("native"),
     "Bulk tag did not persist",
   );
+  await waitForSelectionReset();
   const before = run("show", source.reference).status;
   assert.throws(() =>
     command(
