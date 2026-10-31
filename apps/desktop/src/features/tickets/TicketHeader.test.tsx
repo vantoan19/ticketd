@@ -147,6 +147,9 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   ).toBeTruthy();
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Ticket actions" }),
+  );
   await chooseAction("Move to trash");
   await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {

@@ -1,0 +1,104 @@
+.duplicate-review {
+  display: grid;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.duplicate-tickets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.duplicate-ticket {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.duplicate-ticket-label,
+.dependency-edge-label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.duplicate-ticket-reference {
+  font-family: var(--font-mono);
+  color: var(--muted-foreground);
+}
+.duplicate-ticket-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.duplicate-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 18px;
+}
+.duplicate-change {
+  height: auto;
+  padding: 0;
+}
+.dependencies h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.dependencies ul {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.dependency-edge {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.dependency-edges {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.dependency-edge-label {
+  display: inline-block;
+  min-width: 64px;
+  font-family: inherit;
+}
+.dependency-reason,
+.dependency-consequence {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+.dependency-reason {
+  color: var(--muted-foreground);
+}
+.duplicate-summary {
+  margin: 0;
+  font-weight: 500;
+}
+.duplicate-stale,
+.duplicate-error {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--error-surface);
+  color: var(--error-foreground);
+}
+.duplicate-stale p {
+  margin: 0;
+}

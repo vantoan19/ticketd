@@ -6,6 +6,7 @@ mod context;
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
+    ReplacementIssue,
 };
 mod evidence;
 mod export;
