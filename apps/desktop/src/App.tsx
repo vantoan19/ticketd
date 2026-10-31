@@ -23,9 +23,17 @@ export function App() {
   const [exportPath, setExportPath] = useState("");
   const [exportMessage, setExportMessage] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
+  const [efforts, setEfforts] = useState<
+    { id: string; name: string; archived: boolean }[]
+  >([]);
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
+  const [effort, setEffort] = useState("");
+  const [status, setStatus] = useState("");
+  const [tags, setTags] = useState("");
+  const [availability, setAvailability] = useState("");
+  const [family, setFamily] = useState("");
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -43,10 +51,24 @@ export function App() {
         Promise.all([
           trash
             ? client.listTrash()
-            : query
-              ? client.searchTickets(query, filter, offset)
-              : client.listTickets(),
+            : client.findTickets({
+                query,
+                project:
+                  filter === "all" || filter === "unlinked" ? null : filter,
+                unlinked: filter === "unlinked",
+                effort: effort || null,
+                status: status || null,
+                tags: tags
+                  .split(",")
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+                availability: availability || null,
+                family: family || null,
+                limit: 50,
+                offset,
+              }),
           client.listProjects(),
+          client.listEfforts(),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -58,6 +80,7 @@ export function App() {
       if (request !== generation.current) return;
       setTickets(result[0]);
       setProjects(result[1]);
+      setEfforts(result[2]);
       setRevision((value) => value + 1);
       setError("");
     } catch (reason) {
@@ -69,7 +92,17 @@ export function App() {
       window.clearTimeout(timeout);
       if (request === generation.current) setLoading(false);
     }
-  }, [trash, query, filter, offset]);
+  }, [
+    trash,
+    query,
+    filter,
+    offset,
+    effort,
+    status,
+    tags,
+    availability,
+    family,
+  ]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => void refresh(), 0);
@@ -182,6 +215,82 @@ export function App() {
               />
             </label>
           )}
+          {!trash && (
+            <fieldset className="my-3 grid gap-2">
+              <legend>Filters</legend>
+              <label>
+                Effort
+                <select
+                  value={effort}
+                  onChange={(e) => {
+                    setEffort(e.target.value);
+                    setOffset(0);
+                  }}
+                >
+                  <option value="">All Efforts</option>
+                  {efforts.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                      {item.archived ? " (archived)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Status{" "}
+                <select
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value);
+                    setOffset(0);
+                  }}
+                >
+                  <option value="">All statuses</option>
+                  {["Todo", "In progress", "In review", "Done", "Canceled"].map(
+                    (value) => (
+                      <option key={value}>{value}</option>
+                    ),
+                  )}
+                </select>
+              </label>
+              <label>
+                Tags (comma separated; all tags required){" "}
+                <input
+                  value={tags}
+                  onChange={(e) => {
+                    setTags(e.target.value);
+                    setOffset(0);
+                  }}
+                  className="rounded border p-1"
+                />
+              </label>
+              <label>
+                Availability{" "}
+                <select
+                  value={availability}
+                  onChange={(e) => {
+                    setAvailability(e.target.value);
+                    setOffset(0);
+                  }}
+                >
+                  <option value="">All availability</option>
+                  <option>Ready</option>
+                  <option>Blocked</option>
+                </select>
+              </label>
+              <label>
+                Parent family reference{" "}
+                <input
+                  value={family}
+                  onChange={(e) => {
+                    setFamily(e.target.value);
+                    setOffset(0);
+                  }}
+                  className="rounded border p-1"
+                />
+              </label>
+            </fieldset>
+          )}
           <h2 id="tickets-heading" className="text-xl font-semibold">
             {trash ? "Trash" : "Tickets"}
           </h2>
@@ -191,7 +300,9 @@ export function App() {
             </p>
           ) : tickets.length === 0 ? (
             <p className="mt-3">
-              {query && !trash ? "No matching tickets." : "No tickets yet."}
+              {!trash
+                ? "No tickets match the active filters."
+                : "No tickets in trash."}
             </p>
           ) : (
             <ul className="mt-3 divide-y divide-neutral-200">
@@ -233,7 +344,7 @@ export function App() {
                 ))}
             </ul>
           )}
-          {query && !trash && (
+          {!trash && (
             <div>
               <button
                 type="button"

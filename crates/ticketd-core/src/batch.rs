@@ -17,7 +17,11 @@ pub struct TicketChange {
     pub add_tags: Vec<String>,
     #[serde(default)]
     pub remove_tags: Vec<String>,
-    #[serde(default, deserialize_with = "crate::deserialize_project_patch")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::deserialize_project_patch"
+    )]
     pub parent: Option<Option<String>>,
     #[serde(default)]
     pub add_blockers: Vec<String>,
@@ -71,18 +75,27 @@ impl Workspace {
                 "at most 1000 individual edits are allowed".into(),
             ));
         }
-        self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        self.connection.execute_batch("SAVEPOINT batch")?;
+        if let Err(error) = crate::transaction_write_lock(&self.connection) {
+            let _ = self
+                .connection
+                .execute_batch("ROLLBACK TO batch; RELEASE batch");
+            return Err(error);
+        }
         let result = self.apply_batch_inner(operations);
         match result {
             Ok(tickets) => {
-                if let Err(error) = self.connection.execute_batch("COMMIT") {
-                    let _ = self.connection.execute_batch("ROLLBACK");
+                if let Err(error) = self.connection.execute_batch("RELEASE batch") {
+                    let _ = self
+                        .connection
+                        .execute_batch("ROLLBACK TO batch; RELEASE batch");
                     return Err(error.into());
                 }
                 Ok(tickets)
             }
             Err(error) => {
-                self.connection.execute_batch("ROLLBACK")?;
+                self.connection
+                    .execute_batch("ROLLBACK TO batch; RELEASE batch")?;
                 Err(error)
             }
         }

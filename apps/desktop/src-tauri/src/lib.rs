@@ -1,7 +1,7 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
     DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project, Ticket,
-    TicketPatch, Workspace,
+    TicketFilter, TicketPatch, Workspace,
 };
 
 #[tauri::command]
@@ -44,6 +44,12 @@ fn list_tickets() -> Result<Vec<Ticket>, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.find_tickets(&filter))
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 fn search_tickets(
     query: String,
@@ -220,6 +226,7 @@ pub fn run() -> Result<(), tauri::Error> {
             edit_project,
             list_tickets,
             search_tickets,
+            find_tickets,
             dependency_graph,
             list_trash,
             set_trashed,

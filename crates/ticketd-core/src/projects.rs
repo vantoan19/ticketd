@@ -70,7 +70,7 @@ impl Workspace {
             path: path.to_owned(),
             paths: vec![path.to_owned()],
         };
-        let tx = self.connection.transaction()?;
+        let tx = self.connection.savepoint()?;
         tx.execute(
             "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
             params![project.id, project.name, project.path],
@@ -88,7 +88,7 @@ impl Workspace {
         let normalized = normalize(path).unwrap_or_else(|_| path.to_owned());
         let path = normalized.as_str();
         let old = self.show_project(id)?;
-        let tx = self.connection.transaction()?;
+        let tx = self.connection.savepoint()?;
         if tx.execute(
             "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
             params![name, path, id],
