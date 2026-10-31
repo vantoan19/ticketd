@@ -1196,18 +1196,39 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     db.execute_batch("DROP INDEX ticket_history_ticket_id; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
+    // Hold a shared lock while both openers observe the old schema, so neither
+    // can migrate until both have had an opportunity to contend.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("{}.lock", path.display()))
+        .unwrap();
+    fs2::FileExt::lock_shared(&lock).unwrap();
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let (sender, receiver) = std::sync::mpsc::channel();
     let handles: Vec<_> = (0..2)
         .map(|_| {
             let path = path.clone();
             let barrier = barrier.clone();
+            let sender = sender.clone();
             std::thread::spawn(move || {
                 barrier.wait();
-                Workspace::open(path).unwrap()
+                sender.send(Workspace::open(path).unwrap()).unwrap();
             })
         })
         .collect();
-    let mut workspaces: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    drop(lock);
+    let mut workspaces: Vec<_> = (0..2)
+        .map(|_| {
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("concurrent workspace open timed out")
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
     assert_eq!(
         workspaces[0].show_ticket(&reference).unwrap().tags,
         vec!["kept"]

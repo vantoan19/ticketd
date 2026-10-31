@@ -34,12 +34,6 @@ pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
         .open(name)?)
 }
 
-pub(crate) fn shared_lock(path: &Path) -> Result<File, Error> {
-    let file = lock_file(path)?;
-    FileExt::lock_shared(&file)?;
-    Ok(file)
-}
-
 pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<(), Error> {
     Backup::new(source, destination)?.run_to_completion(100, Duration::from_millis(25), None)?;
     Ok(())

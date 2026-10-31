@@ -17,7 +17,10 @@ pub use search::{Availability, TicketFilter};
 mod tags;
 pub use efforts::{Effort, EffortCounts, EffortView};
 
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use directories::ProjectDirs;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -135,6 +138,17 @@ fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
+fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
+    if Instant::now() >= deadline {
+        return Err(Error::Backup(
+            "workspace is in use and cannot be migrated; close other ticketd operations and retry"
+                .into(),
+        ));
+    }
+    std::thread::sleep(Duration::from_millis(25));
+    Ok(())
+}
+
 pub struct Workspace {
     connection: Connection,
     _lock: std::fs::File,
@@ -148,8 +162,16 @@ impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         use fs2::FileExt;
         let path = path.as_ref();
+        let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let lock = backup::shared_lock(path)?;
+            let lock = backup::lock_file(path)?;
+            if let Err(error) = FileExt::try_lock_shared(&lock) {
+                if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
+                    return Err(error.into());
+                }
+                wait_for_migration_lock(deadline)?;
+                continue;
+            }
             let connection = Connection::open(path)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
@@ -167,7 +189,13 @@ impl Workspace {
             drop(connection);
             drop(lock);
             let lock = backup::lock_file(path)?;
-            FileExt::lock_exclusive(&lock)?;
+            if let Err(error) = FileExt::try_lock_exclusive(&lock) {
+                if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
+                    return Err(error.into());
+                }
+                wait_for_migration_lock(deadline)?;
+                continue;
+            }
             let mut connection = Connection::open(path)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
