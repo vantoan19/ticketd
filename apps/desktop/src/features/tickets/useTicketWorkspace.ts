@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 type View = "tickets" | "projects" | "efforts" | "settings";
 export function useTicketWorkspace(
@@ -33,9 +27,7 @@ export function useTicketWorkspace(
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
-  const [title, setTitle] = useState("");
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
@@ -135,23 +127,26 @@ export function useTicketWorkspace(
       active = false;
     };
   }, [selected, revision]);
-  async function create(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    try {
-      const ticket = await client.createTicket(
-        title,
-        filter === "all" || filter === "unlinked" ? null : filter,
-      );
-      setTitle("");
-      setCreating(false);
-      await refresh();
-      setSelected(ticket.reference);
-    } catch (reason) {
-      setError(String(reason));
-    } finally {
-      setSaving(false);
-    }
+  async function create(
+    title: string,
+    body: string,
+    status: string,
+    project: string | null,
+    effortId: string | null,
+    tags: string[],
+  ) {
+    const ticket = await client.createTicket(
+      title,
+      body,
+      status,
+      project,
+      effortId,
+      tags,
+    );
+    setDetails((previous) => ({ ...previous, [ticket.reference]: ticket }));
+    setCreating(false);
+    setSelected(ticket.reference);
+    await refresh();
   }
   const updateTicket = useCallback((updated: Ticket) => {
     generation.current++;
@@ -229,11 +224,8 @@ export function useTicketWorkspace(
     setSelected,
     details,
     setDetails,
-    title,
-    setTitle,
     error,
     setError,
-    saving,
     loading,
     revision,
     refresh,

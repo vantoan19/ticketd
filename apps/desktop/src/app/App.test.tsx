@@ -400,3 +400,48 @@ test("clears additional filters while preserving the selected Effort", async () 
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
 });
+
+test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (
+      ["list_projects", "list_efforts", "find_tickets", "search_tags"].includes(
+        command,
+      )
+    )
+      return [];
+    if (command === "create_ticket") throw new Error("Creation failed");
+    throw new Error(`unexpected ${command}`);
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  fireEvent.change(screen.getByLabelText("New ticket title"), {
+    target: { value: "Draft ticket" },
+  });
+  fireEvent.change(screen.getByLabelText("Description"), {
+    target: { value: "Draft body" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await act(async () => {});
+  expect(screen.getByRole("alert").textContent).toContain("Creation failed");
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "create_ticket",
+    expect.objectContaining({
+      title: "Draft ticket",
+      body: "Draft body",
+      status: "Todo",
+      projectId: null,
+      effortId: null,
+      tags: [],
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  expect(screen.getByLabelText("Description")).toHaveProperty(
+    "value",
+    "Draft body",
+  );
+});

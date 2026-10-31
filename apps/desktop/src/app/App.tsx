@@ -1,14 +1,13 @@
+import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { Button } from "@/components/ui/button";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
-import { Input } from "@/components/ui/input";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
 import { SidebarProvider } from "@/components/ui/sidebar";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Plus, RefreshCw, X } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
 import { useRef, useState } from "react";
@@ -56,10 +55,7 @@ export function App() {
     setSelected,
     details,
     setDetails,
-    title,
-    setTitle,
     error,
-    saving,
     loading,
     revision,
     refresh,
@@ -123,50 +119,15 @@ export function App() {
               {error}
             </p>
           )}
-          <Dialog open={creating} onOpenChange={setCreating}>
-            <DialogContent
-              className="create-panel"
-              showCloseButton={false}
-              aria-describedby={undefined}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault();
-                createTriggerRef.current?.focus();
-              }}
-            >
-              <div className="panel-heading">
-                <DialogTitle>New ticket</DialogTitle>
-                <button
-                  aria-label="Close new ticket"
-                  className="icon-button"
-                  onClick={() => setCreating(false)}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <form
-                onSubmit={(event) => void create(event)}
-                className="create-form"
-              >
-                <label className="flex flex-col gap-1">
-                  New ticket title
-                  <Input
-                    className="rounded border border-neutral-400 bg-white p-2"
-                    autoFocus
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    required
-                  />
-                </label>
-                {error && <p role="alert">{error}</p>}
-                <Button
-                  className="rounded bg-neutral-900 px-4 py-2 text-white disabled:opacity-50"
-                  disabled={saving}
-                >
-                  Create ticket
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <CreateTicketDialog
+            open={creating}
+            onOpenChange={setCreating}
+            triggerRef={createTriggerRef}
+            navigation={navigation}
+            projects={projects}
+            efforts={efforts}
+            create={create}
+          />
           <WorkspaceSettings
             hidden={view !== "settings"}
             onRestore={async () => {

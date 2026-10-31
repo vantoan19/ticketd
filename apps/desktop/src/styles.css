@@ -410,8 +410,7 @@ select option {
 .ticket-detail select {
   max-width: 100%;
 }
-.ticket-detail button:not(.icon-button):not([data-slot="button"]),
-.create-panel button:not(.icon-button) {
+.ticket-detail button:not(.icon-button):not([data-slot="button"]) {
   color: var(--muted-foreground);
   background: var(--accent);
   border: 1px solid var(--border);
@@ -637,13 +636,20 @@ select option {
 .create-form input {
   width: 100%;
 }
-.create-panel .create-form button {
-  align-self: flex-end;
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--foreground);
-  padding: 8px 14px;
-  font-weight: 600;
+.create-form .ticket-properties {
+  margin: 0;
+}
+.create-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.create-actions small {
+  color: var(--muted-foreground);
+}
+.create-form [role="alert"] {
+  color: var(--destructive);
 }
 
 @theme inline {
@@ -748,8 +754,7 @@ select option {
 
 /* Primary actions invert with the surrounding surface. */
 .new-ticket,
-.empty-state button,
-.create-panel .create-form button {
+.empty-state button {
   color: var(--primary-ink);
 }
 :root {

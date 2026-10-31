@@ -1,7 +1,7 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
-    DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project, Ticket,
-    TicketFilter, TicketPatch, Workspace,
+    BatchOperation, DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project,
+    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
 };
 
 #[tauri::command]
@@ -96,9 +96,40 @@ fn remove_checkout(id: String, path: String) -> Result<Project, String> {
 }
 
 #[tauri::command]
-fn create_ticket(title: String, project_id: Option<String>) -> Result<Ticket, String> {
+fn create_ticket(
+    title: String,
+    body: String,
+    status: Status,
+    project_id: Option<String>,
+    effort_id: Option<String>,
+    tags: Vec<String>,
+) -> Result<Ticket, String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.create_ticket_in_project(&title, project_id.as_deref()))
+        .and_then(|mut workspace| {
+            let mut tickets = workspace.apply_batch(vec![
+                BatchOperation::Create {
+                    name: "new".into(),
+                    title,
+                    project_id,
+                },
+                BatchOperation::Change {
+                    ticket: "$new".into(),
+                    change: Box::new(TicketChange {
+                        patch: TicketPatch {
+                            body: Some(body),
+                            status: Some(status),
+                            effort_id: effort_id.map(Some),
+                            ..Default::default()
+                        },
+                        add_tags: tags,
+                        ..Default::default()
+                    }),
+                },
+            ])?;
+            tickets
+                .pop()
+                .ok_or_else(|| ticketd_core::Error::InvalidBatch("missing result".into()))
+        })
         .map_err(|error| error.to_string())
 }
 

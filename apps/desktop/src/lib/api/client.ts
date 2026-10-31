@@ -187,9 +187,23 @@ export const client = {
   async removeCheckout(id: string, path: string) {
     return projectSchema.parse(await invoke("remove_checkout", { id, path }));
   },
-  async createTicket(title: string, projectId: string | null) {
+  async createTicket(
+    title: string,
+    body: string,
+    status: string,
+    projectId: string | null,
+    effortId: string | null,
+    tags: string[],
+  ) {
     return ticketSchema.parse(
-      await invoke("create_ticket", { title, projectId }),
+      await invoke("create_ticket", {
+        title,
+        body,
+        status,
+        projectId,
+        effortId,
+        tags,
+      }),
     );
   },
   async changeTicket(
