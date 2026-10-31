@@ -1065,3 +1065,58 @@ fn combined_filters_apply_project_effort_status_and_blocked_before_paging() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].reference, blocked.reference);
 }
+
+#[test]
+fn backup_restores_trash_relationships_and_request_replay() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut w = Workspace::open(&path).unwrap();
+    let request = || WriteRequest::CreateTicket {
+        title: "Original".into(),
+        project_id: None,
+    };
+    let original = w.write(Some("request-1"), request()).unwrap();
+    let blocker = w.create_ticket("Blocker").unwrap();
+    let child = w.create_ticket("Child").unwrap();
+    w.add_dependency(&blocker.reference, &child.reference, None)
+        .unwrap();
+    w.set_trashed(&blocker.reference, true, None).unwrap();
+    w.backup(&backup).unwrap();
+    w.create_ticket("Later").unwrap();
+    drop(w);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut w = Workspace::open(&path).unwrap();
+    assert_eq!(w.write(Some("request-1"), request()).unwrap(), original);
+    assert_eq!(
+        w.show_ticket(&child.reference).unwrap().prerequisites[0].reference,
+        blocker.reference
+    );
+    assert_eq!(w.list_trash().unwrap()[0].id, blocker.id);
+    assert!(w.show_ticket("T-4").is_err());
+}
+
+#[test]
+fn restore_rejects_open_workspace_and_invalid_backup_without_changing_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Keep me").unwrap();
+    workspace.backup(&backup).unwrap();
+    assert!(Workspace::restore(&path, &backup).is_err());
+    drop(workspace);
+    std::fs::write(&backup, b"not a database").unwrap();
+    assert!(Workspace::restore(&path, &backup).is_err());
+    std::fs::remove_file(&backup).unwrap();
+    let newer = rusqlite::Connection::open(&backup).unwrap();
+    newer.pragma_update(None, "user_version", 999).unwrap();
+    drop(newer);
+    assert!(Workspace::restore(&path, &backup).is_err());
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().title,
+        "Keep me"
+    );
+}

@@ -14,6 +14,10 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Save a consistent workspace backup to a new file
+    Backup { path: String },
+    /// Restore a workspace backup after closing other ticketd operations
+    RestoreWorkspace { path: String },
     /// Execute a JSON write request from a file or stdin; retain its result for safe retries
     Write {
         file: String,
@@ -293,8 +297,18 @@ fn read_content(
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
+    if let Command::RestoreWorkspace { path } = &args.command {
+        let safety = Workspace::restore_default(path)?;
+        println!("Restored workspace. Safety backup: {}", safety.display());
+        return Ok(());
+    }
     let mut workspace = Workspace::open_default()?;
     let output = match args.command {
+        Command::Backup { path } => {
+            workspace.backup(&path)?;
+            format!("Backup saved: {path}")
+        }
+        Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::Write { file, request_id } => {
             let input = read_content(None, Some(file))?.ok_or("missing request")?;
             let request: WriteRequest = serde_json::from_str(&input)?;

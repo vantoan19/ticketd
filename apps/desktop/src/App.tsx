@@ -20,6 +20,9 @@ import { TicketEditor } from "./TicketEditor";
 const DependencyGraph = lazy(() => import("./DependencyGraph"));
 
 export function App() {
+  const [backupPath, setBackupPath] = useState("");
+  const [backupMessage, setBackupMessage] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [efforts, setEfforts] = useState<
     { id: string; name: string; archived: boolean }[]
@@ -137,6 +140,60 @@ export function App() {
   return (
     <main className="mx-auto max-w-4xl p-8">
       <h1 className="text-3xl font-semibold">ticketd</h1>
+      <section aria-label="Workspace backup">
+        <label>
+          Backup file path{" "}
+          <input
+            value={backupPath}
+            onChange={(event) => setBackupPath(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!backupPath || backupBusy}
+          onClick={() =>
+            void (async () => {
+              setBackupBusy(true);
+              try {
+                setBackupMessage(await client.backupWorkspace(backupPath));
+              } catch (reason) {
+                setBackupMessage(`Backup failed: ${String(reason)}`);
+              } finally {
+                setBackupBusy(false);
+              }
+            })()
+          }
+        >
+          Back up
+        </button>
+        <button
+          type="button"
+          disabled={!backupPath || backupBusy}
+          onClick={() =>
+            void (async () => {
+              if (
+                !window.confirm(
+                  "Restore this backup? Current workspace data will be replaced after a safety backup is made.",
+                )
+              )
+                return;
+              setBackupBusy(true);
+              try {
+                setBackupMessage(await client.restoreWorkspace(backupPath));
+                setSelected(null);
+                await refresh();
+              } catch (reason) {
+                setBackupMessage(`Restore failed: ${String(reason)}`);
+              } finally {
+                setBackupBusy(false);
+              }
+            })()
+          }
+        >
+          Restore backup
+        </button>
+        <p role="status">{backupMessage}</p>
+      </section>
       <form
         onSubmit={(event) => void create(event)}
         className="my-6 flex flex-wrap items-end gap-3"
