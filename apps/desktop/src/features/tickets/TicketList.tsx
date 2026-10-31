@@ -1,5 +1,18 @@
 import { useRef } from "react";
+import { StatusDot } from "@/components/ui/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
+import {
+  readiness,
+  readinessLabel,
+  rowContext,
+  type RowScope,
+} from "./ticket-row";
 import type { Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
 
@@ -11,6 +24,7 @@ export function TicketList({
   onToggle,
   selectable,
   selectionDisabled = false,
+  scope,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -19,79 +33,87 @@ export function TicketList({
   onToggle: (reference: string) => void;
   selectable: boolean;
   selectionDisabled?: boolean;
+  scope: RowScope;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   return (
-    <ul className="ticket-rows">
-      {tickets.map((ticket, index) => {
-        return (
-          <li key={ticket.id}>
-            {selectable && (
-              <label className="ticket-select">
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${ticket.reference}`}
-                  checked={bulkSelection.includes(ticket.reference)}
-                  disabled={selectionDisabled}
-                  onChange={() => onToggle(ticket.reference)}
-                />
-              </label>
-            )}
-            <button
-              ref={(node) => {
-                if (node) rows.current.set(ticket.id, node);
-                else rows.current.delete(ticket.id);
-              }}
-              type="button"
-              className="ticket-row"
-              aria-pressed={ticket.reference === selected}
-              onClick={() => onOpen(ticket.reference)}
-              onFocus={(event) =>
-                event.currentTarget.scrollIntoView?.({ block: "nearest" })
-              }
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                  event.preventDefault();
-                  const next =
-                    tickets[index + (event.key === "ArrowDown" ? 1 : -1)];
-                  if (next) rows.current.get(next.id)?.focus();
-                } else if (event.key === "Enter") {
-                  event.preventDefault();
-                  onOpen(ticket.reference);
+    <TooltipProvider delayDuration={400}>
+      <ul className="ticket-rows">
+        {tickets.map((ticket, index) => {
+          return (
+            <li key={ticket.id}>
+              {selectable && (
+                <label className="ticket-select">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${ticket.reference}`}
+                    checked={bulkSelection.includes(ticket.reference)}
+                    disabled={selectionDisabled}
+                    onChange={() => onToggle(ticket.reference)}
+                  />
+                </label>
+              )}
+              <button
+                ref={(node) => {
+                  if (node) rows.current.set(ticket.id, node);
+                  else rows.current.delete(ticket.id);
+                }}
+                type="button"
+                className="ticket-row"
+                aria-pressed={ticket.reference === selected}
+                onClick={() => onOpen(ticket.reference)}
+                onFocus={(event) =>
+                  event.currentTarget.scrollIntoView?.({ block: "nearest" })
                 }
-              }}
-            >
-              <span
-                className="ticket-row-status"
-                title={ticket.status}
-                role="img"
-                aria-label={ticket.status}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const next =
+                      tickets[index + (event.key === "ArrowDown" ? 1 : -1)];
+                    if (next) rows.current.get(next.id)?.focus();
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+                    onOpen(ticket.reference);
+                  }
+                }}
               >
-                <StatusIcon status={ticket.status} decorative />
-                <span className="ticket-status-label">{ticket.status}</span>
-              </span>
-              <span className="ticket-ref">{ticket.reference}</span>
-              <span className="ticket-title" title={ticket.title}>
-                {ticket.title}
-              </span>
-              <span className="ticket-row-meta">
-                {ticket.status === "Todo" && ticket.availability && (
-                  <span>{ticket.availability}</span>
-                )}
-                {ticket.parent && (
-                  <span>
-                    Parent: {ticket.parent.reference}
-                    {ticket.parent.trashed ? " (trashed)" : ""}
-                  </span>
-                )}
-                {ticket.tags.length > 0 && (
-                  <span>{ticket.tags.join(", ")}</span>
-                )}
-              </span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="ticket-row-status">
+                      <StatusIcon status={ticket.status} />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>{ticket.status}</TooltipContent>
+                </Tooltip>
+                <span className="ticket-ref">{ticket.reference}</span>
+                <span className="ticket-title" title={ticket.title}>
+                  {ticket.title}
+                </span>
+                <RowDetails ticket={ticket} scope={scope} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </TooltipProvider>
+  );
+}
+
+function RowDetails({ ticket, scope }: { ticket: Ticket; scope: RowScope }) {
+  const state = readiness(ticket);
+  const context = rowContext(ticket, scope);
+  return (
+    <span className="ticket-row-meta">
+      <span className="ticket-row-state">
+        {state.kind !== "status" && <StatusDot tone={state.kind} size={8} />}
+        {readinessLabel(state)}
+      </span>
+      {context && <span className="ticket-row-context">{context}</span>}
+      {ticket.tags.map((tag) => (
+        <span key={tag} className="ticket-tag">
+          {tag}
+        </span>
+      ))}
+    </span>
   );
 }
