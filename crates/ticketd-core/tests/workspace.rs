@@ -196,6 +196,43 @@ fn dependencies_derive_availability_and_keep_history() {
             .as_deref(),
         Some("Blocked")
     );
+    workspace
+        .change_ticket(
+            &blocker.reference,
+            TicketPatch {
+                status: Some(Status::InReview),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Blocked")
+    );
+    workspace
+        .change_ticket(
+            &dependent.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let started = workspace.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(started.availability, None);
+    assert_eq!(started.prerequisites[0].status, Status::InReview);
+    assert!(
+        workspace
+            .add_dependency(&blocker.reference, &blocker.reference, None)
+            .is_err()
+    );
+    workspace
+        .add_dependency(&blocker.reference, &dependent.reference, None)
+        .unwrap();
     assert!(
         workspace
             .add_dependency(&dependent.reference, &blocker.reference, None)
@@ -208,7 +245,9 @@ fn dependencies_derive_availability_and_keep_history() {
         workspace
             .ticket_history(&dependent.reference)
             .unwrap()
-            .len(),
+            .iter()
+            .filter(|entry| entry.kind == "dependency")
+            .count(),
         2
     );
 }
