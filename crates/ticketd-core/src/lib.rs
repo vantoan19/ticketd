@@ -10,9 +10,9 @@ pub use duplicates::{
 mod evidence;
 mod export;
 mod location;
-pub use location::WorkspaceInfo;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
+pub use location::WorkspaceInfo;
 
 mod efforts;
 mod retry;
