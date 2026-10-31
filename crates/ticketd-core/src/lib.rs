@@ -154,7 +154,7 @@ pub struct Ticket {
     pub children: Vec<hierarchy::RelatedTicket>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct TicketPatch {
     pub title: Option<String>,
     pub body: Option<String>,

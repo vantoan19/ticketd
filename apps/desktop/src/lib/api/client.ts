@@ -115,7 +115,22 @@ export type FindFilter = {
   limit: number;
   offset: number;
 };
+export type BulkChange = {
+  project_id?: string | null;
+  effort_id?: string | null;
+  add_tags?: string[];
+  remove_tags?: string[];
+};
 export const client = {
+  async bulkChange(
+    references: string[],
+    change: BulkChange,
+    requestId: string,
+  ) {
+    return z
+      .array(ticketSchema)
+      .parse(await invoke("bulk_change", { references, change, requestId }));
+  },
   async contextualRelationships(reference: string, offset = 0) {
     const item = z.object({
       reference: z.string(),

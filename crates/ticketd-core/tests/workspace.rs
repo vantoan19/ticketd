@@ -2636,3 +2636,62 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     assert_eq!(version, 19);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
+
+#[test]
+fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection() {
+    use ticketd_core::{BatchOperation, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bulk-organization.sqlite")).unwrap();
+    let project = workspace.create_project("Project", "/project").unwrap();
+    let effort = workspace.create_effort("Effort").unwrap();
+    let first = workspace.create_ticket("First").unwrap();
+    let second = workspace.create_ticket("Second").unwrap();
+    workspace.add_tag(&first.reference, "keep").unwrap();
+    workspace.add_tag(&second.reference, "remove").unwrap();
+    let changes = || {
+        serde_json::from_value::<Vec<BatchOperation>>(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}},
+        {"operation":"change", "ticket":second.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}}
+    ])).unwrap()
+    };
+    workspace
+        .write(
+            Some("organize"),
+            WriteRequest::Batch {
+                operations: changes(),
+            },
+        )
+        .unwrap();
+    workspace
+        .write(
+            Some("organize"),
+            WriteRequest::Batch {
+                operations: changes(),
+            },
+        )
+        .unwrap();
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(saved.tags, vec!["keep", "new"]);
+    assert_eq!(
+        workspace.show_ticket(&second.reference).unwrap().tags,
+        vec!["new"]
+    );
+    let invalid: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}},
+        {"operation":"change", "ticket":second.reference, "change":{"project_id":"missing"}}
+    ])).unwrap();
+    assert!(workspace.apply_batch(invalid).is_err());
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    let clear: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}}
+    ])).unwrap();
+    workspace.apply_batch(clear).unwrap();
+    let saved = workspace.show_ticket(&first.reference).unwrap();
+    assert_eq!(saved.project_id, None);
+    assert_eq!(saved.effort_id, None);
+    assert_eq!(saved.tags, vec!["keep", "new"]);
+}

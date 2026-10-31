@@ -203,6 +203,30 @@ fn create_ticket(
 }
 
 #[tauri::command]
+fn bulk_change(
+    references: Vec<String>,
+    change: TicketChange,
+    request_id: String,
+) -> Result<Vec<Ticket>, String> {
+    let operations = references
+        .into_iter()
+        .map(|ticket| BatchOperation::Change {
+            ticket,
+            change: Box::new(change.clone()),
+        })
+        .collect();
+    match Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(Some(&request_id), WriteRequest::Batch { operations })
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Tickets(tickets) => Ok(tickets),
+        _ => Err("Unexpected batch result".into()),
+    }
+}
+
+#[tauri::command]
 fn bulk_status(
     references: Vec<String>,
     status: Status,
@@ -584,6 +608,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_ticket,
             change_ticket,
             bulk_status,
+            bulk_change,
             ticket_history,
             reminder,
             set_reminder,
