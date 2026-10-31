@@ -333,10 +333,29 @@ Set latency budgets and representative dataset sizes after a benchmark spike. Ba
 
 ### Platform support
 
-- Target macOS, Linux, and Windows.
-- Define supported OS versions, CPU architectures, and Linux distributions before committing to a release matrix.
-- Verify editor behavior, shortcuts, clipboard, rendering, and CLI packaging on target platforms.
-- WSL agents accessing a Windows-hosted database require explicit validation; do not assume this works as part of ordinary Windows support.
+The first release targets these native desktop and CLI combinations. Release
+validation remains outstanding; a CI build alone is not a support guarantee.
+
+| Operating system | Architecture          | First-release target | Validation status                                                                                           |
+| ---------------- | --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| macOS 26         | ARM64 (Apple Silicon) | Desktop and CLI      | Scaffold builds in CI; first agent host is macOS 26.5 ARM64. Full workflow and delivery remain unvalidated. |
+| Ubuntu 24.04 LTS | x86-64                | Desktop and CLI      | Scaffold builds in CI. Full workflow and delivery remain unvalidated.                                       |
+| Windows 11       | x86-64                | Desktop and CLI      | Unvalidated on Windows 11; CI uses a Windows Server runner, not a desktop installation.                     |
+
+Other versions, architectures, and Linux distributions are not part of this first
+matrix. Before release, validate installation and launch, editor behavior, shortcuts,
+clipboard, rendering, CLI packaging, and the shared workspace workflow on each
+target. Verify cross-process writes, migration and refresh behavior as specified
+in the architecture; do not infer those properties from a build.
+
+The delivery ships desktop and CLI together; the CLI must run independently with the desktop
+closed and without a daemon. Package format, signing, and distribution details remain
+to be decided and validated.
+
+The observed first agent environment is native macOS, so WSL is not required for
+that workflow. WSL is deferred from the first matrix; neither a WSL-native workspace
+nor a WSL agent accessing a Windows-hosted database is validated. Do not assume
+cross-environment database access or locking works without explicit testing.
 
 ## 12. Proposed acceptance criteria
 
@@ -375,9 +394,7 @@ These are possible future directions, not a committed roadmap.
 
 ## 14. Open decisions
 
-| Question                     | Proposal for review                                                   |
-| ---------------------------- | --------------------------------------------------------------------- |
-| Desktop and CLI distribution | Ship together; CLI operates independently while UI is closed          |
-| MVP success criterion        | Complete one real project through the workflow in section 12          |
-| Performance budgets          | Establish after measuring a representative dataset and machine        |
-| Supported platforms and WSL  | Define release matrix and validate the first actual agent environment |
+| Question              | Proposal for review                                            |
+| --------------------- | -------------------------------------------------------------- |
+| MVP success criterion | Complete one real project through the workflow in section 12   |
+| Performance budgets   | Establish after measuring a representative dataset and machine |

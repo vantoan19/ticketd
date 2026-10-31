@@ -1,7 +1,787 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: Geist;
+  src: url("./assets/fonts/Geist-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: Geist;
+  src: url("./assets/fonts/Geist-Semibold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("./assets/fonts/GeistMono-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
+@custom-variant dark (&:is(.dark *));
 :root {
-  font-family: system-ui, sans-serif;
-  color: #171717;
-  background: #fafafa;
+  font-family:
+    Geist,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--foreground);
+  background: var(--background);
+  font-size: 13px;
+  color-scheme: light dark;
+  --background: #fff;
+  --surface: #fafafa;
+  --error-surface: #fef2f2;
+  --error-foreground: #991b1b;
+  --foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #fff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --accent: #f5f5f5;
+  --accent-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #666;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #737373;
+  --destructive: #b91c1c;
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+input,
+select,
+textarea {
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 7px 9px;
+  min-width: 0;
+}
+select option {
+  background: var(--surface);
+}
+.workspace {
+  width: 100%;
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+  border-right: 1px solid var(--border);
+  padding: 19px 12px 12px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 7px 21px;
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+.brand-mark {
+  color: var(--muted-foreground);
+  font-size: 23px;
+  line-height: 1;
+}
+.brand-label {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.09em;
+}
+.new-ticket {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: var(--primary);
+  font-weight: 600;
+  color: var(--foreground);
+}
+.new-ticket:hover {
+  background: var(--primary);
+}
+.new-ticket span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.sidebar-nav {
+  display: grid;
+  gap: 2px;
+  margin-top: 16px;
+}
+.sidebar-nav button,
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 5px;
+  text-align: left;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar-nav button svg,
+.settings-link svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.sidebar-nav button:hover,
+.settings-link:hover {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.sidebar-nav button.active {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.sidebar-nav button.active svg {
+  color: var(--muted-foreground);
+}
+.sidebar-scroll {
+  overflow-y: auto;
+  flex: 1;
+}
+.sidebar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 26px 8px 0;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  font-size: 11px;
+}
+.sidebar-heading button {
+  color: var(--muted-foreground);
+}
+.sidebar-heading + .sidebar-nav {
+  margin-top: 8px;
+}
+.settings-link {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding-top: 16px;
+}
+.main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+.topbar {
+  height: 54px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 25px;
+  color: var(--muted-foreground);
+}
+.topbar strong {
+  color: var(--foreground);
+  font-weight: 550;
+}
+.slash {
+  padding: 0 12px;
+  color: var(--muted-foreground);
+}
+.icon-button {
+  padding: 6px;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+}
+.icon-button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ticket-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.ticket-workspace[hidden] {
+  display: none;
+}
+.ticket-list {
+  flex: 1;
+  min-width: 330px;
+  overflow-y: auto;
+}
+.ticket-detail {
+  width: 43%;
+  min-width: 360px;
+  max-width: 600px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding: 0 24px 36px;
+}
+.detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 51px;
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.list-header {
+  padding: 30px 26px 19px;
+}
+.list-header h1,
+.management h1 {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  color: var(--foreground);
+}
+.list-header p,
+.management > p {
+  color: var(--muted-foreground);
+  margin-top: 5px;
+}
+.list-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 26px 18px;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 9px;
+  width: min(280px, 70%);
+  background: var(--surface);
+}
+.search input {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  outline: 0;
+}
+.filters {
+  position: relative;
+}
+.filters-trigger {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  border-radius: 5px;
+}
+.filters-content fieldset {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 12px 35px #0008;
+}
+.filters-content fieldset label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted-foreground);
+}
+.filters-content legend {
+  display: none;
+}
+.list-heading {
+  padding: 10px 26px;
+  border-block: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.list-heading span {
+  margin-left: 7px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.ticket-list ul {
+  margin: 0;
+}
+.ticket-list li {
+  border-color: var(--border);
+}
+.ticket-list li button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px;
+  border-radius: 0;
+  color: var(--muted-foreground);
+}
+.ticket-list li button:hover {
+  background: var(--accent);
+}
+.ticket-list li button[aria-pressed="true"] {
+  background: var(--accent);
+}
+.ticket-ref {
+  color: var(--muted-foreground);
+  flex: none;
+  font-size: 12px;
+}
+.ticket-title {
+  color: var(--foreground);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-status {
+  color: var(--muted-foreground);
+  flex: none;
+}
+.ticket-list > p {
+  color: var(--muted-foreground);
+  padding: 25px 26px;
+}
+.ticket-list > .pagination {
+  padding: 15px 26px;
+  color: var(--muted-foreground);
+  display: flex;
+  gap: 12px;
+}
+.ticket-detail > div:not(.detail-header) {
+  padding-top: 12px;
+}
+.ticket-detail label {
+  color: var(--muted-foreground);
+}
+.ticket-detail input,
+.ticket-detail select {
+  max-width: 100%;
+}
+.ticket-detail button:not(.icon-button),
+.management button,
+.create-panel button:not(.icon-button) {
+  color: var(--muted-foreground);
+  background: var(--accent);
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  border-radius: 5px;
+}
+.ticket-detail button:hover,
+.management button:hover {
+  background: var(--accent);
+}
+.ticket-detail .detail-disclosure {
+  border-top: 1px solid var(--border);
+  margin-top: 17px;
+  padding-top: 13px;
+}
+.detail-disclosure summary {
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-weight: 600;
+}
+.ticket-detail .cm-editor {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--foreground);
+}
+.ticket-detail .text-neutral-600 {
+  color: var(--muted-foreground);
+}
+.ticket-detail input.bg-white {
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.markdown-preview {
+  color: var(--muted-foreground);
+}
+.management {
+  overflow-y: auto;
+  padding: 36px 42px;
+  max-width: 900px;
+}
+.management section,
+.management nav,
+.settings-card {
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.management h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.management label {
+  color: var(--muted-foreground);
+}
+.management input,
+.management select {
+  margin: 5px;
+}
+.settings-card section {
+  border: 0;
+  padding: 0;
+  margin-top: 12px;
+}
+.create-panel {
+  position: fixed;
+  z-index: 51;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  translate: none;
+  width: min(500px, 80vw);
+  background: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 18px;
+  box-shadow: 0 16px 60px #0009;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.create-panel form {
+  margin-bottom: 0;
+}
+.create-panel input.bg-white {
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.global-error {
+  padding: 10px 24px;
+  background: var(--error-surface);
+  color: var(--error-foreground);
+}
+.ticket-list .text-neutral-600 {
+  color: var(--muted-foreground);
+}
+.ticket-detail .cm-editor {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.ticket-detail .cm-gutters {
+  background: var(--surface);
+  color: var(--muted-foreground);
+  border-color: var(--border);
+}
+.ticket-detail .cm-activeLine,
+.ticket-detail .cm-activeLineGutter {
+  background: var(--accent);
+}
+.ticket-detail .cm-cursor {
+  border-left-color: var(--foreground);
+}
+.ticket-list li button > span:not(.ticket-title) {
+  white-space: nowrap;
+}
+.detail-content .editor-reference {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.detail-content .editor-title {
+  display: block;
+  margin: 8px 0 22px;
+}
+.detail-content .editor-title input {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  color: var(--foreground);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+.detail-content .editor-body > span {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.detail-content .editor-body small {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.detail-content .cm-editor {
+  min-height: 170px;
+}
+.detail-content .cm-scroller {
+  min-height: 170px;
+  padding: 8px 0;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.detail-content .detail-metadata {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0;
+  padding: 14px 0;
+  border-block: 1px solid var(--border);
+}
+.detail-metadata .history-block {
+  display: contents;
+}
+.detail-metadata .history-block > label,
+.detail-metadata > label {
+  margin: 0;
+}
+.detail-metadata .detail-disclosure {
+  order: 4;
+  width: 100%;
+  margin: 0;
+  padding: 10px 0 0;
+}
+.empty-state {
+  padding: 70px 26px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+.empty-state strong {
+  display: block;
+  color: var(--foreground);
+  font-size: 16px;
+}
+.empty-state p {
+  margin: 8px 0 18px;
+}
+.empty-state button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--primary);
+  color: var(--foreground);
+  border-radius: 5px;
+  padding: 8px 12px;
+}
+.detail-content .editor-title textarea {
+  display: block;
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+}
+.create-form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
+  margin-top: 20px;
+}
+.create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.create-form input {
+  width: 100%;
+}
+.create-panel .create-form button {
+  align-self: flex-end;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--foreground);
+  padding: 8px 14px;
+  font-weight: 600;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: 6px;
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+.filters-content {
+  z-index: 50;
+  width: 300px;
+  color: var(--foreground);
+  background: var(--accent);
+  border: 1px solid var(--border);
+}
+
+.sidebar-header,
+.sidebar-body,
+.sidebar-footer,
+.sidebar-group {
+  padding: 0;
+  gap: 0;
+}
+.sidebar-body {
+  flex: 1;
+  overflow: hidden;
+}
+.sidebar-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+}
+.sidebar-nav li {
+  width: 100%;
+}
+
+.status-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-trigger {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  min-width: 104px;
+}
+.status-options {
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  z-index: 60;
+}
+.status-options [role="option"]:focus {
+  background: var(--accent);
+  color: var(--foreground);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --surface: #171717;
+    --error-surface: #451a1a;
+    --error-foreground: #fecaca;
+    --foreground: #ededed;
+    --primary: #ededed;
+    --primary-foreground: #171717;
+    --secondary: #262626;
+    --secondary-foreground: #ededed;
+    --accent: #262626;
+    --accent-foreground: #ededed;
+    --muted: #262626;
+    --muted-foreground: #a1a1a1;
+    --border: #262626;
+    --input: #404040;
+    --ring: #a1a1a1;
+  }
+}
+
+/* Primary actions invert with the surrounding surface. */
+.new-ticket,
+.empty-state button,
+.create-panel .create-form button {
+  color: var(--primary-ink);
+}
+:root {
+  --primary-ink: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary-ink: #171717;
+  }
+}
+.ticket-ref,
+.editor-reference {
+  font-family: "Geist Mono", monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
