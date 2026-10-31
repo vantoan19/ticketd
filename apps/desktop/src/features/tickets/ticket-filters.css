@@ -10,15 +10,6 @@
 .filter-chips button {
   height: 26px;
 }
-.ticket-detail-container {
-  display: flex;
-  width: 43%;
-  min-width: 360px;
-  max-width: 600px;
-  min-height: 0;
-  flex-direction: column;
-  border-left: 1px solid var(--border);
-}
 .selection-context {
   padding: 8px 16px;
   color: var(--muted-foreground);
@@ -26,10 +17,9 @@
   font-size: 12px;
 }
 
-.ticket-detail-container .ticket-detail {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  flex: 1;
-  border-left: 0;
+.filters-content [data-slot="field-group"] {
+  gap: 12px;
+}
+.filters-content [data-slot="field"] {
+  gap: 4px;
 }

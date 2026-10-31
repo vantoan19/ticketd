@@ -1,0 +1,77 @@
+.ticket-list {
+  container-type: inline-size;
+}
+.ticket-list .ticket-rows {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ticket-rows li {
+  border-bottom: 1px solid var(--border);
+}
+.ticket-list .ticket-row {
+  display: grid;
+  grid-template-columns: 105px 52px minmax(0, 1fr) minmax(0, auto);
+  column-gap: 12px;
+  row-gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  text-align: left;
+  padding: 8px 26px;
+}
+.ticket-row-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+}
+.ticket-row-status svg {
+  flex: none;
+}
+.ticket-row-meta {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+}
+.ticket-row-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-list .ticket-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+  position: relative;
+}
+.ticket-list .ticket-row[aria-pressed="true"] {
+  box-shadow: inset 3px 0 var(--foreground);
+}
+@container (max-width: 650px) {
+  .ticket-list .ticket-row {
+    grid-template-columns: 105px 52px minmax(0, 1fr);
+  }
+  .ticket-row-meta {
+    grid-column: 3;
+  }
+}
+
+@container (max-width: 500px) {
+  .ticket-list .ticket-row {
+    grid-template-columns: 16px 52px minmax(0, 1fr);
+    padding-inline: 18px;
+  }
+  .ticket-row-status span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}

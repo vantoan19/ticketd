@@ -2,21 +2,34 @@ import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { Button } from "@/components/ui/button";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { Input } from "@/components/ui/input";
+import { TicketList } from "@/features/tickets/TicketList";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { CircleDot, Plus, RefreshCw, X } from "lucide-react";
+import { Plus, RefreshCw, X } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
 import { Projects } from "@/features/projects/Projects";
 import { useRef, useState } from "react";
+import { useDefaultLayout } from "react-resizable-panels";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import { cn } from "cn";
 
 export function App() {
   const [view, setView] = useState<
     "tickets" | "projects" | "efforts" | "settings"
   >("tickets");
   const [creating, setCreating] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [narrowDetail, setNarrowDetail] = useState(false);
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "ticketd.workspace",
+  });
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const {
     projects,
@@ -60,6 +73,12 @@ export function App() {
     clearFilters,
     queryError,
   } = useTicketWorkspace(setView, setCreating);
+  const [previousSelection, setPreviousSelection] = useState(selected);
+  if (previousSelection !== selected) {
+    setPreviousSelection(selected);
+    setNarrowDetail(selected !== null);
+    if (!selected) setExpanded(false);
+  }
   return (
     <SidebarProvider>
       <main className="workspace">
@@ -181,172 +200,164 @@ export function App() {
               <Efforts revision={revision} refresh={refresh} />
             </div>
           }
-          <div className="ticket-workspace" hidden={view !== "tickets"}>
-            <section className="ticket-list" aria-labelledby="tickets-heading">
-              <div className="list-header">
-                <div>
-                  <h1>{scopeName}</h1>
-                  <p>Your workspace tickets, in one place.</p>
-                </div>
-              </div>
-              {!trash && (
-                <TicketFilters
-                  {...{
-                    query,
-                    setQuery,
-                    effort,
-                    setEffort,
-                    status,
-                    setStatus,
-                    tags,
-                    setTags,
-                    availability,
-                    setAvailability,
-                    family,
-                    setFamily,
-                    efforts,
-                    setOffset,
-                    navigation,
-                    clearFilters,
-                  }}
-                />
-              )}
-              <h2 id="tickets-heading" className="list-heading">
-                {trash ? "Deleted tickets" : "Tickets"}{" "}
-                <span>{tickets.length}</span>
-              </h2>
-              {queryError ? (
-                <div className="empty-state" role="alert">
-                  <strong>Could not load tickets</strong>
-                  <p>Try refreshing the current view.</p>
-                  <Button variant="outline" onClick={() => void refresh()}>
-                    Retry
-                  </Button>
-                </div>
-              ) : loading ? (
-                <p role="status" className="mt-3">
-                  Loading tickets…
-                </p>
-              ) : tickets.length === 0 ? (
-                <div className="empty-state">
-                  {trash ? (
-                    <p>No tickets in trash.</p>
-                  ) : query ||
-                    tags ||
-                    family ||
-                    effort !== navigation.effort ||
-                    status !==
-                      (navigation.kind === "progress" ? "In progress" : "") ||
-                    availability !==
-                      (navigation.kind === "ready" ? "Ready" : "") ? (
-                    <>
-                      <strong>No matching tickets</strong>
-                      <p>Try clearing your search and filters.</p>
-                      <Button variant="outline" onClick={clearFilters}>
-                        Clear filters
-                      </Button>
-                    </>
-                  ) : navigation.project !== "all" ||
-                    navigation.effort ||
-                    navigation.kind !== "all" ? (
-                    <>
-                      <strong>No tickets in this scope</strong>
-                      <p>Create a ticket or choose another view.</p>
-                      <Button
-                        variant="outline"
-                        onClick={(event) => {
-                          createTriggerRef.current = event.currentTarget;
-                          setCreating(true);
-                        }}
-                      >
-                        Create ticket
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <strong>Your workspace is ready</strong>
-                      <p>
-                        Create your first ticket to start keeping track of work.
-                      </p>
-                      <button
-                        onClick={(event) => {
-                          createTriggerRef.current = event.currentTarget;
-                          setCreating(true);
-                        }}
-                      >
-                        <Plus size={15} /> Create your first ticket
-                      </button>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <ul className="mt-3 divide-y divide-neutral-200">
-                  {tickets
-                    .filter(
+          <ResizablePanelGroup
+            orientation="horizontal"
+            className={cn(
+              "ticket-workspace",
+              expanded && "expanded",
+              narrowDetail && "narrow-detail",
+            )}
+            defaultLayout={defaultLayout}
+            onLayoutChanged={onLayoutChanged}
+            hidden={view !== "tickets"}
+          >
+            <ResizablePanel
+              id="list"
+              minSize={330}
+              defaultSize={480}
+              className="list-panel"
+            >
+              <section
+                className="ticket-list"
+                aria-labelledby="tickets-heading"
+              >
+                {!trash && (
+                  <TicketFilters
+                    {...{
+                      query,
+                      setQuery,
+                      effort,
+                      setEffort,
+                      status,
+                      setStatus,
+                      tags,
+                      setTags,
+                      availability,
+                      setAvailability,
+                      family,
+                      setFamily,
+                      efforts,
+                      setOffset,
+                      navigation,
+                      clearFilters,
+                    }}
+                  />
+                )}
+                <h2 id="tickets-heading" className="list-heading">
+                  {trash ? "Deleted tickets" : "Tickets"}{" "}
+                  <span>{tickets.length}</span>
+                </h2>
+                {queryError ? (
+                  <div className="empty-state" role="alert">
+                    <strong>Could not load tickets</strong>
+                    <p>Try refreshing the current view.</p>
+                    <Button variant="outline" onClick={() => void refresh()}>
+                      Retry
+                    </Button>
+                  </div>
+                ) : loading ? (
+                  <p role="status" className="mt-3">
+                    Loading tickets…
+                  </p>
+                ) : tickets.length === 0 ? (
+                  <div className="empty-state">
+                    {trash ? (
+                      <p>No tickets in trash.</p>
+                    ) : query ||
+                      tags ||
+                      family ||
+                      effort !== navigation.effort ||
+                      status !==
+                        (navigation.kind === "progress" ? "In progress" : "") ||
+                      availability !==
+                        (navigation.kind === "ready" ? "Ready" : "") ? (
+                      <>
+                        <strong>No matching tickets</strong>
+                        <p>Try clearing your search and filters.</p>
+                        <Button variant="outline" onClick={clearFilters}>
+                          Clear filters
+                        </Button>
+                      </>
+                    ) : navigation.project !== "all" ||
+                      navigation.effort ||
+                      navigation.kind !== "all" ? (
+                      <>
+                        <strong>No tickets in this scope</strong>
+                        <p>Create a ticket or choose another view.</p>
+                        <Button
+                          variant="outline"
+                          onClick={(event) => {
+                            createTriggerRef.current = event.currentTarget;
+                            setCreating(true);
+                          }}
+                        >
+                          Create ticket
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <strong>Your workspace is ready</strong>
+                        <p>
+                          Create your first ticket to start keeping track of
+                          work.
+                        </p>
+                        <button
+                          onClick={(event) => {
+                            createTriggerRef.current = event.currentTarget;
+                            setCreating(true);
+                          }}
+                        >
+                          <Plus size={15} /> Create your first ticket
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <TicketList
+                    tickets={tickets.filter(
                       (item) =>
                         filter === "all" ||
                         (filter === "unlinked"
                           ? item.project_id === null
                           : item.project_id === filter),
-                    )
-                    .map((item) => (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelected(item.reference)}
-                          aria-pressed={item.reference === selected}
-                          className="w-full rounded p-3 text-left hover:bg-neutral-100 aria-pressed:bg-neutral-200"
-                        >
-                          <CircleDot size={16} className="row-status" />
-                          <span className="ticket-ref">{item.reference}</span>
-                          <span className="ticket-title">
-                            {item.title}
-                          </span>{" "}
-                          {item.parent && (
-                            <span>
-                              {" "}
-                              · Parent: {item.parent.reference}
-                              {item.parent.trashed ? " (trashed)" : ""}
-                            </span>
-                          )}
-                          {item.availability && (
-                            <span> · {item.availability}</span>
-                          )}
-                          {item.tags.length > 0 && (
-                            <span className="ml-2 text-sm text-neutral-600">
-                              {item.tags.join(", ")}
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              )}
-              {!trash && (offset > 0 || tickets.length === 50) && (
-                <div className="pagination">
-                  <button
-                    type="button"
-                    disabled={offset === 0}
-                    onClick={() => {
-                      setOffset(Math.max(0, offset - 50));
+                    )}
+                    selected={selected}
+                    onOpen={(reference) => {
+                      setSelected(reference);
+                      setNarrowDetail(true);
                     }}
-                  >
-                    Previous
-                  </button>
-                  <span> Page {Math.floor(offset / 50) + 1} </span>
-                  <button
-                    type="button"
-                    disabled={tickets.length < 50}
-                    onClick={() => {
-                      setOffset(offset + 50);
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
-              )}
-            </section>
-            <div className="ticket-detail-container">
+                  />
+                )}
+                {!trash && (offset > 0 || tickets.length === 50) && (
+                  <div className="pagination">
+                    <button
+                      type="button"
+                      disabled={offset === 0}
+                      onClick={() => {
+                        setOffset(Math.max(0, offset - 50));
+                      }}
+                    >
+                      Previous
+                    </button>
+                    <span> Page {Math.floor(offset / 50) + 1} </span>
+                    <button
+                      type="button"
+                      disabled={tickets.length < 50}
+                      onClick={() => {
+                        setOffset(offset + 50);
+                      }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </section>
+            </ResizablePanel>
+            <ResizableHandle
+              className="split-handle"
+              aria-label="Resize ticket list"
+            />
+            <ResizablePanel id="detail" minSize={360} className="detail-panel">
               {selected &&
                 !loading &&
                 !queryError &&
@@ -356,6 +367,12 @@ export function App() {
                   </p>
                 )}
               <TicketDetails
+                expanded={expanded}
+                onExpand={() => setExpanded(true)}
+                onReturn={() => {
+                  setExpanded(false);
+                  setNarrowDetail(false);
+                }}
                 selected={selected}
                 setSelected={setSelected}
                 details={details}
@@ -366,8 +383,8 @@ export function App() {
                 setError={setError}
                 setTrash={setTrash}
               />
-            </div>
-          </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
       </main>
     </SidebarProvider>

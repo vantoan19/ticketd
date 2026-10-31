@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { History } from "./History";
+import { History, StatusControl } from "./History";
 Element.prototype.scrollIntoView = () => {};
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -21,14 +21,15 @@ test("shows a failed status save while history is closed", async () => {
     throw new Error("Database busy; retry");
   });
   render(
-    <History
-      reference="T-1"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      trashed={false}
-      onChange={async () => {}}
-    />,
+    <>
+      <StatusControl
+        reference="T-1"
+        status="Todo"
+        trashed={false}
+        onChange={async () => {}}
+      />
+      <History reference="T-1" status="Todo" revision={0} projects={[]} />
+    </>,
   );
   fireEvent.keyDown(screen.getByLabelText("Status"), { key: "ArrowDown" });
   fireEvent.click(screen.getByRole("option", { name: "Done" }));
