@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets;",
     )
     .unwrap();
     drop(db);
@@ -1779,5 +1779,59 @@ fn concurrent_opposing_duplicate_marks_cannot_form_a_cycle() {
             .filter(|success| *success)
             .count(),
         1
+    );
+}
+
+#[test]
+fn followed_duplicate_changes_appear_in_attention_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace.set_following(&source.reference, true).unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    let duplicate_events: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.kind == "relationship:duplicate")
+        .collect();
+    assert_eq!(duplicate_events.len(), 2);
+    assert_eq!(duplicate_events[0].from_value, target.reference);
+    assert_eq!(duplicate_events[1].to_value, target.reference);
+}
+
+#[test]
+fn duplicate_relationship_survives_export_and_backup_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["duplicate_tickets"][0]["source_id"], source.id);
+    assert_eq!(export["duplicate_tickets"][0]["canonical_id"], target.id);
+    workspace.backup(&backup).unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&source.reference)
+            .unwrap()
+            .duplicate_of,
+        Some(target.reference)
+    );
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
     );
 }

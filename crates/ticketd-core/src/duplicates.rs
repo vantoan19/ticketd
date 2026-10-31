@@ -65,13 +65,13 @@ impl Workspace {
                 params![destination, source_id],
             )?;
             for (id, _) in children {
-                history::record(&tx, &id, "duplicate", source, &target, agent)?;
+                history::record(&tx, &id, "relationship:duplicate", source, &target, agent)?;
             }
             tx.execute("INSERT INTO duplicate_tickets (source_id, canonical_id, restore_status) VALUES (?1, ?2, ?3) ON CONFLICT(source_id) DO UPDATE SET canonical_id = excluded.canonical_id", params![source_id, destination, status])?;
             history::record(
                 &tx,
                 &source_id,
-                "duplicate",
+                "relationship:duplicate",
                 previous.as_deref().unwrap_or(""),
                 &target,
                 agent,
@@ -96,7 +96,7 @@ impl Workspace {
         let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, 'T-' || c.number, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
         if let Some((restore, canonical, status)) = existing {
             tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;
-            history::record(&tx, &id, "duplicate", &canonical, "", agent)?;
+            history::record(&tx, &id, "relationship:duplicate", &canonical, "", agent)?;
             if let Some(restore) = restore.filter(|r| r != &status) {
                 tx.execute(
                     "UPDATE tickets SET status = ?1 WHERE id = ?2",
