@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use rusqlite::Connection;
 use ticketd_core::{
     BackupCheck, EvidenceInput, EvidenceKind, SafetyBackupKind, Workspace, WorkspaceSummary,

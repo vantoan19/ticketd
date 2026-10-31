@@ -2,9 +2,10 @@
 mod cli_status;
 
 use ticketd_core::{
-    BackupInspection, BackupRecord, BatchOperation, SafetyBackup, DependencyGraph, Effort, EffortView, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, Note, NotePatch, Project, SidebarCounts, Status, Ticket,
-    TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence,
+    EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Project, SafetyBackup, SidebarCounts,
+    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo,
+    WriteRequest, WriteResult,
 };
 
 #[tauri::command]
