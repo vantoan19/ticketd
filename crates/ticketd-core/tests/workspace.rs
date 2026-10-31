@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE evidence;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -1637,6 +1637,203 @@ fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
         Status::Todo
     );
     assert_eq!(workspace.ticket_history(&first.reference).unwrap(), before);
+}
+
+#[test]
+fn duplicate_consolidation_and_undo_preserve_original_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    workspace
+        .change_ticket(
+            &a.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .mark_duplicate(&a.reference, &b.reference, None)
+        .unwrap();
+    workspace
+        .mark_duplicate(&b.reference, &c.reference, None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&a.reference)
+            .unwrap()
+            .duplicate_of
+            .as_deref(),
+        Some(c.reference.as_str())
+    );
+    workspace.remove_duplicate(&a.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&a.reference).unwrap().status,
+        Status::InProgress
+    );
+}
+
+#[test]
+fn duplicate_rejects_dependencies_and_undo_respects_later_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .add_dependency(&source.reference, &target.reference, None)
+        .unwrap();
+    assert!(
+        workspace
+            .mark_duplicate(&source.reference, &target.reference, None)
+            .unwrap_err()
+            .to_string()
+            .contains("blocking dependencies")
+    );
+    workspace
+        .remove_dependency(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Done
+    );
+}
+
+#[test]
+fn duplicate_write_replay_does_not_undo_a_later_change() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let request = || WriteRequest::MarkDuplicate {
+        source: source.reference.clone(),
+        canonical: target.reference.clone(),
+        agent: None,
+    };
+    workspace
+        .write(Some("duplicate-request"), request())
+        .unwrap();
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .write(Some("duplicate-request"), request())
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Done
+    );
+}
+
+#[test]
+fn concurrent_opposing_duplicate_marks_cannot_form_a_cycle() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [
+        (a.reference.clone(), b.reference.clone()),
+        (b.reference, a.reference),
+    ]
+    .into_iter()
+    .map(|(source, target)| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut workspace = Workspace::open(path).unwrap();
+            barrier.wait();
+            workspace.mark_duplicate(&source, &target, None).is_ok()
+        })
+    })
+    .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|success| *success)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn followed_duplicate_changes_appear_in_attention_inbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace.set_following(&source.reference, true).unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    let duplicate_events: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.kind == "relationship:duplicate")
+        .collect();
+    assert_eq!(duplicate_events.len(), 2);
+    assert_eq!(duplicate_events[0].from_value, target.reference);
+    assert_eq!(duplicate_events[1].to_value, target.reference);
+}
+
+#[test]
+fn duplicate_relationship_survives_export_and_backup_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    let export = workspace.export().unwrap();
+    assert_eq!(export["duplicate_tickets"][0]["source_id"], source.id);
+    assert_eq!(export["duplicate_tickets"][0]["canonical_id"], target.id);
+    workspace.backup(&backup).unwrap();
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&source.reference)
+            .unwrap()
+            .duplicate_of,
+        Some(target.reference)
+    );
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
 }
 
 #[test]
