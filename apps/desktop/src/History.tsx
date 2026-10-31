@@ -35,10 +35,12 @@ function parseEntries(value: unknown): Entry[] {
 export function History({
   reference,
   status,
+  revision,
   onChange,
 }: {
   reference: string;
   status: string;
+  revision: number;
   onChange: () => Promise<void>;
 }) {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -55,7 +57,7 @@ export function History({
     return () => {
       active = false;
     };
-  }, [reference, status]);
+  }, [reference, status, revision]);
   async function changeStatus(value: string) {
     try {
       await invoke("change_ticket", { reference, patch: { status: value } });
