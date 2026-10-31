@@ -18,7 +18,7 @@ const browser = await remote({
 });
 
 try {
-  const empty = await browser.$("p=No tickets yet.");
+  const empty = await browser.$("p=No tickets match the active filters.");
   await empty.waitForDisplayed({ timeout: 15000 });
   const started = Date.now();
   const ticket = runCli("create", "Created by CLI");
