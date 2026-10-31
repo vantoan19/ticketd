@@ -231,6 +231,16 @@ fn list_notes(reference: String, limit: u32, offset: u32) -> Result<Vec<Note>, S
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn get_note(reference: String, id: String) -> Result<Option<Note>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| match workspace.note(&reference, &id) {
+            Ok(note) => Ok(Some(note)),
+            Err(ticketd_core::Error::NoteNotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        })
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn add_note(reference: String, content: String) -> Result<Note, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.add_note(&reference, &content, None))
@@ -379,6 +389,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_inbox_read,
             ticket_backlinks,
             list_notes,
+            get_note,
             add_note,
             edit_note,
             delete_note,

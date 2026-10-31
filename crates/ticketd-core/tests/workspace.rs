@@ -1638,3 +1638,86 @@ fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
     );
     assert_eq!(workspace.ticket_history(&first.reference).unwrap(), before);
 }
+
+#[test]
+fn followed_note_remains_understandable_after_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let note = workspace
+        .add_note(&ticket.reference, "Original finding", Some("agent"))
+        .unwrap();
+    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, "note");
+    assert_eq!(entries[0].from_value, note.id);
+    assert_eq!(entries[0].to_value, "Original finding");
+}
+
+#[test]
+fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
+    use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    let blocker = workspace.create_ticket("Blocker").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let request = || WriteRequest::Batch {
+        operations: vec![BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Batch note".into()],
+                add_blockers: vec![blocker.reference.clone()],
+                ..Default::default()
+            }),
+        }],
+    };
+    let failed = vec![
+        BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Rolled back".into()],
+                ..Default::default()
+            }),
+        },
+        BatchOperation::Change {
+            ticket: "T-9999".into(),
+            change: Box::new(TicketChange::default()),
+        },
+    ];
+    assert!(workspace.apply_batch(failed).is_err());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace.write(Some("batch"), request()).unwrap();
+    workspace.write(Some("batch"), request()).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "note" && e.to_value == "Batch note")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "dependency" && e.to_value == blocker.reference)
+    );
+}
+
+#[test]
+fn followed_relationship_endpoints_receive_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = workspace.create_ticket("Parent").unwrap();
+    let child = workspace.create_ticket("Child").unwrap();
+    workspace.set_following(&parent.reference, true).unwrap();
+    workspace
+        .set_parent(&child.reference, Some(&parent.reference), Some("agent"))
+        .unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].reference, parent.reference);
+    assert_eq!(entries[0].to_value, child.reference);
+    assert_eq!(entries[0].editing_agent.as_deref(), Some("agent"));
+}

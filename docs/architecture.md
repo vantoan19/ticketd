@@ -101,3 +101,10 @@ and `--offset` for bounded pages). Personal writes use the retryable `write`
 workflow: `set_following` takes a ticket `reference` and `following` boolean;
 `set_inbox_read` takes explicit entry `ids` and a `read` boolean. Supplying the
 IDs actually displayed avoids marking later arrivals read.
+
+Inbox entries for new notes retain the note ID and its original content in
+`from_value` and `to_value`; this snapshot remains meaningful after the note is
+edited or deleted. `editing_agent` is descriptive attribution. Relationship
+history kinds `parent`, `dependency`, and those prefixed `relationship:` also
+produce inbox entries for followed tickets, in the same transaction as the
+change. New relationship types use that prefix to participate.
