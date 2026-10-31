@@ -60,7 +60,7 @@ pub(crate) fn migrate(transaction: &Transaction<'_>) -> Result<(), Error> {
 }
 
 pub(crate) fn record(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     ticket_id: &str,
     kind: &str,
     from: &str,

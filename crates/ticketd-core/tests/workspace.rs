@@ -724,3 +724,39 @@ fn dependency_graph_is_bounded_and_reports_direction_and_availability() {
         Some("Blocked")
     );
 }
+
+#[test]
+fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
+    use ticketd_core::BatchOperation;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("batch.sqlite")).unwrap();
+    let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"create", "name":"parent", "title":"Parent"},
+        {"operation":"create", "name":"child", "title":"Child"},
+        {"operation":"change", "ticket":"$child", "change":{"parent":"$parent", "add_blockers":["$parent"], "add_tags":["Feature"], "notes":["Started"]}}
+    ])).unwrap();
+    let results = workspace.apply_batch(operations).unwrap();
+    let child = workspace.show_ticket(&results[1].reference).unwrap();
+    assert_eq!(child.parent.unwrap().reference, results[0].reference);
+    assert_eq!(child.prerequisites[0].reference, results[0].reference);
+    assert_eq!(child.tags, ["feature"]);
+    assert_eq!(workspace.notes(&child.reference, 10, 0).unwrap().len(), 1);
+    let history_before = workspace.ticket_history(&child.reference).unwrap();
+    let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"create", "name":"temporary", "title":"Rolled back"},
+        {"operation":"change", "ticket":child.reference, "change":{"status":"Done", "notes":["rolled back"]}},
+        {"operation":"change", "ticket":results[0].reference, "change":{"add_blockers":[child.reference]}}
+    ])).unwrap();
+    let error = workspace.apply_batch(operations).unwrap_err().to_string();
+    assert!(error.contains("operation 2"));
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    assert_eq!(
+        workspace.show_ticket(&child.reference).unwrap().status,
+        ticketd_core::Status::Todo
+    );
+    assert_eq!(workspace.notes(&child.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(
+        workspace.ticket_history(&child.reference).unwrap(),
+        history_before
+    );
+}

@@ -1,5 +1,5 @@
 use crate::{Error, Ticket, Workspace, history, relationships};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,9 +45,8 @@ impl Workspace {
         child: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
         let parent_id = relationships::id(&tx, parent)?;
         let child_id = relationships::id(&tx, child)?;
         crate::ensure_editable(&tx, &parent_id)?;
@@ -67,9 +66,8 @@ impl Workspace {
         parent: Option<&str>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
-        let tx = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
         let child_id = relationships::id(&tx, child)?;
         let old: Option<String> = tx.query_row("SELECT 'T-' || tickets.number FROM ticket_parents JOIN tickets ON tickets.id = ticket_parents.parent_id WHERE child_id = ?1", [&child_id], |row| row.get(0)).optional()?;
         // Removing a link is allowed if either endpoint remains visible.
