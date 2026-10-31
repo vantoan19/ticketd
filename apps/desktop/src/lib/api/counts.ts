@@ -1,0 +1,17 @@
+import { invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
+
+const countSchema = z.number().int().nonnegative();
+const sidebarCountsSchema = z.object({
+  unread_inbox: countSchema,
+  ready: countSchema,
+  in_progress: countSchema,
+});
+
+export type SidebarCounts = z.infer<typeof sidebarCountsSchema>;
+
+export const countsClient = {
+  async sidebar(): Promise<SidebarCounts> {
+    return sidebarCountsSchema.parse(await invoke("sidebar_counts"));
+  },
+};

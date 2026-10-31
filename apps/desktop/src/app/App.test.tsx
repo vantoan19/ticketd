@@ -273,7 +273,13 @@ test("retains project drafts and clears filters when navigating scopes", async (
     target: { value: "Draft" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  expect(
+    screen.queryByRole("navigation", { name: "Workspace views" }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
   expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
     "value",
     "Draft",
@@ -841,9 +847,10 @@ test("removes an Effort and adds or removes a tag from the Organize menu", async
 
 test("shows attention for a reminder while another view is active and after reopening", async () => {
   vi.useFakeTimers();
-  let unread = false;
+  let unread = 0;
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "has_unread_inbox") return unread;
+    if (command === "sidebar_counts")
+      return { unread_inbox: unread, ready: 4, in_progress: 2 };
     if (
       command === "list_projects" ||
       command === "list_efforts" ||
@@ -857,16 +864,61 @@ test("shows attention for a reminder while another view is active and after reop
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
-  unread = true;
+  unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(screen.getByRole("button", { name: "Inbox, unread" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inbox, 3 unread" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Ready 4" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "In progress 2" })).toBeTruthy();
   app.unmount();
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByRole("button", { name: "Inbox, unread" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inbox, 3 unread" })).toBeTruthy();
+  unread = 0;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeTruthy();
+});
+
+test("opens a ticket from the list at full width when Open tickets says so", async () => {
+  vi.useFakeTimers();
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ theme: "system", openTickets: "expanded" }),
+  );
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    effort_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return [];
+  });
+  const { container } = render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  expect(container.querySelector(".ticket-workspace.expanded")).not.toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Return to ticket list" }),
+  );
+  expect(container.querySelector(".ticket-workspace.expanded")).toBeNull();
 });

@@ -1,11 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
+import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { useTicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import { useBulkEdit } from "@/features/tickets/useBulkEdit";
 import { TicketWorkspaceView } from "@/features/tickets/TicketWorkspaceView";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
-import { WorkspaceSettings } from "@/features/settings/WorkspaceSettings";
+import { SettingsView } from "@/features/settings/SettingsView";
+import { SettingsNav } from "@/features/settings/SettingsNav";
+import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Menu } from "lucide-react";
 import { Efforts } from "@/features/efforts/Efforts";
@@ -17,18 +19,31 @@ export function App() {
   const [view, setView] = useState<
     "tickets" | "projects" | "efforts" | "settings" | "inbox"
   >("tickets");
+  useThemeSync();
+  // Settings replaces the sidebar; Back to tickets returns to the view it left.
+  const [viewBeforeSettings, setViewBeforeSettings] =
+    useState<typeof view>("tickets");
+  const openView = (next: typeof view) => {
+    if (next === "settings" && view !== "settings") setViewBeforeSettings(view);
+    setView(next);
+  };
   const [inboxTarget, setInboxTarget] = useState<{
     reference: string;
     id: string;
     key: number;
   } | null>(null);
-  const [unread, setUnread] = useState(false);
+  const [counts, setCounts] = useState<SidebarCounts>({
+    unread_inbox: 0,
+    ready: 0,
+    in_progress: 0,
+  });
   useEffect(() => {
     let active = true;
     const poll = () =>
-      void invoke("has_unread_inbox")
+      void countsClient
+        .sidebar()
         .then((value) => {
-          if (active && typeof value === "boolean") setUnread(value);
+          if (active) setCounts(value);
         })
         .catch(() => {});
     poll();
@@ -75,25 +90,33 @@ export function App() {
       >
         Skip to content
       </a>
-      <div className="workspace">
-        <WorkspaceSidebar
-          unread={unread}
-          view={view}
-          setView={setView}
-          filter={filter}
-          effort={effort}
-          status={status}
-          availability={availability}
-          trash={trash}
-          projects={projects}
-          efforts={efforts}
-          scope={scope}
-          navigation={navigation}
-          setCreating={setCreating}
-          createTriggerRef={createTriggerRef}
-        />
+      <div
+        className={
+          view === "settings" ? "workspace settings-open" : "workspace"
+        }
+      >
+        {view === "settings" ? (
+          <SettingsNav onBack={() => setView(viewBeforeSettings)} />
+        ) : (
+          <WorkspaceSidebar
+            counts={counts}
+            view={view}
+            setView={openView}
+            filter={filter}
+            effort={effort}
+            status={status}
+            availability={availability}
+            trash={trash}
+            projects={projects}
+            efforts={efforts}
+            scope={scope}
+            navigation={navigation}
+            setCreating={setCreating}
+            createTriggerRef={createTriggerRef}
+          />
+        )}
         <main id="main-content" tabIndex={-1} className="content-panel">
-          {isMobile && (
+          {isMobile && view !== "settings" && (
             <div className="mobile-nav-bar">
               <SidebarTrigger
                 className="mobile-nav-trigger"
@@ -119,7 +142,7 @@ export function App() {
             efforts={efforts}
             create={create}
           />
-          <WorkspaceSettings
+          <SettingsView
             hidden={view !== "settings"}
             onRestore={async () => {
               setSelected(null);

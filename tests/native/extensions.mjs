@@ -101,24 +101,24 @@ try {
     `Native finding referencing ${target.reference}`,
   );
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 12000 });
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
-    await browser.$("p*=New note: Native finding")
+    await browser.$("span*=New note: Native finding")
   ).waitForDisplayed({ timeout: 12000 });
-  await click(await browser.$("button=Mark displayed read"));
+  await click(await browser.$("button=Mark shown as read"));
   await waitFor(
     () => run("inbox").every((item) => item.read),
     "Inbox entries were not marked read",
   );
   await waitFor(
-    async () => !(await browser.$('[aria-label="Inbox, unread"]').isExisting()),
+    async () => !(await browser.$('[aria-label^="Inbox,"]').isExisting()),
     "Unread indicator did not clear",
   );
   await click(
     await browser.$(
-      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
@@ -152,17 +152,17 @@ try {
   await browser.keys("Escape");
   await click(await browser.$('[aria-label="Manage projects"]'));
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 75000, interval: 250 });
   assert.equal(
     run("inbox").filter((item) => item.kind === "reminder").length,
     1,
   );
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
-    await browser.$("p*=Reminder due")
+    await browser.$("span*=Your reminder is due")
   ).waitForDisplayed({ timeout: 10000 });
-  await click(await browser.$("button=Mark displayed read"));
+  await click(await browser.$("button=Mark shown as read"));
   await waitFor(
     () => run("inbox").every((item) => item.read),
     "Reminder not read",
@@ -178,9 +178,9 @@ try {
   );
   browser = await connect();
   await (
-    await browser.$('[aria-label="Inbox, unread"]')
+    await browser.$('[aria-label^="Inbox,"]')
   ).waitForDisplayed({ timeout: 15000 });
-  await click(await browser.$('[aria-label="Inbox, unread"]'));
+  await click(await browser.$('[aria-label^="Inbox,"]'));
   assert.equal(
     run("inbox").filter((item) => item.kind === "reminder").length,
     2,
@@ -200,7 +200,7 @@ try {
   );
   await click(
     await browser.$(
-      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//p[contains(., "Reminder due")] and .//span[normalize-space()="Unread"]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "Your reminder is due")] and .//span[normalize-space()="Unread"]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
