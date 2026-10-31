@@ -24,11 +24,14 @@ import {
 } from "@/lib/preferences";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
+import { Kbd } from "@/components/ui/kbd";
+import { modifierKeyLabel, fileManagerName } from "@/lib/platform";
+import { formatDateTime } from "@/lib/format";
+import { writeClipboard } from "@/lib/clipboard";
+import { revealFile } from "@/lib/reveal";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
-import { fileManagerName } from "@/features/settings/file-manager";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import "@/features/settings/settings.css";
@@ -168,21 +171,13 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
     };
   }, [refreshKey]);
   async function copyPath(path: string) {
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(path);
-      setMessage("Path copied.");
-    } catch (reason) {
-      setMessage(`Could not copy the path: ${String(reason)}`);
-    }
+    const failure = await writeClipboard(path);
+    setMessage(
+      failure === null ? "Path copied." : `Could not copy the path: ${failure}`,
+    );
   }
   async function reveal(path: string) {
-    try {
-      await workspaceClient.reveal(path);
-      setMessage("");
-    } catch (reason) {
-      setMessage(`Could not show the file: ${String(reason)}`);
-    }
+    setMessage((await revealFile(path)) ?? "");
   }
   const manager = fileManagerName();
   const facts = info && [
@@ -252,11 +247,6 @@ function localDate() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-function formatBackupTime(timestamp: string) {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
-}
-
 function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
   const [last, setLast] = useState<BackupRecord | null>(null);
   const [failure, setFailure] = useState("");
@@ -316,11 +306,8 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     }
   }
   async function reveal(path: string) {
-    try {
-      await workspaceClient.reveal(path);
-    } catch (reason) {
-      setFailure(`Could not show the file: ${String(reason)}`);
-    }
+    const failure = await revealFile(path);
+    if (failure) setFailure(failure);
   }
   async function chooseBackup() {
     setFailure("");
@@ -362,7 +349,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             <p className="settings-label">
               Last backup{" "}
               <span className="settings-hint">
-                {formatBackupTime(last.completed_at)}
+                {formatDateTime(last.completed_at)}
               </span>
             </p>
             <p className="workspace-path" aria-label="Last backup path">
@@ -480,13 +467,9 @@ function ExportCard() {
     }
   }
   async function copyCommand() {
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(EXPORT_COMMAND);
-      setMessage("Command copied.");
-    } catch (reason) {
-      setFailure(`Could not copy the command: ${String(reason)}`);
-    }
+    const failure = await writeClipboard(EXPORT_COMMAND);
+    if (failure === null) setMessage("Command copied.");
+    else setFailure(`Could not copy the command: ${failure}`);
   }
   return (
     <SettingsCard id="export" title="Export">

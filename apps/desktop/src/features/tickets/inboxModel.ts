@@ -1,3 +1,4 @@
+import { startOfLocalDay } from "@/lib/format";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
 
@@ -53,22 +54,14 @@ export function summarize(entry: Entry): string {
   return entry.editing_agent ? `${base} · ${entry.editing_agent}` : base;
 }
 
-function startOfDay(date: Date): number {
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  ).getTime();
-}
-
 /** Group by local calendar day relative to `now`. */
 export function dayGroup(timestamp: string, now: Date): DayGroup {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "Earlier";
-  const today = startOfDay(now);
-  const day = startOfDay(date);
+  const today = startOfLocalDay(now);
+  const day = startOfLocalDay(date);
   if (day >= today) return "Today";
-  const yesterday = startOfDay(new Date(today - 1));
+  const yesterday = startOfLocalDay(new Date(today - 1));
   return day >= yesterday ? "Yesterday" : "Earlier";
 }
 

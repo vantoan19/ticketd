@@ -17,7 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { SettingsCard } from "@/features/settings/SettingsCard";
-import { CopyButton } from "@/features/projects/CopyButton";
+import { CopyButton } from "@/components/ui/copy-button";
 import { FormDialog } from "@/features/projects/FormDialog";
 import "../management.css";
 import "./projects.css";
@@ -91,7 +91,7 @@ function CheckoutRow({
   return (
     <div className="checkout-row">
       <code>{path}</code>
-      <CopyButton label={`checkout path ${path}`} text={path} />
+      <CopyButton aria-label={`Copy checkout path ${path}`} text={path} />
       <Button
         type="button"
         variant="ghost"
@@ -289,7 +289,7 @@ export function Projects({
                   <span className="settings-hint">Project ID</span>
                   <code>{item.id}</code>
                   <CopyButton
-                    label={`project ID of ${item.name}`}
+                    aria-label={`Copy project ID of ${item.name}`}
                     text={item.id}
                   />
                 </div>

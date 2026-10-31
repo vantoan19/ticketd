@@ -16,7 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatWhen } from "./format-when";
+import { formatDateTime } from "@/lib/format";
+import { useCopy } from "@/components/ui/use-copy";
 import "./evidence.css";
 import {
   useCallback,
@@ -69,7 +70,7 @@ export function Evidence({
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
+  const { copied, copy: copyText } = useCopy();
   const request = useRef<{ key: string; id: string } | null>(null);
   const pendingRef = useRef(false);
   function requestId(key: string) {
@@ -148,19 +149,12 @@ export function Evidence({
       current.value !== editing.value ||
       current.name !== editing.name ||
       current.kind !== editing.kind);
-  function copy(item: EvidenceRecord) {
-    const failure = "Could not copy the value. Select it above to copy it.";
-    if (!navigator.clipboard) {
-      setError(failure);
-      return;
-    }
-    void navigator.clipboard
-      .writeText(item.value)
-      .then(() => {
-        setCopied(item.id);
-        setError("");
-      })
-      .catch(() => setError(failure));
+  async function copy(item: EvidenceRecord) {
+    setError(
+      (await copyText(item.id, item.value))
+        ? ""
+        : "Could not copy the value. Select it above to copy it.",
+    );
   }
   function startAdding() {
     returnFocus.current = null;
@@ -204,7 +198,7 @@ export function Evidence({
             <div className="evidence-item-heading">
               <strong>{item.name}</strong>
               <span title={item.updated_at}>
-                {typeNames[item.kind]} · {formatWhen(item.updated_at)}
+                {typeNames[item.kind]} · {formatDateTime(item.updated_at)}
                 {item.editing_agent && ` · ${item.editing_agent}`}
               </span>
               <span className="evidence-item-actions">

@@ -1,14 +1,6 @@
 import * as React from "react";
 import { cn } from "cn";
 
-/** The label for the platform's primary modifier key. */
-// eslint-disable-next-line react-refresh/only-export-components -- required beside Kbd; only affects dev reloads
-export function modifierKeyLabel(): string {
-  const platform =
-    typeof navigator === "undefined" ? "" : navigator.platform || "";
-  return /mac|iphone|ipad/i.test(platform) ? "⌘" : "Ctrl";
-}
-
 function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
   return (
     <kbd

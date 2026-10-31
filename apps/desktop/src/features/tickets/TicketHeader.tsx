@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCopy } from "@/components/ui/use-copy";
 import {
   Dialog,
   DialogContent,
@@ -32,29 +33,7 @@ import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
 function contextCommand(reference: string): string {
-  return `ticketd context ${reference}`;
-}
-
-/** Copies text and reports success or failure for a short confirmation. */
-function useCopy() {
-  const [copied, setCopied] = useState("");
-  const [error, setError] = useState("");
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  async function copy(label: string, text: string) {
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(text);
-      setError("");
-      setCopied(label);
-      window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => setCopied(""), 2000);
-    } catch (reason) {
-      setCopied("");
-      setError(`Could not copy ${label.toLowerCase()}: ${String(reason)}`);
-    }
-  }
-  return { copied, error, copy };
+  return `ticketd context ${reference} --relationships --notes --evidence`;
 }
 
 /** The reference, personal actions, actions menu, and pane controls of a ticket. */

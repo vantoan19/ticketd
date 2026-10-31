@@ -17,7 +17,8 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Kbd, modifierKeyLabel } from "@/components/ui/kbd";
+import { Kbd } from "@/components/ui/kbd";
+import { modifierKeyLabel } from "@/lib/platform";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,

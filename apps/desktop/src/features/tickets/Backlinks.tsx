@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { client } from "@/lib/api/client";
 import { EmphasizedPassage } from "./reference-passage";
-import { formatWhen } from "./format-when";
+import { formatDateTime } from "@/lib/format";
 import "./backlinks.css";
 
 type Link = Awaited<ReturnType<typeof client.backlinks>>[number];
@@ -100,7 +100,7 @@ export function Backlinks({
               </span>
               <span className="backlink-where">
                 {link.note_id
-                  ? `Note${noteDates[link.note_id] ? ` · ${formatWhen(noteDates[link.note_id] ?? "")}` : ""}`
+                  ? `Note${noteDates[link.note_id] ? ` · ${formatDateTime(noteDates[link.note_id] ?? "")}` : ""}`
                   : "Description"}
               </span>
               <span className="mention-passage">

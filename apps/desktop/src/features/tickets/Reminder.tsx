@@ -120,7 +120,9 @@ export function Reminder({
           size="sm"
           aria-label={
             due
-              ? `Manage reminder, scheduled ${reminderSummary(due)}`
+              ? reminderSummary(due) === "Reminder due"
+                ? "Manage reminder, due"
+                : `Manage reminder, scheduled ${reminderSummary(due)}`
               : "Manage reminder"
           }
         >

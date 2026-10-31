@@ -2,17 +2,14 @@ import { useEffect, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { workspaceClient, type SafetyBackup } from "@/lib/api/workspace";
-import { fileManagerName } from "@/features/settings/file-manager";
+import { fileManagerName } from "@/lib/platform";
+import { formatDateTime } from "@/lib/format";
+import { revealFile } from "@/lib/reveal";
 
 const KIND_LABEL: Record<SafetyBackup["kind"], string> = {
   safety: "Before a restore",
   pre_migration: "Before an upgrade",
 };
-
-function formatTime(timestamp: string) {
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
-}
 
 /** The safety and pre-migration backups kept next to the workspace. */
 export function SafetyBackups() {
@@ -34,12 +31,7 @@ export function SafetyBackups() {
     };
   }, []);
   async function reveal(path: string) {
-    try {
-      await workspaceClient.reveal(path);
-      setFailure("");
-    } catch (reason) {
-      setFailure(`Could not show the file: ${String(reason)}`);
-    }
+    setFailure((await revealFile(path)) ?? "");
   }
   return (
     <div className="safety-backups" role="region" aria-label="Safety backups">
@@ -59,7 +51,7 @@ export function SafetyBackups() {
                 <p className="settings-label">
                   {KIND_LABEL[backup.kind]}{" "}
                   <span className="settings-hint">
-                    {formatTime(backup.saved_at)}
+                    {formatDateTime(backup.saved_at)}
                   </span>
                 </p>
                 <code className="safety-backup-path">{backup.path}</code>

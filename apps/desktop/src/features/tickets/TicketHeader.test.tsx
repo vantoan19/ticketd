@@ -103,7 +103,9 @@ test("copies the reference from the header and the context command from the menu
   await waitFor(() => expect(writeText).toHaveBeenCalledWith("T-1"));
   await chooseAction("Copy context command");
   await waitFor(() =>
-    expect(writeText).toHaveBeenLastCalledWith("ticketd context T-1"),
+    expect(writeText).toHaveBeenLastCalledWith(
+      "ticketd context T-1 --relationships --notes --evidence",
+    ),
   );
 });
 
@@ -116,6 +118,10 @@ test("Follow exposes a pressed state and reads Following", async () => {
   expect(pressed.getAttribute("aria-pressed")).toBe("true");
 });
 
+// The summary follows the locale's time format, so expectations use it too.
+const localTime = (date: Date) =>
+  date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
 test("the reminder trigger shows the scheduled time", async () => {
   const due = new Date();
   due.setDate(due.getDate() + 1);
@@ -125,16 +131,29 @@ test("the reminder trigger shows the scheduled time", async () => {
   const trigger = await screen.findByRole("button", {
     name: /Manage reminder, scheduled/,
   });
-  expect(trigger.textContent).toBe("Tomorrow, 9:00");
+  expect(trigger.textContent).toBe(`Tomorrow, ${localTime(due)}`);
 });
 
-test("summarizes reminder times relative to today", () => {
+test("summarizes reminder times relative to today in the locale's format", () => {
   const now = new Date(2030, 0, 10, 12, 0);
   const at = (day: number, hour: number, minute: number) =>
-    new Date(2030, 0, day, hour, minute).toISOString();
-  expect(reminderSummary(at(10, 15, 5), now)).toBe("Today, 15:05");
-  expect(reminderSummary(at(11, 9, 0), now)).toBe("Tomorrow, 9:00");
-  expect(reminderSummary(at(20, 9, 0), now)).toMatch(/, 9:00$/);
+    new Date(2030, 0, day, hour, minute);
+  expect(reminderSummary(at(10, 15, 5).toISOString(), now)).toBe(
+    `Today, ${localTime(at(10, 15, 5))}`,
+  );
+  expect(reminderSummary(at(11, 9, 0).toISOString(), now)).toBe(
+    `Tomorrow, ${localTime(at(11, 9, 0))}`,
+  );
+  expect(reminderSummary(at(20, 9, 0).toISOString(), now)).toContain(
+    localTime(at(20, 9, 0)),
+  );
+});
+
+test("a reminder whose time has passed says it is due, not scheduled", () => {
+  const now = new Date(2030, 0, 10, 12, 0);
+  expect(reminderSummary(new Date(2030, 0, 10, 9, 0).toISOString(), now)).toBe(
+    "Reminder due",
+  );
 });
 
 test("the actions menu opens the graph, the duplicate dialog, and trash", async () => {

@@ -20,7 +20,10 @@ import {
   type BackupInspection,
   type WorkspaceSummary,
 } from "@/lib/api/workspace";
-import { fileManagerName } from "@/features/settings/file-manager";
+import { fileManagerName } from "@/lib/platform";
+import { formatDateTime } from "@/lib/format";
+import { writeClipboard } from "@/lib/clipboard";
+import { revealFile } from "@/lib/reveal";
 import "@/features/settings/restore-review.css";
 
 type Phase =
@@ -38,9 +41,7 @@ type Phase =
 const UNCHANGED = "Your workspace hasn't changed.";
 
 function formatWhen(timestamp: string | null) {
-  if (!timestamp) return "No changes yet";
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+  return timestamp ? formatDateTime(timestamp) : "No changes yet";
 }
 
 function splitPath(path: string) {
@@ -230,21 +231,13 @@ export function RestoreDialog({
   }
 
   async function copy(text: string) {
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(text);
-      setCopied("Path copied.");
-    } catch (reason) {
-      setCopied(`Could not copy the path: ${String(reason)}`);
-    }
+    const failure = await writeClipboard(text);
+    setCopied(
+      failure === null ? "Path copied." : `Could not copy the path: ${failure}`,
+    );
   }
   async function reveal(target: string) {
-    try {
-      await workspaceClient.reveal(target);
-      setCopied("");
-    } catch (reason) {
-      setCopied(`Could not show the file: ${String(reason)}`);
-    }
+    setCopied((await revealFile(target)) ?? "");
   }
 
   const busy = phase.name === "restoring" || phase.name === "checking";

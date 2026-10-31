@@ -28,7 +28,7 @@ import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
 import { EmphasizedPassage } from "./reference-passage";
-import { formatWhen } from "./format-when";
+import { formatDateTime } from "@/lib/format";
 import "./activity.css";
 
 /**
@@ -302,11 +302,11 @@ export function Activity({
                     dateTime={item.note.created_at}
                     title={item.note.created_at}
                   >
-                    {formatWhen(item.note.created_at)}
+                    {formatDateTime(item.note.created_at)}
                   </time>
                   {item.note.updated_at !== item.note.created_at && (
                     <span title={item.note.updated_at}>
-                      Edited {formatWhen(item.note.updated_at)}
+                      Edited {formatDateTime(item.note.updated_at)}
                     </span>
                   )}
                   {item.note.editing_agent && (
@@ -321,7 +321,7 @@ export function Activity({
                           size="icon-sm"
                           className="activity-menu"
                           disabled={pending}
-                          aria-label={`Actions for note from ${formatWhen(item.note.created_at)}`}
+                          aria-label={`Actions for note from ${formatDateTime(item.note.created_at)}`}
                         >
                           <MoreHorizontal />
                         </Button>
@@ -363,7 +363,7 @@ export function Activity({
                   dateTime={item.entry.timestamp}
                   title={item.entry.timestamp}
                 >
-                  {formatWhen(item.entry.timestamp)}
+                  {formatDateTime(item.entry.timestamp)}
                 </time>
                 {item.entry.editing_agent && (
                   <span>Agent: {item.entry.editing_agent}</span>
