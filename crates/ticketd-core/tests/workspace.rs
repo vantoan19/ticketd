@@ -327,3 +327,86 @@ fn concurrent_opposing_dependencies_cannot_form_cycle() {
         1
     );
 }
+
+#[test]
+fn effort_membership_progress_and_archiving_preserve_tickets() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let effort = workspace.create_effort("Launch").unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    workspace
+        .set_effort(&ticket.reference, Some(&effort.id), Some("agent"))
+        .unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let view = workspace.show_effort(&effort.id).unwrap();
+    assert_eq!(view.members.len(), 1);
+    assert_eq!(view.counts.done, 1);
+    workspace
+        .change_effort(&effort.id, None, Some(true))
+        .unwrap();
+    assert!(workspace.list_efforts(false).unwrap().is_empty());
+    workspace
+        .change_effort(&effort.id, Some("Release"), Some(false))
+        .unwrap();
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().status,
+        Status::Done
+    );
+    workspace.set_effort(&ticket.reference, None, None).unwrap();
+    let history = workspace.ticket_history(&ticket.reference).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|entry| entry.kind == "effort")
+            .count(),
+        2
+    );
+    assert!(
+        workspace
+            .show_effort(&effort.id)
+            .unwrap()
+            .members
+            .is_empty()
+    );
+}
+
+#[test]
+fn moving_effort_membership_is_atomic_and_survives_reopening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let first = workspace.create_effort("First").unwrap();
+    let second = workspace.create_effort("Second").unwrap();
+    let ticket = workspace.create_ticket("Shared outcome").unwrap();
+    workspace
+        .set_effort(&ticket.reference, Some(&first.id), None)
+        .unwrap();
+    assert!(
+        workspace
+            .set_effort(&ticket.reference, Some("missing"), None)
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().effort_id,
+        Some(first.id.clone())
+    );
+    workspace
+        .set_effort(&ticket.reference, Some(&second.id), None)
+        .unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.show_effort(&first.id).unwrap().members.is_empty());
+    assert_eq!(workspace.show_effort(&second.id).unwrap().members.len(), 1);
+    let history = workspace.ticket_history(&ticket.reference).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[1].from_value, first.id);
+    assert_eq!(history[1].to_value, second.id);
+}

@@ -1,3 +1,4 @@
+import { Efforts } from "./Efforts";
 import { Dependencies } from "./Dependencies";
 import { Notes } from "./Notes";
 import {
@@ -117,6 +118,7 @@ export function App() {
           {error}
         </p>
       )}
+      <Efforts revision={revision} refresh={refresh} />
       <div className="grid gap-6 md:grid-cols-2">
         <section aria-labelledby="tickets-heading">
           <h2 id="tickets-heading" className="text-xl font-semibold">
