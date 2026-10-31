@@ -153,8 +153,6 @@ export function App() {
           />
           {
             <div className="management" hidden={view !== "projects"}>
-              <h1>Projects</h1>
-              <p>Manage projects and registered checkouts.</p>{" "}
               <Projects
                 projects={projects}
                 loading={loading}

@@ -27,6 +27,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Help",
 ];
 
-export function settingsCardId(id: SettingsSectionId) {
+/** A card id: a Settings section, or another page borrowing the card (Projects). */
+export type SettingsCardKey = SettingsSectionId | `project-${string}`;
+
+export function settingsCardId(id: SettingsCardKey) {
   return `settings-${id}`;
 }
