@@ -529,7 +529,7 @@ select option {
   background: var(--accent);
 }
 .ticket-detail .cm-cursor {
-  border-left-color: var(--border);
+  border-left-color: var(--foreground);
 }
 .ticket-list li button > span:not(.ticket-title) {
   white-space: nowrap;
@@ -724,7 +724,7 @@ select option {
   min-width: 104px;
 }
 .status-options {
-  background: var(--accent);
+  background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   z-index: 60;
@@ -732,6 +732,8 @@ select option {
 .status-options [role="option"]:focus {
   background: var(--accent);
   color: var(--foreground);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 @media (prefers-color-scheme: dark) {
