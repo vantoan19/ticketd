@@ -8,6 +8,10 @@ const ticketSchema = z.object({
   status: z.string(),
   body: z.string(),
   tags: z.array(z.string()),
+  availability: z.string().nullable(),
+  prerequisites: z.array(
+    z.object({ reference: z.string(), title: z.string(), status: z.string() }),
+  ),
 });
 export type Ticket = z.infer<typeof ticketSchema>;
 export const client = {

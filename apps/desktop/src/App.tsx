@@ -1,3 +1,4 @@
+import { Dependencies } from "./Dependencies";
 import { History } from "./History";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { client, type Ticket } from "./client";
@@ -96,7 +97,8 @@ export function App() {
                     <span className="mr-3 text-neutral-600">
                       {item.reference}
                     </span>
-                    {item.title}
+                    {item.title}{" "}
+                    {item.availability && <span> · {item.availability}</span>}
                     {item.tags.length > 0 && (
                       <span className="ml-2 text-sm text-neutral-600">
                         {item.tags.join(", ")}
@@ -125,6 +127,9 @@ export function App() {
                 />
               )}
               <TicketEditor ticket={item} onSaved={updateTicket} />
+              {item.id === selected && (
+                <Dependencies ticket={item} refresh={refresh} />
+              )}
               <Tags
                 reference={item.reference}
                 tags={item.tags}

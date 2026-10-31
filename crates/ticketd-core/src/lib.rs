@@ -1,4 +1,5 @@
 //! Shared ticket workflows for the desktop and CLI.
+mod relationships;
 mod tags;
 
 use std::{path::Path, time::Duration};
@@ -13,6 +14,8 @@ pub use history::{HistoryEntry, Status};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("dependency would create a cycle or self-link")]
+    DependencyCycle,
     #[error("tag name must not be empty")]
     EmptyTag,
     #[error("ticket title must not be empty")]
@@ -37,6 +40,8 @@ pub struct Ticket {
     pub status: Status,
     pub body: String,
     pub tags: Vec<String>,
+    pub availability: Option<String>,
+    pub prerequisites: Vec<relationships::Prerequisite>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -66,7 +71,7 @@ impl Workspace {
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let version: i64 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if version > 4 {
+        if version > 5 {
             return Err(Error::NewerSchema(version));
         }
         if version == 0 {
@@ -81,6 +86,10 @@ impl Workspace {
         if version < 4 {
             tags::migrate(&transaction)?;
             transaction.pragma_update(None, "user_version", 4)?;
+        }
+        if version < 5 {
+            relationships::migrate(&transaction)?;
+            transaction.pragma_update(None, "user_version", 5)?;
         }
         transaction.commit()?;
         Ok(Self { connection })
@@ -103,6 +112,8 @@ impl Workspace {
             status: Status::Todo,
             body: String::new(),
             tags: Vec::new(),
+            availability: Some("Ready".into()),
+            prerequisites: Vec::new(),
         })
     }
 
@@ -143,6 +154,7 @@ impl Workspace {
             ticket_from_row,
         )?;
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
+        relationships::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -161,6 +173,7 @@ impl Workspace {
             .collect::<Result<Vec<_>, _>>()?;
         for ticket in &mut tickets {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
+            relationships::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -179,6 +192,7 @@ impl Workspace {
             .optional()?;
         let mut ticket = ticket.ok_or_else(|| Error::NotFound(reference.to_owned()))?;
         ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
+        relationships::populate(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -197,5 +211,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         })?,
         body: row.get(4)?,
         tags: Vec::new(),
+        availability: None,
+        prerequisites: Vec::new(),
     })
 }

@@ -1,4 +1,4 @@
-use ticketd_core::Workspace;
+use ticketd_core::{Status, TicketPatch, Workspace};
 
 #[test]
 fn ticket_survives_reopening_workspace() {
@@ -143,4 +143,106 @@ fn version_one_workspace_upgrades_content_history_and_tags() {
     drop(workspace);
     let reopened = Workspace::open(&path).unwrap();
     assert_eq!(reopened.show_ticket("T-1").unwrap(), updated);
+}
+
+#[test]
+fn dependencies_derive_availability_and_keep_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let blocker = workspace.create_ticket("blocker").unwrap();
+    let dependent = workspace.create_ticket("dependent").unwrap();
+    workspace
+        .add_dependency(&blocker.reference, &dependent.reference, None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Blocked")
+    );
+    workspace
+        .change_ticket(
+            &blocker.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Ready")
+    );
+    workspace
+        .change_ticket(
+            &blocker.reference,
+            TicketPatch {
+                status: Some(Status::Canceled),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Blocked")
+    );
+    assert!(
+        workspace
+            .add_dependency(&dependent.reference, &blocker.reference, None)
+            .is_err()
+    );
+    workspace
+        .remove_dependency(&blocker.reference, &dependent.reference, None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .ticket_history(&dependent.reference)
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn concurrent_opposing_dependencies_cannot_form_cycle() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [
+        (a.reference.clone(), b.reference.clone()),
+        (b.reference, a.reference),
+    ]
+    .into_iter()
+    .map(|(blocker, dependent)| {
+        let path = path.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            let mut workspace = Workspace::open(path).unwrap();
+            barrier.wait();
+            workspace.add_dependency(&blocker, &dependent, None).is_ok()
+        })
+    })
+    .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|result| *result)
+            .count(),
+        1
+    );
 }

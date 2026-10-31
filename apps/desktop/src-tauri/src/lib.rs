@@ -43,6 +43,20 @@ fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut workspace| workspace.add_dependency(&blocker, &dependent, None))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut workspace| workspace.remove_dependency(&blocker, &dependent, None))
+        .map_err(|error| error.to_string())
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -51,7 +65,9 @@ pub fn run() -> Result<(), tauri::Error> {
             change_ticket,
             ticket_history,
             add_tag,
-            remove_tag
+            remove_tag,
+            add_dependency,
+            remove_dependency
         ])
         .run(tauri::generate_context!())
 }
