@@ -209,6 +209,11 @@ export const client = {
       .array(noteSchema)
       .parse(await invoke("list_notes", { reference, limit: 50, offset }));
   },
+  async note(reference: string, id: string) {
+    return noteSchema
+      .nullable()
+      .parse(await invoke("get_note", { reference, id }));
+  },
   async addNote(reference: string, content: string) {
     return noteSchema.parse(await invoke("add_note", { reference, content }));
   },

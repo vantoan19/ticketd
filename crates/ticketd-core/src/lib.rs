@@ -210,10 +210,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 16 {
+            if version > 17 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 16 {
+            if version == 17 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -234,10 +234,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 16 {
+            if version > 17 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 16 {
+            if version < 17 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -317,6 +317,9 @@ impl Workspace {
         }
         if version < 16 {
             transaction.execute_batch("CREATE TABLE evidence (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, ticket_id TEXT NOT NULL REFERENCES tickets(id), kind TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), editing_agent TEXT); PRAGMA user_version = 16;")?;
+        }
+        if version < 17 {
+            transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 17;")?;
         }
         transaction.commit()?;
         Ok(())
@@ -504,6 +507,7 @@ impl Workspace {
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
         let result = notes::add(&tx, &id_ticket, content, agent)?;
+        inbox::record(&tx, &id_ticket, "note", &result.id, content, agent)?;
         tx.commit()?;
         Ok(result)
     }
@@ -530,6 +534,11 @@ impl Workspace {
         tx.commit()?;
         Ok(())
     }
+    pub fn note(&self, reference: &str, id: &str) -> Result<Note, Error> {
+        let ticket = self.show_ticket(reference)?;
+        notes::get(&self.connection, &ticket.id, id)
+    }
+
     pub fn notes(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Note>, Error> {
         let ticket = self.show_ticket(reference)?;
         notes::read(&self.connection, &ticket.id, limit, offset)

@@ -27,6 +27,7 @@ export function Activity({
   active,
   trashed,
   select,
+  target,
 }: {
   reference: string;
   status: string;
@@ -35,12 +36,34 @@ export function Activity({
   active: boolean;
   trashed: boolean;
   select?: (reference: string) => void;
+  target?: { id: string; key: number } | null;
 }) {
+  const [loadError, setLoadError] = useState("");
+  const [targetNote, setTargetNote] = useState<Note | null>(null);
+  const targetRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active || !target) return;
+    let current = true;
+    void client
+      .note(reference, target.id)
+      .then((note) => {
+        if (current) setTargetNote(note);
+      })
+      .catch((reason: unknown) => {
+        if (current) setLoadError(String(reason));
+      });
+    return () => {
+      current = false;
+    };
+  }, [active, reference, target]);
+  useEffect(() => {
+    if (active && target && targetNote?.id === target.id)
+      targetRef.current?.scrollIntoView?.({ block: "center" });
+  }, [active, target, targetNote]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState("");
   const [draft, setDraft] = useState("");
   const [edit, setEdit] = useState<{
     id: string;
@@ -160,6 +183,16 @@ export function Activity({
   }
   return (
     <section className="activity" aria-label="Activity">
+      {active && target && targetNote?.id === target.id && (
+        <div ref={targetRef} tabIndex={-1} aria-label="Selected note">
+          <strong>Selected note</strong>
+          <TicketMarkdown
+            content={targetNote.content}
+            select={select}
+            revision={revision}
+          />
+        </div>
+      )}
       <div className="activity-heading">
         <h3>Activity</h3>
         <span>Notes and recorded changes</span>

@@ -66,6 +66,16 @@ fn cli_status_change_appears_in_followed_inbox() {
     assert_eq!(inbox[0]["reference"], "T-1");
     assert_eq!(inbox[0]["to_value"], "Done");
     assert_eq!(inbox[0]["read"], false);
+    run(
+        &["write", "-", "--request-id", "note"],
+        Some(
+            r#"{"operation":"add_note","reference":"T-1","content":"CLI finding","agent":"runner"}"#,
+        ),
+    );
+    let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
+    assert_eq!(inbox[0]["kind"], "note");
+    assert_eq!(inbox[0]["to_value"], "CLI finding");
+    assert_eq!(inbox[0]["editing_agent"], "runner");
 }
 
 #[test]

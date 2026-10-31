@@ -34,7 +34,7 @@ impl Workspace {
             ("ticket_follows", "person, ticket_id"),
             (
                 "inbox_entries",
-                "id, person, ticket_id, kind, from_value, to_value, timestamp, read",
+                "id, person, ticket_id, kind, from_value, to_value, timestamp, read, editing_agent",
             ),
             ("tags", "name"),
             ("ticket_tags", "ticket_id, tag_name"),

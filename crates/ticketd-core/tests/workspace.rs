@@ -1640,6 +1640,89 @@ fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
 }
 
 #[test]
+fn followed_note_remains_understandable_after_deletion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let note = workspace
+        .add_note(&ticket.reference, "Original finding", Some("agent"))
+        .unwrap();
+    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].kind, "note");
+    assert_eq!(entries[0].from_value, note.id);
+    assert_eq!(entries[0].to_value, "Original finding");
+}
+
+#[test]
+fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
+    use ticketd_core::{BatchOperation, TicketChange, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    let blocker = workspace.create_ticket("Blocker").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let request = || WriteRequest::Batch {
+        operations: vec![BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Batch note".into()],
+                add_blockers: vec![blocker.reference.clone()],
+                ..Default::default()
+            }),
+        }],
+    };
+    let failed = vec![
+        BatchOperation::Change {
+            ticket: ticket.reference.clone(),
+            change: Box::new(TicketChange {
+                notes: vec!["Rolled back".into()],
+                ..Default::default()
+            }),
+        },
+        BatchOperation::Change {
+            ticket: "T-9999".into(),
+            change: Box::new(TicketChange::default()),
+        },
+    ];
+    assert!(workspace.apply_batch(failed).is_err());
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    workspace.write(Some("batch"), request()).unwrap();
+    workspace.write(Some("batch"), request()).unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "note" && e.to_value == "Batch note")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.kind == "dependency" && e.to_value == blocker.reference)
+    );
+}
+
+#[test]
+fn followed_relationship_endpoints_receive_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = workspace.create_ticket("Parent").unwrap();
+    let child = workspace.create_ticket("Child").unwrap();
+    workspace.set_following(&parent.reference, true).unwrap();
+    workspace
+        .set_parent(&child.reference, Some(&parent.reference), Some("agent"))
+        .unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].reference, parent.reference);
+    assert_eq!(entries[0].to_value, child.reference);
+    assert_eq!(entries[0].editing_agent.as_deref(), Some("agent"));
+}
+
+#[test]
 fn duplicate_consolidation_and_undo_preserve_original_status() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -1976,4 +2059,49 @@ fn evidence_rejects_empty_fields_and_incomplete_pull_request_urls() {
         );
     }
     assert!(ws.evidence(&ticket.reference, 50, 0).unwrap().is_empty());
+}
+
+#[test]
+fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
+    use ticketd_core::{EvidenceInput, EvidenceKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace
+        .create_ticket("Evidence survives migration")
+        .unwrap();
+    workspace
+        .add_evidence(
+            &ticket.reference,
+            EvidenceInput {
+                kind: EvidenceKind::Commit,
+                name: "Commit".into(),
+                value: "abc123".into(),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    drop(workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+    )
+    .unwrap();
+    drop(db);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.evidence(&ticket.reference, 10, 0).unwrap()[0].value,
+        "abc123"
+    );
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let db = rusqlite::Connection::open(backup).unwrap();
+    let version: i64 = db
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 17);
+    assert!(
+        db.prepare("SELECT editing_agent FROM inbox_entries")
+            .is_ok()
+    );
 }
