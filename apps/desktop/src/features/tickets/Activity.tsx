@@ -5,6 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { MarkdownEditor } from "@/features/markdown/MarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -83,7 +84,13 @@ export function Activity({
   }, [active, loadNotes, reference, revision, status]);
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy.current) return;
+    if (
+      event.target !== event.currentTarget ||
+      busy.current ||
+      trashed ||
+      !(edit ? edit.content : draft).trim()
+    )
+      return;
     busy.current = true;
     setPending(true);
     setError("");
@@ -268,20 +275,18 @@ export function Activity({
           onSubmit={(event) => void save(event)}
         >
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`note-${reference}`}>
-                {edit ? "Edit note" : "New note"}
+            <Field data-disabled={pending}>
+              <FieldLabel asChild>
+                <span>{edit ? "Edit note" : "New note"}</span>
               </FieldLabel>
-              <textarea
-                id={`note-${reference}`}
+              <MarkdownEditor
+                key={edit?.id ?? "new"}
+                label={edit ? "Edit note" : "New note"}
                 value={edit ? edit.content : draft}
-                onChange={(event) =>
-                  edit
-                    ? setEdit({ ...edit, content: event.target.value })
-                    : setDraft(event.target.value)
+                onChange={(content) =>
+                  edit ? setEdit({ ...edit, content }) : setDraft(content)
                 }
-                required
-                disabled={pending}
+                readOnly={pending}
               />
               <FieldDescription>Markdown is supported.</FieldDescription>
             </Field>
@@ -293,7 +298,11 @@ export function Activity({
             </p>
           )}
           <div className="activity-actions">
-            <Button type="submit" size="sm" disabled={pending}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={pending || !(edit ? edit.content : draft).trim()}
+            >
               {pending ? "Saving…" : edit ? "Save note" : "Add note"}
             </Button>
             {edit && (
