@@ -1,6 +1,8 @@
 //! Shared ticket workflows for the desktop and CLI.
 mod efforts;
+mod graph;
 mod hierarchy;
+pub use graph::{DependencyGraph, GraphEdge, GraphNode};
 mod projects;
 mod relationships;
 mod tags;

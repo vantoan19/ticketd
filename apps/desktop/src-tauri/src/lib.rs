@@ -1,6 +1,7 @@
 //! Desktop adapter for the shared ticketd core.
 use ticketd_core::{
-    Effort, EffortView, HistoryEntry, Note, NotePatch, Project, Ticket, TicketPatch, Workspace,
+    DependencyGraph, Effort, EffortView, HistoryEntry, Note, NotePatch, Project, Ticket,
+    TicketPatch, Workspace,
 };
 
 #[tauri::command]
@@ -19,6 +20,13 @@ fn create_project(name: String, path: String) -> Result<Project, String> {
 fn edit_project(id: String, name: String, path: String) -> Result<Project, String> {
     Workspace::open_default()
         .and_then(|mut w| w.edit_project(&id, &name, &path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| w.dependency_graph(&reference))
         .map_err(|e| e.to_string())
 }
 
@@ -173,6 +181,7 @@ pub fn run() -> Result<(), tauri::Error> {
             create_project,
             edit_project,
             list_tickets,
+            dependency_graph,
             create_ticket,
             change_ticket,
             ticket_history,

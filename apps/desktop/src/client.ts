@@ -16,6 +16,21 @@ const ticketSchema = z.object({
     z.object({ reference: z.string(), title: z.string(), status: z.string() }),
   ),
 });
+const graphSchema = z.object({
+  nodes: z.array(
+    z.object({
+      reference: z.string(),
+      title: z.string(),
+      status: z.string(),
+      availability: z.string().nullable(),
+    }),
+  ),
+  edges: z.array(z.object({ blocker: z.string(), dependent: z.string() })),
+  max_nodes: z.number(),
+  max_depth: z.number(),
+  truncated: z.boolean(),
+});
+export type DependencyGraph = z.infer<typeof graphSchema>;
 const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -33,6 +48,9 @@ const noteSchema = z.object({
 export type Note = z.infer<typeof noteSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export const client = {
+  async dependencyGraph(reference: string) {
+    return graphSchema.parse(await invoke("dependency_graph", { reference }));
+  },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
   },

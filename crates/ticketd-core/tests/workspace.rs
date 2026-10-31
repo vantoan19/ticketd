@@ -607,3 +607,41 @@ fn checkout_context_is_local_and_ambiguous_matches_are_reported() {
         project.id
     );
 }
+
+#[test]
+fn dependency_graph_is_bounded_and_reports_direction_and_availability() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("graph.sqlite")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    let d = workspace.create_ticket("D").unwrap();
+    workspace
+        .add_dependency(&a.reference, &b.reference, None)
+        .unwrap();
+    workspace
+        .add_dependency(&b.reference, &c.reference, None)
+        .unwrap();
+    workspace
+        .add_dependency(&c.reference, &d.reference, None)
+        .unwrap();
+    let graph = workspace.dependency_graph(&a.reference).unwrap();
+    assert_eq!(graph.nodes.len(), 3);
+    assert!(graph.truncated);
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|edge| edge.blocker == a.reference && edge.dependent == b.reference)
+    );
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.reference == b.reference)
+            .unwrap()
+            .availability
+            .as_deref(),
+        Some("Blocked")
+    );
+}
