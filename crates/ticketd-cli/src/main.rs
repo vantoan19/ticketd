@@ -104,6 +104,8 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Preview dependencies before marking a duplicate
+    PreviewDuplicate { source: String, canonical: String },
     /// Remove a duplicate designation
     RemoveDuplicate {
         source: String,
@@ -595,6 +597,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             &canonical,
             agent.as_deref(),
         )?)?,
+        Command::PreviewDuplicate { source, canonical } => {
+            serde_json::to_string(&workspace.preview_duplicate_dependencies(&source, &canonical)?)?
+        }
         Command::RemoveDuplicate { source, agent } => {
             serde_json::to_string(&workspace.remove_duplicate(&source, agent.as_deref())?)?
         }

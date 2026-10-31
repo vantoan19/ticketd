@@ -192,3 +192,49 @@ fn cli_marks_and_removes_duplicate_designation() {
     assert_eq!(removed["status"], "Todo");
     assert!(removed["duplicate_of"].is_null());
 }
+
+#[test]
+fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], input: Option<&str>| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "Duplicate"], None);
+    run(&["create", "Canonical"], None);
+    run(&["create", "Dependent"], None);
+    run(&["add-dependency", "T-1", "T-3"], None);
+    let preview = run(&["preview-duplicate", "T-1", "T-2"], None);
+    assert_eq!(preview["edges"][0]["replacement_blocker"], "T-2");
+    let request = serde_json::json!({ "operation": "mark_duplicate_reviewed", "source": "T-1", "canonical": "T-2", "expected_canonical": preview["canonical"], "decisions": [{"edge": preview["edges"][0], "choice": "replace"}], "agent": null });
+    run(
+        &["write", "-", "--request-id", "review"],
+        Some(&request.to_string()),
+    );
+    let saved = run(&["show", "T-3"], None);
+    assert_eq!(saved["prerequisites"][0]["reference"], "T-2");
+}

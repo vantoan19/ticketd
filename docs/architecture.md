@@ -102,6 +102,15 @@ workflow: `set_following` takes a ticket `reference` and `following` boolean;
 `set_inbox_read` takes explicit entry `ids` and a `read` boolean. Supplying the
 IDs actually displayed avoids marking later arrivals read.
 
+To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
+T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
+with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
+with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
+optional agent. If the affected edges or resolved canonical change, preview again.
+For a separate graph edit after undo, preview the current endpoint against the
+replacement endpoint and submit the same fields with operation
+`edit_dependencies_reviewed`. Neither operation silently moves newly arrived
+edges; a retained canceled prerequisite remains unresolved.
 Inbox entries for new notes retain the note ID and its original content in
 `from_value` and `to_value`; this snapshot remains meaningful after the note is
 edited or deleted. `editing_agent` is descriptive attribution. Relationship

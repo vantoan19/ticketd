@@ -1,5 +1,31 @@
 use crate::{Error, Ticket, Workspace, history, relationships};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyEdge {
+    pub blocker: String,
+    pub dependent: String,
+    pub replacement_blocker: String,
+    pub replacement_dependent: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyChoice {
+    Replace,
+    Remove,
+    Retain,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyDecision {
+    pub edge: DependencyEdge,
+    pub choice: DependencyChoice,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DuplicateDependencyPreview {
+    pub canonical: String,
+    pub edges: Vec<DependencyEdge>,
+}
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
     conn.execute_batch("CREATE TABLE duplicate_tickets (source_id TEXT PRIMARY KEY REFERENCES tickets(id), canonical_id TEXT NOT NULL REFERENCES tickets(id), restore_status TEXT); PRAGMA user_version = 15;")?;
@@ -22,6 +48,16 @@ impl Workspace {
         canonical: &str,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
+        self.mark_duplicate_internal(source, canonical, agent, false)
+    }
+
+    fn mark_duplicate_internal(
+        &mut self,
+        source: &str,
+        canonical: &str,
+        agent: Option<&str>,
+        reviewed: bool,
+    ) -> Result<Ticket, Error> {
         let tx = self.connection.savepoint()?;
         crate::transaction_write_lock(&tx)?;
         let source_id = relationships::id(&tx, source)?;
@@ -38,7 +74,7 @@ impl Workspace {
             [&source_id],
             |r| r.get(0),
         )?;
-        if incident {
+        if incident && !reviewed {
             return Err(Error::DuplicateDependencies);
         }
         let status: String = tx.query_row(
@@ -108,4 +144,179 @@ impl Workspace {
         tx.commit()?;
         self.show_ticket(source)
     }
+}
+
+impl Workspace {
+    pub fn preview_duplicate_dependencies(
+        &self,
+        source: &str,
+        canonical: &str,
+    ) -> Result<DuplicateDependencyPreview, Error> {
+        let source_id = relationships::id(&self.connection, source)?;
+        let canonical_id = relationships::id(&self.connection, canonical)?;
+        let source: String = self.connection.query_row(
+            "SELECT 'T-' || number FROM tickets WHERE id=?1",
+            [&source_id],
+            |r| r.get(0),
+        )?;
+        let destination: String = self.connection.query_row("SELECT 'T-' || t.number FROM tickets t WHERE t.id = COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| r.get(0))?;
+        let mut stmt = self.connection.prepare("SELECT 'T-' || b.number, 'T-' || d.number FROM dependencies e JOIN tickets b ON b.id=e.blocker_id JOIN tickets d ON d.id=e.dependent_id WHERE e.blocker_id=?1 OR e.dependent_id=?1 ORDER BY b.number,d.number LIMIT 1001")?;
+        let edges: Vec<DependencyEdge> = stmt
+            .query_map([&source_id], |r| {
+                let blocker: String = r.get(0)?;
+                let dependent: String = r.get(1)?;
+                Ok(DependencyEdge {
+                    replacement_blocker: if blocker == source {
+                        destination.clone()
+                    } else {
+                        blocker.clone()
+                    },
+                    replacement_dependent: if dependent == source {
+                        destination.clone()
+                    } else {
+                        dependent.clone()
+                    },
+                    blocker,
+                    dependent,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        if edges.len() > 1000 {
+            return Err(Error::InvalidBatch(
+                "dependency review exceeds 1000 edges".into(),
+            ));
+        }
+        Ok(DuplicateDependencyPreview {
+            canonical: destination,
+            edges,
+        })
+    }
+
+    pub fn mark_duplicate_reviewed(
+        &mut self,
+        source: &str,
+        canonical: &str,
+        expected_canonical: &str,
+        decisions: Vec<DependencyDecision>,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        // A savepoint composes with retryable writes, while acquiring the write lock before
+        // reading ensures that the reviewed graph cannot change before commit.
+        self.connection
+            .execute_batch("SAVEPOINT duplicate_review")?;
+        let result = (|| {
+            crate::transaction_write_lock(&self.connection)?;
+            self.apply_dependency_review(source, canonical, expected_canonical, &decisions, agent)?;
+            self.mark_duplicate_internal(source, canonical, agent, true)
+        })();
+        match result {
+            Ok(ticket) => {
+                self.connection.execute_batch("RELEASE duplicate_review")?;
+                Ok(ticket)
+            }
+            Err(error) => {
+                self.connection
+                    .execute_batch("ROLLBACK TO duplicate_review; RELEASE duplicate_review")?;
+                Err(error)
+            }
+        }
+    }
+    pub fn edit_dependencies_reviewed(
+        &mut self,
+        source: &str,
+        canonical: &str,
+        expected_canonical: &str,
+        decisions: Vec<DependencyDecision>,
+        agent: Option<&str>,
+    ) -> Result<Ticket, Error> {
+        self.connection
+            .execute_batch("SAVEPOINT dependency_review")?;
+        let result = (|| {
+            crate::transaction_write_lock(&self.connection)?;
+            self.apply_dependency_review(source, canonical, expected_canonical, &decisions, agent)?;
+            self.show_ticket(source)
+        })();
+        match result {
+            Ok(ticket) => {
+                self.connection.execute_batch("RELEASE dependency_review")?;
+                Ok(ticket)
+            }
+            Err(error) => {
+                self.connection
+                    .execute_batch("ROLLBACK TO dependency_review; RELEASE dependency_review")?;
+                Err(error)
+            }
+        }
+    }
+
+    fn apply_dependency_review(
+        &mut self,
+        source: &str,
+        canonical: &str,
+        expected_canonical: &str,
+        decisions: &[DependencyDecision],
+        agent: Option<&str>,
+    ) -> Result<(), Error> {
+        let preview = self.preview_duplicate_dependencies(source, canonical)?;
+        let edges: Vec<_> = decisions.iter().map(|d| d.edge.clone()).collect();
+        if edges != preview.edges || expected_canonical != preview.canonical {
+            return Err(Error::DependencyReviewChanged);
+        }
+        for decision in decisions {
+            if decision.choice != DependencyChoice::Retain {
+                self.remove_dependency(&decision.edge.blocker, &decision.edge.dependent, agent)?;
+                record_edge_change(
+                    &self.connection,
+                    &decision.edge.blocker,
+                    &decision.edge.dependent,
+                    false,
+                    agent,
+                )?;
+            }
+        }
+        for decision in decisions {
+            if decision.choice == DependencyChoice::Replace {
+                let blocker_id =
+                    relationships::id(&self.connection, &decision.edge.replacement_blocker)?;
+                let dependent_id =
+                    relationships::id(&self.connection, &decision.edge.replacement_dependent)?;
+                let existed: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id=?1 AND dependent_id=?2)", params![blocker_id, dependent_id], |r| r.get(0))?;
+                self.add_dependency(
+                    &decision.edge.replacement_blocker,
+                    &decision.edge.replacement_dependent,
+                    agent,
+                )?;
+                if !existed {
+                    record_edge_change(
+                        &self.connection,
+                        &decision.edge.replacement_blocker,
+                        &decision.edge.replacement_dependent,
+                        true,
+                        agent,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn record_edge_change(
+    conn: &Connection,
+    blocker: &str,
+    dependent: &str,
+    added: bool,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    let description = format!("{blocker} blocks {dependent}");
+    let (from, to) = if added {
+        ("", description.as_str())
+    } else {
+        (description.as_str(), "")
+    };
+    for reference in [blocker, dependent] {
+        let id = relationships::id(conn, reference)?;
+        history::record(conn, &id, "relationship:dependency_review", from, to, agent)?;
+    }
+    Ok(())
 }

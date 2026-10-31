@@ -50,6 +50,23 @@ const graphSchema = z.object({
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
+const dependencyEdgeSchema = z.object({
+  blocker: z.string(),
+  dependent: z.string(),
+  replacement_blocker: z.string(),
+  replacement_dependent: z.string(),
+});
+const duplicatePreviewSchema = z.object({
+  canonical: z.string(),
+  edges: z.array(dependencyEdgeSchema),
+});
+export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>;
+export type DuplicatePreview = z.infer<typeof duplicatePreviewSchema>;
+export type DependencyDecision = {
+  edge: DependencyEdge;
+  choice: "replace" | "remove" | "retain";
+};
+
 const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -103,6 +120,45 @@ export const client = {
     return z
       .array(ticketSchema)
       .parse(await invoke("bulk_status", { references, status, requestId }));
+  },
+  async previewDuplicate(source: string, canonical: string) {
+    return duplicatePreviewSchema.parse(
+      await invoke("preview_duplicate_dependencies", { source, canonical }),
+    );
+  },
+  async markDuplicateReviewed(
+    source: string,
+    canonical: string,
+    expectedCanonical: string,
+    decisions: DependencyDecision[],
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("mark_duplicate_reviewed", {
+        source,
+        canonical,
+        expectedCanonical,
+        decisions,
+        requestId,
+      }),
+    );
+  },
+  async editDependenciesReviewed(
+    source: string,
+    canonical: string,
+    expectedCanonical: string,
+    decisions: DependencyDecision[],
+    requestId: string,
+  ) {
+    return ticketSchema.parse(
+      await invoke("edit_dependencies_reviewed", {
+        source,
+        canonical,
+        expectedCanonical,
+        decisions,
+        requestId,
+      }),
+    );
   },
   async markDuplicate(source: string, canonical: string, requestId: string) {
     return ticketSchema.parse(

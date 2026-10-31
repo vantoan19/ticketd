@@ -325,6 +325,72 @@ fn mark_duplicate(source: String, canonical: String, request_id: String) -> Resu
 }
 
 #[tauri::command]
+fn preview_duplicate_dependencies(
+    source: String,
+    canonical: String,
+) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.preview_duplicate_dependencies(&source, &canonical))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn mark_duplicate_reviewed(
+    source: String,
+    canonical: String,
+    expected_canonical: String,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::MarkDuplicateReviewed {
+                    source,
+                    canonical,
+                    expected_canonical,
+                    decisions,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
+fn edit_dependencies_reviewed(
+    source: String,
+    canonical: String,
+    expected_canonical: String,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+    request_id: String,
+) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::EditDependenciesReviewed {
+                    source,
+                    canonical,
+                    expected_canonical,
+                    decisions,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
 fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String> {
     let result = Workspace::open_default()
         .and_then(|mut workspace| {
@@ -464,6 +530,9 @@ pub fn run() -> Result<(), tauri::Error> {
             add_tag,
             remove_tag,
             mark_duplicate,
+            preview_duplicate_dependencies,
+            mark_duplicate_reviewed,
+            edit_dependencies_reviewed,
             remove_duplicate,
             add_dependency,
             remove_dependency,
