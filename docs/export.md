@@ -1,7 +1,7 @@
 # Workspace export format
 
 `ticketd export` writes a UTF-8 JSON document to stdout. `ticketd export --file PATH`
-writes a new file; the desktop's Export workspace form accepts a file path. File
+writes a new file; the desktop's Settings Export card opens a native save dialog. File
 exports refuse to overwrite an existing path and are published only after the
 complete snapshot has been written. Errors are reported to stderr by the CLI or
 in the desktop. When redirecting stdout yourself, a failed command may leave a

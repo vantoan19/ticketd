@@ -19,4 +19,5 @@ tauri-build.workspace = true
 [dependencies]
 tauri.workspace = true
 tauri-plugin-opener.workspace = true
+tauri-plugin-dialog.workspace = true
 ticketd-core.workspace = true

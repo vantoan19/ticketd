@@ -7,7 +7,17 @@ use std::{
 use crate::{Error, Workspace, default_path};
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags, backup::Backup};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// The most recent backup that was saved and verified, whichever surface made it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupRecord {
+    /// Absolute path of the backup file when it was made.
+    pub path: String,
+    /// UTC time the backup finished, as an RFC 3339 timestamp.
+    pub completed_at: String,
+}
 
 pub(crate) fn lock_file(path: &Path) -> Result<File, Error> {
     let resolved = match path.canonicalize() {
@@ -41,10 +51,10 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 
 fn validate(connection: &Connection) -> Result<(), Error> {
     let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > 19 {
+    if version > 20 {
         return Err(Error::NewerSchema(version));
     }
-    if !(1..=19).contains(&version) {
+    if !(1..=20).contains(&version) {
         return Err(Error::Backup(format!(
             "unsupported backup schema version {version}"
         )));
@@ -79,6 +89,7 @@ fn validate(connection: &Connection) -> Result<(), Error> {
         ("duplicate_tickets", 15),
         ("evidence", 16),
         ("ticket_reminders", 18),
+        ("last_backup", 20),
     ] {
         if version < introduced {
             continue;
@@ -108,8 +119,38 @@ impl Workspace {
         })();
         if result.is_err() {
             let _ = std::fs::remove_file(path);
+            return result;
         }
-        result
+        // The backup is already saved and checked, so a failure to note it
+        // must not discard it; the previous record simply stays.
+        let recorded = path
+            .canonicalize()
+            .map(|absolute| absolute.display().to_string())
+            .unwrap_or_else(|_| path.display().to_string());
+        let _ = self.connection.execute(
+            "INSERT INTO last_backup (id, path, completed_at) VALUES (1, ?1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+             ON CONFLICT(id) DO UPDATE SET path = excluded.path, completed_at = excluded.completed_at",
+            [recorded],
+        );
+        Ok(())
+    }
+
+    /// The last successful backup, or `None` when none was recorded.
+    pub fn last_backup(&self) -> Result<Option<BackupRecord>, Error> {
+        match self.connection.query_row(
+            "SELECT path, completed_at FROM last_backup WHERE id = 1",
+            [],
+            |row| {
+                Ok(BackupRecord {
+                    path: row.get(0)?,
+                    completed_at: row.get(1)?,
+                })
+            },
+        ) {
+            Ok(record) => Ok(Some(record)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub(crate) fn migration_backup(
@@ -165,7 +206,7 @@ impl Workspace {
         current.busy_timeout(Duration::from_secs(10))?;
         let current_version: i64 =
             current.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_version > 19 {
+        if current_version > 20 {
             return Err(Error::NewerSchema(current_version));
         }
         let mut name = workspace.as_os_str().to_os_string();

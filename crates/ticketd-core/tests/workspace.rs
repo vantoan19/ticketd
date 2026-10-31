@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -2084,7 +2084,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+        "DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
     )
     .unwrap();
     drop(db);
@@ -2099,7 +2099,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 19);
+    assert_eq!(version, 20);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2612,7 +2612,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
         .unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE contextual_relationships; PRAGMA user_version = 18;")
+    db.execute_batch("DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;")
         .unwrap();
     drop(db);
     std::fs::copy(&path, &backup).unwrap();
@@ -2632,7 +2632,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 19);
+    assert_eq!(version, 20);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
 
@@ -2858,7 +2858,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, 19);
+    assert_eq!(info.format_version, 20);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }
@@ -2959,4 +2959,31 @@ fn unread_inbox_filter_pages_over_unread_entries_only() {
     let everything = workspace.inbox_page(100, 0, false).unwrap();
     assert_eq!(everything.len(), 4);
     assert_eq!(everything, workspace.inbox(100, 0).unwrap());
+}
+
+#[test]
+fn last_backup_records_successes_and_ignores_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(workspace.last_backup().unwrap(), None);
+
+    let first = dir.path().join("first.sqlite3");
+    workspace.backup(&first).unwrap();
+    let recorded = workspace.last_backup().unwrap().unwrap();
+    assert_eq!(
+        recorded.path,
+        first.canonicalize().unwrap().display().to_string()
+    );
+    assert!(recorded.completed_at.ends_with('Z'));
+
+    // An existing file is refused and the previous record stays.
+    assert!(workspace.backup(&first).is_err());
+    assert_eq!(workspace.last_backup().unwrap().unwrap(), recorded);
+
+    let second = dir.path().join("second.sqlite3");
+    workspace.backup(&second).unwrap();
+    assert_eq!(
+        workspace.last_backup().unwrap().unwrap().path,
+        second.canonicalize().unwrap().display().to_string()
+    );
 }

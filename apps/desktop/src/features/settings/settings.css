@@ -218,6 +218,22 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+.backup-status {
+  margin-top: 16px;
+}
+.backup-status .workspace-path {
+  margin: 8px 0;
+}
+.status-word {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.backup-restore {
+  margin-top: 16px;
+}
 .workspace-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
