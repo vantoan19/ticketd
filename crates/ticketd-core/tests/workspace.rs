@@ -1314,3 +1314,30 @@ fn tag_search_includes_unused_vocabulary_and_limits_results() {
     assert_eq!(workspace.search_tags("bu", 1).unwrap(), vec!["bug"]);
     assert_eq!(workspace.search_tags("BUG", 50).unwrap(), vec!["bug"]);
 }
+
+#[test]
+fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
+    use ticketd_core::{BatchOperation, Status, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bulk.sqlite")).unwrap();
+    let first = workspace.create_ticket("First").unwrap();
+    let second = workspace.create_ticket("Second").unwrap();
+    workspace
+        .set_trashed(&second.reference, true, None)
+        .unwrap();
+    let before = workspace.ticket_history(&first.reference).unwrap();
+    let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":first.reference, "change":{"status":"Done"}},
+        {"operation":"change", "ticket":second.reference, "change":{"status":"Done"}}
+    ]))
+    .unwrap();
+    let error = workspace
+        .write(Some("bulk-failed"), WriteRequest::Batch { operations })
+        .unwrap_err();
+    assert!(error.to_string().contains("operation 1"));
+    assert_eq!(
+        workspace.show_ticket(&first.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(workspace.ticket_history(&first.reference).unwrap(), before);
+}
