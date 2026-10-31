@@ -1,9 +1,11 @@
 import {
   Inbox,
   CircleDot,
-  CheckCircle2,
+  CirclePlay,
+  ListTodo,
   Trash2,
   Settings,
+  Settings2,
   Plus,
   Folder,
   Layers,
@@ -19,6 +21,12 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Project } from "@/lib/api/client";
 import type { RefObject } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -67,23 +75,25 @@ export function WorkspaceSidebar({
     >
       <SidebarHeader className="sidebar-header">
         <div className="brand">
-          <span className="brand-mark">◈</span>
           <strong>ticketd</strong>
-
-          <Button
-            className="new-ticket"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="New ticket"
-            title="New ticket"
-            onClick={(event) => {
-              createTriggerRef.current = event.currentTarget;
-              setView("tickets");
-              setCreating(true);
-            }}
-          >
-            <Plus />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                className="new-ticket"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="New ticket"
+                onClick={(event) => {
+                  createTriggerRef.current = event.currentTarget;
+                  setView("tickets");
+                  setCreating(true);
+                }}
+              >
+                <Plus />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>New ticket</TooltipContent>
+          </Tooltip>
         </div>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
@@ -92,10 +102,11 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
+                aria-label={unread ? "Inbox, unread" : "Inbox"}
                 onClick={() => setView("inbox")}
               >
-                <Inbox size={16} /> Attention inbox{" "}
-                {unread && <span aria-label="Unread attention">●</span>}
+                <Inbox size={16} /> Inbox
+                {unread && <StatusDot tone="unread" className="ml-auto" />}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -108,7 +119,7 @@ export function WorkspaceSidebar({
                 }
                 onClick={() => scope("all")}
               >
-                <Inbox size={16} /> All tickets
+                <ListTodo size={16} /> All tickets
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -116,7 +127,7 @@ export function WorkspaceSidebar({
                 isActive={navigation.kind === "ready" && view === "tickets"}
                 onClick={() => scope("ready")}
               >
-                <CheckCircle2 size={16} /> Ready
+                <CirclePlay size={16} /> Ready
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -127,16 +138,11 @@ export function WorkspaceSidebar({
                 <CircleDot size={16} /> In progress
               </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={navigation.kind === "trash" && view === "tickets"}
-                onClick={() => scope("trash")}
-              >
-                <Trash2 size={16} /> Trash
-              </SidebarMenuButton>
-            </SidebarMenuItem>
           </SidebarMenu>
         </nav>
+        <span role="status" className="sr-only">
+          {unread ? "Unread inbox items" : ""}
+        </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
@@ -145,7 +151,7 @@ export function WorkspaceSidebar({
                 aria-label="Manage projects"
                 onClick={() => setView("projects")}
               >
-                <Plus size={15} />
+                <Settings2 size={15} />
               </button>
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
@@ -163,9 +169,6 @@ export function WorkspaceSidebar({
                 {projects.map((p) => (
                   <SidebarMenuItem key={p.id}>
                     <SidebarMenuButton
-                      aria-pressed={
-                        navigation.project === p.id && view === "tickets"
-                      }
                       isActive={
                         navigation.project === p.id && view === "tickets"
                       }
@@ -185,7 +188,7 @@ export function WorkspaceSidebar({
                 aria-label="Manage Efforts"
                 onClick={() => setView("efforts")}
               >
-                <Plus size={15} />
+                <Settings2 size={15} />
               </button>
             </div>
             <nav aria-label="Effort scopes" className="sidebar-nav">
@@ -210,9 +213,26 @@ export function WorkspaceSidebar({
         </div>
       </SidebarContent>
       <SidebarFooter className="sidebar-footer">
-        <button className="settings-link" onClick={() => setView("settings")}>
-          <Settings size={16} /> Workspace settings
-        </button>
+        <nav aria-label="Trash and settings" className="sidebar-nav">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={navigation.kind === "trash" && view === "tickets"}
+                onClick={() => scope("trash")}
+              >
+                <Trash2 size={16} /> Trash
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "settings"}
+                onClick={() => setView("settings")}
+              >
+                <Settings size={16} /> Settings
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </nav>
       </SidebarFooter>
     </Sidebar>
   );
