@@ -2814,3 +2814,21 @@ fn unread_observation_delivers_reminders_once_across_reopen() {
     assert!(!workspace.has_unread_inbox().unwrap());
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
+
+#[test]
+fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember once").unwrap();
+    let request = || WriteRequest::SetReminder {
+        reference: ticket.reference.clone(),
+        due_at: Some("2020-01-01T00:00:00Z".into()),
+    };
+    ws.write(Some("lost-response"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
+    ws.write(Some("lost-response"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 1);
+    ws.write(Some("new-occurrence"), request()).unwrap();
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 2);
+}

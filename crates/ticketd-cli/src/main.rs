@@ -436,7 +436,10 @@ fn read_content(
 fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     let args = Arguments::parse();
     if let Command::RestoreWorkspace { path } = &args.command {
-        let safety = Workspace::restore_default(path)?;
+        let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+            Some(workspace) => Workspace::restore(workspace, path)?,
+            None => Workspace::restore_default(path)?,
+        };
         writeln!(
             output,
             "Restored workspace. Safety backup: {}",

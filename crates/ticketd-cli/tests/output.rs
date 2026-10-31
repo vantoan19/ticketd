@@ -421,3 +421,36 @@ fn cli_test_storage_isolated_from_platform_workspace_and_other_tests() {
             .is_empty()
     );
 }
+
+#[test]
+fn isolated_restore_replaces_only_the_test_workspace() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("TICKETD_TEST_WORKSPACE", &workspace)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    run(&["create", "Before backup"]);
+    run(&["backup", backup.to_str().unwrap()]);
+    run(&["create", "After backup"]);
+    let result = run(&["restore-workspace", backup.to_str().unwrap()]);
+    let safety = result
+        .trim()
+        .strip_prefix("Restored workspace. Safety backup: ")
+        .unwrap();
+    assert!(std::path::Path::new(safety).starts_with(dir.path()));
+    let restored: serde_json::Value = serde_json::from_str(&run(&["list"])).unwrap();
+    assert_eq!(restored.as_array().unwrap().len(), 1);
+    assert_eq!(restored[0]["title"], "Before backup");
+}
