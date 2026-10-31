@@ -18,10 +18,13 @@ export function Duplicates({
   ticket,
   refresh,
   select,
+  onDone,
 }: {
   ticket: Ticket;
   refresh: () => Promise<void>;
   select: (reference: string) => void;
+  /** Called after a duplicate designation or dependency change is saved. */
+  onDone?: () => void;
 }) {
   const [editingGraph, setEditingGraph] = useState(false);
   const [existingEndpoint, setExistingEndpoint] = useState("");
@@ -79,6 +82,7 @@ export function Duplicates({
       setPreview(null);
       setChoices([]);
       await refresh();
+      onDone?.();
     } catch (reason) {
       setError(String(reason));
       if (String(reason).includes("review has changed") && target !== null) {

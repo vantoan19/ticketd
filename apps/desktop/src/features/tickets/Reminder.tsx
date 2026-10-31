@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { reminderSummary } from "@/features/tickets/reminder-summary";
 
 // A local clock time may be skipped or occur twice during a time-zone transition.
 function localInstants(value: string): Date[] {
@@ -114,9 +115,17 @@ export function Reminder({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label="Manage reminder">
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={
+            due
+              ? `Manage reminder, scheduled ${reminderSummary(due)}`
+              : "Manage reminder"
+          }
+        >
           <Bell data-icon="inline-start" />
-          {due ? "Reminder set" : "Remind me"}
+          {due ? reminderSummary(due) : "Remind me"}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="reminder-popover">
