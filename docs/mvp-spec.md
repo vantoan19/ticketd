@@ -54,12 +54,12 @@ First make ticket management, visualization, and context retrieval work well. Ad
 
 ## 3. Actors and responsibility boundaries
 
-| Actor or component | Responsibility |
-| --- | --- |
-| Person using the desktop UI | Understand the work, review and edit tickets, inspect relationships and progress |
-| Agent using the CLI | Create and update tickets, notes, tags, hierarchy, and dependencies; retrieve context |
-| External harness | AI conversations, brainstorming, planning, skills, implementation, and verification |
-| Application core | Business rules, context queries, and consistent data operations |
+| Actor or component          | Responsibility                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| Person using the desktop UI | Understand the work, review and edit tickets, inspect relationships and progress      |
+| Agent using the CLI         | Create and update tickets, notes, tags, hierarchy, and dependencies; retrieve context |
+| External harness            | AI conversations, brainstorming, planning, skills, implementation, and verification   |
+| Application core            | Business rules, context queries, and consistent data operations                       |
 
 The MVP does not include account sign-in, agent-provider integration, or subscription handling.
 
@@ -117,13 +117,13 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 
 ### 4.5. Status and derived availability
 
-| Stored status | Meaning |
-| --- | --- |
-| Todo | Work has not started |
-| In progress | Work is underway |
-| In review | Implementation is finished; review is pending |
-| Done | Work is complete and no further review is required |
-| Canceled | Work will not continue |
+| Stored status | Meaning                                            |
+| ------------- | -------------------------------------------------- |
+| Todo          | Work has not started                               |
+| In progress   | Work is underway                                   |
+| In review     | Implementation is finished; review is pending      |
+| Done          | Work is complete and no further review is required |
+| Canceled      | Work will not continue                             |
 
 People and agents may transition directly between any statuses. Review may be skipped when unnecessary; transitions are recorded in history and do not change related tickets.
 
@@ -172,20 +172,20 @@ People and agents may transition directly between any statuses. Review may be sk
 
 ## 6. MVP functional scope
 
-| Area | Required capability |
-| --- | --- |
-| Projects | Create, read, and edit repository projects; select interaction-local context; register checkout paths |
-| Efforts | Create, read, edit, archive/reactivate; manage membership; view counts by status |
-| Tickets | Create, read, edit, trash, and restore; stable identifiers and workspace-wide short references |
-| Content | Markdown editor and preview, checklists, autosave with clear save state |
+| Area              | Required capability                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| Projects          | Create, read, and edit repository projects; select interaction-local context; register checkout paths         |
+| Efforts           | Create, read, edit, archive/reactivate; manage membership; view counts by status                              |
+| Tickets           | Create, read, edit, trash, and restore; stable identifiers and workspace-wide short references                |
+| Content           | Markdown editor and preview, checklists, autosave with clear save state                                       |
 | Notes and history | Add, read, edit, and delete timestamped notes; record author/source when known; read automatic ticket history |
-| Tags | Add, remove, and filter tags; classification is optional |
-| Hierarchy | Assign/remove parent, display subtickets, enforce one-level limit |
-| Dependencies | Add/remove edges, reject cycles, derive Ready/Blocked |
-| Search | Search titles, bodies, and notes; combine with filters |
-| Filters | Project (including unlinked), Effort, status, tags, Ready/Blocked, and parent |
-| CLI | Main UI operations, structured output, batch operations, and context queries |
-| Local data | Offline persistence, migrations, export, and verifiable backup/restore |
+| Tags              | Add, remove, and filter tags; classification is optional                                                      |
+| Hierarchy         | Assign/remove parent, display subtickets, enforce one-level limit                                             |
+| Dependencies      | Add/remove edges, reject cycles, derive Ready/Blocked                                                         |
+| Search            | Search titles, bodies, and notes; combine with filters                                                        |
+| Filters           | Project (including unlinked), Effort, status, tags, Ready/Blocked, and parent                                 |
+| CLI               | Main UI operations, structured output, batch operations, and context queries                                  |
+| Local data        | Offline persistence, migrations, export, and verifiable backup/restore                                        |
 
 Trash preserves relationships under section 4.6; permanent ticket deletion is not supported.
 
@@ -203,12 +203,12 @@ Trash preserves relationships under section 4.6; permanent ticket deletion is no
 
 ### Required views
 
-| View | Purpose |
-| --- | --- |
-| List | Flat stream, search, filtering, and quick operations; surface important relationships |
-| Ticket detail | Read/edit content, checklist, notes, project/Effort links, parent/subtickets, and dependencies; read history |
-| Effort view | Flat member-ticket list, counts by status, membership management, and archive/reactivation |
-| Dependency graph | Understand dependency direction, blocked work, and relationships around a selected ticket |
+| View             | Purpose                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| List             | Flat stream, search, filtering, and quick operations; surface important relationships                        |
+| Ticket detail    | Read/edit content, checklist, notes, project/Effort links, parent/subtickets, and dependencies; read history |
+| Effort view      | Flat member-ticket list, counts by status, membership management, and archive/reactivation                   |
+| Dependency graph | Understand dependency direction, blocked work, and relationships around a selected ticket                    |
 
 Initial layout direction: navigation for projects and Efforts, including unlinked tickets, main list/graph surface, and ticket detail in a panel or dedicated page appropriate to window size. Validate through prototyping rather than treating this as a fixed pixel layout.
 
@@ -261,17 +261,17 @@ Agents use the CLI/application core. They do not write SQL directly or treat Mar
 
 ## 9. Confirmed technology stack
 
-| Component | Technology |
-| --- | --- |
-| Desktop: macOS, Linux, Windows | Tauri |
-| Frontend | React + TypeScript + Vite |
-| UI components | shadcn/ui + Radix UI |
-| Styling and icons | Tailwind CSS + Lucide |
-| Application core | Rust |
-| Agent-facing CLI | Rust + clap |
-| Local database | SQLite |
-| Dependency visualization | React Flow + Dagre |
-| Markdown editor | CodeMirror + preview |
+| Component                      | Technology                |
+| ------------------------------ | ------------------------- |
+| Desktop: macOS, Linux, Windows | Tauri                     |
+| Frontend                       | React + TypeScript + Vite |
+| UI components                  | shadcn/ui + Radix UI      |
+| Styling and icons              | Tailwind CSS + Lucide     |
+| Application core               | Rust                      |
+| Agent-facing CLI               | Rust + clap               |
+| Local database                 | SQLite                    |
+| Dependency visualization       | React Flow + Dagre        |
+| Markdown editor                | CodeMirror + preview      |
 
 The product name `ticketd` does not require a background daemon. The proposed MVP CLI remains a direct client of the shared application core.
 
@@ -312,13 +312,13 @@ flowchart TD
 
 Measure UI and CLI independently, including full CLI startup rather than database query time alone. Do not present unmeasured numbers as guarantees.
 
-| Area | Measurement |
-| --- | --- |
-| CLI | End-to-end process startup to output, cold and warm |
-| Context | Call count and output size for a real workflow |
-| UI | Project opening, search, ticket opening/editing, external-update visibility |
-| Graph | Loading, layout, and pan/zoom across representative graph sizes |
-| Concurrency | UI reads during agent writes, multiple writers, lock waits, and conflicts |
+| Area        | Measurement                                                                 |
+| ----------- | --------------------------------------------------------------------------- |
+| CLI         | End-to-end process startup to output, cold and warm                         |
+| Context     | Call count and output size for a real workflow                              |
+| UI          | Project opening, search, ticket opening/editing, external-update visibility |
+| Graph       | Loading, layout, and pan/zoom across representative graph sizes             |
+| Concurrency | UI reads during agent writes, multiple writers, lock waits, and conflicts   |
 
 Set latency budgets and representative dataset sizes after a benchmark spike. Batch operations, bounded output, and loading only needed data are design requirements from the start.
 
@@ -375,9 +375,9 @@ These are possible future directions, not a committed roadmap.
 
 ## 14. Open decisions
 
-| Question | Proposal for review |
-| --- | --- |
-| Desktop and CLI distribution | Ship together; CLI operates independently while UI is closed |
-| MVP success criterion | Complete one real project through the workflow in section 12 |
-| Performance budgets | Establish after measuring a representative dataset and machine |
-| Supported platforms and WSL | Define release matrix and validate the first actual agent environment |
+| Question                     | Proposal for review                                                   |
+| ---------------------------- | --------------------------------------------------------------------- |
+| Desktop and CLI distribution | Ship together; CLI operates independently while UI is closed          |
+| MVP success criterion        | Complete one real project through the workflow in section 12          |
+| Performance budgets          | Establish after measuring a representative dataset and machine        |
+| Supported platforms and WSL  | Define release matrix and validate the first actual agent environment |

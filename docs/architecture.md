@@ -2,7 +2,7 @@
 
 ticketd is a local desktop application and an independently usable CLI. Both call the same Rust core library, with a separate instance in each process, and share one local workspace database.
 
-The direct-access process model is the selected direction, conditional on validating concurrency, migrations, and UI refresh in a technical spike. Exact interface signatures and internal file layout are not finalized.
+The direct-access process model is the selected direction, conditional on validating concurrency, migrations, and UI refresh in a technical spike. Exact workflow interface signatures remain to be designed.
 
 ## Runtime
 
@@ -27,27 +27,31 @@ flowchart TB
 
 The core is a shared library, not a shared running process. A background daemon, HTTP server, or running desktop is not required for CLI operations.
 
+## Source layout
+
+The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
+
 ## Module responsibilities
 
-| Module | Responsibility |
-| --- | --- |
-| Desktop UI | Lists, ticket details, Efforts, graph presentation, Markdown editing, unsaved drafts, and save feedback |
-| Tauri adapter | Translate desktop requests and results across the desktop bridge |
-| CLI adapter | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
-| Rust core | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly |
+| Module        | Responsibility                                                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop UI    | Lists, ticket details, Efforts, graph presentation, Markdown editing, unsaved drafts, and save feedback                                  |
+| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                         |
+| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
+| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
 ## Interface direction
 
-| Caller intent | Core behavior |
-| --- | --- |
-| Create a ticket | Validate initial content and links, assign identity/reference, persist, and return the ticket |
-| Change a ticket | Apply supplied fields, explicit relationship changes, and optional notes as one atomic change |
-| Apply a batch | Compose the same operations atomically, with local names for new tickets |
-| Find tickets | Apply search, filters, ordering, and output limits |
-| Open ticket context | Assemble the ticket and requested related context from one consistent snapshot |
-| View a dependency graph | Return bounded graph data for presentation |
+| Caller intent           | Core behavior                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket |
+| Change a ticket         | Apply supplied fields, explicit relationship changes, and optional notes as one atomic change |
+| Apply a batch           | Compose the same operations atomically, with local names for new tickets                      |
+| Find tickets            | Apply search, filters, ordering, and output limits                                            |
+| Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                |
+| View a dependency graph | Return bounded graph data for presentation                                                    |
 
 Projects, Efforts, notes, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
 

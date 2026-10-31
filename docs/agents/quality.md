@@ -36,9 +36,9 @@
 
 ## Checks and review
 
-`./scripts/check` checks Markdown and whitespace now. It also runs Rust checks when `Cargo.toml` exists and frontend checks when `package.json` exists; it fails if required tools or scripts are missing. Install locked dependencies before running it.
+`./scripts/check` checks Markdown, whitespace, Rust formatting/Clippy/tests, and frontend formatting/lint/types/tests. Install dependencies with `npm ci` and use the pinned Rust toolchain before running it.
 
-The current CI runs documentation checks. The first application scaffold must extend CI with the pinned toolchains, locked dependency installation, and the same check command. Add platform builds for the supported release targets as they become runnable.
+CI runs the same check command and builds the frontend, desktop, and CLI on Linux, macOS, and Windows using pinned toolchains and committed lockfiles. The initial scaffold has no behavior tests; Vitest permits an empty suite until behavior is implemented.
 
 Review should assess interface simplicity, domain correctness, error paths, and whether tests protect observable behavior. CI checks mechanics; it does not replace design review. Use dependency updates scoped to the intended change and pin CI actions to commit SHAs.
 

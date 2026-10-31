@@ -1,0 +1,18 @@
+[package]
+name = "ticketd-cli"
+description = "Agent-facing command line for ticketd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ticketd"
+path = "src/main.rs"
+
+[dependencies]
+ticketd-core.workspace = true
+clap.workspace = true
