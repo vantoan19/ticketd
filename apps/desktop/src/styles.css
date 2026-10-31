@@ -1,24 +1,60 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: Geist;
+  src: url("./assets/fonts/Geist-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: Geist;
+  src: url("./assets/fonts/Geist-Semibold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("./assets/fonts/GeistMono-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 :root {
   font-family:
-    Inter,
+    Geist,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
-  color: #e5e5e9;
-  background: #19191c;
+  color: var(--foreground);
+  background: var(--background);
   font-size: 13px;
-  --sidebar: hsl(0 0% 98%);
-  --sidebar-foreground: hsl(240 5.3% 26.1%);
-  --sidebar-primary: hsl(240 5.9% 10%);
-  --sidebar-primary-foreground: hsl(0 0% 98%);
-  --sidebar-accent: hsl(240 4.8% 95.9%);
-  --sidebar-accent-foreground: hsl(240 5.9% 10%);
-  --sidebar-border: hsl(220 13% 91%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
+  color-scheme: light dark;
+  --background: #fff;
+  --surface: #fafafa;
+  --error-surface: #fef2f2;
+  --error-foreground: #991b1b;
+  --foreground: #171717;
+  --primary: #171717;
+  --primary-foreground: #fff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --accent: #f5f5f5;
+  --accent-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #666;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #737373;
+  --destructive: #b91c1c;
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 * {
   box-sizing: border-box;
@@ -35,23 +71,24 @@ button:disabled {
 }
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: 2px solid #8a86e9;
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 input,
 select,
 textarea {
-  color: #e8e8ed;
-  background: #242429;
-  border: 1px solid #3b3b43;
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 7px 9px;
   min-width: 0;
 }
 select option {
-  background: #242429;
+  background: var(--surface);
 }
 .workspace {
   width: 100%;
@@ -65,9 +102,9 @@ select option {
   flex: none;
   display: flex;
   flex-direction: column;
-  background: #17171a;
-  color: #d4d4dc;
-  border-right: 1px solid #303035;
+  background: var(--background);
+  color: var(--foreground);
+  border-right: 1px solid var(--border);
   padding: 19px 12px 12px;
 }
 .brand {
@@ -79,14 +116,14 @@ select option {
   letter-spacing: -0.03em;
 }
 .brand-mark {
-  color: #a5a2ff;
+  color: var(--muted-foreground);
   font-size: 23px;
   line-height: 1;
 }
 .brand-label {
   margin-left: auto;
   font-size: 9px;
-  color: #686871;
+  color: var(--muted-foreground);
   letter-spacing: 0.09em;
 }
 .new-ticket {
@@ -96,16 +133,16 @@ select option {
   width: 100%;
   padding: 9px 10px;
   border-radius: 6px;
-  background: #5754a4;
+  background: var(--primary);
   font-weight: 600;
-  color: white;
+  color: var(--foreground);
 }
 .new-ticket:hover {
-  background: #6662b9;
+  background: var(--primary);
 }
 .new-ticket span {
   margin-left: auto;
-  color: #c0bfea;
+  color: var(--muted-foreground);
   font-size: 11px;
 }
 .sidebar-nav {
@@ -122,7 +159,7 @@ select option {
   padding: 7px 9px;
   border-radius: 5px;
   text-align: left;
-  color: #a8a8b2;
+  color: var(--muted-foreground);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -130,19 +167,19 @@ select option {
 .sidebar-nav button svg,
 .settings-link svg {
   flex: none;
-  color: #777782;
+  color: var(--muted-foreground);
 }
 .sidebar-nav button:hover,
 .settings-link:hover {
-  background: #252529;
-  color: #eeeef2;
+  background: var(--surface);
+  color: var(--foreground);
 }
 .sidebar-nav button.active {
-  background: #303036;
-  color: #f4f4f7;
+  background: var(--accent);
+  color: var(--foreground);
 }
 .sidebar-nav button.active svg {
-  color: #aaa7ff;
+  color: var(--muted-foreground);
 }
 .sidebar-scroll {
   overflow-y: auto;
@@ -153,18 +190,18 @@ select option {
   align-items: center;
   justify-content: space-between;
   margin: 26px 8px 0;
-  color: #777780;
+  color: var(--muted-foreground);
   font-weight: 600;
   font-size: 11px;
 }
 .sidebar-heading button {
-  color: #8c8c96;
+  color: var(--muted-foreground);
 }
 .sidebar-heading + .sidebar-nav {
   margin-top: 8px;
 }
 .settings-link {
-  border-top: 1px solid #303035;
+  border-top: 1px solid var(--border);
   border-radius: 0;
   padding-top: 16px;
 }
@@ -173,34 +210,34 @@ select option {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #1d1d21;
+  background: var(--background);
 }
 .topbar {
   height: 54px;
   flex: none;
-  border-bottom: 1px solid #323238;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 25px;
-  color: #85858f;
+  color: var(--muted-foreground);
 }
 .topbar strong {
-  color: #dedee3;
+  color: var(--foreground);
   font-weight: 550;
 }
 .slash {
   padding: 0 12px;
-  color: #53535d;
+  color: var(--muted-foreground);
 }
 .icon-button {
   padding: 6px;
   border-radius: 5px;
-  color: #92929d;
+  color: var(--muted-foreground);
 }
 .icon-button:hover {
-  background: #303036;
-  color: white;
+  background: var(--accent);
+  color: var(--foreground);
 }
 .ticket-workspace {
   flex: 1;
@@ -220,20 +257,20 @@ select option {
   min-width: 360px;
   max-width: 600px;
   overflow-y: auto;
-  border-left: 1px solid #323238;
+  border-left: 1px solid var(--border);
   padding: 0 24px 36px;
 }
 .detail-header {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #1d1d21;
-  border-bottom: 1px solid #323238;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: center;
   height: 51px;
-  color: #a4a4ae;
+  color: var(--muted-foreground);
   font-weight: 600;
 }
 .list-header {
@@ -244,11 +281,11 @@ select option {
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.035em;
-  color: #f2f2f4;
+  color: var(--foreground);
 }
 .list-header p,
 .management > p {
-  color: #85858f;
+  color: var(--muted-foreground);
   margin-top: 5px;
 }
 .list-controls {
@@ -261,12 +298,12 @@ select option {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #85858f;
-  border: 1px solid #393940;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0 9px;
   width: min(280px, 70%);
-  background: #232328;
+  background: var(--surface);
 }
 .search input {
   border: 0;
@@ -282,8 +319,8 @@ select option {
   gap: 6px;
   align-items: center;
   cursor: pointer;
-  color: #aaaab3;
-  border: 1px solid #393940;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
   padding: 7px 10px;
   border-radius: 5px;
 }
@@ -292,36 +329,36 @@ select option {
   display: grid;
   gap: 10px;
   padding: 16px;
-  background: #29292e;
-  border: 1px solid #44444c;
+  background: var(--accent);
+  border: 1px solid var(--border);
   border-radius: 7px;
   box-shadow: 0 12px 35px #0008;
 }
 .filters-content fieldset label {
   display: grid;
   gap: 4px;
-  color: #aaaab3;
+  color: var(--muted-foreground);
 }
 .filters-content legend {
   display: none;
 }
 .list-heading {
   padding: 10px 26px;
-  border-block: 1px solid #323238;
-  background: #212125;
-  color: #bcbcc5;
+  border-block: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
   font-weight: 600;
 }
 .list-heading span {
   margin-left: 7px;
-  color: #777781;
+  color: var(--muted-foreground);
   font-weight: 400;
 }
 .ticket-list ul {
   margin: 0;
 }
 .ticket-list li {
-  border-color: #303036;
+  border-color: var(--border);
 }
 .ticket-list li button {
   display: flex;
@@ -329,37 +366,37 @@ select option {
   gap: 10px;
   padding: 13px 26px;
   border-radius: 0;
-  color: #b2b2bc;
+  color: var(--muted-foreground);
 }
 .ticket-list li button:hover {
-  background: #28282e;
+  background: var(--accent);
 }
 .ticket-list li button[aria-pressed="true"] {
-  background: #303039;
+  background: var(--accent);
 }
 .ticket-ref {
-  color: #858590;
+  color: var(--muted-foreground);
   flex: none;
   font-size: 12px;
 }
 .ticket-title {
-  color: #e2e2e7;
+  color: var(--foreground);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .row-status {
-  color: #8c8b99;
+  color: var(--muted-foreground);
   flex: none;
 }
 .ticket-list > p {
-  color: #8c8c96;
+  color: var(--muted-foreground);
   padding: 25px 26px;
 }
 .ticket-list > .pagination {
   padding: 15px 26px;
-  color: #9999a4;
+  color: var(--muted-foreground);
   display: flex;
   gap: 12px;
 }
@@ -367,7 +404,7 @@ select option {
   padding-top: 12px;
 }
 .ticket-detail label {
-  color: #aaaab4;
+  color: var(--muted-foreground);
 }
 .ticket-detail input,
 .ticket-detail select {
@@ -376,42 +413,42 @@ select option {
 .ticket-detail button:not(.icon-button),
 .management button,
 .create-panel button:not(.icon-button) {
-  color: #c9c9d2;
-  background: #303036;
-  border: 1px solid #414149;
+  color: var(--muted-foreground);
+  background: var(--accent);
+  border: 1px solid var(--border);
   padding: 5px 9px;
   border-radius: 5px;
 }
 .ticket-detail button:hover,
 .management button:hover {
-  background: #3a3a42;
+  background: var(--accent);
 }
 .ticket-detail .detail-disclosure {
-  border-top: 1px solid #35353c;
+  border-top: 1px solid var(--border);
   margin-top: 17px;
   padding-top: 13px;
 }
 .detail-disclosure summary {
-  color: #c1c1ca;
+  color: var(--muted-foreground);
   cursor: pointer;
   font-weight: 600;
 }
 .ticket-detail .cm-editor {
   margin-top: 8px;
-  border: 1px solid #3b3b43;
+  border: 1px solid var(--border);
   border-radius: 5px;
-  color: #222;
+  color: var(--foreground);
 }
 .ticket-detail .text-neutral-600 {
-  color: #9797a1;
+  color: var(--muted-foreground);
 }
 .ticket-detail input.bg-white {
-  background: #25252a;
-  color: #eee;
-  border-color: #414149;
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
 }
 .markdown-preview {
-  color: #c3c3cc;
+  color: var(--muted-foreground);
 }
 .management {
   overflow-y: auto;
@@ -423,8 +460,8 @@ select option {
 .settings-card {
   margin-top: 24px;
   padding: 20px;
-  background: #242429;
-  border: 1px solid #38383f;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
 }
 .management h2 {
@@ -432,7 +469,7 @@ select option {
   font-weight: 600;
 }
 .management label {
-  color: #aaaab4;
+  color: var(--muted-foreground);
 }
 .management input,
 .management select {
@@ -451,8 +488,8 @@ select option {
   transform: translate(-50%, -50%);
   translate: none;
   width: min(500px, 80vw);
-  background: #29292f;
-  border: 1px solid #484850;
+  background: var(--accent);
+  border: 1px solid var(--border);
   border-radius: 9px;
   padding: 18px;
   box-shadow: 0 16px 60px #0009;
@@ -466,39 +503,39 @@ select option {
   margin-bottom: 0;
 }
 .create-panel input.bg-white {
-  background: #202025;
-  color: white;
-  border-color: #484850;
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
 }
 .global-error {
   padding: 10px 24px;
-  background: #562f37;
-  color: #ffcbcb;
+  background: var(--error-surface);
+  color: var(--error-foreground);
 }
 .ticket-list .text-neutral-600 {
-  color: #93939e;
+  color: var(--muted-foreground);
 }
 .ticket-detail .cm-editor {
-  background: #25252a;
-  color: #e5e5eb;
+  background: var(--surface);
+  color: var(--foreground);
 }
 .ticket-detail .cm-gutters {
-  background: #25252a;
-  color: #777782;
-  border-color: #3b3b43;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  border-color: var(--border);
 }
 .ticket-detail .cm-activeLine,
 .ticket-detail .cm-activeLineGutter {
-  background: #303037;
+  background: var(--accent);
 }
 .ticket-detail .cm-cursor {
-  border-left-color: #eeeeef;
+  border-left-color: var(--border);
 }
 .ticket-list li button > span:not(.ticket-title) {
   white-space: nowrap;
 }
 .detail-content .editor-reference {
-  color: #92929d;
+  color: var(--muted-foreground);
   font-size: 12px;
 }
 .detail-content .editor-title {
@@ -511,7 +548,7 @@ select option {
   background: transparent;
   border: 0;
   border-radius: 2px;
-  color: #f4f4f6;
+  color: var(--foreground);
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.035em;
@@ -520,10 +557,10 @@ select option {
   display: flex;
   justify-content: space-between;
   font-weight: 600;
-  color: #c5c5cd;
+  color: var(--muted-foreground);
 }
 .detail-content .editor-body small {
-  color: #777782;
+  color: var(--muted-foreground);
   font-weight: 400;
 }
 .detail-content .cm-editor {
@@ -542,7 +579,7 @@ select option {
   gap: 10px;
   margin: 22px 0;
   padding: 14px 0;
-  border-block: 1px solid #35353c;
+  border-block: 1px solid var(--border);
 }
 .detail-metadata .history-block {
   display: contents;
@@ -560,11 +597,11 @@ select option {
 .empty-state {
   padding: 70px 26px;
   text-align: center;
-  color: #9999a4;
+  color: var(--muted-foreground);
 }
 .empty-state strong {
   display: block;
-  color: #e6e6eb;
+  color: var(--foreground);
   font-size: 16px;
 }
 .empty-state p {
@@ -574,8 +611,8 @@ select option {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  background: #5754a4;
-  color: white;
+  background: var(--primary);
+  color: var(--foreground);
   border-radius: 5px;
   padding: 8px 12px;
 }
@@ -588,7 +625,7 @@ select option {
   background: transparent;
   border: 0;
   border-radius: 2px;
-  color: #f4f4f6;
+  color: var(--foreground);
   font: inherit;
   font-size: 22px;
   font-weight: 650;
@@ -606,32 +643,36 @@ select option {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: #bdbdc6;
+  color: var(--muted-foreground);
 }
 .create-form input {
   width: 100%;
 }
 .create-panel .create-form button {
   align-self: flex-end;
-  background: #5754a4;
-  border-color: #6662b9;
-  color: white;
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--foreground);
   padding: 8px 14px;
   font-weight: 600;
 }
 
-.dark {
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: hsl(224.3 76.3% 48%);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(240 3.7% 15.9%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: hsl(217.2 91.2% 59.8%);
-}
-
 @theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: 6px;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -645,9 +686,9 @@ select option {
 .filters-content {
   z-index: 50;
   width: 300px;
-  color: #e5e5e9;
-  background: #29292f;
-  border: 1px solid #484850;
+  color: var(--foreground);
+  background: var(--accent);
+  border: 1px solid var(--border);
 }
 
 .sidebar-header,
@@ -677,18 +718,68 @@ select option {
   gap: 8px;
 }
 .status-trigger {
-  background: #242429;
-  border: 1px solid #3b3b43;
-  color: #e8e8ed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--foreground);
   min-width: 104px;
 }
 .status-options {
-  background: #29292f;
-  color: #e8e8ed;
-  border: 1px solid #484850;
+  background: var(--accent);
+  color: var(--foreground);
+  border: 1px solid var(--border);
   z-index: 60;
 }
 .status-options [role="option"]:focus {
-  background: #41414b;
-  color: white;
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --surface: #171717;
+    --error-surface: #451a1a;
+    --error-foreground: #fecaca;
+    --foreground: #ededed;
+    --primary: #ededed;
+    --primary-foreground: #171717;
+    --secondary: #262626;
+    --secondary-foreground: #ededed;
+    --accent: #262626;
+    --accent-foreground: #ededed;
+    --muted: #262626;
+    --muted-foreground: #a1a1a1;
+    --border: #262626;
+    --input: #404040;
+    --ring: #a1a1a1;
+  }
+}
+
+/* Primary actions invert with the surrounding surface. */
+.new-ticket,
+.empty-state button,
+.create-panel .create-form button {
+  color: var(--primary-ink);
+}
+:root {
+  --primary-ink: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary-ink: #171717;
+  }
+}
+.ticket-ref,
+.editor-reference {
+  font-family: "Geist Mono", monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
