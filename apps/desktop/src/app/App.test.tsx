@@ -190,14 +190,36 @@ test("opens a related ticket outside the filtered list and preserves drafts when
       if (command === "find_tickets") return listVisible ? [first] : [];
       if (command === "show_ticket")
         return args?.reference === first.reference ? first : second;
-      if (command === "dependency_graph")
+      if (command === "contextual_relationships") {
+        const empty = { items: [], next_offset: null };
         return {
-          nodes: [],
-          edges: [],
-          max_nodes: 50,
-          max_depth: 5,
-          truncated: false,
+          relationships: {
+            parent: null,
+            children:
+              args?.reference === first.reference
+                ? {
+                    items: [
+                      {
+                        reference: second.reference,
+                        title: { text: second.title },
+                        status: "Todo",
+                        trashed: false,
+                        unresolved: true,
+                      },
+                    ],
+                    next_offset: null,
+                  }
+                : empty,
+            prerequisites: empty,
+            blocking: empty,
+            related: empty,
+            discovered_while: empty,
+            discoveries: empty,
+            duplicate_of: null,
+            duplicates: empty,
+          },
         };
+      }
       throw new Error(`unexpected ${command}`);
     },
   );

@@ -128,6 +128,7 @@ export function TicketDetails({
                 efforts={efforts}
                 onSaved={updateTicket}
                 refresh={refresh}
+                onOpenTicket={setSelected}
               />
               <div className="editor-body">
                 <p className="description-heading">Description</p>
@@ -153,6 +154,7 @@ export function TicketDetails({
                 efforts={efforts}
                 onSaved={updateTicket}
                 refresh={refresh}
+                onOpenTicket={setSelected}
               />
             </TicketEditor>
           )}

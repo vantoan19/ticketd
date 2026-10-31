@@ -1,44 +1,41 @@
 import { useEffect, useRef, useState } from "react";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { client, type Ticket } from "@/lib/api/client";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { client, type Relationships, type Ticket } from "@/lib/api/client";
+import { Duplicates } from "@/features/tickets/Duplicates";
 import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
-  linkKinds,
   linkLabel,
-  linkSignature,
+  linkRows,
+  mergePage,
+  nextOffset,
   removeLink,
-  type LinkKind,
   type LinkRow,
 } from "@/features/tickets/linked-work";
 import "./linked-work.css";
 
-type Contextual = Awaited<ReturnType<typeof client.contextualRelationships>>;
-type Info = { title: string; status: string; trashed: boolean };
 type Loaded = {
   reference: string;
-  contextual: Contextual | null;
-  nextOffset: number | null;
-  blocks: LinkRow[];
-  info: Record<string, Info>;
-  failed: boolean;
+  links: Relationships | null;
+  /** Why the read failed, when it did. */
+  failure: string;
 };
 
-const contextualKinds = [
-  ["related", "related"],
-  ["discovered_while", "discovered_while"],
-  ["discoveries", "discoveries"],
-] as const;
-
-function nextOffset(links: Contextual) {
-  const offsets = [
-    links.related.next_offset,
-    links.discovered_while.next_offset,
-    links.discoveries.next_offset,
-  ].filter((value): value is number => value !== null);
-  return offsets.length ? Math.max(...offsets) : null;
-}
+const isDuplicateKind = (kind: LinkRow["kind"]) =>
+  kind === "duplicate_of" || kind === "duplicates";
 
 /** Every link of a ticket as one flat section, grouped by meaning. */
 export function LinkedWork({
@@ -57,74 +54,38 @@ export function LinkedWork({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reload, setReload] = useState(0);
   const [linking, setLinking] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const attempts = useRef(new Map<string, string>());
-  const signature = linkSignature(ticket);
   const reference = ticket.reference;
 
+  // One bounded read of the core's relationships feeds every row. It reruns
+  // whenever the workspace revision moves, so links made elsewhere appear.
   useEffect(() => {
     let active = true;
-    const refs = [
-      ticket.parent?.reference,
-      ...ticket.children.map((item) => item.reference),
-      ticket.duplicate_of,
-      ...(ticket.duplicates ?? []),
-    ].filter((value): value is string => !!value);
-    void Promise.allSettled([
-      client.contextualRelationships(reference, 0),
-      client.dependencyGraph(reference),
-      ...refs.map((value) => client.showTicket(value)),
-    ]).then(([contextual, graphResult, ...tickets]) => {
-      if (!active) return;
-      const info: Record<string, Info> = {};
-      for (const result of tickets)
-        if (result.status === "fulfilled")
-          info[result.value.reference] = {
-            title: result.value.title,
-            status: result.value.status,
-            trashed: result.value.trashed,
-          };
-      const blocks: LinkRow[] = [];
-      if (graphResult.status === "fulfilled") {
-        const nodes = new Map(
-          graphResult.value.nodes.map((node) => [node.reference, node]),
-        );
-        for (const edge of graphResult.value.edges) {
-          const node = nodes.get(edge.dependent);
-          if (edge.blocker === reference && node)
-            blocks.push({
-              kind: "blocks",
-              reference: node.reference,
-              title: node.title,
-              status: node.status,
-              trashed: node.trashed,
-            });
-        }
-      }
-      setLoaded({
-        reference,
-        contextual: contextual.status === "fulfilled" ? contextual.value : null,
-        nextOffset:
-          contextual.status === "fulfilled"
-            ? nextOffset(contextual.value)
-            : null,
-        blocks,
-        info,
-        failed:
-          contextual.status === "rejected" || graphResult.status === "rejected",
-      });
-    });
+    client.contextualRelationships(reference, 0).then(
+      (links) => {
+        if (active) setLoaded({ reference, links, failure: "" });
+      },
+      (reason: unknown) => {
+        if (active)
+          setLoaded((previous) => ({
+            reference,
+            // Keep what was shown for this ticket; say the refresh failed.
+            links: previous?.reference === reference ? previous.links : null,
+            failure: String(reason),
+          }));
+      },
+    );
     return () => {
       active = false;
     };
-    // `signature` stands for the link fields of `ticket` read above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reference, revision, signature, reload]);
+  }, [reference, revision, reload]);
 
   const current = loaded?.reference === reference ? loaded : null;
-  const rows = collectRows(ticket, current);
-  const count = rows.length;
+  const rows = current?.links ? linkRows(current.links) : [];
+  const more = current?.links ? nextOffset(current.links) : null;
 
   async function remove(row: LinkRow) {
     const key = JSON.stringify([row.kind, row.reference]);
@@ -145,52 +106,63 @@ export function LinkedWork({
       setPending(false);
     }
   }
-  async function more() {
-    if (!current?.contextual || current.nextOffset === null) return;
+  async function showMore() {
+    if (!current?.links || more === null) return;
     try {
-      const page = await client.contextualRelationships(
-        reference,
-        current.nextOffset,
+      const page = await client.contextualRelationships(reference, more);
+      setLoaded((previous) =>
+        previous?.links && previous.reference === reference
+          ? { ...previous, links: mergePage(previous.links, page) }
+          : previous,
       );
-      setLoaded((previous) => {
-        if (!previous?.contextual || previous.reference !== reference)
-          return previous;
-        const merged = { ...previous.contextual };
-        for (const [key] of contextualKinds) {
-          const known = new Set(
-            merged[key].items.map((item) => item.reference),
-          );
-          merged[key] = {
-            items: [
-              ...merged[key].items,
-              ...page[key].items.filter((item) => !known.has(item.reference)),
-            ],
-            next_offset: page[key].next_offset,
-          };
-        }
-        return {
-          ...previous,
-          contextual: merged,
-          nextOffset: nextOffset(page),
-        };
-      });
     } catch (reason) {
       setError(`Could not load more links: ${String(reason)}`);
     }
   }
 
-  const dialog = (
-    <LinkTicketDialog
-      ticket={ticket}
-      open={linking}
-      onOpenChange={setLinking}
-      onLinked={async () => {
-        setReload((value) => value + 1);
-        await refresh();
-      }}
-    />
+  const dialogs = (
+    <>
+      <LinkTicketDialog
+        ticket={ticket}
+        open={linking}
+        onOpenChange={setLinking}
+        onLinked={async () => {
+          setReload((value) => value + 1);
+          await refresh();
+        }}
+      />
+      <Dialog open={reviewing} onOpenChange={setReviewing}>
+        <DialogContent className="duplicate-dialog">
+          <DialogHeader>
+            <DialogTitle>Review dependency changes</DialogTitle>
+            <DialogDescription>
+              Move dependencies between {ticket.reference} and another ticket
+              after a duplicate link was removed.
+            </DialogDescription>
+          </DialogHeader>
+          <Duplicates
+            ticket={ticket}
+            startSeparate
+            refresh={async () => {
+              setReload((value) => value + 1);
+              await refresh();
+            }}
+            onDone={() => setReviewing(false)}
+            onCancel={() => setReviewing(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
-  if (count === 0)
+  const linkAction = (
+    <Button variant="ghost" size="sm" onClick={() => setLinking(true)}>
+      <Plus aria-hidden="true" />
+      Link ticket
+    </Button>
+  );
+  // Collapse to the bare action only after a successful read found nothing;
+  // loading and failed look different from "no links".
+  if (!current?.links || rows.length === 0)
     return (
       <section
         id={`linked-work-${reference}`}
@@ -198,12 +170,26 @@ export function LinkedWork({
         data-empty
         aria-label="Linked work"
       >
-        <Button variant="ghost" size="sm" onClick={() => setLinking(true)}>
-          <Plus aria-hidden="true" />
-          Link ticket
-        </Button>
+        {linkAction}
+        {!current && (
+          <span className="linked-work-state" role="status">
+            Loading linked work…
+          </span>
+        )}
+        {current && !current.links && (
+          <span className="linked-work-state" role="alert">
+            Could not load linked work: {current.failure}{" "}
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => setReload((value) => value + 1)}
+            >
+              Try again
+            </Button>
+          </span>
+        )}
         {error && <p role="alert">{error}</p>}
-        {dialog}
+        {dialogs}
       </section>
     );
   return (
@@ -214,22 +200,25 @@ export function LinkedWork({
     >
       <div className="detail-section-heading">
         <h3>
-          Linked work <span className="linked-work-count">{count}</span>
+          Linked work{" "}
+          <span className="linked-work-count">
+            {rows.length}
+            {more !== null && "+"}
+          </span>
         </h3>
         <div className="linked-work-actions">
           <Button variant="ghost" size="sm" onClick={onOpenGraph}>
             <Network aria-hidden="true" />
             Graph
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setLinking(true)}>
-            <Plus aria-hidden="true" />
-            Link ticket
-          </Button>
+          {linkAction}
         </div>
       </div>
       {error && <p role="alert">{error}</p>}
-      {current?.failed && (
-        <p role="alert">Some linked work could not be loaded.</p>
+      {current.failure && (
+        <p role="alert">
+          Linked work could not be refreshed: {current.failure}
+        </p>
       )}
       <ul className="linked-work-rows">
         {rows.map((row) => (
@@ -240,7 +229,7 @@ export function LinkedWork({
           >
             <span className="linked-work-label">{linkLabel(row.kind)}</span>
             <StatusIcon
-              status={row.status ?? ""}
+              status={row.status}
               size={14}
               decorative
               className="linked-work-icon"
@@ -251,92 +240,117 @@ export function LinkedWork({
               className="linked-work-title"
               onClick={() => select(row.reference)}
             >
-              {row.title || "Loading title…"}
+              {row.title}
             </Button>
             <span className="linked-work-status">{statusText(row)}</span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="linked-work-remove"
-              title="Remove relationship"
-              aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
-              disabled={pending}
-              onClick={() => void remove(row)}
-            >
-              <X aria-hidden="true" />
-            </Button>
+            {isDuplicateKind(row.kind) ? (
+              <RemoveDuplicate
+                row={row}
+                ticket={reference}
+                disabled={pending}
+                onRemove={() => void remove(row)}
+                onReview={() => setReviewing(true)}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="linked-work-remove"
+                title="Remove relationship"
+                aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+                disabled={pending}
+                onClick={() => void remove(row)}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            )}
           </li>
         ))}
       </ul>
-      {current?.nextOffset != null && (
-        <Button variant="outline" size="sm" onClick={() => void more()}>
+      {more !== null && (
+        <Button variant="outline" size="sm" onClick={() => void showMore()}>
           Show more links
         </Button>
       )}
-      {dialog}
+      {dialogs}
     </section>
   );
 }
 
-function statusText(row: LinkRow) {
-  const parts = [row.status ?? "Loading status…"];
-  if (row.kind === "blocked_by" && row.status && row.status !== "Done")
-    parts.push("not done");
-  if (row.trashed) parts.push("in trash");
-  return parts.join(" · ");
+/**
+ * Removing a duplicate link is not a plain delete: it restores the duplicate's
+ * earlier status and leaves moved dependencies where they are. The person sees
+ * that before confirming.
+ */
+function RemoveDuplicate({
+  row,
+  ticket,
+  disabled,
+  onRemove,
+  onReview,
+}: {
+  row: LinkRow;
+  ticket: string;
+  disabled: boolean;
+  onRemove: () => void;
+  onReview: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const duplicate = row.kind === "duplicate_of" ? ticket : row.reference;
+  const canonical = row.kind === "duplicate_of" ? row.reference : ticket;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="linked-work-remove"
+          title="Remove relationship"
+          aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+          disabled={disabled}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        aria-label="Remove duplicate link"
+        className="linked-work-confirm"
+      >
+        <p>
+          {duplicate} stops being a duplicate of {canonical} and returns to the
+          status it had before. Dependencies that were moved to {canonical} stay
+          where they are; review them separately.
+        </p>
+        <div className="linked-work-confirm-actions">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setOpen(false);
+              onReview();
+            }}
+          >
+            Review separate dependency changes
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setOpen(false);
+              onRemove();
+            }}
+          >
+            Remove duplicate link
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
-function collectRows(ticket: Ticket, loaded: Loaded | null): LinkRow[] {
-  const info = loaded?.info ?? {};
-  const known = (
-    kind: LinkKind,
-    reference: string,
-    title: string | undefined,
-    trashed: boolean | undefined,
-  ): LinkRow => ({
-    kind,
-    reference,
-    title: info[reference]?.title ?? title ?? "",
-    status: info[reference]?.status ?? null,
-    trashed: info[reference]?.trashed ?? trashed ?? false,
-  });
-  const byKind: Record<LinkKind, LinkRow[]> = {
-    blocked_by: ticket.prerequisites.map((item) => ({
-      kind: "blocked_by",
-      ...item,
-    })),
-    blocks: loaded?.blocks ?? [],
-    parent: ticket.parent
-      ? [
-          known(
-            "parent",
-            ticket.parent.reference,
-            ticket.parent.title,
-            ticket.parent.trashed,
-          ),
-        ]
-      : [],
-    subticket: ticket.children.map((item) =>
-      known("subticket", item.reference, item.title, item.trashed),
-    ),
-    related: [],
-    discovered_while: [],
-    discoveries: [],
-    duplicate_of: ticket.duplicate_of
-      ? [known("duplicate_of", ticket.duplicate_of, undefined, undefined)]
-      : [],
-    duplicates: (ticket.duplicates ?? []).map((reference) =>
-      known("duplicates", reference, undefined, undefined),
-    ),
-  };
-  if (loaded?.contextual)
-    for (const [key, kind] of contextualKinds)
-      byKind[kind] = loaded.contextual[key].items.map((item) => ({
-        kind,
-        reference: item.reference,
-        title: item.title.text,
-        status: item.status,
-        trashed: item.trashed,
-      }));
-  return linkKinds.flatMap(({ kind }) => byKind[kind]);
+function statusText(row: LinkRow) {
+  const parts = [row.status];
+  if (row.kind === "blocked_by" && row.unresolved) parts.push("not done");
+  if (row.trashed) parts.push("in trash");
+  return parts.join(" · ");
 }

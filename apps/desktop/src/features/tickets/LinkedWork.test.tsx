@@ -41,52 +41,59 @@ const other = (reference: string, title: string, status = "Todo") => ({
   title,
   status,
 });
+type Item = {
+  reference: string;
+  title: string;
+  status?: string;
+  trashed?: boolean;
+  unresolved?: boolean;
+};
+const related = (item: Item) => ({
+  status: "Todo",
+  trashed: false,
+  unresolved: true,
+  ...item,
+  title: { text: item.title },
+});
+const pageOf = (items: Item[] = [], next_offset: number | null = null) => ({
+  items: items.map(related),
+  next_offset,
+});
 
 function bridge(
   options: {
-    related?: { reference: string; title: string }[];
-    blocks?: string[];
+    prerequisites?: Item[];
+    blocking?: Item[];
+    related?: Item[];
+    parent?: Item;
+    duplicate_of?: Item;
+    duplicates?: Item[];
+    more?: number;
     fail?: Record<string, string>;
+    never?: boolean;
   } = {},
 ) {
   vi.mocked(invoke).mockImplementation(async (command: string) => {
     const failure = options.fail?.[command];
     if (failure) throw failure;
-    if (command === "contextual_relationships")
+    if (command === "contextual_relationships") {
+      if (options.never) return new Promise(() => {});
       return {
         relationships: {
-          related: {
-            items: (options.related ?? []).map((item) => ({
-              ...item,
-              title: { text: item.title },
-              status: "Todo",
-              trashed: false,
-            })),
-            next_offset: null,
-          },
+          parent: options.parent ? related(options.parent) : null,
+          children: page,
+          prerequisites: pageOf(options.prerequisites),
+          blocking: pageOf(options.blocking),
+          related: pageOf(options.related, options.more ?? null),
           discovered_while: page,
           discoveries: page,
+          duplicate_of: options.duplicate_of
+            ? related(options.duplicate_of)
+            : null,
+          duplicates: pageOf(options.duplicates),
         },
       };
-    if (command === "dependency_graph")
-      return {
-        nodes: [
-          { ...base, availability: null },
-          ...(options.blocks ?? []).map((reference) => ({
-            ...other(reference, "Waiting"),
-            availability: null,
-          })),
-        ],
-        edges: (options.blocks ?? []).map((dependent) => ({
-          blocker: "T-1",
-          dependent,
-        })),
-        max_nodes: 50,
-        max_depth: 2,
-        truncated: false,
-      };
-    if (command === "show_ticket")
-      return other("T-9", "Existing original", "Canceled");
+    }
     if (command === "search_tickets")
       return [other("T-5", "Target"), other("T-1", "Itself")];
     return base;
@@ -109,22 +116,44 @@ function renderSection(
   return refresh;
 }
 
-test("a ticket with no links shows only Link ticket", () => {
+test("a ticket with no links shows only Link ticket once the read succeeds", async () => {
   bridge();
   renderSection(base);
+  await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   expect(screen.getByRole("button", { name: "Link ticket" })).toBeTruthy();
   expect(screen.queryByRole("heading")).toBeNull();
-  expect(screen.queryByText(/No parent|No subtickets/)).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
 });
 
-test("shows every kind of link grouped in order, without expanding anything", async () => {
+test("loading and a failed read are distinct from having no links", async () => {
+  bridge({ never: true });
+  const view = render(
+    <LinkedWork
+      ticket={base}
+      revision={0}
+      refresh={async () => {}}
+      select={() => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain("Loading linked");
+  view.unmount();
+  bridge({ fail: { contextual_relationships: "database busy" } });
+  renderSection(base);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Could not load linked work: database busy",
+  );
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+test("builds every row from the one relationships read, including all dependents", async () => {
   bridge({
     related: [{ reference: "T-4", title: "Sibling" }],
-    blocks: ["T-6"],
-  });
-  renderSection({
-    ...base,
+    blocking: [
+      { reference: "T-6", title: "Waiting" },
+      { reference: "T-7", title: "Also waiting" },
+    ],
     prerequisites: [
       {
         reference: "T-2",
@@ -133,50 +162,46 @@ test("shows every kind of link grouped in order, without expanding anything", as
         trashed: true,
       },
     ],
-    parent: { reference: "T-3", title: "Epic", trashed: false },
-    duplicate_of: "T-9",
+    parent: { reference: "T-3", title: "Epic" },
+    duplicate_of: { reference: "T-9", title: "Original", status: "Canceled" },
   });
+  renderSection(base);
   await screen.findByText("Sibling");
-  await screen.findByText("Waiting");
-  await screen.findByText("Canceled");
   const rows = screen.getAllByRole("listitem");
   expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
     "blocked_by",
+    "blocks",
     "blocks",
     "parent",
     "related",
     "duplicate_of",
   ]);
   expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
-  expect(screen.getByRole("heading").textContent).toContain("5");
-  expect(document.querySelector("details")).toBeNull();
+  expect(screen.getByRole("heading").textContent).toContain("6");
+  const commands = vi.mocked(invoke).mock.calls.map((call) => call[0]);
+  expect(commands).not.toContain("dependency_graph");
+  expect(commands).not.toContain("show_ticket");
+});
+
+test("shows n+ and loads the next page when more links exist", async () => {
+  bridge({ related: [{ reference: "T-4", title: "Sibling" }], more: 20 });
+  renderSection(base);
+  await screen.findByText("Sibling");
+  expect(screen.getByRole("heading").textContent).toContain("1+");
+  expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
 test("the Graph action opens the dependency graph", async () => {
-  bridge();
+  bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
-  renderSection(
-    {
-      ...base,
-      prerequisites: [
-        { reference: "T-2", title: "Blocker", status: "Todo", trashed: false },
-      ],
-    },
-    undefined,
-    onOpenGraph,
-  );
+  renderSection(base, undefined, onOpenGraph);
   fireEvent.click(await screen.findByRole("button", { name: "Graph" }));
   expect(onOpenGraph).toHaveBeenCalled();
 });
 
 test("Remove relationship takes the link off the ticket", async () => {
-  bridge();
-  const refresh = renderSection({
-    ...base,
-    prerequisites: [
-      { reference: "T-2", title: "Blocker", status: "Todo", trashed: false },
-    ],
-  });
+  bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
+  const refresh = renderSection(base);
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Remove relationship: Blocked by T-2",
@@ -187,6 +212,37 @@ test("Remove relationship takes the link off the ticket", async () => {
       blocker: "T-2",
       dependent: "T-1",
     }),
+  );
+  await waitFor(() => expect(refresh).toHaveBeenCalled());
+});
+
+test("removing a duplicate link explains the result before anything changes", async () => {
+  bridge({
+    duplicate_of: { reference: "T-9", title: "Original", status: "Todo" },
+  });
+  const refresh = renderSection({ ...base, duplicate_of: "T-9" });
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Remove relationship: Duplicate of T-9",
+    }),
+  );
+  const confirm = await screen.findByRole("dialog", {
+    name: "Remove duplicate link",
+  });
+  expect(confirm.textContent).toContain("T-1 stops being a duplicate of T-9");
+  expect(confirm.textContent).toContain("review them separately");
+  expect(invoke).not.toHaveBeenCalledWith(
+    "remove_duplicate",
+    expect.anything(),
+  );
+  fireEvent.click(
+    within(confirm).getByRole("button", { name: "Remove duplicate link" }),
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "remove_duplicate",
+      expect.objectContaining({ source: "T-1" }),
+    ),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
 });

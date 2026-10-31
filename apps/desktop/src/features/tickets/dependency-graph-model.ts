@@ -26,27 +26,6 @@ export function layoutGraph(graph: DependencyGraph) {
   );
 }
 
-/** The tickets that wait on `reference`, and the tickets it waits on. */
-export function neighbours(graph: DependencyGraph, reference: string) {
-  const byReference = new Map(
-    graph.nodes.map((node) => [node.reference, node]),
-  );
-  const pick = (references: string[]) =>
-    references.flatMap((item) => byReference.get(item) ?? []);
-  return {
-    blocks: pick(
-      graph.edges
-        .filter((edge) => edge.blocker === reference)
-        .map((edge) => edge.dependent),
-    ),
-    blockedBy: pick(
-      graph.edges
-        .filter((edge) => edge.dependent === reference)
-        .map((edge) => edge.blocker),
-    ),
-  };
-}
-
 /** How far a limited graph reaches, or null when nothing was cut off. */
 export function scopeNotice(graph: DependencyGraph, origin: string) {
   if (!graph.truncated) return null;

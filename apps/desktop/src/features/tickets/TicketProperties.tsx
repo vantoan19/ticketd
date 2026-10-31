@@ -123,12 +123,15 @@ export function TicketProperties({
   efforts,
   onSaved,
   refresh,
+  onOpenTicket,
 }: {
   ticket: Ticket;
   projects: Project[];
   efforts: Effort[];
   onSaved: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
+  /** Opens another ticket, such as the canonical ticket of a duplicate. */
+  onOpenTicket?: (reference: string) => void;
 }) {
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
@@ -255,6 +258,17 @@ export function TicketProperties({
             </SelectGroup>
           </SelectContent>
         </Select>,
+      )}
+      {/* The canonical link belongs beside the status, trashed or not. */}
+      {ticket.duplicate_of && (
+        <Button
+          variant="link"
+          size="sm"
+          className="duplicate-of-link"
+          onClick={() => onOpenTicket?.(ticket.duplicate_of!)}
+        >
+          Duplicate of {ticket.duplicate_of}
+        </Button>
       )}
       {property(
         "Project",

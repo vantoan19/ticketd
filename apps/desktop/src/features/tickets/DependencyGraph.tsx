@@ -22,7 +22,6 @@ import {
   NODE_HEIGHT,
   NODE_WIDTH,
   layoutGraph,
-  neighbours,
   scopeNotice,
   type GraphTicket,
 } from "@/features/tickets/dependency-graph-model";
@@ -30,6 +29,7 @@ import {
   client,
   type DependencyGraph as Graph,
   type Project,
+  type Relationships,
   type Ticket,
 } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
@@ -176,7 +176,9 @@ function Legend() {
   return (
     <ul className="graph-legend" aria-label="Legend">
       <li>Arrows point to the work that waits.</li>
-      <li>A ticket is Ready once every ticket above it is Done.</li>
+      <li>
+        A Todo ticket is Ready once every ticket with an arrow into it is Done.
+      </li>
       <li>In review and Canceled tickets still block.</li>
       <li>
         <StatusDot tone="ready" /> Ready
@@ -188,8 +190,15 @@ function Legend() {
   );
 }
 
-function TicketList({ tickets }: { tickets: GraphTicket[] }) {
-  if (!tickets.length) return <p className="graph-none">None</p>;
+function TicketList({
+  tickets,
+  placeholder = "None",
+}: {
+  tickets: { reference: string; title: string }[] | null;
+  /** Shown when there are none, or while they are still loading. */
+  placeholder?: string;
+}) {
+  if (!tickets?.length) return <p className="graph-none">{placeholder}</p>;
   return (
     <ul>
       {tickets.map((ticket) => (
@@ -203,7 +212,6 @@ function TicketList({ tickets }: { tickets: GraphTicket[] }) {
 }
 
 function SelectionPanel({
-  graph,
   ticket,
   origin,
   projects,
@@ -211,7 +219,6 @@ function SelectionPanel({
   onOpen,
   onBack,
 }: {
-  graph: Graph;
   ticket: GraphTicket;
   origin: string;
   projects: Project[];
@@ -219,12 +226,20 @@ function SelectionPanel({
   onOpen: (reference: string) => void;
   onBack: () => void;
 }) {
-  const [loaded, setLoaded] = useState<Ticket | null>(null);
+  const [loaded, setLoaded] = useState<{
+    ticket: Ticket;
+    blocks: Relationships["blocking"];
+  } | null>(null);
+  // The drawn graph is bounded, so a ticket at its edge has links that are not
+  // drawn. The panel lists the ticket's own links from the core instead.
   useEffect(() => {
     let active = true;
-    void client.showTicket(ticket.reference).then(
-      (value) => {
-        if (active) setLoaded(value);
+    void Promise.all([
+      client.showTicket(ticket.reference),
+      client.contextualRelationships(ticket.reference, 0),
+    ]).then(
+      ([value, links]) => {
+        if (active) setLoaded({ ticket: value, blocks: links.blocking });
       },
       () => {},
     );
@@ -232,8 +247,13 @@ function SelectionPanel({
       active = false;
     };
   }, [ticket.reference]);
-  const detail = loaded?.reference === ticket.reference ? loaded : null;
-  const { blocks, blockedBy } = neighbours(graph, ticket.reference);
+  const ready = loaded?.ticket.reference === ticket.reference ? loaded : null;
+  const detail = ready?.ticket ?? null;
+  const blockedBy = detail?.prerequisites ?? null;
+  const blocks = ready?.blocks.items.map((item) => ({
+    reference: item.reference,
+    title: item.title.text,
+  }));
   const project = projects.find((item) => item.id === detail?.project_id);
   const effort = efforts.find((item) => item.id === detail?.effort_id);
   const placeholder = detail ? "None" : "Loading…";
@@ -250,9 +270,18 @@ function SelectionPanel({
       </h3>
       <AvailabilityMark availability={ticket.availability} />
       <h4>Blocked by</h4>
-      <TicketList tickets={blockedBy} />
+      <TicketList
+        tickets={blockedBy}
+        placeholder={detail ? "None" : "Loading…"}
+      />
       <h4>Blocks</h4>
-      <TicketList tickets={blocks} />
+      <TicketList
+        tickets={blocks ?? null}
+        placeholder={ready ? "None" : "Loading…"}
+      />
+      {ready?.blocks.next_offset != null && (
+        <p className="graph-none">More tickets wait on this one.</p>
+      )}
       <dl className="graph-panel-facts">
         <dt>Project</dt>
         <dd>{project?.name ?? placeholder}</dd>
@@ -346,7 +375,6 @@ export default function DependencyGraph({
           </div>
           {selectedTicket ? (
             <SelectionPanel
-              graph={graph}
               ticket={selectedTicket}
               origin={reference}
               projects={projects}

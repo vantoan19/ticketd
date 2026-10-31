@@ -1,4 +1,4 @@
-import { client, type Ticket } from "@/lib/api/client";
+import { client, type Relationships } from "@/lib/api/client";
 
 /** The meaning of a link, as seen from the ticket whose detail is open. */
 export type LinkKind =
@@ -46,9 +46,77 @@ export type LinkRow = {
   kind: LinkKind;
   reference: string;
   title: string;
-  status: string | null;
+  status: string;
   trashed: boolean;
+  /** Still has to be Done for a dependency on it to clear. */
+  unresolved: boolean;
 };
+
+/** The kinds that come as pages; they share one offset. */
+export const pagedKinds = [
+  ["prerequisites", "blocked_by"],
+  ["blocking", "blocks"],
+  ["children", "subticket"],
+  ["related", "related"],
+  ["discovered_while", "discovered_while"],
+  ["discoveries", "discoveries"],
+  ["duplicates", "duplicates"],
+] as const;
+
+/** Where the next page of any kind starts, or null when every kind is complete. */
+export function nextOffset(links: Relationships): number | null {
+  const offsets = pagedKinds
+    .map(([key]) => links[key].next_offset)
+    .filter((value): value is number => value !== null);
+  return offsets.length ? Math.max(...offsets) : null;
+}
+
+/** Adds a later page to the pages already read, without repeating a ticket. */
+export function mergePage(
+  known: Relationships,
+  page: Relationships,
+): Relationships {
+  const merged = { ...known };
+  for (const [key] of pagedKinds) {
+    const seen = new Set(known[key].items.map((item) => item.reference));
+    merged[key] = {
+      items: [
+        ...known[key].items,
+        ...page[key].items.filter((item) => !seen.has(item.reference)),
+      ],
+      next_offset: page[key].next_offset,
+    };
+  }
+  return merged;
+}
+
+/** Every link in the order the section shows them, built from one core read. */
+export function linkRows(links: Relationships): LinkRow[] {
+  const row = (
+    kind: LinkKind,
+    item: Relationships["children"]["items"][number],
+  ): LinkRow => ({
+    kind,
+    reference: item.reference,
+    title: item.title.text,
+    status: item.status,
+    trashed: item.trashed,
+    unresolved: item.unresolved,
+  });
+  const single = (kind: LinkKind, item: Relationships["parent"]) =>
+    item ? [row(kind, item)] : [];
+  const paged = (kind: LinkKind) => {
+    const entry = pagedKinds.find(([, value]) => value === kind);
+    return entry ? links[entry[0]].items.map((item) => row(kind, item)) : [];
+  };
+  return linkKinds.flatMap(({ kind }) =>
+    kind === "parent"
+      ? single(kind, links.parent)
+      : kind === "duplicate_of"
+        ? single(kind, links.duplicate_of)
+        : paged(kind),
+  );
+}
 
 /** Add a link of the given meaning between `ticket` and `other`. Throws the core's reason on refusal. */
 export async function addLink(
@@ -145,15 +213,4 @@ export async function removeLink(
       await client.removeDuplicate(other, requestId);
       return;
   }
-}
-
-/** Identifies the links a ticket carries, so detail changes reload the parts fetched separately. */
-export function linkSignature(ticket: Ticket) {
-  return JSON.stringify([
-    ticket.parent?.reference,
-    ticket.children.map((item) => item.reference),
-    ticket.prerequisites.map((item) => [item.reference, item.status]),
-    ticket.duplicate_of,
-    ticket.duplicates,
-  ]);
 }

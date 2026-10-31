@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { DependencyGraph } from "@/lib/api/client";
-import { layoutGraph, neighbours, scopeNotice } from "./dependency-graph-model";
+import { layoutGraph, scopeNotice } from "./dependency-graph-model";
 
 const node = (reference: string) => ({
   id: reference,
@@ -26,12 +26,6 @@ test("blockers are laid out above the tickets they block", () => {
   const y = (reference: string) => positions.get(reference)?.y ?? NaN;
   expect(y("T-1")).toBeLessThan(y("T-2"));
   expect(y("T-2")).toBeLessThan(y("T-3"));
-});
-
-test("neighbours separate what a ticket blocks from what blocks it", () => {
-  const found = neighbours(graph, "T-2");
-  expect(found.blocks.map((item) => item.reference)).toEqual(["T-3"]);
-  expect(found.blockedBy.map((item) => item.reference)).toEqual(["T-1"]);
 });
 
 test("only a limited graph states how far it reaches", () => {

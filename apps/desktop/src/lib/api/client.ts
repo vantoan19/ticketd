@@ -34,6 +34,32 @@ const ticketSchema = z.object({
     }),
   ),
 });
+const relatedSchema = z.object({
+  reference: z.string(),
+  title: z.object({ text: z.string() }),
+  status: z.string(),
+  trashed: z.boolean(),
+  /** Whether this ticket still has to be Done for a dependency on it to clear. */
+  unresolved: z.boolean(),
+});
+const relatedPageSchema = z.object({
+  items: z.array(relatedSchema),
+  next_offset: z.number().nullable(),
+});
+const relationshipsSchema = z.object({
+  parent: relatedSchema.nullable(),
+  children: relatedPageSchema,
+  prerequisites: relatedPageSchema,
+  blocking: relatedPageSchema,
+  related: relatedPageSchema,
+  discovered_while: relatedPageSchema,
+  discoveries: relatedPageSchema,
+  duplicate_of: relatedSchema.nullable(),
+  duplicates: relatedPageSchema,
+});
+export type Relationships = z.infer<typeof relationshipsSchema>;
+export type RelatedTicket = z.infer<typeof relatedSchema>;
+
 const graphSchema = z.object({
   nodes: z.array(
     z.object({
@@ -139,25 +165,13 @@ export const client = {
         ),
       );
   },
-  async contextualRelationships(reference: string, offset = 0) {
-    const item = z.object({
-      reference: z.string(),
-      title: z.object({ text: z.string() }),
-      status: z.string(),
-      trashed: z.boolean(),
-    });
-    const page = z.object({
-      items: z.array(item),
-      next_offset: z.number().nullable(),
-    });
+  /** Every relationship of a ticket as the core reports it, one page of each kind. */
+  async contextualRelationships(
+    reference: string,
+    offset = 0,
+  ): Promise<Relationships> {
     return z
-      .object({
-        relationships: z.object({
-          related: page,
-          discovered_while: page,
-          discoveries: page,
-        }),
-      })
+      .object({ relationships: relationshipsSchema })
       .parse(await invoke("contextual_relationships", { reference, offset }))
       .relationships;
   },

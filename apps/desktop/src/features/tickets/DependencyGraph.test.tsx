@@ -60,8 +60,43 @@ beforeEach(() => {
         effort_id: null,
         parent: null,
         children: [],
-        prerequisites: [],
+        // Links beyond the drawn graph still show in the panel.
+        prerequisites: [
+          { reference: "T-2", title: "Build", status: "Todo", trashed: false },
+          {
+            reference: "T-40",
+            title: "Offscreen",
+            status: "Todo",
+            trashed: false,
+          },
+        ],
       };
+    if (command === "contextual_relationships") {
+      const empty = { items: [], next_offset: null };
+      const item = (reference: string, title: string) => ({
+        reference,
+        title: { text: title },
+        status: "Todo",
+        trashed: false,
+        unresolved: true,
+      });
+      return {
+        relationships: {
+          parent: null,
+          children: empty,
+          prerequisites: empty,
+          blocking: {
+            items: [item("T-99", "Beyond the graph")],
+            next_offset: null,
+          },
+          related: empty,
+          discovered_while: empty,
+          discoveries: empty,
+          duplicate_of: null,
+          duplicates: empty,
+        },
+      };
+    }
     throw new Error(`unexpected ${command}`);
   });
 });
@@ -89,7 +124,9 @@ test("states the arrow direction and keeps a way back to the origin ticket", asy
   await screen.findByRole("button", { name: /^T-3\b/ });
   expect(screen.getByText("Arrows point to the work that waits.")).toBeTruthy();
   expect(
-    screen.getByText("A ticket is Ready once every ticket above it is Done."),
+    screen.getByText(
+      "A Todo ticket is Ready once every ticket with an arrow into it is Done.",
+    ),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to T-2" }));
   expect(onBack).toHaveBeenCalled();
@@ -101,6 +138,9 @@ test("selecting a node shows what it blocks, its project, and Open", async () =>
   const panel = screen.getByRole("complementary", { name: "Selected ticket" });
   expect(within(panel).getByText("Blocked by")).toBeTruthy();
   expect(await within(panel).findByText("Core")).toBeTruthy();
+  // The panel lists the ticket's own links, including ones the graph omits.
+  expect(within(panel).getByText("Offscreen")).toBeTruthy();
+  expect(await within(panel).findByText("Beyond the graph")).toBeTruthy();
   fireEvent.click(within(panel).getByRole("button", { name: "Open T-3" }));
   expect(onOpen).toHaveBeenCalledWith("T-3");
 });

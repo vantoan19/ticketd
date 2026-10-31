@@ -4,6 +4,26 @@
 .linked-work[data-empty] {
   margin-top: 16px;
 }
+.linked-work-state {
+  margin-left: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.linked-work-confirm {
+  display: grid;
+  gap: 12px;
+  width: 20rem;
+  font-size: 14px;
+}
+.linked-work-confirm p {
+  margin: 0;
+}
+.linked-work-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .linked-work-count {
   margin-left: 4px;
   color: var(--muted-foreground);

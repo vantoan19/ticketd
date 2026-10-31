@@ -393,6 +393,8 @@ try {
   );
   await duplicateRow.moveTo();
   await click(duplicateRow);
+  // Removing a duplicate link explains the result and asks first.
+  await click(await browser.$("button=Remove duplicate link"));
   await waitFor(
     () => run("show", source.reference).duplicate_of === null,
     "Duplicate undo failed",

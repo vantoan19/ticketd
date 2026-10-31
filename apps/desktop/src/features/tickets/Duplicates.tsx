@@ -62,8 +62,11 @@ export function Duplicates({
   refresh,
   onDone,
   onCancel,
+  startSeparate = false,
 }: {
   ticket: Ticket;
+  /** Opens on the separate dependency review rather than on marking a duplicate. */
+  startSeparate?: boolean;
   refresh: () => Promise<void>;
   /** Called after the duplicate and its dependency changes are saved. */
   onDone?: () => void;
@@ -80,7 +83,7 @@ export function Duplicates({
   const [attempt, setAttempt] = useState<{ key: string; id: string } | null>(
     null,
   );
-  const [separate, setSeparate] = useState(false);
+  const [separate, setSeparate] = useState(startSeparate);
   const target = canonical.trim();
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
   const sourceRef = separate ? target : ticket.reference;

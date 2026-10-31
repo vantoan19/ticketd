@@ -64,3 +64,34 @@ test("keeps the saved project and reports a failed change", async () => {
     ),
   );
 });
+
+test("a duplicate links to its canonical ticket beside the status, even in trash", () => {
+  const open = vi.fn();
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-1",
+        title: "Ticket",
+        body: "",
+        status: "Canceled",
+        tags: [],
+        project_id: null,
+        effort_id: null,
+        trashed: true,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+        duplicate_of: "T-9",
+      }}
+      projects={[]}
+      efforts={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+      onOpenTicket={open}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Duplicate of T-9" }));
+  expect(open).toHaveBeenCalledWith("T-9");
+});
