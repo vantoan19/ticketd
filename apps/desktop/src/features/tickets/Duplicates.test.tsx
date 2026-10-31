@@ -33,20 +33,44 @@ test("marks a duplicate and refreshes the ticket", async () => {
     children: [],
     prerequisites: [],
   };
-  vi.mocked(invoke).mockResolvedValue({
-    ...ticket,
-    status: "Canceled",
-    duplicate_of: "T-2",
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "preview_duplicate_dependencies")
+      return {
+        canonical: "T-2",
+        edges: [
+          {
+            blocker: "T-1",
+            dependent: "T-3",
+            replacement_blocker: "T-2",
+            replacement_dependent: "T-3",
+          },
+        ],
+      };
+    return { ...ticket, status: "Canceled", duplicate_of: "T-2" };
   });
   const refresh = vi.fn(async () => {});
   render(<Duplicates ticket={ticket} refresh={refresh} select={() => {}} />);
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
     target: { value: "T-2" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Preview dependencies" }));
+  const choice = await screen.findByLabelText("Choice for T-1 blocks T-3");
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Mark duplicate",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.change(choice, { target: { value: "retain" } });
   fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(invoke).toHaveBeenCalledWith(
-    "mark_duplicate",
-    expect.objectContaining({ source: "T-1", canonical: "T-2" }),
+    "mark_duplicate_reviewed",
+    expect.objectContaining({
+      source: "T-1",
+      canonical: "T-2",
+      decisions: [expect.objectContaining({ choice: "retain" })],
+    }),
   );
 });

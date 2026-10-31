@@ -2107,6 +2107,323 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
 }
 
 #[test]
+fn duplicate_review_replaces_a_blocker_atomically() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Duplicate").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = workspace
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let choices = preview
+        .edges
+        .clone()
+        .into_iter()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    workspace
+        .mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            choices,
+            None,
+        )
+        .unwrap();
+    let saved = workspace.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(saved.prerequisites[0].reference, canonical.reference);
+    assert_eq!(saved.availability.as_deref(), Some("Blocked"));
+}
+
+#[test]
+fn duplicate_review_rejects_new_edges_without_partial_changes() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut first = Workspace::open(&path).unwrap();
+    let source = first.create_ticket("Duplicate").unwrap();
+    let canonical = first.create_ticket("Canonical").unwrap();
+    let dependent = first.create_ticket("Dependent").unwrap();
+    let other = first.create_ticket("Other").unwrap();
+    first
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = first
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .clone()
+        .into_iter()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    let mut second = Workspace::open(&path).unwrap();
+    second
+        .add_dependency(&source.reference, &other.reference, None)
+        .unwrap();
+    assert!(
+        first
+            .mark_duplicate_reviewed(
+                &source.reference,
+                &canonical.reference,
+                &preview.canonical,
+                decisions,
+                None
+            )
+            .is_err()
+    );
+    assert_eq!(
+        first.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(
+        first
+            .show_ticket(&dependent.reference)
+            .unwrap()
+            .prerequisites[0]
+            .reference,
+        source.reference
+    );
+}
+
+#[test]
+fn reviewed_duplicate_rollback_cycle_and_separate_undo_edit() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    ws.add_dependency(&dependent.reference, &canonical.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    assert!(
+        ws.mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            decisions,
+            None
+        )
+        .is_err()
+    );
+    assert_eq!(
+        ws.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        source.reference
+    );
+    ws.remove_dependency(&dependent.reference, &canonical.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    ws.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        canonical.reference
+    );
+    let review = ws
+        .preview_duplicate_dependencies(&canonical.reference, &source.reference)
+        .unwrap();
+    let decisions = review
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Replace,
+        })
+        .collect();
+    ws.edit_dependencies_reviewed(
+        &canonical.reference,
+        &source.reference,
+        &review.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        ws.show_ticket(&dependent.reference).unwrap().prerequisites[0].reference,
+        source.reference
+    );
+}
+
+#[test]
+fn reviewed_duplicate_retry_preserves_later_graph_edits() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let request = || WriteRequest::MarkDuplicateReviewed {
+        source: source.reference.clone(),
+        canonical: canonical.reference.clone(),
+        expected_canonical: preview.canonical.clone(),
+        decisions: preview
+            .edges
+            .iter()
+            .cloned()
+            .map(|edge| DependencyDecision {
+                edge,
+                choice: DependencyChoice::Replace,
+            })
+            .collect(),
+        agent: None,
+    };
+    ws.write(Some("review"), request()).unwrap();
+    ws.remove_dependency(&canonical.reference, &dependent.reference, None)
+        .unwrap();
+    ws.write(Some("review"), request()).unwrap();
+    assert!(
+        ws.show_ticket(&dependent.reference)
+            .unwrap()
+            .prerequisites
+            .is_empty()
+    );
+}
+
+#[test]
+fn retained_duplicate_blocker_stays_unresolved_and_review_notifies_followers() {
+    use ticketd_core::{DependencyChoice, DependencyDecision};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let kept = ws.create_ticket("Kept").unwrap();
+    let moved = ws.create_ticket("Moved").unwrap();
+    ws.add_dependency(&source.reference, &kept.reference, None)
+        .unwrap();
+    ws.add_dependency(&source.reference, &moved.reference, None)
+        .unwrap();
+    ws.set_following(&moved.reference, true).unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| {
+            let choice = if edge.dependent == kept.reference {
+                DependencyChoice::Retain
+            } else {
+                DependencyChoice::Replace
+            };
+            DependencyDecision { edge, choice }
+        })
+        .collect();
+    ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        decisions,
+        None,
+    )
+    .unwrap();
+    let kept = ws.show_ticket(&kept.reference).unwrap();
+    assert_eq!(kept.availability.as_deref(), Some("Blocked"));
+    assert_eq!(kept.prerequisites[0].status, Status::Canceled);
+    assert!(
+        ws.inbox(100, 0)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.kind == "relationship:dependency_review"
+                && entry.reference == moved.reference)
+    );
+}
+
+#[test]
+fn concurrent_new_edge_is_never_silently_replaced_by_duplicate_review() {
+    use std::sync::{Arc, Barrier};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut ws = Workspace::open(&path).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("New dependent").unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let thread_path = path.clone();
+    let thread_barrier = barrier.clone();
+    let blocker = source.reference.clone();
+    let target = dependent.reference.clone();
+    let worker = std::thread::spawn(move || {
+        let mut other = Workspace::open(thread_path).unwrap();
+        thread_barrier.wait();
+        other.add_dependency(&blocker, &target, None).unwrap();
+    });
+    barrier.wait();
+    let result = ws.mark_duplicate_reviewed(
+        &source.reference,
+        &canonical.reference,
+        &preview.canonical,
+        vec![],
+        None,
+    );
+    worker.join().unwrap();
+    let saved = ws.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(saved.prerequisites[0].reference, source.reference);
+    if result.is_err() {
+        assert_eq!(
+            ws.show_ticket(&source.reference).unwrap().status,
+            Status::Todo
+        );
+    }
+}
+
+#[test]
 fn contextual_relationships_are_symmetric_or_directed() {
     use ticketd_core::{ContextOptions, RelationshipKind};
     let dir = tempfile::tempdir().unwrap();

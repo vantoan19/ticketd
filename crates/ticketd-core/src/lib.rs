@@ -4,6 +4,9 @@ pub use backlinks::Backlink;
 mod backup;
 mod context;
 mod duplicates;
+pub use duplicates::{
+    DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
+};
 mod evidence;
 mod export;
 pub use context::{ContextOptions, TicketContext};
@@ -98,6 +101,8 @@ pub enum Error {
     DuplicateDependencies,
     #[error("a ticket cannot be related to itself")]
     RelationshipSelfLink,
+    #[error("dependency review has changed; preview and choose again")]
+    DependencyReviewChanged,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
