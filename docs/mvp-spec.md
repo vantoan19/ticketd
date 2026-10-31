@@ -333,23 +333,22 @@ Set latency budgets and representative dataset sizes after a benchmark spike. Ba
 
 ### Platform support
 
-The first release is planned for these native desktop and CLI combinations. They are
-candidate targets, pending release validation and product approval; a CI build alone
-is not a support guarantee.
+The first release targets these native desktop and CLI combinations. Release
+validation remains outstanding; a CI build alone is not a support guarantee.
 
-| Operating system | Architecture          | First-release candidate | Validation status                                                                                           |
-| ---------------- | --------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| macOS 26         | ARM64 (Apple Silicon) | Desktop and CLI         | Scaffold builds in CI; first agent host is macOS 26.5 ARM64. Full workflow and delivery remain unvalidated. |
-| Ubuntu 24.04 LTS | x86-64                | Desktop and CLI         | Scaffold builds in CI. Full workflow and delivery remain unvalidated.                                       |
-| Windows 11       | x86-64                | Desktop and CLI         | Unvalidated on Windows 11; CI uses a Windows Server runner, not a desktop installation.                     |
+| Operating system | Architecture          | First-release target | Validation status                                                                                           |
+| ---------------- | --------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| macOS 26         | ARM64 (Apple Silicon) | Desktop and CLI      | Scaffold builds in CI; first agent host is macOS 26.5 ARM64. Full workflow and delivery remain unvalidated. |
+| Ubuntu 24.04 LTS | x86-64                | Desktop and CLI      | Scaffold builds in CI. Full workflow and delivery remain unvalidated.                                       |
+| Windows 11       | x86-64                | Desktop and CLI      | Unvalidated on Windows 11; CI uses a Windows Server runner, not a desktop installation.                     |
 
 Other versions, architectures, and Linux distributions are not part of this first
 matrix. Before release, validate installation and launch, editor behavior, shortcuts,
 clipboard, rendering, CLI packaging, and the shared workspace workflow on each
-candidate. Verify cross-process writes, migration and refresh behavior as specified
+target. Verify cross-process writes, migration and refresh behavior as specified
 in the architecture; do not infer those properties from a build.
 
-The proposed delivery ships desktop and CLI together; the CLI must run independently with the desktop
+The delivery ships desktop and CLI together; the CLI must run independently with the desktop
 closed and without a daemon. Package format, signing, and distribution details remain
 to be decided and validated.
 
@@ -395,9 +394,7 @@ These are possible future directions, not a committed roadmap.
 
 ## 14. Open decisions
 
-| Question                     | Proposal for review                                            |
-| ---------------------------- | -------------------------------------------------------------- |
-| Desktop and CLI distribution | Ship together; CLI operates independently while UI is closed   |
-| MVP success criterion        | Complete one real project through the workflow in section 12   |
-| Performance budgets          | Establish after measuring a representative dataset and machine |
-| Supported platforms and WSL  | Approve and validate the candidate matrix before release       |
+| Question              | Proposal for review                                            |
+| --------------------- | -------------------------------------------------------------- |
+| MVP success criterion | Complete one real project through the workflow in section 12   |
+| Performance budgets   | Establish after measuring a representative dataset and machine |
