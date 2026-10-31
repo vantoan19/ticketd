@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { client } from "@/lib/api/client";
 import { useState, type FormEvent } from "react";
 import type { Ticket } from "@/lib/api/client";
 
@@ -15,10 +15,7 @@ export function Hierarchy({
   const [error, setError] = useState("");
   async function change(value: string | null) {
     try {
-      await invoke("set_parent", {
-        reference: ticket.reference,
-        parent: value,
-      });
+      await client.setParent(ticket.reference, value);
       setParent("");
       setError("");
       await refresh();
@@ -60,10 +57,8 @@ export function Hierarchy({
               <button
                 type="button"
                 onClick={() =>
-                  void invoke("detach_child", {
-                    child: child.reference,
-                    parent: ticket.reference,
-                  })
+                  void client
+                    .detachChild(child.reference, ticket.reference)
                     .then(refresh)
                     .catch((reason: unknown) => setError(String(reason)))
                 }

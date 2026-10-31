@@ -76,6 +76,26 @@ export type FindFilter = {
   offset: number;
 };
 export const client = {
+  async changeDependency(
+    command: "add_dependency" | "remove_dependency",
+    blocker: string,
+    dependent: string,
+  ) {
+    await invoke(command, { blocker, dependent });
+  },
+  async changeTag(
+    command: "add_tag" | "remove_tag",
+    reference: string,
+    tag: string,
+  ) {
+    await invoke(command, { reference, tag });
+  },
+  async setParent(reference: string, parent: string | null) {
+    await invoke("set_parent", { reference, parent });
+  },
+  async detachChild(child: string, parent: string) {
+    await invoke("detach_child", { child, parent });
+  },
   async backupWorkspace(path: string) {
     return z.string().parse(await invoke("backup_workspace", { path }));
   },
