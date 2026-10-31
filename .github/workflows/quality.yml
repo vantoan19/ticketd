@@ -139,6 +139,8 @@ jobs:
           cp ${{ matrix.installer }} distribution/
           cp ${{ matrix.cli }} distribution/
           cp docs/install.md distribution/INSTALL.md
+      - name: Smoke-test CLI installation and discovery
+        run: node tests/native/cli-install.mjs ${{ matrix.cli }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ticketd-${{ matrix.platform }}
