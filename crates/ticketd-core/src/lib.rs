@@ -3,6 +3,7 @@ mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
 mod context;
+mod duplicates;
 mod export;
 pub use context::{ContextOptions, TicketContext};
 
@@ -86,6 +87,12 @@ pub enum Error {
     EmptyProject,
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("duplicate would create a cycle or self-link")]
+    DuplicateCycle,
+    #[error(
+        "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
+    )]
+    DuplicateDependencies,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
@@ -125,6 +132,10 @@ pub struct Ticket {
     pub project_id: Option<String>,
     pub availability: Option<String>,
     pub prerequisites: Vec<relationships::Prerequisite>,
+    #[serde(default)]
+    pub duplicate_of: Option<String>,
+    #[serde(default)]
+    pub duplicates: Vec<String>,
     pub parent: Option<hierarchy::RelatedTicket>,
     pub children: Vec<hierarchy::RelatedTicket>,
 }
@@ -193,10 +204,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 15 {
+            if version > 16 {
                 return Err(Error::NewerSchema(version));
             }
-            if version == 15 {
+            if version == 16 {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
@@ -217,10 +228,10 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            if version > 15 {
+            if version > 16 {
                 return Err(Error::NewerSchema(version));
             }
-            if version < 15 {
+            if version < 16 {
                 let backup = if version > 0 {
                     Some(Self::migration_backup(&connection, path).map_err(|source| {
                         Error::Backup(format!("cannot create a pre-migration backup for {}: {source}; check available disk space and directory permissions, then retry", path.display()))
@@ -296,7 +307,10 @@ impl Workspace {
             inbox::migrate(&transaction)?;
         }
         if version < 15 {
-            transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 15;")?;
+            duplicates::migrate(&transaction)?;
+        }
+        if version < 16 {
+            transaction.execute_batch("ALTER TABLE inbox_entries ADD COLUMN editing_agent TEXT; PRAGMA user_version = 16;")?;
         }
         transaction.commit()?;
         Ok(())
@@ -342,6 +356,8 @@ impl Workspace {
             project_id: project_id.map(str::to_owned),
             availability: Some("Ready".into()),
             prerequisites: Vec::new(),
+            duplicate_of: None,
+            duplicates: Vec::new(),
             parent: None,
             children: Vec::new(),
         })
@@ -404,6 +420,12 @@ impl Workspace {
                 )?;
             }
         }
+        if patch.status.is_some() && patch.status != Some(ticket.status) {
+            transaction.execute(
+                "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id = ?1",
+                [&ticket.id],
+            )?;
+        }
         let status = patch.status.unwrap_or(ticket.status);
         transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
         if status != ticket.status {
@@ -424,6 +446,7 @@ impl Workspace {
         updated.tags = tags::for_ticket(&transaction, &updated.id)?;
         relationships::populate(&transaction, &mut updated)?;
         hierarchy::populate(&transaction, &mut updated)?;
+        duplicates::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -531,6 +554,7 @@ impl Workspace {
             ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
+            duplicates::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -551,6 +575,7 @@ impl Workspace {
         ticket.tags = tags::for_ticket(&self.connection, &ticket.id)?;
         relationships::populate(&self.connection, &mut ticket)?;
         hierarchy::populate(&self.connection, &mut ticket)?;
+        duplicates::populate(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -574,6 +599,8 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         effort_id: row.get(6)?,
         availability: None,
         prerequisites: Vec::new(),
+        duplicate_of: None,
+        duplicates: Vec::new(),
         parent: None,
         children: Vec::new(),
     })

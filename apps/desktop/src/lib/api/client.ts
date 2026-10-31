@@ -22,6 +22,8 @@ const ticketSchema = z.object({
       trashed: z.boolean(),
     }),
   ),
+  duplicate_of: z.string().nullable().optional(),
+  duplicates: z.array(z.string()).optional(),
   prerequisites: z.array(
     z.object({
       reference: z.string(),
@@ -81,6 +83,16 @@ export const client = {
     return z
       .array(ticketSchema)
       .parse(await invoke("bulk_status", { references, status, requestId }));
+  },
+  async markDuplicate(source: string, canonical: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("mark_duplicate", { source, canonical, requestId }),
+    );
+  },
+  async removeDuplicate(source: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("remove_duplicate", { source, requestId }),
+    );
   },
   async changeDependency(
     command: "add_dependency" | "remove_dependency",

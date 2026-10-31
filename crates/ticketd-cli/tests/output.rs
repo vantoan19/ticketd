@@ -103,3 +103,31 @@ fn backlinks_command_returns_source_and_passage() {
     assert_eq!(result[0]["source_reference"], "T-2");
     assert_eq!(result[0]["passage"], "See T-1 for context");
 }
+
+#[test]
+fn cli_marks_and_removes_duplicate_designation() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    run(&["create", "Source"]);
+    run(&["create", "Canonical"]);
+    let marked = run(&["mark-duplicate", "T-1", "T-2"]);
+    assert_eq!(marked["status"], "Canceled");
+    assert_eq!(marked["duplicate_of"], "T-2");
+    let removed = run(&["remove-duplicate", "T-1"]);
+    assert_eq!(removed["status"], "Todo");
+    assert!(removed["duplicate_of"].is_null());
+}

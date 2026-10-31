@@ -92,6 +92,19 @@ enum Command {
     AddTag { reference: String, tag: String },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
     RemoveTag { reference: String, tag: String },
+    /// Mark a ticket as a duplicate of a canonical ticket
+    MarkDuplicate {
+        source: String,
+        canonical: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Remove a duplicate designation
+    RemoveDuplicate {
+        source: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Add a directed blocking dependency
     AddDependency {
         blocker: String,
@@ -479,6 +492,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::RemoveTag { reference, tag } => {
             serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
+        }
+        Command::MarkDuplicate {
+            source,
+            canonical,
+            agent,
+        } => serde_json::to_string(&workspace.mark_duplicate(
+            &source,
+            &canonical,
+            agent.as_deref(),
+        )?)?,
+        Command::RemoveDuplicate { source, agent } => {
+            serde_json::to_string(&workspace.remove_duplicate(&source, agent.as_deref())?)?
         }
         Command::AddDependency {
             blocker,
