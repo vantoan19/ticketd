@@ -1,0 +1,204 @@
+/* Settings navigation: takes the workspace sidebar's place. */
+.settings-nav {
+  width: 208px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  overflow-y: auto;
+  background: var(--background);
+  color: var(--foreground);
+}
+.settings-back,
+.settings-nav li button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--muted-foreground);
+}
+.settings-back:hover,
+.settings-nav li button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.settings-back:focus-visible,
+.settings-nav li button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.settings-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.settings-nav [role="group"] + [role="group"] {
+  margin-top: 16px;
+}
+.settings-nav-heading {
+  margin: 0 12px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--disabled-foreground);
+}
+
+/* The shell stacks the section list above the content on narrow windows. */
+.workspace.settings-open .mobile-sidebar-trigger {
+  display: none;
+}
+@media (max-width: 767px) {
+  .workspace.settings-open {
+    flex-direction: column;
+  }
+  .settings-nav {
+    width: 100%;
+    max-height: 40%;
+    padding-bottom: 0;
+  }
+}
+
+/* Settings page: one centered column of cards. */
+.settings-page {
+  max-width: none;
+}
+.settings-column {
+  width: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+}
+.settings-column > p {
+  margin: 4px 0 0;
+}
+.settings-page .settings-card {
+  margin-top: 32px;
+}
+.settings-card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-border), var(--focus-ring);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.settings-row-stacked {
+  align-items: stretch;
+  flex-direction: column;
+}
+.settings-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--foreground);
+}
+.settings-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted-foreground);
+}
+.settings-failure {
+  margin: 0;
+  color: var(--error-foreground);
+  font-size: 13px;
+}
+
+/* Open tickets: two selectable cards with small layout previews. */
+.layout-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.layout-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  text-align: left;
+  color: var(--foreground);
+}
+.layout-choice:hover {
+  background: var(--recessed);
+}
+.layout-choice:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-border-base), var(--focus-ring);
+}
+.layout-choice[data-state="checked"] {
+  box-shadow: 0 0 0 2px var(--foreground);
+}
+.layout-choice[data-state="checked"]:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--foreground),
+    var(--focus-ring);
+}
+.layout-choice-label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.layout-preview {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+  height: 56px;
+  padding: 6px;
+  border-radius: 6px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+}
+.layout-preview-list,
+.layout-preview-detail {
+  border-radius: 3px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.layout-preview-list {
+  flex: 0 0 38%;
+}
+.layout-preview-detail {
+  flex: 1;
+}
+
+/* Keyboard shortcuts */
+.shortcut-list {
+  margin: 0;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  font-size: 14px;
+}
+.shortcut-row + .shortcut-row {
+  box-shadow: 0 -1px 0 var(--border);
+}
+.shortcut-row dt {
+  color: var(--foreground);
+}
+.shortcut-row dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
