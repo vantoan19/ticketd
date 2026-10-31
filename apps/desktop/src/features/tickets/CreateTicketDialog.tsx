@@ -71,6 +71,15 @@ export function CreateTicketDialog({
   const [titleError, setTitleError] = useState("");
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
+  // Title is disabled while creating, and a disabled field cannot take focus,
+  // so Create more asks for focus once the field is enabled again.
+  const refocusTitle = useRef(false);
+  useEffect(() => {
+    if (!pending && refocusTitle.current) {
+      refocusTitle.current = false;
+      titleRef.current?.focus();
+    }
+  }, [pending]);
   const [tagQuery, setTagQuery] = useState("");
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(false);
@@ -149,7 +158,7 @@ export function CreateTicketDialog({
       if (createMore) {
         update({ title: "", body: "", restored: false });
         setAnnouncement(`Created ${reference}`);
-        titleRef.current?.focus();
+        refocusTitle.current = true;
       } else setDraft(null);
     } catch (reason) {
       setError(`Could not create ticket: ${String(reason)}`);

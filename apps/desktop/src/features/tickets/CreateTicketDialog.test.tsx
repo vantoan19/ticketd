@@ -170,6 +170,8 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
   const title = screen.getByRole("textbox", { name: "Title" });
   fireEvent.change(title, { target: { value: "First" } });
+  // Focus is on the button that submitted, as it is for a real click.
+  screen.getByRole("button", { name: "Create ticket" }).focus();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(screen.getByText("Created T-1")).toBeTruthy());
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
