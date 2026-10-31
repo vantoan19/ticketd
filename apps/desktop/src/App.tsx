@@ -1,4 +1,5 @@
 import { Projects, TicketProject } from "./Projects";
+import { Dependencies } from "./Dependencies";
 import { Notes } from "./Notes";
 import {
   useCallback,
@@ -161,7 +162,8 @@ export function App() {
                       <span className="mr-3 text-neutral-600">
                         {item.reference}
                       </span>
-                      {item.title}
+                      {item.title}{" "}
+                      {item.availability && <span> · {item.availability}</span>}
                       {item.tags.length > 0 && (
                         <span className="ml-2 text-sm text-neutral-600">
                           {item.tags.join(", ")}
@@ -198,7 +200,13 @@ export function App() {
               />
               <TicketEditor ticket={item} onSaved={updateTicket} />
               {item.id === selected && (
-                <Notes reference={item.reference} refreshRevision={revision} />
+                <>
+                  <Dependencies ticket={item} refresh={refresh} />
+                  <Notes
+                    reference={item.reference}
+                    refreshRevision={revision}
+                  />
+                </>
               )}
               <Tags
                 reference={item.reference}

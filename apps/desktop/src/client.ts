@@ -9,6 +9,10 @@ const ticketSchema = z.object({
   body: z.string(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
+  availability: z.string().nullable(),
+  prerequisites: z.array(
+    z.object({ reference: z.string(), title: z.string(), status: z.string() }),
+  ),
 });
 const projectSchema = z.object({
   id: z.string(),

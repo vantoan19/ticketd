@@ -51,6 +51,20 @@ enum Command {
     AddTag { reference: String, tag: String },
     /// Remove a tag (trimmed and lowercased; missing memberships are ignored)
     RemoveTag { reference: String, tag: String },
+    /// Add a directed blocking dependency
+    AddDependency {
+        blocker: String,
+        dependent: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Remove a directed blocking dependency
+    RemoveDependency {
+        blocker: String,
+        dependent: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// List tickets
     List {
         #[arg(long, conflicts_with = "unlinked")]
@@ -226,6 +240,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Command::RemoveTag { reference, tag } => {
             serde_json::to_string(&workspace.remove_tag(&reference, &tag)?)?
         }
+        Command::AddDependency {
+            blocker,
+            dependent,
+            agent,
+        } => serde_json::to_string(&workspace.add_dependency(
+            &blocker,
+            &dependent,
+            agent.as_deref(),
+        )?)?,
+        Command::RemoveDependency {
+            blocker,
+            dependent,
+            agent,
+        } => serde_json::to_string(&workspace.remove_dependency(
+            &blocker,
+            &dependent,
+            agent.as_deref(),
+        )?)?,
         Command::List { project, unlinked } => {
             if let Some(ref id) = project {
                 workspace.show_project(id)?;

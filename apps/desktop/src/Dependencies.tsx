@@ -1,0 +1,62 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useState, type FormEvent } from "react";
+import type { Ticket } from "./client";
+
+export function Dependencies({
+  ticket,
+  refresh,
+}: {
+  ticket: Ticket;
+  refresh: () => Promise<void>;
+}) {
+  const [blocker, setBlocker] = useState("");
+  const [error, setError] = useState("");
+  async function change(command: string, reference: string) {
+    try {
+      await invoke(command, {
+        blocker: reference,
+        dependent: ticket.reference,
+      });
+      setBlocker("");
+      setError("");
+      await refresh();
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+  function add(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void change("add_dependency", blocker);
+  }
+  return (
+    <section aria-label="Prerequisites">
+      <h3>Prerequisites</h3>
+      <ul>
+        {ticket.prerequisites.map((item) => (
+          <li key={item.reference}>
+            {item.reference} {item.title} ({item.status}
+            {item.status !== "Done" && ", unresolved"}){" "}
+            <button
+              type="button"
+              onClick={() => void change("remove_dependency", item.reference)}
+            >
+              Remove {item.reference}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form onSubmit={add}>
+        <label>
+          Blocker reference{" "}
+          <input
+            value={blocker}
+            onChange={(event) => setBlocker(event.target.value)}
+            required
+          />
+        </label>{" "}
+        <button>Add prerequisite</button>
+      </form>
+      {error && <p role="alert">{error}</p>}
+    </section>
+  );
+}

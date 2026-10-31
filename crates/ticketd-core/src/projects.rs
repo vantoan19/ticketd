@@ -12,7 +12,7 @@ pub struct Project {
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL); ALTER TABLE tickets ADD COLUMN project_id TEXT REFERENCES projects(id); CREATE INDEX tickets_project_id ON tickets(project_id); PRAGMA user_version = 6;")?;
+    tx.execute_batch("CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL); ALTER TABLE tickets ADD COLUMN project_id TEXT REFERENCES projects(id); CREATE INDEX tickets_project_id ON tickets(project_id); PRAGMA user_version = 7;")?;
     Ok(())
 }
 
