@@ -102,7 +102,9 @@ try {
     { timeout: 10000, timeoutMsg: "Desktop edit did not save" },
   );
   await (await (await detail()).$("button=Edit description")).click();
-  const editor = await (await detail()).$(".cm-content");
+  const editor = await (
+    await detail()
+  ).$('[role="textbox"][aria-label="Description rich text"]');
   await editor.click();
   await browser.keys(["End"]);
   await browser.keys(" Reviewed in desktop.");
