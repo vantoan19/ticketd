@@ -25,14 +25,35 @@ import {
   type PlateEditor,
 } from "platejs/react";
 import {
-  BasicBlocksPlugin,
+  H1Plugin,
+  H2Plugin,
+  H3Plugin,
+  H4Plugin,
+  H5Plugin,
+  H6Plugin,
+  BlockquotePlugin,
+  HorizontalRulePlugin,
   BoldPlugin,
   ItalicPlugin,
   CodePlugin,
   StrikethroughPlugin,
 } from "@platejs/basic-nodes/react";
+import {
+  HeadingRules,
+  BlockquoteRules,
+  BoldRules,
+  ItalicRules,
+  CodeRules,
+  StrikethroughRules,
+} from "@platejs/basic-nodes";
 import { ListPlugin } from "@platejs/list-classic/react";
-import { indentListItems, unindentListItems } from "@platejs/list-classic";
+import {
+  indentListItems,
+  unindentListItems,
+  BulletedListRules,
+  OrderedListRules,
+  TaskListRules,
+} from "@platejs/list-classic";
 import { TablePlugin } from "@platejs/table/react";
 import {
   insertTable,
@@ -43,7 +64,7 @@ import {
 } from "@platejs/table";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
-import { toggleCodeBlock } from "@platejs/code-block";
+import { toggleCodeBlock, CodeBlockRules } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -434,6 +455,7 @@ export interface MarkdownEditorProps {
   onChange: (markdown: string) => void;
   readOnly?: boolean;
   label?: string;
+  autoFocus?: boolean;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -442,6 +464,7 @@ export function MarkdownEditor({
   onChange,
   readOnly = false,
   label = "Markdown document",
+  autoFocus = false,
 }: MarkdownEditorProps) {
   const document = useMemo(() => readMarkdown(value), [value]);
   const [sourceMode, setSourceMode] = useState(false);
@@ -449,20 +472,47 @@ export function MarkdownEditor({
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
   const source = sourceMode || document.reasons.length > 0;
+  const container = useRef<HTMLElement>(null);
   const emitted = useRef(value);
   const synchronizing = useRef(false);
   const previousMarkdown = useRef(writeMarkdown(document.value));
   const editor = usePlateEditor({
     plugins: [
-      BasicBlocksPlugin,
-      BoldPlugin,
-      ItalicPlugin,
-      CodePlugin,
-      StrikethroughPlugin,
-      ListPlugin,
+      ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
+        (plugin) => plugin.configure({ inputRules: [HeadingRules.markdown()] }),
+      ),
+      BlockquotePlugin.configure({ inputRules: [BlockquoteRules.markdown()] }),
+      HorizontalRulePlugin,
+      BoldPlugin.configure({
+        inputRules: [
+          BoldRules.markdown(),
+          BoldRules.markdown({ variant: "_" }),
+        ],
+      }),
+      ItalicPlugin.configure({
+        inputRules: [
+          ItalicRules.markdown(),
+          ItalicRules.markdown({ variant: "_" }),
+        ],
+      }),
+      CodePlugin.configure({ inputRules: [CodeRules.markdown()] }),
+      StrikethroughPlugin.configure({
+        inputRules: [StrikethroughRules.markdown()],
+      }),
+      ListPlugin.configure({
+        inputRules: [
+          BulletedListRules.markdown(),
+          BulletedListRules.markdown({ variant: "*" }),
+          OrderedListRules.markdown(),
+          TaskListRules.markdown(),
+          TaskListRules.markdown({ checked: true }),
+        ],
+      }),
       TablePlugin.configure({ options: { disableMerge: true } }),
       LinkPlugin,
-      CodeBlockPlugin,
+      CodeBlockPlugin.configure({
+        inputRules: [CodeBlockRules.markdown({ on: "break" })],
+      }),
       createPlatePlugin({
         key: "mermaid",
         node: { isElement: true, isVoid: true, component: Diagram },
@@ -503,6 +553,15 @@ export function MarkdownEditor({
     value: document.value,
   });
   useEffect(() => {
+    if (!autoFocus || readOnly) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (source)
+        container.current?.querySelector<HTMLElement>(".cm-content")?.focus();
+      else editor.tf.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, readOnly, source, editor]);
+  useEffect(() => {
     if (value === emitted.current) return;
     synchronizing.current = true;
     emitted.current = value;
@@ -532,11 +591,13 @@ export function MarkdownEditor({
       (event.key === "ArrowUp" || event.key === "ArrowDown")
     ) {
       event.preventDefault();
+      event.stopPropagation();
       moveBlock(editor, event.key === "ArrowUp" ? -1 : 1);
       return;
     }
     if (event.key === "Tab" && editor.api.some({ match: { type: "li" } })) {
       event.preventDefault();
+      event.stopPropagation();
       if (event.shiftKey) unindentListItems(editor);
       else indentListItems(editor);
       return;
@@ -553,9 +614,11 @@ export function MarkdownEditor({
     if (!slash) return;
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       setSlash(false);
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      event.stopPropagation();
       setSlashIndex(
         (current) =>
           (current +
@@ -568,6 +631,7 @@ export function MarkdownEditor({
       choices[slashIndex]
     ) {
       event.preventDefault();
+      event.stopPropagation();
       choose(choices[slashIndex][0]);
     } else if (event.key === "Backspace") {
       if (!slashQuery) setSlash(false);
@@ -581,7 +645,7 @@ export function MarkdownEditor({
     }
   }
   return (
-    <section className="markdown-editor" aria-label={label}>
+    <section ref={container} className="markdown-editor" aria-label={label}>
       <div className="editor-mode">
         <CopySourceButton source={value} label={`Copy ${label} Markdown`} />
         <Button
@@ -611,6 +675,7 @@ export function MarkdownEditor({
       {source ? (
         <CodeMirror
           value={value}
+          autoFocus={autoFocus}
           readOnly={readOnly}
           editable={!readOnly}
           aria-label={`${label} source`}
@@ -658,15 +723,29 @@ export function MarkdownEditor({
               const pasted = event.clipboardData.getData("text/plain");
               if (!pasted) return;
               event.preventDefault();
+              event.stopPropagation();
               const incoming = readMarkdown(pasted);
               if (incoming.reasons.length) editor.tf.insertText(pasted);
-              else editor.tf.insertFragment(incoming.value);
+              else {
+                const first = incoming.value[0];
+                // Slate merges a fragment's first block into the current block.
+                // An empty leading paragraph protects a pasted heading/list/table.
+                editor.tf.insertFragment(
+                  first?.type === "p"
+                    ? incoming.value
+                    : [
+                        { type: "p", children: [{ text: "" }] },
+                        ...incoming.value,
+                      ],
+                );
+              }
             }}
             onDragOver={(event) => {
               if (
                 event.dataTransfer.types.includes("application/x-ticketd-block")
               )
                 event.preventDefault();
+              event.stopPropagation();
             }}
             onDrop={(event) => {
               const data = event.dataTransfer.getData(
@@ -674,6 +753,7 @@ export function MarkdownEditor({
               );
               if (!data || readOnly) return;
               event.preventDefault();
+              event.stopPropagation();
               const range = editor.api.findEventRange(event);
               const destination = range?.anchor.path[0];
               const origin = Number(data);
