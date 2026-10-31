@@ -1,7 +1,14 @@
+import { Tags } from "./Tags";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-type Ticket = { id: string; reference: string; title: string; status: string };
+type Ticket = {
+  id: string;
+  reference: string;
+  title: string;
+  status: string;
+  tags: string[];
+};
 
 function parseTicket(value: unknown): Ticket {
   if (typeof value !== "object" || value === null)
@@ -11,7 +18,9 @@ function parseTicket(value: unknown): Ticket {
     typeof ticket.id !== "string" ||
     typeof ticket.reference !== "string" ||
     typeof ticket.title !== "string" ||
-    typeof ticket.status !== "string"
+    typeof ticket.status !== "string" ||
+    !Array.isArray(ticket.tags) ||
+    !ticket.tags.every((tag: unknown) => typeof tag === "string")
   )
     throw new Error("Invalid ticket returned by workspace");
   return {
@@ -19,6 +28,7 @@ function parseTicket(value: unknown): Ticket {
     reference: ticket.reference,
     title: ticket.title,
     status: ticket.status,
+    tags: ticket.tags as string[],
   };
 }
 
@@ -114,6 +124,11 @@ export function App() {
                       {item.reference}
                     </span>
                     {item.title}
+                    {item.tags.length > 0 && (
+                      <span className="ml-2 text-sm text-neutral-600">
+                        {item.tags.join(", ")}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -130,6 +145,11 @@ export function App() {
                 {ticket.reference} · {ticket.status}
               </p>
               <h3 className="mt-2 text-lg">{ticket.title}</h3>
+              <Tags
+                reference={ticket.reference}
+                tags={ticket.tags}
+                refresh={refresh}
+              />
             </div>
           ) : (
             <p className="mt-3">Select a ticket to see its details.</p>
