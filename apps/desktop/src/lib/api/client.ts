@@ -79,31 +79,42 @@ const graphSchema = z.object({
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
+const reviewModeSchema = z.enum(["duplicate", "separate"]);
+const statusSchema = z.enum([
+  "Todo",
+  "In progress",
+  "In review",
+  "Done",
+  "Canceled",
+]);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),
   replacement_blocker: z.string(),
   replacement_dependent: z.string(),
-  dependent_status: z.enum([
-    "Todo",
-    "In progress",
-    "In review",
-    "Done",
-    "Canceled",
-  ]),
-  dependent_ready: z.boolean(),
-  // Whether the waiting ticket is Ready after each choice, decided by the core.
-  ready_if_replaced: z.boolean(),
-  ready_if_removed: z.boolean(),
-  ready_if_kept: z.boolean(),
+  // Stamped by the preview; submitted back unchanged with each decision.
+  mode: reviewModeSchema,
+  basis: z.string(),
 });
 const duplicatePreviewSchema = z.object({
+  source: z.string(),
+  mode: reviewModeSchema,
   canonical: z.string(),
   edges: z.array(dependencyEdgeSchema),
   replacement_issues: z
     .array(z.enum(["already_exists", "self_block", "cycle"]).nullable())
     .default([]),
 });
+// What every choice together does to one waiting ticket; decided by the core.
+const waitingOutcomeSchema = z.object({
+  ticket: z.string(),
+  status: statusSchema,
+  trashed: z.boolean(),
+  before: z.enum(["ready", "blocked", "no_ready_state"]),
+  after: z.enum(["ready", "blocked", "no_ready_state"]),
+  unresolved_after: z.array(z.string()),
+});
+export type WaitingOutcome = z.infer<typeof waitingOutcomeSchema>;
 export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>;
 export type DuplicatePreview = z.infer<typeof duplicatePreviewSchema>;
 export type DependencyDecision = {
@@ -222,6 +233,23 @@ export const client = {
         canonical,
         separate,
       }),
+    );
+  },
+  async evaluateDuplicate(
+    source: string,
+    canonical: string,
+    separate: boolean,
+    decisions: DependencyDecision[],
+  ) {
+    return z.array(waitingOutcomeSchema).parse(
+      await structured(
+        invoke("evaluate_dependency_review", {
+          source,
+          canonical,
+          separate,
+          decisions,
+        }),
+      ),
     );
   },
   async markDuplicateReviewed(

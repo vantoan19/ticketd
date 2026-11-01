@@ -24,10 +24,50 @@ impl Status {
 }
 
 /// SQL for a blocker, named by its table alias, that does not yet satisfy a
-/// dependency. Every readiness query uses it, so they agree with
-/// [`Status::satisfies_dependency`].
+/// dependency. Set-based readiness queries (counts, search, graph) use it; it is
+/// the SQL form of [`Status::satisfies_dependency`], which [`readiness`] and
+/// [`unresolved_blockers`] use for one ticket held in memory.
 pub(crate) fn unresolved_blocker_sql(alias: &str) -> String {
     format!("{alias}.status != 'Done'")
+}
+
+/// Whether a ticket can be picked up now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Readiness {
+    /// Todo with every blocker Done.
+    Ready,
+    /// Todo with an unresolved blocker.
+    Blocked,
+    /// Started, finished, or in the trash: no Ready or Blocked indicator, matching the
+    /// Ready list, which leaves trashed tickets out.
+    NoReadyState,
+}
+
+/// The one in-memory readiness rule, given the statuses of a ticket's blockers.
+pub(crate) fn readiness(
+    status: Status,
+    trashed: bool,
+    blockers: impl IntoIterator<Item = Status>,
+) -> Readiness {
+    if trashed || status != Status::Todo {
+        Readiness::NoReadyState
+    } else if blockers.into_iter().all(Status::satisfies_dependency) {
+        Readiness::Ready
+    } else {
+        Readiness::Blocked
+    }
+}
+
+/// The blockers, with their statuses, that do not satisfy a dependency.
+pub(crate) fn unresolved_blockers(
+    blockers: impl IntoIterator<Item = (String, Status)>,
+) -> Vec<String> {
+    blockers
+        .into_iter()
+        .filter(|(_, status)| !status.satisfies_dependency())
+        .map(|(reference, _)| reference)
+        .collect()
 }
 
 impl fmt::Display for Status {

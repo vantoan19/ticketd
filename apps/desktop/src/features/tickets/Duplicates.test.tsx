@@ -42,26 +42,33 @@ const edge = (
   dependent,
   replacement_blocker: blocker === "T-1" ? "T-2" : blocker,
   replacement_dependent: dependent === "T-1" ? "T-2" : dependent,
-  dependent_status: "Todo",
-  dependent_ready: false,
-  ready_if_replaced: true,
-  ready_if_removed: true,
-  ready_if_kept: false,
+  mode: "duplicate",
+  basis: "0123456789abcdef",
   ...overrides,
 });
 const preview = {
+  source: "T-1",
+  mode: "duplicate",
   canonical: "T-2",
   edges: [edge("T-1", "T-3"), edge("T-1", "T-4"), edge("T-5", "T-1")],
   replacement_issues: [null, "already_exists", null],
 };
 let reviewError: unknown = null;
-let current = preview;
+let current: Record<string, unknown> = preview;
+let outcomes: unknown[] = [];
+let evaluateError: unknown = null;
 
 beforeEach(() => {
   reviewError = null;
   current = preview;
+  outcomes = [];
+  evaluateError = null;
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "preview_duplicate_dependencies") return current;
+    if (command === "evaluate_dependency_review") {
+      if (evaluateError) throw evaluateError;
+      return outcomes;
+    }
     if (command === "show_ticket")
       return { ...ticket, id: "2", reference: "T-2", title: "Canonical" };
     if (reviewError) throw reviewError;
@@ -125,13 +132,9 @@ test("the summary and the apply label follow the choices", async () => {
       /Cancel T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
     ),
   ).toBeTruthy();
+  expect(screen.getByText("T-3 now waits on T-2")).toBeTruthy();
   expect(
-    screen.getByText("T-3 becomes Ready; it waits for T-2 to be Done instead"),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(
-      "T-4 stays Blocked; it keeps waiting on a canceled ticket",
-    ),
+    screen.getByText("T-4 keeps waiting on a canceled ticket"),
   ).toBeTruthy();
 });
 
@@ -183,6 +186,8 @@ test("a stale preview keeps the review open, applies nothing, and refreshes on r
     ).disabled,
   ).toBe(true);
   current = {
+    source: "T-1",
+    mode: "duplicate",
     canonical: "T-2",
     edges: [edge("T-1", "T-3"), edge("T-6", "T-1")],
     replacement_issues: [null, null],
@@ -196,7 +201,13 @@ test("a stale preview keeps the review open, applies nothing, and refreshes on r
 });
 
 test("a ticket with no dependencies can be marked directly", async () => {
-  current = { canonical: "T-2", edges: [], replacement_issues: [] };
+  current = {
+    source: "T-1",
+    mode: "duplicate",
+    canonical: "T-2",
+    edges: [],
+    replacement_issues: [],
+  };
   render(<Duplicates ticket={ticket} refresh={async () => {}} />);
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
     target: { value: "T-2" },
@@ -209,6 +220,8 @@ test("a ticket with no dependencies can be marked directly", async () => {
 
 test("reviews separate dependency changes for an existing endpoint", async () => {
   current = {
+    source: "T-9",
+    mode: "separate",
     canonical: "T-1",
     edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
     replacement_issues: [null],
@@ -245,6 +258,8 @@ test("shows both tickets with their statuses, and the duplicate's status change"
 
 test("a separate review does not claim the kept endpoint is canceled", async () => {
   current = {
+    source: "T-9",
+    mode: "separate",
     canonical: "T-1",
     edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
     replacement_issues: [null],
@@ -259,65 +274,146 @@ test("a separate review does not claim the kept endpoint is canceled", async () 
   fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "retain");
-  expect(
-    screen.getByText("T-3 stays Blocked; it keeps waiting on T-9"),
-  ).toBeTruthy();
+  expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
   expect(screen.queryByText(/canceled ticket/)).toBeNull();
 });
 
-test("each choice names the dependent and its resulting readiness", async () => {
+const outcome = (ticket: string, overrides: Record<string, unknown> = {}) => ({
+  ticket,
+  status: "Todo",
+  trashed: false,
+  before: "blocked",
+  after: "blocked",
+  unresolved_after: [],
+  ...overrides,
+});
+
+test("each choice words the core's outcome for the whole set of choices", async () => {
   current = {
+    source: "T-1",
+    mode: "duplicate",
     canonical: "T-2",
     edges: [
-      edge("T-1", "T-3", { dependent_ready: true }),
-      edge("T-1", "T-4", { dependent_status: "In progress" }),
+      edge("T-1", "T-3"),
+      edge("T-1", "T-4"),
+      edge("T-1", "T-6"),
+      edge("T-1", "T-7"),
     ],
-    replacement_issues: [null, null],
+    replacement_issues: [null, null, null, null],
   };
+  outcomes = [
+    outcome("T-3", { after: "ready" }),
+    outcome("T-4", { unresolved_after: ["T-8", "T-2"] }),
+    outcome("T-6", {
+      status: "In progress",
+      before: "no_ready_state",
+      after: "no_ready_state",
+    }),
+    outcome("T-7", {
+      trashed: true,
+      before: "no_ready_state",
+      after: "no_ready_state",
+    }),
+  ];
   await openReview();
-  choose("T-1 blocks T-3", "retain");
+  choose("T-1 blocks T-3", "replace");
   expect(
-    screen.getByText(
-      "T-3 becomes Blocked; it keeps waiting on a canceled ticket",
+    await screen.findByText(
+      "T-3 becomes Ready; it now waits on T-2, which is Done",
     ),
-  ).toBeTruthy();
-  choose("T-1 blocks T-3", "remove");
-  expect(
-    screen.getByText("T-3 stays Ready; it no longer waits on T-1"),
   ).toBeTruthy();
   choose("T-1 blocks T-4", "replace");
   expect(
     screen.getByText(
-      "T-4 is In progress and has no Ready state; it waits for T-2 to be Done instead",
+      "T-4 stays Blocked, waiting on T-8, T-2; it now waits on T-2",
+    ),
+  ).toBeTruthy();
+  choose("T-1 blocks T-6", "remove");
+  expect(
+    screen.getByText(
+      "T-6 is In progress and has no Ready state; it no longer waits on T-1",
+    ),
+  ).toBeTruthy();
+  choose("T-1 blocks T-7", "retain");
+  expect(
+    screen.getByText(
+      "T-7 is in the trash and has no Ready state; it keeps waiting on a canceled ticket",
     ),
   ).toBeTruthy();
 });
 
-test("a dependent that changed status after the preview is stale, and refreshing shows its new status", async () => {
+test("the canonical's readiness is shown when the duplicate is the dependent", async () => {
+  current = {
+    source: "T-1",
+    mode: "duplicate",
+    canonical: "T-2",
+    edges: [edge("T-5", "T-1")],
+    replacement_issues: [null],
+  };
+  outcomes = [
+    outcome("T-1", { after: "no_ready_state" }),
+    outcome("T-2", { before: "ready", unresolved_after: ["T-5"] }),
+  ];
   await openReview();
-  choose("T-1 blocks T-3", "remove");
-  choose("T-1 blocks T-4", "retain");
+  choose("T-5 blocks T-1", "replace");
+  expect(
+    await screen.findByText(
+      "T-2 becomes Blocked, waiting on T-5; it takes over T-1's dependency on T-5",
+    ),
+  ).toBeTruthy();
   choose("T-5 blocks T-1", "retain");
-  reviewError = {
+  expect(screen.getByText("T-1 keeps its dependency on T-5")).toBeTruthy();
+});
+
+test("the review evaluates every choice together, with unchosen ones kept", async () => {
+  await openReview();
+  choose("T-1 blocks T-3", "replace");
+  await waitFor(() =>
+    expect(invoke).toHaveBeenLastCalledWith("evaluate_dependency_review", {
+      source: "T-1",
+      canonical: "T-2",
+      separate: false,
+      decisions: [
+        expect.objectContaining({ choice: "replace" }),
+        expect.objectContaining({ choice: "retain" }),
+        expect.objectContaining({ choice: "retain" }),
+      ],
+    }),
+  );
+});
+
+test("a review the core calls changed while choosing is stale", async () => {
+  await openReview();
+  evaluateError = {
     code: "review_changed",
     index: null,
     message: "dependency review has changed; preview and choose again",
   };
-  fireEvent.click(
-    screen.getByRole("button", { name: "Mark duplicate and apply 1 change" }),
-  );
-  await screen.findByText(/Dependencies changed after this preview/);
-  current = {
-    canonical: "T-2",
-    edges: [edge("T-1", "T-3", { dependent_status: "Done" })],
-    replacement_issues: [null],
-  };
-  fireEvent.click(screen.getByRole("button", { name: "Refresh preview" }));
-  await screen.findByRole("radiogroup", { name: "Choice for T-1 blocks T-3" });
   choose("T-1 blocks T-3", "remove");
   expect(
-    screen.getByText(
-      "T-3 is Done and has no Ready state; it no longer waits on T-1",
-    ),
+    await screen.findByText(/Dependencies changed after this preview/),
   ).toBeTruthy();
+});
+
+test("a separate review compares against the preview's normalized source", async () => {
+  current = {
+    source: "T-9",
+    mode: "separate",
+    canonical: "T-1",
+    edges: [
+      { ...edge("T-9", "T-3"), mode: "separate", replacement_blocker: "T-1" },
+    ],
+    replacement_issues: [null],
+  };
+  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review separate dependency changes" }),
+  );
+  fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
+    target: { value: "T-09" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  await screen.findByText("Affected dependencies");
+  choose("T-9 blocks T-3", "retain");
+  expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
 });

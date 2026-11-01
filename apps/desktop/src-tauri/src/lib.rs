@@ -461,6 +461,26 @@ fn preview_duplicate_dependencies(
         .map_err(|e| e.to_string())
 }
 
+/// What a whole set of choices does to each waiting ticket, for the review to show.
+#[tauri::command]
+fn evaluate_dependency_review(
+    source: String,
+    canonical: String,
+    separate: bool,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+) -> Result<Vec<ticketd_core::WaitingOutcome>, BridgeFailure> {
+    let mode = if separate {
+        ticketd_core::ReviewMode::Separate
+    } else {
+        ticketd_core::ReviewMode::Duplicate
+    };
+    Workspace::open_default()
+        .and_then(|workspace| {
+            workspace.evaluate_dependency_review(&source, &canonical, mode, &decisions)
+        })
+        .map_err(BridgeFailure::from)
+}
+
 #[tauri::command]
 fn mark_duplicate_reviewed(
     source: String,
@@ -743,6 +763,7 @@ pub fn run() -> Result<(), tauri::Error> {
             add_tag,
             remove_tag,
             preview_duplicate_dependencies,
+            evaluate_dependency_review,
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,
             remove_duplicate,

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
 import {
@@ -23,6 +23,7 @@ import {
   type Ticket,
   type DuplicatePreview,
   type DependencyDecision,
+  type WaitingOutcome,
 } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
 import "./duplicate-review.css";
@@ -78,6 +79,7 @@ export function Duplicates({
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
   const [error, setError] = useState("");
+  const [outcomes, setOutcomes] = useState<WaitingOutcome[]>([]);
   const [stale, setStale] = useState(false);
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState<{ key: string; id: string } | null>(
@@ -86,7 +88,35 @@ export function Duplicates({
   const [separate, setSeparate] = useState(startSeparate);
   const target = canonical.trim();
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
-  const sourceRef = separate ? target : ticket.reference;
+  // The preview's normalized form of the source, which its edges refer to; the typed
+  // text (T-01) only until a preview is loaded.
+  const sourceRef = preview?.source ?? (separate ? target : ticket.reference);
+  const canonicalArg = separate ? ticket.reference : target;
+
+  // The core judges all choices together; the review only shows what it answers. Choices
+  // not made yet count as Keep, which is the current graph.
+  useEffect(() => {
+    if (!preview || preview.edges.length === 0) return;
+    let current = true;
+    const decisions: DependencyDecision[] = preview.edges.map(
+      (edge, index) => ({
+        edge,
+        choice: (choices[index] || "retain") as Choice,
+      }),
+    );
+    client
+      .evaluateDuplicate(preview.source, canonicalArg, separate, decisions)
+      .then((result) => current && setOutcomes(result))
+      .catch((reason: unknown) => {
+        if (!current) return;
+        const failure = toFailure(reason);
+        if (failure.code === "review_changed") setStale(true);
+        else setError(failure.message);
+      });
+    return () => {
+      current = false;
+    };
+  }, [preview, choices, canonicalArg, separate]);
 
   async function loadPreview() {
     setPending(true);
@@ -94,14 +124,15 @@ export function Duplicates({
     setStale(false);
     try {
       const result = await client.previewDuplicate(
-        sourceRef,
-        separate ? ticket.reference : target,
+        separate ? target : ticket.reference,
+        canonicalArg,
         separate,
       );
       const resolved = separate
         ? null
         : await client.showTicket(result.canonical);
       setPreview(result);
+      setOutcomes([]);
       setCanonicalTicket(resolved);
       setChoices(result.edges.map(() => ""));
     } catch (reason) {
@@ -274,7 +305,13 @@ export function Duplicates({
                       {reason && <p className="dependency-reason">{reason}.</p>}
                       <p className="dependency-consequence">
                         {choice
-                          ? consequence(sourceRef, edge, choice, separate)
+                          ? consequence(
+                              sourceRef,
+                              edge,
+                              choice,
+                              outcomes,
+                              separate,
+                            )
                           : "Choose what happens to this dependency."}
                       </p>
                     </li>

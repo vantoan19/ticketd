@@ -2,6 +2,7 @@ import type {
   DependencyDecision,
   DependencyEdge,
   DuplicatePreview,
+  WaitingOutcome,
 } from "@/lib/api/client";
 
 export type Choice = DependencyDecision["choice"];
@@ -32,44 +33,56 @@ export function replacementIssueReason(
 
 /**
  * One line describing what a choice does to the ticket that waits on the edge.
- * In a separate review the existing endpoint is not canceled, so Keep leaves a
- * live dependency rather than one on a canceled ticket. Whether the waiting
- * ticket is Ready afterwards is the core's answer; this only words it.
+ * `outcomes` come from the core, which judges every choice together, so this only
+ * words them. In a separate review the existing endpoint is not canceled, so Keep
+ * leaves a live dependency rather than one on a canceled ticket.
  */
 export function consequence(
   source: string,
   edge: DependencyEdge,
   choice: Choice,
+  outcomes: WaitingOutcome[],
   separate = false,
 ): string {
-  if (edge.blocker === source) {
-    const effect =
-      choice === "replace"
-        ? `it waits for ${edge.replacement_blocker} to be Done instead`
-        : choice === "remove"
-          ? `it no longer waits on ${source}`
-          : separate
-            ? `it keeps waiting on ${source}`
-            : "it keeps waiting on a canceled ticket";
-    const ready = {
-      replace: edge.ready_if_replaced,
-      remove: edge.ready_if_removed,
-      retain: edge.ready_if_kept,
-    }[choice];
-    return `${readiness(edge, ready)}; ${effect}`;
-  }
-  if (choice === "replace")
-    return `${edge.replacement_dependent} waits for ${edge.blocker} to be Done`;
-  if (choice === "remove") return `${edge.blocker} no longer blocks ${source}`;
-  return `${source} keeps its dependency on ${edge.blocker}`;
+  const waiting =
+    choice === "replace" ? edge.replacement_dependent : edge.dependent;
+  const outcome = outcomes.find((candidate) => candidate.ticket === waiting);
+  // A ticket canceled by this review has no readiness worth stating.
+  const clause =
+    outcome && !(waiting === source && !separate) ? readiness(outcome) : "";
+  const subject = clause ? "it" : waiting;
+  const effect = (() => {
+    if (edge.blocker === source) {
+      if (choice === "replace") {
+        const done =
+          outcome &&
+          !outcome.unresolved_after.includes(edge.replacement_blocker);
+        return `${subject} now waits on ${edge.replacement_blocker}${done ? ", which is Done" : ""}`;
+      }
+      if (choice === "remove") return `${subject} no longer waits on ${source}`;
+      return separate
+        ? `${subject} keeps waiting on ${source}`
+        : `${subject} keeps waiting on a canceled ticket`;
+    }
+    if (choice === "replace")
+      return `${subject} takes over ${source}'s dependency on ${edge.blocker}`;
+    if (choice === "remove")
+      return `${edge.blocker} no longer blocks ${source}`;
+    return `${source} keeps its dependency on ${edge.blocker}`;
+  })();
+  return clause ? `${clause}; ${effect}` : effect;
 }
 
-/** How a choice changes whether the dependent is Ready; only Todo tickets have a Ready state. */
-function readiness(edge: DependencyEdge, ready: boolean): string {
-  if (edge.dependent_status !== "Todo")
-    return `${edge.dependent} is ${edge.dependent_status} and has no Ready state`;
-  const verb = ready === edge.dependent_ready ? "stays" : "becomes";
-  return `${edge.dependent} ${verb} ${ready ? "Ready" : "Blocked"}`;
+/** How the core says all choices together change a waiting ticket's readiness. */
+function readiness(outcome: WaitingOutcome): string {
+  const { ticket } = outcome;
+  if (outcome.after === "no_ready_state")
+    return outcome.trashed
+      ? `${ticket} is in the trash and has no Ready state`
+      : `${ticket} is ${outcome.status} and has no Ready state`;
+  if (outcome.after === "ready")
+    return `${ticket} ${outcome.before === "ready" ? "stays" : "becomes"} Ready`;
+  return `${ticket} ${outcome.before === "blocked" ? "stays" : "becomes"} Blocked, waiting on ${outcome.unresolved_after.join(", ")}`;
 }
 
 /** The number of dependency changes the current choices apply; Keep changes nothing. */
