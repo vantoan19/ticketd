@@ -265,6 +265,8 @@ enum SourceCommand {
         #[command(flatten)]
         settings: SourceSettings,
     },
+    /// Show each source's last refresh, current failure, and how many tickets are unavailable
+    Status,
     /// Import matching issues and refresh every externally owned ticket now, or one ticket
     Refresh {
         /// Refresh only this externally owned ticket, for example T-12
@@ -979,6 +981,7 @@ fn source_command(
             let values = resolve(workspace, &provider, settings)?;
             serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
         }
+        SourceCommand::Status => serde_json::to_string(&workspace.source_statuses()?)?,
         SourceCommand::Refresh { .. } => unreachable_refresh()?,
     })
 }
