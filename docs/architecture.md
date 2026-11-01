@@ -130,6 +130,14 @@ with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets.
 
+The source conversation (an external ticket's comments and timeline events) is
+a read-only mirror in `source_conversation`, keyed by ticket and the source's
+own entry id. It has no write workflow: refresh replaces it in the same short
+write as the ticket, only when the issue changed since it was last read, and a
+failed read keeps what was retrieved. Authors are the source's identities, never
+an editing agent, and the rows survive takeover as provenance. Agents read it
+with `ticketd context T-n --conversation`.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
