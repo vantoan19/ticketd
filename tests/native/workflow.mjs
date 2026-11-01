@@ -181,13 +181,20 @@ try {
         ).$$("button*=Record native workflow evidence")
       ).length === 0,
   );
-  await search.clearValue();
+  await search.click();
+  await browser.keys(["Control", "a"]);
+  await browser.keys(["Backspace"]);
+  await browser.waitUntil(async () => (await search.getValue()) === "", {
+    timeout: 5000,
+    timeoutMsg: "Search did not clear",
+  });
   await (await (await detail()).$("button=Graph")).click();
   const graphView = await browser.$('section[aria-label="Dependency graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
   const graphNode = await graphView.$(`button*=${evidence.reference}`);
   await graphNode.waitForDisplayed({ timeout: 10000 });
-  await graphNode.click();
+  // The canvas transform can make WebKitGTK refuse a native click, so click in the page.
+  await browser.execute((node) => node.click(), graphNode);
   await (await graphView.$(`button*=Open ${evidence.reference}`)).click();
   await browser.waitUntil(
     async () =>
