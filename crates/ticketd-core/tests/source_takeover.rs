@@ -10,7 +10,7 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Status, TicketFilter, TicketPatch, WriteRequest, WriteResult, Workspace,
+    Error, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
     source::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
         ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
@@ -324,7 +324,10 @@ fn a_repeated_takeover_changes_nothing_and_a_replayed_request_returns_its_first_
         panic!("takeover returns the ticket");
     };
     assert_eq!(first, replay, "replay returns the stored outcome");
-    assert_eq!(f.workspace.show_ticket("T-1").unwrap().title, "Edited later");
+    assert_eq!(
+        f.workspace.show_ticket("T-1").unwrap().title,
+        "Edited later"
+    );
     // Without a request id a repeat is a no-op and records no second change.
     f.workspace.take_ownership("T-1", None).unwrap();
     let changes = f

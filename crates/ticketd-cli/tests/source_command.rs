@@ -475,6 +475,13 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
     assert_eq!(report["imported"], json!([]));
     assert_eq!(cli.run(&["show", "T-1"])["title"], "Mine");
     let stderr = cli.fail(&["source", "refresh", "--ticket", "T-1"], None);
-    assert!(stderr.contains("not owned by an external source"), "{stderr}");
-    assert!(cli.run(&["history", "T-1"]).to_string().contains("ownership"));
+    assert!(
+        stderr.contains("not owned by an external source"),
+        "{stderr}"
+    );
+    assert!(
+        cli.run(&["history", "T-1"])
+            .to_string()
+            .contains("ownership")
+    );
 }
