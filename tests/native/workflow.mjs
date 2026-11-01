@@ -158,7 +158,18 @@ try {
   // but always require the exact literal text.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await browser.keys(sentence);
-    if ((await noteEditor.getText()).trim() === sentence) break;
+    const shown = (await noteEditor.getText()).trim();
+    if (shown === sentence) break;
+    console.log(
+      `Note attempt ${attempt + 1}: getText=${JSON.stringify(shown)} textContent=${JSON.stringify(
+        await browser.execute(
+          () =>
+            document.querySelector(
+              '[role="textbox"][aria-label="New note rich text"]',
+            )?.textContent,
+        ),
+      )}`,
+    );
     await browser.keys(["Control", "a"]);
     await browser.keys(["Backspace"]);
   }
