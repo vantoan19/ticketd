@@ -11,6 +11,7 @@ import { Activity } from "@/features/tickets/Activity";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SourceLink } from "@/features/tickets/SourceLink";
+import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import {
   externalNumber,
   externalSource,
@@ -84,6 +85,9 @@ export function TicketPage({
       data-trashed={ticket.trashed || undefined}
     >
       <div className="detail-document">
+        {active && (
+          <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
+        )}
         {ticket.trashed || contentLocked ? (
           <>
             <h3 className="detail-title">{ticket.title}</h3>

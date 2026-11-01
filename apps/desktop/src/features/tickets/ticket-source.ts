@@ -31,6 +31,8 @@ export function sourceState(source: TicketSource): {
   tone: "positive" | "attention" | null;
 } {
   const name = providerName(source.provider);
+  if (source.unavailable)
+    return { text: "Source unavailable", tone: "attention" };
   if (source.state.state === "open")
     return { text: `Open on ${name}`, tone: "positive" };
   switch (source.state.reason) {
@@ -48,17 +50,38 @@ export function sourceState(source: TicketSource): {
   }
 }
 
+/** "just now", "4 min ago", "2 h ago", "3 d ago"; null when the time cannot be read. */
+export function ago(iso: string, now = Date.now()): string | null {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
 /** "Synced 4 min ago", or that the ticket has not been confirmed yet. */
 export function freshness(source: TicketSource, now = Date.now()): string {
   if (!source.last_refreshed_at) return "Not synced yet";
-  const then = new Date(source.last_refreshed_at).getTime();
-  if (Number.isNaN(then)) return `Synced ${source.last_refreshed_at}`;
-  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
-  if (minutes < 1) return "Synced just now";
-  if (minutes < 60) return `Synced ${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `Synced ${hours} h ago`;
-  return `Synced ${Math.floor(hours / 24)} d ago`;
+  return `Synced ${ago(source.last_refreshed_at, now) ?? source.last_refreshed_at}`;
+}
+
+/** Whether the source cannot be read, and what to say about it. Never implies completion. */
+export function unavailableNotice(
+  source: TicketSource,
+  now = Date.now(),
+): { title: string; detail: string; since: string } | null {
+  const unavailable = source.unavailable;
+  if (!unavailable || source.ownership !== "external") return null;
+  const name = providerName(source.provider);
+  const since = ago(unavailable.since, now) ?? unavailable.since;
+  return {
+    title: "Source unavailable",
+    detail: `${name} could not be reached for ${source.display}: ${unavailable.message} Nothing was deleted or completed.`,
+    since: `Since ${since}`,
+  };
 }
 
 /** What a closed duplicate says about its canonical issue, never inventing one. */

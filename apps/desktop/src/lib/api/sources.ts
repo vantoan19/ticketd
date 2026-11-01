@@ -111,6 +111,27 @@ const refreshReportSchema = z.object({
 });
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
+const sourceStatusSchema = z.object({
+  provider: z.string(),
+  last_attempt_at: z.string().nullable(),
+  /** The last run in which the source could be read. */
+  last_refreshed_at: z.string().nullable(),
+  error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** When the current streak of failed runs began. */
+  failing_since: z.string().nullable(),
+  /** The earliest time the source asked to be contacted again. */
+  retry_after: z.string().nullable(),
+  unavailable_tickets: z.number(),
+});
+export type SourceStatus = z.infer<typeof sourceStatusSchema>;
+
+const sourceHealthSchema = z.object({
+  /** A refresh is running now: startup, periodic, or explicit. */
+  refreshing: z.boolean(),
+  sources: z.array(sourceStatusSchema),
+});
+export type SourceHealth = z.infer<typeof sourceHealthSchema>;
+
 const connectionSchema = z.object({ account: z.string() });
 
 export type SourceFailureCode =
@@ -176,6 +197,10 @@ export const sourcesClient = {
     return refreshReportSchema.parse(
       await call(invoke("refresh_sources", { ticket: ticket ?? null })),
     );
+  },
+  /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
+  async health() {
+    return sourceHealthSchema.parse(await call(invoke("source_health")));
   },
   /** The built-in sources and what is saved for each. */
   async list() {

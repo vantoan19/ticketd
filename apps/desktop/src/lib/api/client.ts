@@ -34,6 +34,14 @@ const ticketSourceSchema = z.object({
   last_refreshed_at: z.string().nullable(),
   last_attempt_at: z.string().nullable(),
   last_error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /**
+   * Set while the source cannot be read: the latest refresh failed with an
+   * unreachable, unauthorized, forbidden, missing or unusable answer. Saved content
+   * and local work are untouched; a rate limit is delayed, not unavailable.
+   */
+  unavailable: z
+    .object({ code: z.string(), message: z.string(), since: z.string() })
+    .nullish(),
   content_locked: z.boolean(),
   status_locked: z.boolean(),
   duplicate_target: duplicateTargetSchema.nullable(),

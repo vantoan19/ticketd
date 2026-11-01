@@ -501,6 +501,27 @@
 .sidebar-footer .sidebar-nav {
   margin-top: 0;
 }
+.sidebar-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 8px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.sidebar-source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.sidebar-source > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--secondary-foreground);
+}
 .brand {
   display: flex;
   align-items: center;
