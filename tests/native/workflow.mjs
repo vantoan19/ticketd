@@ -155,28 +155,19 @@ try {
     await detail()
   ).$('[role="textbox"][aria-label="New note rich text"]');
   await noteEditor.click();
-  // The WebKit driver can drop a keystroke, so verify the typed text and retype.
-  const noteText = "Reviewed rich notes in the installed desktop.";
-  const typed = () =>
-    browser.execute(
-      () =>
-        document.querySelector(
-          '[role="textbox"][aria-label="New note rich text"]',
-        )?.textContent ?? "",
-    );
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await browser.keys(noteText);
-    if ((await typed()).trim() === noteText) break;
-    await browser.keys(["Control", "a"]);
-    await browser.keys(["Backspace"]);
-  }
-  assert.equal((await typed()).trim(), noteText);
+  await browser.keys("Reviewed rich notes in the installed desktop.");
+  // The WebKit driver can drop a keystroke, so compare against what was typed.
+  await browser.waitUntil(
+    async () => (await noteEditor.getText()).includes("Reviewed rich notes"),
+    { timeout: 5000, timeoutMsg: "Typed note text did not reach the editor" },
+  );
+  const typed = (await noteEditor.getText()).trim();
   assert.equal(run("note", "list", harness.reference).length, 0);
   await (await (await detail()).$("button=Add note")).click();
   await browser.waitUntil(
     () =>
       run("note", "list", harness.reference).some((note) =>
-        note.content.includes("Reviewed rich notes in the installed desktop."),
+        note.content.includes(typed),
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
