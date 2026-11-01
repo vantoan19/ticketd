@@ -394,7 +394,7 @@ fn the_credential_is_sent_only_to_the_api_and_redirects_stay_there() {
         discover_all(&engine, &values).unwrap_err().code(),
         "protocol"
     );
-    assert_eq!(fixture.urls(), [url.clone()]);
+    assert_eq!(fixture.urls(), std::slice::from_ref(&url));
 
     let (fixture, engine) = setup(Some(TOKEN));
     fixture.respond(

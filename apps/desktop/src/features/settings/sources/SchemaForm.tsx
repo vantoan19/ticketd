@@ -66,20 +66,8 @@ function MultiSelectField({
   const dynamic = field.options.source === "dynamic";
 
   useEffect(() => {
-    if (!open) return;
-    if (field.options.source === "static") {
-      const needle = query.trim().toLowerCase();
-      setSuggestions(
-        field.options.options.filter(
-          (option) =>
-            option.label.toLowerCase().includes(needle) ||
-            option.value.toLowerCase().includes(needle),
-        ),
-      );
-      return;
-    }
+    if (!open || field.options.source !== "dynamic") return;
     const request = ++requests.current;
-    setLoading(true);
     const timer = window.setTimeout(() => {
       loadOptions(field.key, query.trim())
         .then((options) => {
@@ -105,6 +93,12 @@ function MultiSelectField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, query, field.key]);
 
+  /** Opens the suggestions; a dynamic list shows a pending state until it loads. */
+  function show() {
+    setOpen(true);
+    if (dynamic) setLoading(true);
+  }
+
   function add(item: string) {
     const text = item.trim();
     if (!text || full || value.includes(text)) return;
@@ -112,9 +106,17 @@ function MultiSelectField({
     setQuery("");
   }
 
-  const available = suggestions.filter(
-    (option) => !value.includes(option.value),
-  );
+  const offered =
+    field.options.source === "static"
+      ? field.options.options.filter((option) => {
+          const needle = query.trim().toLowerCase();
+          return (
+            option.label.toLowerCase().includes(needle) ||
+            option.value.toLowerCase().includes(needle)
+          );
+        })
+      : suggestions;
+  const available = offered.filter((option) => !value.includes(option.value));
   return (
     <div
       className="source-field"
@@ -157,10 +159,12 @@ function MultiSelectField({
         }
         aria-describedby={field.help ? `${id}-help` : undefined}
         aria-invalid={errors.length > 0 || undefined}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          if (!open) show();
+        }}
         onChange={(event) => {
           setQuery(event.target.value);
-          setOpen(true);
+          show();
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
