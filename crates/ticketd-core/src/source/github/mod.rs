@@ -549,6 +549,8 @@ fn translate_issue(
             .collect(),
         created_at: text("created_at").unwrap_or_default().to_owned(),
         updated_at: text("updated_at").unwrap_or_default().to_owned(),
+        // GitHub's issue payload does not name the canonical issue of a duplicate.
+        duplicate_of: None,
     }))
 }
 

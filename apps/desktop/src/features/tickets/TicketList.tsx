@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
+import { externalNumber, externalSource, providerName } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
@@ -159,6 +160,7 @@ export function TicketList({
                 <span className="ticket-title" title={ticket.title}>
                   {ticket.title}
                 </span>
+                <SourcePill ticket={ticket} />
                 <RowDetails
                   ticket={ticket}
                   scope={scope}
@@ -173,6 +175,21 @@ export function TicketList({
         })}
       </ul>
     </TooltipProvider>
+  );
+}
+
+/** The owner of an externally owned ticket; a local ticket has no pill. */
+function SourcePill({ ticket }: { ticket: Ticket }) {
+  const source = externalSource(ticket);
+  if (!source) return null;
+  return (
+    <span
+      className="ticket-source-pill"
+      title={`Owned by ${providerName(source.provider)}: ${source.display}`}
+    >
+      <span className="sr-only">Owned by {providerName(source.provider)} </span>
+      {providerName(source.provider)} {externalNumber(source)}
+    </span>
   );
 }
 

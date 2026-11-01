@@ -51,7 +51,7 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     else {
         panic!("expected a valid backup, got {:?}", inspection.check);
     };
-    assert_eq!(format_version, 22);
+    assert_eq!(format_version, 23);
     assert_eq!(
         (
             summary.tickets,
@@ -89,7 +89,7 @@ fn an_empty_workspace_has_no_last_change() {
     assert_eq!(
         inspection.check,
         BackupCheck::Valid {
-            format_version: 22,
+            format_version: 23,
             summary: expected
         }
     );
@@ -103,15 +103,15 @@ fn a_newer_format_names_both_versions() {
     let connection = Connection::open(&newer).unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE tickets (number INTEGER PRIMARY KEY); PRAGMA user_version = 23;",
+            "CREATE TABLE tickets (number INTEGER PRIMARY KEY); PRAGMA user_version = 24;",
         )
         .unwrap();
     drop(connection);
     assert_eq!(
         workspace.inspect_backup(&newer).unwrap().check,
         BackupCheck::NewerFormat {
-            backup_version: 23,
-            supported_version: 22
+            backup_version: 24,
+            supported_version: 23
         }
     );
 }

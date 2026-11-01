@@ -8,6 +8,7 @@ import { effortsClient } from "@/lib/api/efforts";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
@@ -49,6 +50,12 @@ export function TicketListPane({
     setAvailability,
     family,
     setFamily,
+    source,
+    setSource,
+    sourceCounts,
+    configuredSources,
+    sourceRefresh,
+    refreshSources,
     trash,
     tickets,
     counts,
@@ -72,7 +79,8 @@ export function TicketListPane({
     navigation.effort !== effort ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
-    Boolean(query || tags || family);
+    Boolean(query || tags || family) ||
+    source !== "all";
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -92,6 +100,7 @@ export function TicketListPane({
     tags,
     availability,
     family,
+    source,
     trash,
     navigation,
   ]);
@@ -134,6 +143,23 @@ export function TicketListPane({
             <RefreshCw />
           </IconButton>
         </div>
+      )}
+      {!trash && (configuredSources.length > 0 || source !== "all") && (
+        <>
+          <SourceFilter
+            value={source}
+            onChange={setSource}
+            counts={sourceCounts}
+            providers={configuredSources}
+          />
+          {configuredSources.length > 0 && (
+            <SourceRefresh
+              providers={configuredSources}
+              state={sourceRefresh}
+              onRefresh={() => void refreshSources()}
+            />
+          )}
+        </>
       )}
       {!trash && (
         <TicketFilters

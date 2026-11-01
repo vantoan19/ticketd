@@ -35,6 +35,8 @@ export function bridgeDefault(
         canceled: 0,
         duplicate: 0,
       };
+    case "count_by_source":
+      return { all: 0, local: 0, providers: {} };
     case "sidebar_counts":
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":
@@ -49,7 +51,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 22,
+        format_version: 23,
       };
     case "check_cli":
       return {

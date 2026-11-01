@@ -9,6 +9,14 @@ import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { StatusDot } from "@/components/ui/status-dot";
+import { SourceLink } from "@/features/tickets/SourceLink";
+import {
+  externalNumber,
+  externalSource,
+  providerName,
+  sourceState,
+} from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import type { Project, Ticket } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
@@ -53,7 +61,22 @@ export function TicketPage({
   );
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
-  const stateLine = <p className="ticket-state-line">Local ticket</p>;
+  const source = externalSource(ticket);
+  const state = source ? sourceState(source) : null;
+  const stateLine = (
+    <p className="ticket-state-line">
+      {source && state ? (
+        <>
+          {state.tone && <StatusDot tone={state.tone} size={8} />}
+          {state.text} · {externalNumber(source)}
+        </>
+      ) : (
+        "Local ticket"
+      )}
+    </p>
+  );
+  // The source owns the title and description, so they are read, never edited.
+  const contentLocked = Boolean(source?.content_locked);
   return (
     <div
       className="detail-content"
@@ -61,19 +84,42 @@ export function TicketPage({
       data-trashed={ticket.trashed || undefined}
     >
       <div className="detail-document">
-        {ticket.trashed ? (
+        {ticket.trashed || contentLocked ? (
           <>
             <h3 className="detail-title">{ticket.title}</h3>
             {stateLine}
             <div className="editor-body">
-              <p className="description-heading">Description</p>
-              <div className="markdown-preview description-document">
-                <MarkdownDocument
-                  source={ticket.body}
-                  select={select}
-                  revision={revision}
-                />
-              </div>
+              {source && contentLocked ? (
+                <section
+                  className="source-card"
+                  aria-label={`Description from ${providerName(source.provider)}, read-only`}
+                >
+                  <header className="source-card-header">
+                    <span>{providerName(source.provider)} · Read-only</span>
+                    <SourceLink url={source.url}>
+                      Edit on {providerName(source.provider)}
+                    </SourceLink>
+                  </header>
+                  <div className="markdown-preview description-document">
+                    <MarkdownDocument
+                      source={ticket.body}
+                      select={select}
+                      revision={revision}
+                    />
+                  </div>
+                </section>
+              ) : (
+                <>
+                  <p className="description-heading">Description</p>
+                  <div className="markdown-preview description-document">
+                    <MarkdownDocument
+                      source={ticket.body}
+                      select={select}
+                      revision={revision}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </>
         ) : (
@@ -90,6 +136,12 @@ export function TicketPage({
         {active && !ticket.trashed && (
           <Subtickets work={work} select={select} />
         )}
+        {active && !ticket.trashed && source && (
+          <p className="source-caption">
+            Subtickets stay in ticketd; publishing this ticket never publishes
+            them.
+          </p>
+        )}
         {active && (
           <Evidence
             reference={ticket.reference}
@@ -104,6 +156,12 @@ export function TicketPage({
             revision={revision}
             select={onMention}
           />
+        )}
+        {source && (
+          <p className="source-caption">
+            Notes stay in ticketd and are never sent to{" "}
+            {providerName(source.provider)}.
+          </p>
         )}
         <Activity
           reference={ticket.reference}

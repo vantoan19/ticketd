@@ -23,7 +23,7 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 56px minmax(0, 1fr);
+  grid-template-columns: 16px 56px minmax(0, 1fr) auto;
   column-gap: 8px;
   row-gap: 2px;
   width: 100%;
@@ -58,7 +58,7 @@
 }
 .ticket-row-meta {
   display: flex;
-  grid-column: 3;
+  grid-column: 3 / -1;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -289,4 +289,62 @@
 }
 .ticket-group-add {
   margin-left: auto;
+}
+
+/* The owner of an externally owned ticket, after its title: source mark and number. */
+.ticket-source-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--recessed);
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ticket-source-pill svg {
+  width: 12px;
+  height: 12px;
+}
+.ticket-rows li:hover .ticket-source-pill,
+.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-source-pill {
+  background: var(--surface);
+}
+/* Source filter: All, a provider, Local, each with its count. */
+.source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px 8px;
+}
+.source-filter button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--secondary-foreground);
+  font-size: 13px;
+}
+.source-filter button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.source-filter .source-filter-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.source-refresh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
 }

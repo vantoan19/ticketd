@@ -50,6 +50,19 @@ impl Workspace {
                 "source_configurations",
                 "provider, configuration, account, contract_version, saved_at",
             ),
+            (
+                "external_identities",
+                "ticket_id, provider, external_id, locator, display, url, origin, linked_at",
+            ),
+            ("external_ownership", "ticket_id, authority, changed_at"),
+            (
+                "source_sync",
+                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message",
+            ),
+            (
+                "external_duplicate_targets",
+                "ticket_id, provider, external_id, locator, display",
+            ),
         ] {
             let mut statement =
                 tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;
