@@ -15,7 +15,7 @@ use ticketd_core::{
         ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
         DuplicateTarget, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport, SchemaField,
-        SourceError, SourceFilter, ValueFormat,
+        SourceError, SourceFilter, TargetProblem, ValueFormat,
     },
 };
 
@@ -739,4 +739,167 @@ fn concurrent_refreshes_create_one_ticket_per_issue() {
     assert_eq!(imported, 2);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+fn duplicate_of(id: u64, title: &str, canonical: Option<u64>) -> ExternalIssue {
+    let mut dup = issue(id, title);
+    dup.state = closed(ClosureReason::Duplicate);
+    dup.duplicate_of = canonical.map(|canonical| ExternalRef {
+        identity: ExternalIdentity {
+            provider: "fake".into(),
+            id: canonical.to_string(),
+        },
+        locator: format!("o/r#{canonical}"),
+    });
+    dup
+}
+
+fn target(ticket: &Ticket) -> DuplicateTarget {
+    ticket.source.clone().unwrap().duplicate_target.unwrap()
+}
+
+/// Imports each issue as open (discovery only lists open issues), then has the
+/// source close them as duplicates of the given canonical issues.
+fn import_then_close_as_duplicates(f: &mut Fixture, duplicates: &[(u64, Option<u64>)]) {
+    for (id, _) in duplicates {
+        f.publish(issue(*id, &format!("Issue {id}")), true);
+    }
+    f.refresh();
+    for (id, canonical) in duplicates {
+        f.publish(duplicate_of(*id, &format!("Issue {id}"), *canonical), true);
+    }
+    f.refresh();
+}
+
+fn resolved(ticket: &Ticket) -> Option<String> {
+    match target(ticket) {
+        DuplicateTarget::External { ticket, .. } => ticket,
+        DuplicateTarget::Unknown => None,
+    }
+}
+
+#[test]
+fn an_external_target_resolves_to_the_ticket_discovery_later_imports_without_a_second_ticket() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Dup"), true);
+    f.publish(issue(2, "Blocked by dup"), true);
+    f.refresh();
+    f.workspace.add_dependency("T-1", "T-2", None).unwrap();
+    f.publish(duplicate_of(1, "Dup", Some(99)), true);
+    f.refresh();
+
+    // Referenced but not imported: shown as an external-only target.
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+    match target(&f.ticket(1)) {
+        DuplicateTarget::External {
+            display, ticket, ..
+        } => {
+            assert_eq!(display, "o/r#99");
+            assert_eq!(ticket, None);
+        }
+        other => panic!("expected an external target, got {other:?}"),
+    }
+
+    // Ordinary discovery imports the canonical issue; the reference resolves to it.
+    f.publish(issue(99, "Canonical"), true);
+    f.refresh();
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 3);
+    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-3"));
+    // Information only: no local designation, and no dependency moved or satisfied.
+    let dup = f.ticket(1);
+    assert!(dup.duplicate_of.is_none());
+    assert_eq!(dup.status, Status::Duplicate);
+    assert!(!dup.status.satisfies_dependency());
+    assert!(f.ticket(3).duplicates.is_empty());
+    assert_eq!(f.ticket(2).prerequisites.len(), 1);
+    assert_eq!(f.ticket(2).prerequisites[0].reference, "T-1");
+    // The CLI/agent context carries the same target, not a local relationship.
+    let context = f
+        .workspace
+        .ticket_context(
+            "T-1",
+            ticketd_core::ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let relationships = context.relationships.unwrap();
+    assert!(relationships.duplicate_of.is_none());
+    assert_eq!(
+        relationships.external_duplicate_of,
+        Some(target(&f.ticket(1)))
+    );
+}
+
+#[test]
+fn a_changed_target_follows_the_source_and_a_lost_one_is_not_erased() {
+    let mut f = Fixture::new();
+    import_then_close_as_duplicates(&mut f, &[(1, Some(98))]);
+    f.publish(duplicate_of(1, "Dup", Some(99)), true);
+    let report = f.refresh();
+    assert_eq!(report.updated.len(), 1);
+    match target(&f.ticket(1)) {
+        DuplicateTarget::External { identity, .. } => assert_eq!(identity.id, "99"),
+        other => panic!("expected an external target, got {other:?}"),
+    }
+    f.publish(duplicate_of(1, "Dup", None), true);
+    f.refresh();
+    // The source stopped supplying an accessible target: keep what is known.
+    match target(&f.ticket(1)) {
+        DuplicateTarget::External { identity, .. } => assert_eq!(identity.id, "99"),
+        other => panic!("the known target must be kept, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_target_that_is_the_issue_itself_is_unknown_and_a_cycle_is_flagged_not_followed() {
+    let mut f = Fixture::new();
+    import_then_close_as_duplicates(&mut f, &[(1, Some(1)), (2, Some(3)), (3, Some(2))]);
+    assert_eq!(target(&f.ticket(1)), DuplicateTarget::Unknown);
+    for number in [2, 3] {
+        match target(&f.ticket(number)) {
+            DuplicateTarget::External {
+                ticket, problem, ..
+            } => {
+                assert_eq!(ticket, None);
+                assert_eq!(problem, Some(TargetProblem::Cycle));
+            }
+            other => panic!("expected a flagged external target, got {other:?}"),
+        }
+        assert!(f.ticket(number).duplicate_of.is_none());
+    }
+}
+
+#[test]
+fn a_target_that_is_itself_a_duplicate_resolves_directly_to_the_final_canonical_ticket() {
+    let mut f = Fixture::new();
+    import_then_close_as_duplicates(&mut f, &[(1, Some(2)), (2, Some(3)), (3, None)]);
+    f.publish(issue(3, "Final"), true);
+    f.refresh();
+    assert_eq!(resolved(&f.ticket(1)).as_deref(), Some("T-3"));
+}
+
+#[test]
+fn target_identity_survives_export_backup_and_restore() {
+    let mut f = Fixture::new();
+    import_then_close_as_duplicates(&mut f, &[(1, Some(99))]);
+    f.publish(issue(99, "Canonical"), true);
+    f.refresh();
+    let before = f.ticket(1);
+    assert_eq!(resolved(&before).as_deref(), Some("T-2"));
+    let exported = f.workspace.export().unwrap();
+    assert_eq!(
+        exported["external_duplicate_targets"][0]["external_id"],
+        "99"
+    );
+    let path = f.path();
+    let backup = f.dir.path().join("backup.sqlite3");
+    f.workspace.backup(&backup).unwrap();
+    let Fixture { workspace, dir, .. } = f;
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.show_ticket("T-1").unwrap(), before);
+    drop(dir);
 }

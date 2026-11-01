@@ -120,9 +120,19 @@ impl GithubConnector {
     /// Sends an authenticated GET and maps failures to [`SourceError`].
     /// `subject` names what was requested, for a useful not-found message.
     fn get(&self, url: &str, subject: &str) -> Result<HttpResponse, SourceError> {
+        self.send(Method::Get, url, None, subject)
+    }
+
+    fn send(
+        &self,
+        method: Method,
+        url: &str,
+        body: Option<Vec<u8>>,
+        subject: &str,
+    ) -> Result<HttpResponse, SourceError> {
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
-            if !self.is_api_url(&url) {
+            if !self.is_api_url(&url) && url != self.graphql_url() {
                 return Err(SourceError::Protocol(
                     "the source referred to an address outside its API".into(),
                 ));
@@ -132,16 +142,20 @@ impl GithubConnector {
                     "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can read issues".into(),
                 )
             })?;
+            let mut headers = vec![
+                ("Accept".into(), "application/vnd.github+json".into()),
+                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
+                ("User-Agent".into(), "ticketd".into()),
+                ("Authorization".into(), format!("Bearer {}", token.expose())),
+            ];
+            if body.is_some() {
+                headers.push(("Content-Type".into(), "application/json".into()));
+            }
             let request = HttpRequest {
-                method: Method::Get,
+                method,
                 url: url.clone(),
-                headers: vec![
-                    ("Accept".into(), "application/vnd.github+json".into()),
-                    ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
-                    ("User-Agent".into(), "ticketd".into()),
-                    ("Authorization".into(), format!("Bearer {}", token.expose())),
-                ],
-                body: None,
+                headers,
+                body: body.clone(),
             };
             let response = self.transport.send(&request).map_err(|error| {
                 SourceError::Unavailable(format!("could not reach GitHub: {error}"))
@@ -160,6 +174,60 @@ impl GithubConnector {
             return classify(response, subject);
         }
         Err(SourceError::Protocol("too many redirects".into()))
+    }
+
+    /// GitHub Enterprise Server serves GraphQL beside, not under, its REST root.
+    fn graphql_url(&self) -> String {
+        match self.api_url.strip_suffix("/api/v3") {
+            Some(host) => format!("{host}/api/graphql"),
+            None => format!("{}/graphql", self.api_url),
+        }
+    }
+
+    /// The canonical issue a duplicate was marked as a duplicate of.
+    ///
+    /// GitHub's REST issue payload and its timeline `marked_as_duplicate` event do
+    /// not name the canonical issue; only GraphQL's `MarkedAsDuplicateEvent.canonical`
+    /// does. A timeline also shows the event on the canonical issue, so only events
+    /// whose `duplicate` is this issue count, and a later `UnmarkedAsDuplicateEvent`
+    /// withdraws the target. Anything unavailable (no access, an error, a pull
+    /// request as canonical) is "not supplied", never a failure of the fetch.
+    fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Option<ExternalRef> {
+        let (owner, name) = repository.split_once('/')?;
+        let body = serde_json::json!({
+            "query": CANONICAL_QUERY,
+            "variables": {"owner": owner, "name": name, "number": number.parse::<u64>().ok()?},
+        })
+        .to_string()
+        .into_bytes();
+        let response = self
+            .send(
+                Method::Post,
+                &self.graphql_url(),
+                Some(body),
+                "duplicate timeline",
+            )
+            .ok()?;
+        let value: Value = serde_json::from_slice(&response.body).ok()?;
+        let nodes = value
+            .pointer("/data/repository/issue/timelineItems/nodes")?
+            .as_array()?;
+        let mut target = None;
+        for node in nodes {
+            if node
+                .pointer("/duplicate/databaseId")
+                .and_then(Value::as_u64)
+                != Some(id)
+            {
+                continue;
+            }
+            target = match node.get("__typename").and_then(Value::as_str) {
+                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?),
+                Some("UnmarkedAsDuplicateEvent") => None,
+                _ => continue,
+            };
+        }
+        target
     }
 
     fn is_api_url(&self, url: &str) -> bool {
@@ -367,13 +435,48 @@ impl Connector for GithubConnector {
             encode_path(repository)
         );
         let (value, _) = self.json(&url, &format!("issue {}", reference.locator))?;
-        translate_issue(&value, repository)?.ok_or_else(|| {
+        let mut issue = translate_issue(&value, repository)?.ok_or_else(|| {
             SourceError::NotFound(format!(
                 "{} is a pull request, not an issue",
                 reference.locator
             ))
-        })
+        })?;
+        if issue.state
+            == (ExternalState::Closed {
+                reason: ClosureReason::Duplicate,
+            })
+        {
+            let id = issue.reference.identity.id.parse().unwrap_or_default();
+            issue.duplicate_of = self.canonical_of(repository, number, id);
+        }
+        Ok(issue)
     }
+}
+
+const CANONICAL_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
+repository(owner: $owner, name: $name) { issue(number: $number) { \
+timelineItems(last: 50, itemTypes: [MARKED_AS_DUPLICATE_EVENT, UNMARKED_AS_DUPLICATE_EVENT]) { nodes { \
+__typename \
+... on MarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } \
+canonical { __typename ... on Issue { databaseId number repository { nameWithOwner } } } } \
+... on UnmarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } } } } } } }";
+
+/// An issue named as canonical, or `None` for anything ticketd cannot track
+/// (a pull request, or a target the credential cannot read).
+fn canonical_reference(canonical: &Value) -> Option<ExternalRef> {
+    if canonical.get("__typename").and_then(Value::as_str) != Some("Issue") {
+        return None;
+    }
+    let id = canonical.get("databaseId").and_then(Value::as_u64)?;
+    let number = canonical.get("number").and_then(Value::as_u64)?;
+    let repository = canonical.pointer("/repository/nameWithOwner")?.as_str()?;
+    Some(ExternalRef {
+        identity: ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: id.to_string(),
+        },
+        locator: format!("{repository}#{number}"),
+    })
 }
 
 #[derive(Default)]
@@ -549,7 +652,7 @@ fn translate_issue(
             .collect(),
         created_at: text("created_at").unwrap_or_default().to_owned(),
         updated_at: text("updated_at").unwrap_or_default().to_owned(),
-        // GitHub's issue payload does not name the canonical issue of a duplicate.
+        // The issue payload does not name the canonical issue; `fetch` looks it up.
         duplicate_of: None,
     }))
 }
