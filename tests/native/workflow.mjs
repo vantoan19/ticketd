@@ -155,7 +155,15 @@ try {
     await detail()
   ).$('[role="textbox"][aria-label="New note rich text"]');
   await noteEditor.click();
-  await browser.keys("Reviewed rich notes in the installed desktop.");
+  // The WebKit driver can drop a keystroke, so verify the typed text and retype.
+  const noteText = "Reviewed rich notes in the installed desktop.";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await browser.keys(noteText);
+    if ((await noteEditor.getText()).trim() === noteText) break;
+    await browser.keys(["Control", "a"]);
+    await browser.keys(["Backspace"]);
+  }
+  assert.equal((await noteEditor.getText()).trim(), noteText);
   assert.equal(run("note", "list", harness.reference).length, 0);
   await (await (await detail()).$("button=Add note")).click();
   await browser.waitUntil(
@@ -176,12 +184,7 @@ try {
       ).length === 0,
   );
   await search.clearValue();
-  await (
-    await (await header()).$('button[aria-label="Ticket actions"]')
-  ).click();
-  await (
-    await browser.$('//*[@role="menuitem" and text()="Open dependency graph"]')
-  ).click();
+  await (await (await detail()).$("button=Graph")).click();
   const graphView = await browser.$('section[aria-label="Dependency graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
   const graphNode = await graphView.$(`button*=${evidence.reference}`);
