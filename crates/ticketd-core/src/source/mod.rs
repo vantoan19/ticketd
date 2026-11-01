@@ -12,7 +12,9 @@
 
 pub mod contract;
 pub mod engine;
+mod freshness;
 pub mod github;
+mod schedule;
 pub mod schema;
 mod tracking;
 
@@ -24,7 +26,9 @@ pub use contract::{
     DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
     PublishRequest, SourceError,
 };
+pub use freshness::{DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code};
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
+pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
     ValueFormat,
@@ -67,6 +71,11 @@ pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), Error> {
 /// Step 23: external identity, ownership and synchronization state.
 pub(crate) fn migrate_tracking(connection: &rusqlite::Connection) -> Result<(), Error> {
     tracking::migrate(connection)
+}
+
+/// Step 24: failure streaks and per-source status.
+pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(), Error> {
+    freshness::migrate(connection)
 }
 
 pub(crate) use tracking::{guard_change, guard_duplicate, populate};

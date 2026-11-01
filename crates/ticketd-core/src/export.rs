@@ -57,11 +57,15 @@ impl Workspace {
             ("external_ownership", "ticket_id, authority, changed_at"),
             (
                 "source_sync",
-                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message",
+                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, failing_since",
             ),
             (
                 "external_duplicate_targets",
                 "ticket_id, provider, external_id, locator, display",
+            ),
+            (
+                "source_status",
+                "provider, last_attempt_at, last_refreshed_at, error_code, error_message, failing_since, retry_after",
             ),
         ] {
             let mut statement =

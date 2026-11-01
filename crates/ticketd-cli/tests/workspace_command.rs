@@ -34,8 +34,8 @@ fn workspace_prints_its_path_and_both_format_versions_as_json() {
             .to_str()
             .unwrap()
     );
-    assert_eq!(printed["format_version"], 23);
-    assert_eq!(printed["supported_format_version"], 23);
+    assert_eq!(printed["format_version"], 24);
+    assert_eq!(printed["supported_format_version"], 24);
     assert_eq!(printed.as_object().unwrap().len(), 3);
 }
 
@@ -45,7 +45,7 @@ fn workspace_does_not_create_a_missing_workspace() {
     let printed: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["workspace"])).unwrap();
     assert_eq!(printed["format_version"], serde_json::Value::Null);
-    assert_eq!(printed["supported_format_version"], 23);
+    assert_eq!(printed["supported_format_version"], 24);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 

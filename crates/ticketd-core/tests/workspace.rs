@@ -1194,7 +1194,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE source_status; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1254,7 +1254,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     Workspace::restore(&path, &backup).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP INDEX ticket_history_ticket_id; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
+        "DROP INDEX ticket_history_ticket_id; DROP TABLE source_status; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence;",
     )
     .unwrap();
     drop(db);
@@ -2171,7 +2171,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+        "DROP TABLE source_status; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
     )
     .unwrap();
     drop(db);
@@ -2186,7 +2186,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2743,7 +2743,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;",
+        "DROP TABLE source_status; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;",
     )
     .unwrap();
     drop(db);
@@ -2764,7 +2764,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 23);
+    assert_eq!(version, 24);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
 
@@ -2992,7 +2992,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, 23);
+    assert_eq!(info.format_version, 24);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }
@@ -3555,7 +3555,7 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
         [&moved_on.id],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; PRAGMA user_version = 20;")
+    db.execute_batch("DROP TABLE source_status; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; PRAGMA user_version = 20;")
         .unwrap();
     drop(db);
 
