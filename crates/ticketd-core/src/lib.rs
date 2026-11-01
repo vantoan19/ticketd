@@ -158,6 +158,10 @@ pub enum Error {
     },
     #[error("{0} is not owned by an external source, so there is nothing to refresh")]
     NotSynchronized(String),
+    #[error(
+        "{reference} can still be read from {provider}, so ticketd cannot take ownership of it; refresh it or retry later"
+    )]
+    SourceAvailable { reference: String, provider: String },
     #[error(transparent)]
     Source(#[from] source::SourceError),
     #[error(transparent)]

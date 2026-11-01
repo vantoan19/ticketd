@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Ticket } from "@/lib/api/client";
 import { sourcesClient } from "@/lib/api/sources";
+import { TakeOwnership } from "./TakeOwnership";
 import {
   externalSource,
   freshness,
@@ -13,8 +14,7 @@ import {
 /**
  * A recessed notice at the top of the document column while the ticket's source
  * cannot be read. It says what failed and since when, that nothing was deleted or
- * completed, and offers Retry. Taking ownership is a separate decision this notice
- * does not offer.
+ * completed, and offers Retry and Take ownership (a confirmed, separate decision).
  */
 export function SourceUnavailableNotice({
   ticket,
@@ -64,6 +64,7 @@ export function SourceUnavailableNotice({
         >
           Retry
         </Button>
+        <TakeOwnership ticket={ticket} refresh={refresh} />
         {retrying && <span role="status">Refreshing {name}…</span>}
         {failure && !retrying && (
           <span role="alert">Still unavailable: {failure}</span>

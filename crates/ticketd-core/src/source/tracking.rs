@@ -904,7 +904,8 @@ impl Workspace {
                     // the last successful refresh and saved content are not touched.
                     transaction.execute(
                         "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
-                         failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1",
+                         failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
+                         AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
                         params![ticket.ticket_id, now, failure.code, failure.message],
                     )?;
                 }
