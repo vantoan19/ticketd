@@ -157,13 +157,20 @@ try {
   await noteEditor.click();
   // The WebKit driver can drop a keystroke, so verify the typed text and retype.
   const noteText = "Reviewed rich notes in the installed desktop.";
+  const typed = () =>
+    browser.execute(
+      () =>
+        document.querySelector(
+          '[role="textbox"][aria-label="New note rich text"]',
+        )?.textContent ?? "",
+    );
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await browser.keys(noteText);
-    if ((await noteEditor.getText()).trim() === noteText) break;
+    if ((await typed()).trim() === noteText) break;
     await browser.keys(["Control", "a"]);
     await browser.keys(["Backspace"]);
   }
-  assert.equal((await noteEditor.getText()).trim(), noteText);
+  assert.equal((await typed()).trim(), noteText);
   assert.equal(run("note", "list", harness.reference).length, 0);
   await (await (await detail()).$("button=Add note")).click();
   await browser.waitUntil(
