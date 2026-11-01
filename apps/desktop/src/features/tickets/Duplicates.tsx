@@ -186,8 +186,8 @@ export function Duplicates({
               <TicketSummary
                 label="Duplicate"
                 ticket={ticket}
-                icon="Canceled"
-                note={`${ticket.status} → Canceled · Duplicate of ${preview.canonical}`}
+                icon="Duplicate"
+                note={`${ticket.status} → Duplicate · Duplicate of ${preview.canonical}`}
               />
               <TicketSummary
                 label="Canonical ticket"
@@ -224,7 +224,7 @@ export function Duplicates({
               <p className="duplicate-note">
                 {separate
                   ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
-                  : "A canceled ticket never satisfies a blocking dependency, so each of these needs a decision."}
+                  : "A duplicate ticket never satisfies a blocking dependency, so each of these needs a decision."}
               </p>
               <ul>
                 {preview.edges.map((edge, index) => {

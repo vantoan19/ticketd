@@ -13,6 +13,7 @@ const viewSchema = z.object({
     in_review: z.number(),
     done: z.number(),
     canceled: z.number(),
+    duplicate: z.number().default(0),
   }),
   members: z.array(
     z.object({

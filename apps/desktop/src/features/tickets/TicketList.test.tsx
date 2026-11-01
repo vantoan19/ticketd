@@ -76,11 +76,13 @@ test("shows Ready once prerequisites are done", () => {
 
 test("shows only the status word outside Todo", () => {
   renderList(
-    ["In progress", "In review", "Done", "Canceled"].map((status, index) => ({
-      ...ticket({ status, availability: null }),
-      id: String(index),
-      reference: `T-${index + 1}`,
-    })),
+    ["In progress", "In review", "Done", "Canceled", "Duplicate"].map(
+      (status, index) => ({
+        ...ticket({ status, availability: null }),
+        id: String(index),
+        reference: `T-${index + 1}`,
+      }),
+    ),
   );
   expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.queryByText(/Blocked/)).toBeNull();
@@ -88,7 +90,7 @@ test("shows only the status word outside Todo", () => {
 });
 
 test("names the canonical ticket of a duplicate", () => {
-  renderList([ticket({ status: "Canceled", duplicate_of: "T-9" })]);
+  renderList([ticket({ status: "Duplicate", duplicate_of: "T-9" })]);
   expect(screen.getByText("Duplicate of T-9")).toBeTruthy();
 });
 

@@ -58,7 +58,14 @@ export function bridgeDefault(
       return {
         effort: { id: args?.id ?? "", name: "Effort", archived: false },
         members: [],
-        counts: { todo: 0, in_progress: 0, in_review: 0, done: 0, canceled: 0 },
+        counts: {
+          todo: 0,
+          in_progress: 0,
+          in_review: 0,
+          done: 0,
+          canceled: 0,
+          duplicate: 0,
+        },
       };
     case "contextual_relationships":
       return {

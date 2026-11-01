@@ -75,6 +75,7 @@ beforeEach(() => {
             in_review: count("In review"),
             done: count("Done"),
             canceled: count("Canceled"),
+            duplicate: count("Duplicate"),
           },
         };
       }
@@ -120,11 +121,18 @@ async function openLaunch() {
   return screen.findByRole("heading", { name: "Launch" });
 }
 test("shows status counts and members for the Effort, and updates both when a member is removed", async () => {
+  tickets.push({
+    id: "4",
+    reference: "T-4",
+    status: "Duplicate",
+    effort: "e1",
+  });
   await openLaunch();
   const group = await screen.findByLabelText("Tickets by status");
   await waitFor(() => expect(group.textContent).toContain("Done1"));
   expect(group.textContent).toContain("Todo1");
-  expect(screen.getByText("Effort · 2 tickets")).toBeTruthy();
+  expect(group.textContent).toContain("Duplicate1");
+  expect(screen.getByText("Effort · 3 tickets")).toBeTruthy();
   expect(screen.getByText("Active")).toBeTruthy();
 
   fireEvent.click(
@@ -134,7 +142,7 @@ test("shows status counts and members for the Effort, and updates both when a me
     expect(screen.queryByRole("button", { name: /^T-1/ })).toBeNull(),
   );
   await waitFor(() =>
-    expect(screen.getByText("Effort · 1 ticket")).toBeTruthy(),
+    expect(screen.getByText("Effort · 2 tickets")).toBeTruthy(),
   );
   expect(calls).toContainEqual([
     "set_effort",

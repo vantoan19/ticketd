@@ -56,7 +56,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 20;
+pub const FORMAT_VERSION: i64 = 21;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -113,6 +113,8 @@ pub enum Error {
         "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
     )]
     DuplicateDependencies,
+    #[error("choose a canonical ticket to mark a ticket as Duplicate")]
+    DuplicateNeedsCanonical,
     #[error("a ticket cannot be related to itself")]
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
@@ -354,6 +356,9 @@ impl Workspace {
         if version < 20 {
             transaction.execute_batch("CREATE TABLE last_backup (id INTEGER PRIMARY KEY CHECK (id = 1), path TEXT NOT NULL, completed_at TEXT NOT NULL); PRAGMA user_version = 20;")?;
         }
+        if version < 21 {
+            duplicates::migrate_status(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -462,13 +467,15 @@ impl Workspace {
                 )?;
             }
         }
-        if patch.status.is_some() && patch.status != Some(ticket.status) {
-            transaction.execute(
-                "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id = ?1",
-                [&ticket.id],
-            )?;
-        }
         let status = patch.status.unwrap_or(ticket.status);
+        if status != ticket.status {
+            if status == Status::Duplicate {
+                return Err(Error::DuplicateNeedsCanonical);
+            }
+            if ticket.status == Status::Duplicate {
+                duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
+            }
+        }
         transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
         if status != ticket.status {
             history::record(
