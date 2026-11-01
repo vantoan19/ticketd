@@ -47,6 +47,11 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 index: None,
                 message: ticketd_core::Error::DependencyReviewMode(mode).to_string(),
             },
+            ticketd_core::Error::Publication(publication) => Self {
+                code: publication.code(),
+                fields: Vec::new(),
+                message: publication.to_string(),
+            },
             other => Self {
                 code: "failed",
                 index: None,
@@ -824,6 +829,43 @@ fn refresh_sources(
     )?)
 }
 
+/// What publishing would send, and whether it is allowed. No network, no write.
+#[tauri::command(async)]
+fn preview_publication(
+    reference: String,
+    provider: String,
+    destination: Option<String>,
+) -> Result<ticketd_core::source::PublicationPreview, SourceFailure> {
+    let workspace = Workspace::open_default()?;
+    Ok(workspace.preview_publication(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        &provider,
+        destination.as_deref(),
+    )?)
+}
+
+/// Publishes a local ticket once. The attempt is saved before GitHub is called and
+/// no database handle is held while waiting; an unknown outcome comes back as a
+/// `publication_unresolved` failure and stays on the ticket.
+#[tauri::command(async)]
+fn publish_ticket(
+    reference: String,
+    provider: String,
+    destination: Option<String>,
+) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
+    let mut workspace = Workspace::open_default()?;
+    Ok(workspace.publish_ticket(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        &ticketd_core::source::PublishOptions {
+            provider,
+            destination,
+            now: None,
+        },
+    )?)
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -833,6 +875,8 @@ pub fn run() -> Result<(), tauri::Error> {
             backup_workspace,
             list_sources,
             refresh_sources,
+            preview_publication,
+            publish_ticket,
             count_by_source,
             source_check_connection,
             source_options,
