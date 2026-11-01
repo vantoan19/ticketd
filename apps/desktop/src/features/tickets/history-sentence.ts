@@ -86,6 +86,8 @@ export function describeChange(
           : from === to
             ? `Updated evidence ${quote(to)}`
             : `Renamed evidence ${quote(from)} to ${quote(to)}`;
+    case "source":
+      return `Published to ${to}`;
     case "trash":
       return to === "trashed" ? "Moved to trash" : "Restored from trash";
     default:

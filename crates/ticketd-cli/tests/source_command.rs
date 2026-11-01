@@ -28,6 +28,20 @@ fn serve() -> String {
                 .contains(&format!("authorization: bearer {TOKEN}").to_lowercase());
             let (status, body) = if !authorized {
                 ("401 Unauthorized", json!({"message": "Bad credentials"}))
+            } else if request.starts_with("POST ") && path == "/repos/o/r/issues" {
+                (
+                    "201 Created",
+                    json!({"id": 50, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
+                           "html_url": "https://github.example/o/r/issues/7", "assignees": [], "labels": [],
+                           "created_at": "", "updated_at": ""}),
+                )
+            } else if request.starts_with("POST ") && path == "/repos/o/flaky/issues" {
+                ("502 Bad Gateway", json!({"message": "upstream"}))
+            } else if request.starts_with("POST ") {
+                (
+                    "403 Forbidden",
+                    json!({"message": "Resource not accessible"}),
+                )
             } else if path == "/user" {
                 ("200 OK", json!({"login": "octo"}))
             } else if path.starts_with("/user/repos") {
@@ -323,6 +337,86 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     assert!(!String::from_utf8_lossy(&output.stdout).contains("wrong"));
     assert_eq!(cli.run(&["show", "T-1"])["title"], "Real issue, renamed");
     assert!(cli.run(&["show", "T-1"])["source"]["last_error"]["code"] == "unauthenticated");
+}
+
+fn local_ticket(cli: &Cli) -> String {
+    let created = cli.run(&["create", "Escalate me"]);
+    let reference = created["reference"].as_str().unwrap().to_owned();
+    cli.run(&["change", &reference, "--body", "Why it matters"]);
+    reference
+}
+
+#[test]
+fn publish_previews_then_creates_one_issue_and_replays_without_another() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(&cli);
+
+    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    assert_eq!(preview["title"], "Escalate me");
+    assert_eq!(preview["body"], "Why it matters");
+    assert_eq!(preview["destination"], "o/r");
+    assert_eq!(preview["eligibility"]["kind"], "eligible");
+    assert_eq!(cli.run(&["show", &reference])["source"], Value::Null);
+
+    let outcome = cli.run(&["source", "publish", &reference]);
+    assert_eq!(outcome["replayed"], false);
+    assert_eq!(outcome["attempt"]["state"], "succeeded");
+    assert_eq!(outcome["ticket"]["source"]["display"], "o/r#7");
+    assert_eq!(outcome["ticket"]["source"]["origin"], "published");
+    assert_eq!(outcome["ticket"]["source"]["ownership"], "external");
+
+    let again = cli.run(&["source", "publish", &reference]);
+    assert_eq!(again["replayed"], true);
+    assert_eq!(again["attempt"]["id"], outcome["attempt"]["id"]);
+    let shown = cli.run(&["show", &reference]);
+    assert_eq!(shown["reference"], reference);
+    assert!(shown["publication"].is_null());
+}
+
+#[test]
+fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(&cli);
+    let output = cli.command(
+        &["source", "publish", &reference, "--destination", "o/denied"],
+        Some(TOKEN),
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let attempt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(attempt["state"], "failed");
+    assert_eq!(attempt["failure"]["code"], "forbidden");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("remains a local ticket"), "{stderr}");
+    assert_eq!(cli.run(&["show", &reference])["source"], Value::Null);
+}
+
+#[test]
+fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(&cli);
+    let args = ["source", "publish", &reference, "--destination", "o/flaky"];
+    let output = cli.command(&args, Some(TOKEN));
+    assert_eq!(output.status.code(), Some(1));
+    let attempt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(attempt["state"], "unresolved");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("may already exist"), "{stderr}");
+
+    // A new process sees the same open attempt, and a second create is refused.
+    let shown = cli.run(&["show", &reference]);
+    assert_eq!(shown["publication"]["state"], "unresolved");
+    assert_eq!(shown["source"], Value::Null);
+    let stderr = cli.fail(&args, Some(TOKEN));
+    assert!(
+        stderr.contains("resolve it before creating another"),
+        "{stderr}"
+    );
+    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    assert_eq!(preview["eligibility"]["reason"], "attempt_open");
+    assert_eq!(preview["attempt"]["state"], "unresolved");
 }
 
 #[test]

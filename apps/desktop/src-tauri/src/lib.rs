@@ -752,6 +752,11 @@ impl From<ticketd_core::Error> for SourceFailure {
                 fields: source.issues().to_vec(),
                 message: source.to_string(),
             },
+            ticketd_core::Error::Publication(publication) => Self {
+                code: publication.code(),
+                fields: Vec::new(),
+                message: publication.to_string(),
+            },
             other => Self {
                 code: "failed",
                 message: other.to_string(),
@@ -844,6 +849,43 @@ fn refresh_sources(
     )?)
 }
 
+/// What publishing would send, and whether it is allowed. No network, no write.
+#[tauri::command(async)]
+fn preview_publication(
+    reference: String,
+    provider: String,
+    destination: Option<String>,
+) -> Result<ticketd_core::source::PublicationPreview, SourceFailure> {
+    let workspace = Workspace::open_default()?;
+    Ok(workspace.preview_publication(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        &provider,
+        destination.as_deref(),
+    )?)
+}
+
+/// Publishes a local ticket once. The attempt is saved before GitHub is called and
+/// no database handle is held while waiting; an unknown outcome comes back as a
+/// `publication_unresolved` failure and stays on the ticket.
+#[tauri::command(async)]
+fn publish_ticket(
+    reference: String,
+    provider: String,
+    destination: Option<String>,
+) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
+    let mut workspace = Workspace::open_default()?;
+    Ok(workspace.publish_ticket(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        &ticketd_core::source::PublishOptions {
+            provider,
+            destination,
+            now: None,
+        },
+    )?)
+}
+
 #[derive(serde::Serialize)]
 struct SourceHealth {
     /// A refresh is running now (startup, periodic or explicit).
@@ -900,6 +942,8 @@ pub fn run() -> Result<(), tauri::Error> {
             list_sources,
             refresh_sources,
             source_health,
+            preview_publication,
+            publish_ticket,
             count_by_source,
             source_check_connection,
             source_options,

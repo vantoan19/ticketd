@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
-        DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, SourceError,
+        DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, PublishRequest, SourceError,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -290,6 +290,54 @@ impl Engine {
         if issue.reference.identity != reference.identity {
             return Err(SourceError::Protocol(
                 "the source returned a different issue than requested".into(),
+            ));
+        }
+        Ok(issue)
+    }
+
+    /// Where `provider` can publish, for the saved configuration.
+    pub fn publish_destinations(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<Vec<String>, SourceError> {
+        let connector = self.connector(provider)?;
+        if !self.can_publish(provider) {
+            return Ok(Vec::new());
+        }
+        let config = self.validate(provider, raw)?;
+        Ok(connector.destinations(&config))
+    }
+
+    /// Whether `provider` declares the optional publication capability.
+    pub fn can_publish(&self, provider: &str) -> bool {
+        self.descriptor(provider)
+            .is_ok_and(|d| d.capabilities.contains(&Capability::Publish))
+    }
+
+    /// Creates one issue. The caller must already have persisted the attempt:
+    /// this performs the remote write, and whatever it returns, the issue may
+    /// exist. A returned issue is checked to be an open issue of this provider.
+    pub fn publish(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError> {
+        let connector = self.connector(provider)?;
+        if !self.can_publish(provider) {
+            return Err(SourceError::Unsupported("publishing"));
+        }
+        let config = self.validate(provider, raw)?;
+        let issue = connector.publish(&config, request)?;
+        if issue.reference.identity.provider != provider {
+            return Err(SourceError::Protocol(
+                "the created issue named a different provider".into(),
+            ));
+        }
+        if issue.state != ExternalState::Open {
+            return Err(SourceError::Protocol(
+                "the created issue was not reported open".into(),
             ));
         }
         Ok(issue)

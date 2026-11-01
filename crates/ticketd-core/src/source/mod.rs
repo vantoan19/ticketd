@@ -15,6 +15,7 @@ mod conversation;
 pub mod engine;
 mod freshness;
 pub mod github;
+mod publication;
 mod schedule;
 pub mod schema;
 mod tracking;
@@ -32,6 +33,10 @@ pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use freshness::{
     DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
+};
+pub use publication::{
+    AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
+    PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
@@ -85,12 +90,27 @@ pub(crate) fn migrate_conversation(connection: &rusqlite::Connection) -> Result<
 }
 
 pub(crate) use conversation::load as conversation_entries;
+
 /// Step 25: failure streaks and per-source status.
 pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate(connection)
 }
 
-pub(crate) use tracking::{guard_change, guard_duplicate, populate};
+/// Step 26: publication attempts.
+pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
+    publication::migrate(connection)
+}
+
+pub(crate) use tracking::{guard_change, guard_duplicate};
+
+/// Fills the ticket's external side and any blocking publication attempt.
+pub(crate) fn populate(
+    connection: &rusqlite::Connection,
+    ticket: &mut crate::Ticket,
+) -> Result<(), Error> {
+    tracking::populate(connection, ticket)?;
+    publication::populate(connection, ticket)
+}
 
 impl Workspace {
     /// The saved configuration for `provider`, if one was saved.

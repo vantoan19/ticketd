@@ -20,6 +20,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { sourcesClient } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
 import { SourceLink } from "./SourceLink";
+import { LocalPublication } from "./PublishToSource";
 import {
   duplicateTargetText,
   externalSource,
@@ -456,10 +457,13 @@ export function TicketProperties({
             <small className="rail-note">was {ticket.source.display}</small>
           </div>
         ) : (
-          <span className="rail-value" title="Created and edited in ticketd">
-            <HardDrive aria-hidden="true" />
-            Local
-          </span>
+          <div className="rail-source">
+            <span className="rail-value" title="Created and edited in ticketd">
+              <HardDrive aria-hidden="true" />
+              Local
+            </span>
+            <LocalPublication ticket={ticket} refresh={refresh} />
+          </div>
         )}
       </RailSection>
       {property(
