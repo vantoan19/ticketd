@@ -143,9 +143,7 @@ try {
   const local = new Date(future.getTime() - future.getTimezoneOffset() * 60000)
     .toISOString()
     .slice(0, 16);
-  await click(
-    await (await rail()).$('button[aria-label^="Manage reminder"]'),
-  );
+  await click(await (await rail()).$('button[aria-label^="Manage reminder"]'));
   const input = await browser.$('input[type="datetime-local"]');
   await input.scrollIntoView();
   await browser.execute(
@@ -216,9 +214,7 @@ try {
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  await click(
-    await (await rail()).$('button[aria-label^="Manage reminder"]'),
-  );
+  await click(await (await rail()).$('button[aria-label^="Manage reminder"]'));
   await click(await browser.$("button=Snooze 1 hour"));
   await waitFor(() => {
     const value = command(["reminder", "show", source.reference]).match(
@@ -445,9 +441,7 @@ try {
     () => browser.execute(() => window.innerWidth <= 767),
     "Narrow viewport not applied",
   );
-  await click(
-    await (await rail()).$('button[aria-label^="Manage reminder"]'),
-  );
+  await click(await (await rail()).$('button[aria-label^="Manage reminder"]'));
   const reminderRect = await browser.execute(() => {
     const field = document.querySelector(
       '[data-slot="popover-content"] input[type="datetime-local"]',
