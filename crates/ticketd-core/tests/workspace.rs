@@ -3192,6 +3192,7 @@ fn a_prerequisite_is_unresolved_until_it_is_done() {
     );
 }
 
+#[allow(clippy::unwrap_used)]
 fn set_status(workspace: &mut Workspace, reference: &str, status: Status) {
     workspace
         .change_ticket(
