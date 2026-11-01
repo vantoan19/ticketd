@@ -17,7 +17,7 @@ use super::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
         ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, PublishRequest, SourceError,
+        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -33,6 +33,8 @@ const OPTION_PAGES: usize = 5;
 const LABEL_REPOSITORIES: usize = 5;
 /// Pages (of 100) read for one issue's comments or events before giving up.
 const CONVERSATION_PAGES: usize = 50;
+/// Pages (of 100) read when looking for a publication's issue before giving up.
+const SEARCH_PAGES: usize = 5;
 
 pub struct GithubConnector {
     api_url: String,
@@ -502,6 +504,87 @@ impl Connector for GithubConnector {
         self.create_issue(&request.destination, request)
     }
 
+    fn locate(
+        &self,
+        _config: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, SourceError> {
+        let number = issue_number_in(text, destination)?;
+        let url = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(destination)
+        );
+        let (value, _) = self.json(&url, &format!("issue {destination}#{number}"))?;
+        let issue = translate_issue(&value, destination)?.ok_or_else(|| {
+            SourceError::NotFound(format!("{destination}#{number} is a pull request, not an issue"))
+        })?;
+        // An issue transferred elsewhere still answers here; it is not in the destination.
+        let repository = issue.display.rsplit_once('#').map_or("", |(repo, _)| repo);
+        if !repository.eq_ignore_ascii_case(destination) {
+            return Err(not_in_destination(destination));
+        }
+        Ok(issue)
+    }
+
+    fn find_published(
+        &self,
+        _config: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError> {
+        let destination = &search.request.destination;
+        if !ValueFormat::OwnerName.is_valid(destination) {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: "destination".into(),
+                    message: "must be a repository in the form owner/name".into(),
+                },
+            ]));
+        }
+        let since = chrono::DateTime::parse_from_rfc3339(&search.since).ok();
+        let mut url = Some(format!(
+            "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100&since={}",
+            self.api_url,
+            encode_path(destination),
+            encode_component(&search.since)
+        ));
+        let subject = format!("repository {destination}");
+        let mut matches = Vec::new();
+        for _ in 0..SEARCH_PAGES {
+            let Some(current) = url.take() else {
+                break;
+            };
+            let (page, next) = self.json(&current, &subject)?;
+            let items = page
+                .as_array()
+                .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
+            for item in items {
+                let Some(issue) = translate_issue(item, destination)? else {
+                    continue;
+                };
+                // Newest first: the first issue older than the window ends the read.
+                let created = chrono::DateTime::parse_from_rfc3339(&issue.created_at).ok();
+                if let (Some(created), Some(since)) = (created, since)
+                    && created < since
+                {
+                    return Ok(PublicationCandidates {
+                        matches,
+                        complete: true,
+                    });
+                }
+                if could_be_published(&issue, &search.request) {
+                    matches.push(issue);
+                }
+            }
+            url = next;
+        }
+        Ok(PublicationCandidates {
+            matches,
+            complete: url.is_none(),
+        })
+    }
+
     fn fetch(
         &self,
         _config: &ConfigValues,
@@ -581,6 +664,62 @@ impl GithubConnector {
             )),
         }
     }
+}
+
+fn not_in_destination(destination: &str) -> SourceError {
+    SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
+        field: "issue".into(),
+        message: format!("is not in {destination}"),
+    }])
+}
+
+/// The issue number in `text`, which may be `12`, `#12`, `owner/name#12` or an
+/// issue link, provided it names `destination` (compared without case).
+fn issue_number_in(text: &str, destination: &str) -> Result<u64, SourceError> {
+    let text = text.trim();
+    let invalid = || {
+        SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
+            field: "issue".into(),
+            message: "must be an issue number, owner/name#number or an issue link".into(),
+        }])
+    };
+    let (repository, number) = if let Some((_, path)) = text
+        .strip_prefix("https://")
+        .or_else(|| text.strip_prefix("http://"))
+        .and_then(|rest| rest.split_once('/'))
+    {
+        let path = path.split(['?', '#']).next().unwrap_or_default();
+        let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+        match parts.as_slice() {
+            [owner, name, "issues", number] => (Some(format!("{owner}/{name}")), *number),
+            _ => return Err(invalid()),
+        }
+    } else if let Some((repository, number)) = text.rsplit_once('#') {
+        (
+            Some(repository.to_owned()).filter(|r| !r.is_empty()),
+            number,
+        )
+    } else {
+        (None, text)
+    };
+    let number: u64 = number.parse().map_err(|_| invalid())?;
+    if number == 0 {
+        return Err(invalid());
+    }
+    if let Some(repository) = repository
+        && !repository.eq_ignore_ascii_case(destination)
+    {
+        return Err(not_in_destination(destination));
+    }
+    Ok(number)
+}
+
+/// Whether `issue` could be the one `request` created: same title, or the same
+/// non-empty description (GitHub may normalize line endings and trim).
+fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
+    let plain = |text: &str| text.replace("\r\n", "\n").trim().to_owned();
+    plain(&issue.title) == plain(&request.title)
+        || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
 fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {

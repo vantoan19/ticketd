@@ -928,3 +928,137 @@ fn github_declares_that_it_reads_comments() {
             .contains(&Capability::Comments)
     );
 }
+
+fn locate_in(engine: &Engine, text: &str) -> Result<ExternalIssue, SourceError> {
+    engine.locate(
+        "github",
+        &config(json!({"repositories": ["o/r"]})),
+        "o/r",
+        text,
+    )
+}
+
+#[test]
+fn locating_reads_an_issue_only_inside_the_destination() {
+    for text in [
+        "12",
+        "#12",
+        "o/r#12",
+        "O/R#12",
+        "https://github.example/o/r/issues/12",
+    ] {
+        let (fixture, engine) = setup(Some(TOKEN));
+        fixture.respond(
+            &format!("{API}/repos/o/r/issues/12"),
+            ok(issue(77, 12, "o/r")),
+        );
+        let found = locate_in(&engine, text).unwrap();
+        assert_eq!(found.reference.identity.id, "77", "{text}");
+        assert_eq!(found.display, "o/r#12");
+    }
+    for text in [
+        "other/repo#12",
+        "https://github.example/other/repo/issues/12",
+        "abc",
+        "0",
+        "",
+    ] {
+        let (fixture, engine) = setup(Some(TOKEN));
+        let error = locate_in(&engine, text).unwrap_err();
+        assert_eq!(error.code(), "invalid_configuration", "{text}");
+        assert!(fixture.urls().is_empty(), "nothing is requested for {text}");
+    }
+    // A pull request and an issue transferred elsewhere are refused.
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut pull = issue(5, 12, "o/r");
+    pull["pull_request"] = json!({"url": "x"});
+    fixture.respond(&format!("{API}/repos/o/r/issues/12"), ok(pull));
+    assert_eq!(locate_in(&engine, "12").unwrap_err().code(), "not_found");
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/r/issues/12"),
+        ok(issue(5, 3, "moved/away")),
+    );
+    assert_eq!(
+        locate_in(&engine, "12").unwrap_err().code(),
+        "invalid_configuration"
+    );
+}
+
+const SEARCH_URL: &str = "https://api.example.test/repos/o/r/issues?state=all&sort=created&direction=desc&per_page=100&since=2026-03-01T00%3A00%3A00Z";
+
+fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceError> {
+    engine.find_published(
+        "github",
+        &config(json!({"repositories": ["o/r"]})),
+        &PublicationSearch {
+            request: publish_request(),
+            since: "2026-03-01T00:00:00Z".into(),
+        },
+    )
+}
+
+fn created(mut item: Value, at: &str) -> Value {
+    item["created_at"] = json!(at);
+    item
+}
+
+#[test]
+fn searching_reads_the_whole_window_and_matches_by_content() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let second = format!("{API}/repos/o/r/issues?page=2");
+    let mut mine = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
+    mine["title"] = json!("Escalate");
+    let mut unrelated = created(issue(8, 8, "o/r"), "2026-03-02T00:00:00Z");
+    unrelated["body"] = json!("Something else");
+    let mut pull = created(issue(7, 7, "o/r"), "2026-03-02T00:00:00Z");
+    pull["title"] = json!("Escalate");
+    pull["pull_request"] = json!({"url": "x"});
+    let mut same_body = created(issue(6, 6, "o/r"), "2026-03-02T00:00:00Z");
+    same_body["body"] = json!("Details\r\n");
+    let old = created(issue(5, 5, "o/r"), "2026-01-01T00:00:00Z");
+    fixture.respond(
+        SEARCH_URL,
+        ok_with(
+            json!([mine, unrelated, pull]),
+            &[("link", &format!("<{second}>; rel=\"next\""))],
+        ),
+    );
+    // An issue older than the window ends the read: complete without more pages.
+    fixture.respond(&second, ok(json!([same_body, old])));
+
+    let found = search_for_title(&engine).unwrap();
+
+    assert!(found.complete);
+    let ids: Vec<_> = found
+        .matches
+        .iter()
+        .map(|i| i.reference.identity.id.as_str())
+        .collect();
+    assert_eq!(ids, ["9", "6"], "title and normalized body match only");
+}
+
+#[test]
+fn a_search_that_cannot_finish_is_incomplete_or_an_error_never_empty_and_complete() {
+    // The window is longer than the pages read: incomplete.
+    let (fixture, engine) = setup(Some(TOKEN));
+    let again = format!("{API}/repos/o/r/issues?page=2");
+    let link = format!("<{again}>; rel=\"next\"");
+    let recent = created(issue(1, 1, "o/r"), "2026-03-02T00:00:00Z");
+    fixture.respond(SEARCH_URL, ok_with(json!([recent.clone()]), &[("link", &link)]));
+    for _ in 1..SEARCH_PAGES {
+        fixture.respond(&again, ok_with(json!([recent.clone()]), &[("link", &link)]));
+    }
+    let found = search_for_title(&engine).unwrap();
+    assert!(!found.complete);
+
+    // An outage and a missing credential are errors, not "nothing found".
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(SEARCH_URL, status(502, json!({}), &[]));
+    assert_eq!(search_for_title(&engine).unwrap_err().code(), "unavailable");
+    let (_, engine) = setup(None);
+    assert_eq!(
+        search_for_title(&engine).unwrap_err().code(),
+        "unauthenticated"
+    );
+}
