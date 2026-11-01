@@ -91,7 +91,34 @@ fields, selectors, dynamic options, and validation, rendered by ticketd and
 usable through the CLI. Custom extension development, installation/distribution,
 and arbitrary extension-rendered UI are deferred. Keep the interface suitable for
 future providers without building a general plugin system. Exact interface
-signatures and execution mechanics remain to be designed.
+signatures and execution mechanics are described next.
+
+### Source connector layers
+
+The code lives in `ticketd_core::source`, from the inside out:
+
+- **Contract** (`contract.rs`): the `Connector` trait and its provider-neutral
+  types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`, `ClosureReason`,
+  `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
+  a connector that declares another version. Changing a signature or the meaning
+  of a type bumps the version. Adding an optional capability does not. Publication
+  is an optional capability with a default "unsupported" implementation.
+- **Schema** (`schema.rs`): fields, selectors, dynamic options, and validation,
+  shared by every client. Desktop forms and CLI `--set key=value` flags both build
+  raw values that `ConfigSchema::validate` checks and normalizes.
+- **Engine** (`engine.rs`): the only caller of connectors. It validates
+  configuration, walks pages with a progress guard, de-duplicates by external
+  identity, bounds previews, and holds no database handle.
+- **Connectors** (`github/`): provider translation over an `HttpTransport` seam
+  with deterministic fixtures in tests. GitHub uses the person's own credential
+  (environment token or `gh auth token`), which is never stored, exported,
+  backed up, logged, or sent to any host other than the API.
+- **Workflows** (`source/mod.rs`): methods on `Workspace` that call the engine
+  first and then write in one short transaction, so no network I/O happens while
+  the database is locked. `save_source` validates and previews before it saves.
+
+Saved source configuration is workspace data (`source_configurations`), is
+included in export and backups, and is separate from any imported ticket.
 
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 

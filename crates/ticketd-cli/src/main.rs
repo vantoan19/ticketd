@@ -211,6 +211,54 @@ enum Command {
     Workspace,
     /// Show a ticket by its reference
     Show { reference: String },
+    /// Connect and configure ticket sources such as GitHub
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
+}
+
+/// Settings given on the command line: schema fields as `key=value` (repeat a
+/// key or separate values with commas to fill a list) and an optional JSON file.
+#[derive(Args, Default)]
+struct SourceSettings {
+    /// A source setting, for example repositories=owner/name or assignee=octocat
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    set: Vec<String>,
+    /// A JSON object of settings from a file or - for stdin; --set values win
+    #[arg(long)]
+    config_file: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum SourceCommand {
+    /// List available sources with their settings schema and saved configuration
+    List,
+    /// Show a source's saved configuration
+    Show { provider: String },
+    /// Verify credentials and permissions and name the account in use
+    Test { provider: String },
+    /// Suggest values for a setting that offers them (such as repositories)
+    Options {
+        provider: String,
+        field: String,
+        #[arg(long, default_value = "")]
+        query: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Preview the issues discovery would match; imports and saves nothing
+    Preview {
+        provider: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Validate, preview, and save a source's discovery configuration; imports nothing
+    Save {
+        provider: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -805,9 +853,83 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
+        Command::Source { command } => source_command(&mut workspace, command)?,
     };
     writeln!(output, "{text}")?;
     Ok(())
+}
+
+fn source_command(
+    workspace: &mut Workspace,
+    command: SourceCommand,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use ticketd_core::source::{ConfigValues, Engine, SourceError};
+    let engine = Engine::builtin();
+    // Settings given on the command line, or else the saved configuration.
+    let resolve = |workspace: &Workspace,
+                   provider: &str,
+                   settings: SourceSettings|
+     -> Result<ConfigValues, Box<dyn std::error::Error>> {
+        let given = !settings.set.is_empty() || settings.config_file.is_some();
+        if !given {
+            return Ok(workspace
+                .saved_source(provider)?
+                .map(|saved| saved.config)
+                .unwrap_or_default());
+        }
+        let schema = engine.descriptor(provider)?.schema;
+        let mut values = match read_content(None, settings.config_file)? {
+            Some(text) => match serde_json::from_str(&text)? {
+                serde_json::Value::Object(values) => values,
+                _ => return Err("the configuration file must hold a JSON object".into()),
+            },
+            None => ConfigValues::new(),
+        };
+        values.extend(
+            schema
+                .values_from_assignments(&settings.set)
+                .map_err(SourceError::InvalidConfiguration)?,
+        );
+        Ok(values)
+    };
+    Ok(match command {
+        SourceCommand::List => {
+            let mut sources = Vec::new();
+            for descriptor in engine.connectors() {
+                let saved = workspace.saved_source(&descriptor.provider)?;
+                sources.push(serde_json::json!({ "connector": descriptor, "saved": saved }));
+            }
+            serde_json::to_string(&sources)?
+        }
+        SourceCommand::Show { provider } => {
+            engine.descriptor(&provider)?;
+            serde_json::to_string(&workspace.saved_source(&provider)?)?
+        }
+        SourceCommand::Test { provider } => {
+            let values = workspace
+                .saved_source(&provider)?
+                .map(|saved| saved.config)
+                .unwrap_or_default();
+            serde_json::to_string(&engine.check_connection(&provider, &values)?)?
+        }
+        SourceCommand::Options {
+            provider,
+            field,
+            query,
+            settings,
+        } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&engine.options(&provider, &field, &query, &values)?)?
+        }
+        SourceCommand::Preview { provider, settings } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&engine.preview(&provider, &values)?)?
+        }
+        SourceCommand::Save { provider, settings } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
+        }
+    })
 }
 
 fn main() {
