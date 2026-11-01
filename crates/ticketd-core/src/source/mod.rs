@@ -26,8 +26,10 @@ pub use contract::{
     DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
     PublishRequest, SourceError,
 };
-pub use freshness::{DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code};
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
+pub use freshness::{
+    DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
+};
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,

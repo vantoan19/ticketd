@@ -32,7 +32,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ClosureReason, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, SourceError,
+    ClosureReason, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+    SourceError,
     freshness::{self, ProviderRun, SourceUnavailable},
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};

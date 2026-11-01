@@ -132,8 +132,8 @@ closure-owned status edits to externally owned tickets.
 
 Freshness and availability are persisted, not inferred: `source_sync` records the
 start of each ticket's failure streak and `source_status` records each source's
-last run, current error and any rate-limit hold. A ticket reads *Source
-unavailable* exactly when its latest recorded attempt failed with an unreachable,
+last run, current error and any rate-limit hold. A ticket reads _Source
+unavailable_ exactly when its latest recorded attempt failed with an unreachable,
 unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
 limit is delayed, not unavailable. Neither changes content, status or ownership.
 A refresh ignores an observation older than the one it holds, so a slower

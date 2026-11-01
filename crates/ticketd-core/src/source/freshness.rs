@@ -35,7 +35,12 @@ pub const DEFAULT_RATE_LIMIT_SECS: u64 = 300;
 pub fn is_unavailable_code(code: &str) -> bool {
     matches!(
         code,
-        "unavailable" | "unauthenticated" | "forbidden" | "not_found" | "protocol" | "not_configured"
+        "unavailable"
+            | "unauthenticated"
+            | "forbidden"
+            | "not_found"
+            | "protocol"
+            | "not_configured"
     )
 }
 
@@ -90,7 +95,11 @@ pub(crate) struct ProviderRun {
 }
 
 /// Records each provider's run in the refresh write transaction.
-pub(crate) fn record_run(connection: &Connection, run: &ProviderRun, now: &str) -> Result<(), Error> {
+pub(crate) fn record_run(
+    connection: &Connection,
+    run: &ProviderRun,
+    now: &str,
+) -> Result<(), Error> {
     match &run.failure {
         None => {
             connection.execute(
@@ -126,7 +135,10 @@ impl super::RefreshReport {
 
     /// The longest wait a rate-limited source asked for, in seconds.
     pub fn retry_after_secs(&self) -> Option<u64> {
-        self.failures.iter().filter_map(|f| f.retry_after_secs).max()
+        self.failures
+            .iter()
+            .filter_map(|f| f.retry_after_secs)
+            .max()
     }
 }
 

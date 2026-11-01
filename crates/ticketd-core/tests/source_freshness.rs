@@ -1,6 +1,6 @@
 //! Automatic refresh, freshness, and the Source unavailable state, through the
 //! workspace workflow boundary with a controllable fake connector and a manual clock.
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 
 use std::{
     collections::BTreeMap,
@@ -301,7 +301,10 @@ fn a_rate_limit_is_delayed_not_unavailable_and_records_when_to_ask_again() {
     assert!(f.source(1).unavailable.is_none());
     assert_eq!(f.source(1).last_error.unwrap().code, "rate_limited");
     let status = f.workspace.source_statuses().unwrap().remove(0);
-    assert_eq!(status.retry_after.as_deref(), Some("2026-02-01T00:20:00.000Z"));
+    assert_eq!(
+        status.retry_after.as_deref(),
+        Some("2026-02-01T00:20:00.000Z")
+    );
     assert_eq!(status.unavailable_tickets, 0);
     // Only discovery was attempted; the limit stopped the per-ticket fetches.
     assert!(f.fake.0.lock().unwrap().fetch_calls.is_empty());
