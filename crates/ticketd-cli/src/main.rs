@@ -283,6 +283,21 @@ enum SourceCommand {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Publish a local Todo, In progress or In review ticket as one ordinary issue.
+    /// Use --preview first: it prints exactly what would be sent and sends nothing
+    Publish {
+        /// The local ticket to publish, for example T-12
+        ticket: String,
+        #[arg(long, default_value = "github")]
+        provider: String,
+        /// Where to create the issue, for example owner/name; optional when only
+        /// one repository is configured
+        #[arg(long)]
+        destination: Option<String>,
+        /// Print the title, description, destination and eligibility; create nothing
+        #[arg(long)]
+        preview: bool,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -917,6 +932,54 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             return Ok(());
         }
+        Command::Source {
+            command:
+                SourceCommand::Publish {
+                    ticket,
+                    provider,
+                    destination,
+                    preview,
+                },
+        } => {
+            let engine = ticketd_core::source::Engine::builtin();
+            if preview {
+                serde_json::to_string(&workspace.preview_publication(
+                    &engine,
+                    &ticket,
+                    &provider,
+                    destination.as_deref(),
+                )?)?
+            } else {
+                let result = workspace.publish_ticket(
+                    &engine,
+                    &ticket,
+                    &ticketd_core::source::PublishOptions {
+                        provider,
+                        destination,
+                        now: None,
+                    },
+                );
+                if let Err(ticketd_core::Error::Publication(error)) = &result {
+                    // The attempt this command made is printed so a script or agent
+                    // can see what was recorded, even though the command fails.
+                    if !matches!(
+                        error,
+                        ticketd_core::source::PublicationError::Ineligible { .. }
+                    ) && let Some(attempt) = workspace.publication_attempts(&ticket)?.first()
+                    {
+                        writeln!(output, "{}", serde_json::to_string(attempt)?)?;
+                    }
+                    return Err(match error {
+                        ticketd_core::source::PublicationError::Unresolved { .. } => format!(
+                            "{error}. Do not publish {ticket} again by hand; run `ticketd source publish {ticket} --preview` to see the open attempt"
+                        ),
+                        _ => error.to_string(),
+                    }
+                    .into());
+                }
+                serde_json::to_string(&result?)?
+            }
+        }
         Command::Source { command } => source_command(&mut workspace, command)?,
     };
     writeln!(output, "{text}")?;
@@ -997,12 +1060,12 @@ fn source_command(
         SourceCommand::TakeOwnership { reference, agent } => {
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }
-        SourceCommand::Refresh { .. } => unreachable_refresh()?,
+        SourceCommand::Refresh { .. } | SourceCommand::Publish { .. } => unreachable_refresh()?,
     })
 }
 
 fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
-    Err("refresh is handled before source configuration commands".into())
+    Err("refresh and publish are handled before source configuration commands".into())
 }
 
 fn main() {

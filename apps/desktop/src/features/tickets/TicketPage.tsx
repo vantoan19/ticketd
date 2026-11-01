@@ -13,6 +13,7 @@ import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
+import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import {
   externalNumber,
   externalSource,
@@ -89,6 +90,7 @@ export function TicketPage({
         {active && (
           <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
         )}
+        <PublicationNotice ticket={ticket} />
         {ticket.trashed || contentLocked ? (
           <>
             <h3 className="detail-title">{ticket.title}</h3>

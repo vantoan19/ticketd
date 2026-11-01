@@ -151,6 +151,20 @@ refreshing on launch and periodically through one in-process
 limits honored across restarts); there is no daemon, and `ticketd source refresh`
 and `ticketd source status` work without the desktop.
 
+Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
+is built on a durable attempt (`publication_attempts`). One short write checks
+eligibility and saves the attempt as `in_flight` with the exact title,
+description and destination; a unique partial index allows one open attempt per
+ticket. The connector's create call then runs with no transaction open. A second
+short write links the confirmed issue (`external_identities` with origin
+`published`, ownership `external`) and marks the attempt `succeeded`. A refusal
+the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
+leaves the ticket local. Anything else (timeout, server error, unreadable
+answer, an issue that could not be recorded, a crash) leaves it `in_flight` past
+its lease or `unresolved`: the ticket stays local and a second create is
+refused until the attempt is resolved. Replaying a request for an already
+published ticket returns it without calling the connector.
+
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
 while a ticket reads _Source unavailable_. It flips `external_ownership` to

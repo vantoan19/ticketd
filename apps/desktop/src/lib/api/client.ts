@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
+import { publicationAttemptSchema } from "@/lib/api/publication";
+
+export type { PublicationAttempt } from "@/lib/api/publication";
 
 const externalStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("open") }),
@@ -76,6 +79,8 @@ const ticketSchema = z.object({
   duplicate_of: z.string().nullable().optional(),
   duplicates: z.array(z.string()).optional(),
   source: ticketSourceSchema.nullish(),
+  /** The publication attempt that is running or whose outcome is unknown. */
+  publication: publicationAttemptSchema.nullish(),
   prerequisites: z.array(
     z.object({
       reference: z.string(),
