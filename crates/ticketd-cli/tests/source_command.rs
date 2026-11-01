@@ -351,3 +351,36 @@ fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
         "no credential in output"
     );
 }
+
+#[test]
+fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh"]);
+    // Reachable tickets are not taken over.
+    let stderr = cli.fail(&["source", "take-ownership", "T-1"], None);
+    assert!(stderr.contains("can still be read"), "{stderr}");
+    cli.command(&["source", "refresh"], Some("wrong"));
+    let taken = cli.run(&["source", "take-ownership", "T-1", "--agent", "tester"]);
+    assert_eq!(taken["reference"], "T-1");
+    assert_eq!(taken["title"], "Real issue");
+    assert_eq!(taken["source"]["ownership"], "local");
+    assert_eq!(taken["source"]["display"], "o/r#1");
+    assert_eq!(taken["source"]["unavailable"], Value::Null);
+    assert_eq!(cli.run(&["list", "--source", "github"]), json!([]));
+    assert_eq!(
+        cli.run(&["list", "--source", "local"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    cli.run(&["change", "T-1", "--title", "Mine"]);
+    // A later refresh with working access neither resumes nor re-imports it.
+    let report = cli.run(&["source", "refresh"]);
+    assert_eq!(report["imported"], json!([]));
+    assert_eq!(cli.run(&["show", "T-1"])["title"], "Mine");
+    let stderr = cli.fail(&["source", "refresh", "--ticket", "T-1"], None);
+    assert!(stderr.contains("not owned by an external source"), "{stderr}");
+    assert!(cli.run(&["history", "T-1"]).to_string().contains("ownership"));
+}

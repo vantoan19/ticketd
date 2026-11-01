@@ -148,6 +148,15 @@
   gap: 12px;
   margin-top: 4px;
 }
+.take-ownership-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 20px;
+}
 .source-caption {
   margin: 8px 0 0;
   color: var(--muted-foreground);

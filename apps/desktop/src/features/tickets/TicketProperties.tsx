@@ -20,6 +20,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { sourcesClient } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
 import { SourceLink } from "./SourceLink";
+import { TakeOwnership } from "./TakeOwnership";
 import {
   duplicateTargetText,
   externalSource,
@@ -442,6 +443,7 @@ export function TicketProperties({
               <RefreshCw data-icon="inline-start" />
               Refresh
             </Button>
+            <TakeOwnership ticket={ticket} refresh={refresh} variant="ghost" />
             {errors.Source && <small role="alert">{errors.Source}</small>}
           </div>
         ) : ticket.source ? (

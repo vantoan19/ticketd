@@ -151,6 +151,18 @@ refreshing on launch and periodically through one in-process
 limits honored across restarts); there is no daemon, and `ticketd source refresh`
 and `ticketd source status` work without the desktop.
 
+Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
+replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
+while a ticket reads _Source unavailable_. It flips `external_ownership` to
+`local`, clears the failure columns of `source_sync` and records an `ownership`
+history entry; the identity, content, status, relationships and notes are
+untouched. Because every refresh path re-reads authority inside its own write,
+rediscovery, restored access and a refresh already in flight neither resume
+synchronization nor import a second ticket, and nothing turns a local row back
+into `external` for an existing identity: reconnecting needs a future explicit
+action. A taken-over Duplicate keeps its status and the source's last canonical
+as provenance until it leaves Duplicate.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.

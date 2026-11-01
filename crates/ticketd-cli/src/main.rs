@@ -276,6 +276,13 @@ enum SourceCommand {
         #[arg(long)]
         ticket: Option<String>,
     },
+    /// Make an unavailable externally owned ticket local: keeps its content and work, stops synchronizing it
+    TakeOwnership {
+        /// The ticket, for example T-12
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -987,6 +994,9 @@ fn source_command(
             serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
         }
         SourceCommand::Status => serde_json::to_string(&workspace.source_statuses()?)?,
+        SourceCommand::TakeOwnership { reference, agent } => {
+            serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
+        }
         SourceCommand::Refresh { .. } => unreachable_refresh()?,
     })
 }

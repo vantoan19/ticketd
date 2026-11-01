@@ -397,6 +397,11 @@ export const client = {
       ),
     );
   },
+  async takeOwnership(reference: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("take_ownership", { reference, requestId }),
+    );
+  },
   async removeDuplicate(source: string, requestId: string) {
     return ticketSchema.parse(
       await invoke("remove_duplicate", { source, requestId }),
