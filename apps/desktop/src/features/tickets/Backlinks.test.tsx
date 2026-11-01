@@ -19,12 +19,16 @@ test("lists each mention with its location and opens the source passage", async 
           source_title: "Cache layer",
           note_id: null,
           passage: "Blocked on T-1 and T-12.",
+          mention_start: 11,
+          mention_end: 14,
         },
         {
           source_reference: "T-3",
           source_title: "Docs",
           note_id: "n1",
           passage: "See T-1 for context.",
+          mention_start: 4,
+          mention_end: 7,
         },
       ];
     if (command === "get_note")
@@ -55,5 +59,7 @@ test("lists each mention with its location and opens the source passage", async 
     mentioned: "T-1",
     noteId: "n1",
     passage: "See T-1 for context.",
+    start: 4,
+    end: 7,
   });
 });

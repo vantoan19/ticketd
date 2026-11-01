@@ -1,4 +1,5 @@
 import { TicketDetails } from "@/features/tickets/TicketDetails";
+import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
 /** The selected ticket's detail, with a note when it is outside the results. */
@@ -15,10 +16,11 @@ export function TicketDetailPane({
   inboxTarget: { reference: string; id: string; key: number } | null;
   onExpand: () => void;
   onReturn: () => void;
-  onSelect: (reference: string | null) => void;
+  onSelect: (reference: string | null, mention?: MentionTarget) => void;
 }) {
   const {
     selected,
+    mention,
     loading,
     queryError,
     tickets,
@@ -44,6 +46,7 @@ export function TicketDetailPane({
         onExpand={onExpand}
         onReturn={onReturn}
         selected={selected}
+        mention={mention}
         inboxTarget={inboxTarget}
         setSelected={onSelect}
         details={details}

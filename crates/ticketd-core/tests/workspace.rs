@@ -1507,6 +1507,54 @@ fn backup_restore_preserves_personal_inbox_and_follows() {
     assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
 }
 
+/// The source text each backlink of T-1 in `body` covers.
+fn mention_spans(body: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let dir = tempfile::tempdir()?;
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3"))?;
+    let target = workspace.create_ticket("Target")?;
+    assert_eq!(target.reference, "T-1");
+    let source = workspace.create_ticket("Source")?;
+    workspace.change_ticket(
+        &source.reference,
+        TicketPatch {
+            body: Some(body.to_string()),
+            ..Default::default()
+        },
+    )?;
+    // The span counts chars from the body without a leading byte order mark.
+    let text: Vec<char> = body.trim_start_matches('\u{feff}').chars().collect();
+    Ok(workspace
+        .backlinks(&target.reference, 20, 0)?
+        .iter()
+        .map(|link| text[link.mention_start..link.mention_end].iter().collect())
+        .collect())
+}
+
+#[test]
+fn backlink_spans_count_chars_not_utf16_units_or_bytes() {
+    let body = "Émoji 😀 first.\n\n| T-1 | Done |\n|---|---|\n\nSee T-1 here.";
+    assert_eq!(mention_spans(body).unwrap(), ["T-1", "T-1"]);
+}
+
+#[test]
+fn backlink_spans_ignore_a_leading_byte_order_mark_and_survive_crlf() {
+    assert_eq!(mention_spans("\u{feff}See T-1 here.").unwrap(), ["T-1"]);
+    assert_eq!(
+        mention_spans("\u{feff}First line.\r\n\r\nBlocked on T-1 now.\r\n").unwrap(),
+        ["T-1"]
+    );
+}
+
+#[test]
+fn backlink_span_is_the_whole_run_when_the_source_uses_entities_or_escapes() {
+    assert_eq!(
+        mention_spans("&#120;T-1 and T-1").unwrap(),
+        ["&#120;T-1 and T-1"],
+        "a decoded run is not searched in its raw source"
+    );
+    assert_eq!(mention_spans("a \\* T-1").unwrap(), ["a \\* T-1"]);
+}
+
 #[test]
 fn backlinks_follow_markdown_content_and_note_changes() {
     let dir = tempfile::tempdir().unwrap();

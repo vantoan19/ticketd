@@ -116,6 +116,16 @@ Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
 or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
 
+`ticketd backlinks T-1` lists incoming references as JSON. Each entry has
+`source_reference`, `source_title`, `note_id` (null for a description),
+`passage` (the source line, trimmed to 512 characters around the reference), and
+`mention_start` and `mention_end`, which locate the mention in the source ticket
+description or note. They count Unicode scalar values (characters, as `passage`
+is), not bytes or UTF-16 units, and do not count a leading U+FEFF byte order
+mark, so a Python agent can slice `body[mention_start:mention_end]` after
+dropping that mark. The span is the reference itself unless its source uses
+escapes or entities, in which case it is the whole text run containing it.
+
 Contextual links can be added with `ticketd add-relationship T-1 T-2 related`
 or `ticketd add-relationship T-1 T-2 discovered`. For discovery, the first
 ticket is the work during which the second was discovered. Use

@@ -403,6 +403,8 @@ export const client = {
           source_title: z.string(),
           note_id: z.string().nullable(),
           passage: z.string(),
+          mention_start: z.number().int().nonnegative(),
+          mention_end: z.number().int().nonnegative(),
         }),
       )
       .parse(

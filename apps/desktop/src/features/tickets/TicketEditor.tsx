@@ -10,7 +10,19 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
+import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
 
+/**
+ * A backlink's passage, and the span of its mention as the core reports it: chars
+ * into the description without a leading byte order mark.
+ */
+export type Mention = {
+  passage: string;
+  mentioned: string;
+  start: number;
+  end: number;
+  key: number;
+};
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
   ticket,
@@ -18,12 +30,15 @@ export function TicketEditor({
   children,
   select,
   revision,
+  mention = null,
 }: {
   ticket: Ticket;
   onSaved: (ticket: Ticket) => void;
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
+  /** A description passage the person navigated here to read; null once they move on. */
+  mention?: Mention | null;
 }) {
   const [draft, setDraft] = useState<Content>({
     title: ticket.title,
@@ -72,6 +87,64 @@ export function TicketEditor({
   const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
+  const noteRef = useRef<HTMLParagraphElement>(null);
+  // A mention is revealed once. It is dropped when the person starts editing, when
+  // the saved text changes under it, or when the next navigation clears it, so
+  // none of those can bring the highlight back.
+  const [handledMention, setHandledMention] = useState<number | null>(null);
+  const [shown, setShown] = useState<{ mention: Mention; body: string } | null>(
+    null,
+  );
+  if (mention && mention.key !== handledMention) {
+    setHandledMention(mention.key);
+    // Judge the mention against the saved body the core computed it from.
+    setShown({ mention, body: ticket.body });
+    // The rendered description is hidden while editing; a mention returns to it.
+    if (bodyMode === "editing") setBodyMode("reading");
+  } else if (shown && (!mention || editingBody || shown.body !== ticket.body)) {
+    setShown(null);
+  }
+  // The renderer sees the body without its byte order mark, and the core counts
+  // chars; the mark needs UTF-16 offsets into that same text.
+  const rendered = withoutBom(draft.body);
+  const span = shown
+    ? charSpanToUtf16(rendered, {
+        start: shown.mention.start,
+        end: shown.mention.end,
+      })
+    : null;
+  const mark =
+    shown && span && mentionStillAt(rendered, shown.mention.passage, span)
+      ? { ...span, describedBy: `mention-note-${ticket.id}` }
+      : undefined;
+  // Scroll to the marked passage and focus it, once per mention. React renders the
+  // mark; this only reads the DOM and writes the status text it points to. When no
+  // block carries the mark, say so and land on the description instead.
+  useEffect(() => {
+    if (!shown) {
+      if (noteRef.current) {
+        noteRef.current.textContent = "";
+        noteRef.current.className = "sr-only";
+      }
+      return;
+    }
+    const block =
+      documentRef.current?.querySelector<HTMLElement>(
+        "[data-mention-target]",
+      ) ?? null;
+    const target = block ?? bodyRef.current;
+    const note = noteRef.current;
+    if (note) {
+      note.textContent = block
+        ? `Mentions ${shown.mention.mentioned}`
+        : `Couldn't find the mention of ${shown.mention.mentioned} in the rendered description.`;
+      note.className = block ? "sr-only" : "mention-missing";
+    }
+    target?.scrollIntoView?.({ block: "center" });
+    target?.focus({ preventScroll: true });
+  }, [shown]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;
   const bodyDirty = draft.body !== saved.body;
@@ -181,7 +254,21 @@ export function TicketEditor({
         />
       </label>
       {children}
-      <div className="editor-body">
+      <div
+        className="editor-body"
+        ref={bodyRef}
+        tabIndex={-1}
+        role="group"
+        aria-labelledby={`body-${ticket.id}`}
+      >
+        {/* Always present, so a screen reader announces text written into it. */}
+        <p
+          ref={noteRef}
+          id={`mention-note-${ticket.id}`}
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        />
         <div className="description-heading">
           <span id={`body-${ticket.id}`}>Description</span>
           {editingBody ? (
@@ -221,6 +308,7 @@ export function TicketEditor({
         {!editingBody &&
           (draft.body ? (
             <div
+              ref={documentRef}
               className="markdown-preview description-document"
               onClick={(event) => {
                 const target = event.target;
@@ -236,9 +324,10 @@ export function TicketEditor({
               }}
             >
               <MarkdownDocument
-                source={draft.body}
+                source={rendered}
                 select={select}
                 revision={revision}
+                mention={mark}
               />
             </div>
           ) : (
