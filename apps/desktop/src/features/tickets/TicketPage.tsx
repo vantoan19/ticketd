@@ -11,6 +11,7 @@ import { Activity } from "@/features/tickets/Activity";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SourceLink } from "@/features/tickets/SourceLink";
+import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import {
   externalNumber,
   externalSource,
@@ -84,6 +85,7 @@ export function TicketPage({
       data-trashed={ticket.trashed || undefined}
     >
       <div className="detail-document">
+        <PublicationNotice ticket={ticket} />
         {ticket.trashed || contentLocked ? (
           <>
             <h3 className="detail-title">{ticket.title}</h3>

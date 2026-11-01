@@ -47,11 +47,6 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 index: None,
                 message: ticketd_core::Error::DependencyReviewMode(mode).to_string(),
             },
-            ticketd_core::Error::Publication(publication) => Self {
-                code: publication.code(),
-                fields: Vec::new(),
-                message: publication.to_string(),
-            },
             other => Self {
                 code: "failed",
                 index: None,
@@ -746,6 +741,11 @@ impl From<ticketd_core::Error> for SourceFailure {
                 code: source.code(),
                 fields: source.issues().to_vec(),
                 message: source.to_string(),
+            },
+            ticketd_core::Error::Publication(publication) => Self {
+                code: publication.code(),
+                fields: Vec::new(),
+                message: publication.to_string(),
             },
             other => Self {
                 code: "failed",

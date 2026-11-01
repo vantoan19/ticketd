@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { publicationAttemptSchema } from "./client";
 
 const choiceOptionSchema = z.object({
   value: z.string(),
@@ -113,7 +114,45 @@ export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
 const connectionSchema = z.object({ account: z.string() });
 
+const eligibilitySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("eligible") }),
+  z.object({
+    kind: z.literal("ineligible"),
+    reason: z.enum([
+      "trashed",
+      "externally_owned",
+      "provenance_retained",
+      "status",
+      "source_not_connected",
+      "unsupported",
+      "attempt_open",
+    ]),
+    message: z.string(),
+  }),
+]);
+/** What publishing would send, exactly, and whether it is allowed. */
+const publicationPreviewSchema = z.object({
+  reference: z.string(),
+  provider: z.string(),
+  provider_name: z.string(),
+  destination: z.string().nullable(),
+  destinations: z.array(z.string()),
+  title: z.string(),
+  body: z.string(),
+  eligibility: eligibilitySchema,
+  attempt: publicationAttemptSchema.nullable(),
+});
+export type PublicationPreview = z.infer<typeof publicationPreviewSchema>;
+const publishOutcomeSchema = z.object({
+  attempt: publicationAttemptSchema,
+  replayed: z.boolean(),
+});
+
 export type SourceFailureCode =
+  | "publication_ineligible"
+  | "publication_failed"
+  | "publication_unresolved"
+  | "rejected"
   | "unauthenticated"
   | "forbidden"
   | "not_found"
@@ -175,6 +214,38 @@ export const sourcesClient = {
   async refresh(ticket?: string) {
     return refreshReportSchema.parse(
       await call(invoke("refresh_sources", { ticket: ticket ?? null })),
+    );
+  },
+  /** What publishing a local ticket would send. Makes no network call. */
+  async previewPublication(
+    reference: string,
+    provider: string,
+    destination?: string,
+  ) {
+    return publicationPreviewSchema.parse(
+      await call(
+        invoke("preview_publication", {
+          reference,
+          provider,
+          destination: destination ?? null,
+        }),
+      ),
+    );
+  },
+  /**
+   * Publishes a local ticket once. Rejects with a SourceFailure whose code is
+   * `publication_failed` (nothing was created), `publication_unresolved` (the
+   * issue may exist; publishing again is blocked), or `publication_ineligible`.
+   */
+  async publish(reference: string, provider: string, destination?: string) {
+    return publishOutcomeSchema.parse(
+      await call(
+        invoke("publish_ticket", {
+          reference,
+          provider,
+          destination: destination ?? null,
+        }),
+      ),
     );
   },
   /** The built-in sources and what is saved for each. */

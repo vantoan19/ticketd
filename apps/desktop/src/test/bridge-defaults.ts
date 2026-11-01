@@ -35,6 +35,23 @@ export function bridgeDefault(
         canceled: 0,
         duplicate: 0,
       };
+    case "preview_publication":
+      // GitHub is not connected unless a test says so.
+      return {
+        reference: args?.reference ?? "",
+        provider: "github",
+        provider_name: "GitHub",
+        destination: null,
+        destinations: [],
+        title: "",
+        body: "",
+        eligibility: {
+          kind: "ineligible",
+          reason: "source_not_connected",
+          message: "connect GitHub first",
+        },
+        attempt: null,
+      };
     case "count_by_source":
       return { all: 0, local: 0, providers: {} };
     case "sidebar_counts":
@@ -51,7 +68,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 23,
+        format_version: 24,
       };
     case "check_cli":
       return {

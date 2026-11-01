@@ -130,6 +130,20 @@ with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets.
 
+Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
+is built on a durable attempt (`publication_attempts`). One short write checks
+eligibility and saves the attempt as `in_flight` with the exact title,
+description and destination; a unique partial index allows one open attempt per
+ticket. The connector's create call then runs with no transaction open. A second
+short write links the confirmed issue (`external_identities` with origin
+`published`, ownership `external`) and marks the attempt `succeeded`. A refusal
+the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
+leaves the ticket local. Anything else (timeout, server error, unreadable
+answer, an issue that could not be recorded, a crash) leaves it `in_flight` past
+its lease or `unresolved`: the ticket stays local and a second create is
+refused until the attempt is resolved. Replaying a request for an already
+published ticket returns it without calling the connector.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
