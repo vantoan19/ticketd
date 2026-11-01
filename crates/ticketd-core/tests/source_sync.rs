@@ -818,6 +818,23 @@ fn an_external_target_resolves_to_the_ticket_discovery_later_imports_without_a_s
     assert!(f.ticket(3).duplicates.is_empty());
     assert_eq!(f.ticket(2).prerequisites.len(), 1);
     assert_eq!(f.ticket(2).prerequisites[0].reference, "T-1");
+    // The CLI/agent context carries the same target, not a local relationship.
+    let context = f
+        .workspace
+        .ticket_context(
+            "T-1",
+            ticketd_core::ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let relationships = context.relationships.unwrap();
+    assert!(relationships.duplicate_of.is_none());
+    assert_eq!(
+        relationships.external_duplicate_of,
+        Some(target(&f.ticket(1)))
+    );
 }
 
 #[test]
