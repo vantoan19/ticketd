@@ -241,7 +241,30 @@ export function CreateTicketDialog({
                   <small>Optional. Markdown and checklists work.</small>
                 </span>
               </FieldLabel>
-              <div onKeyDown={(event) => event.stopPropagation()}>
+              <div
+                // The editor owns its keys (Enter, slash menu, IME, Escape,
+                // CodeMirror bindings), so they stop here. The one exception is
+                // a Cmd/Ctrl+Enter that the rich editor left unhandled: it
+                // creates the ticket. Nested UI (slash menu, link field, source
+                // editors) handles or ignores it first, so it never reaches here
+                // as an unhandled rich-editor event.
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    event.ctrlKey !== event.metaKey &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.defaultPrevented &&
+                    !event.nativeEvent.isComposing &&
+                    event.keyCode !== 229 &&
+                    (event.target as HTMLElement).closest(".rich-document")
+                  ) {
+                    event.preventDefault();
+                    event.currentTarget.closest("form")?.requestSubmit();
+                  }
+                  event.stopPropagation();
+                }}
+              >
                 <LazyMarkdownEditor
                   label="Description"
                   readOnly={pending}
