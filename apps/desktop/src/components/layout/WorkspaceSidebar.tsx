@@ -33,6 +33,7 @@ import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
 import type { RefObject } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -249,6 +250,7 @@ export function WorkspaceSidebar({
         </div>
       </SidebarContent>
       <SidebarFooter className="sidebar-footer">
+        <SourceStatusFooter />
         <nav aria-label="Trash and settings" className="sidebar-nav">
           <SidebarMenu>
             <SidebarMenuItem>

@@ -324,3 +324,30 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     assert_eq!(cli.run(&["show", "T-1"])["title"], "Real issue, renamed");
     assert!(cli.run(&["show", "T-1"])["source"]["last_error"]["code"] == "unauthenticated");
 }
+
+#[test]
+fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh"]);
+    let status = cli.run(&["source", "status"]);
+    assert_eq!(status[0]["provider"], "github");
+    assert_eq!(status[0]["error"], Value::Null);
+    assert!(status[0]["last_refreshed_at"].is_string());
+    assert_eq!(status[0]["unavailable_tickets"], 0);
+
+    // A refresh that cannot read the source fails, keeps the ticket, and says so.
+    let output = cli.command(&["source", "refresh"], Some("wrong"));
+    assert_eq!(output.status.code(), Some(1));
+    let status = cli.run(&["source", "status"]);
+    assert_eq!(status[0]["error"]["code"], "unauthenticated");
+    assert!(status[0]["failing_since"].is_string());
+    assert_eq!(status[0]["unavailable_tickets"], 1);
+    let shown = cli.run(&["show", "T-1"]);
+    assert_eq!(shown["title"], "Real issue");
+    assert_eq!(shown["source"]["unavailable"]["code"], "unauthenticated");
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("wrong"),
+        "no credential in output"
+    );
+}

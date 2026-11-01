@@ -138,6 +138,19 @@ failed read keeps what was retrieved. Authors are the source's identities, never
 an editing agent, and the rows survive takeover as provenance. Agents read it
 with `ticketd context T-n --conversation`.
 
+Freshness and availability are persisted, not inferred: `source_sync` records the
+start of each ticket's failure streak and `source_status` records each source's
+last run, current error and any rate-limit hold. A ticket reads _Source
+unavailable_ exactly when its latest recorded attempt failed with an unreachable,
+unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
+limit is delayed, not unavailable. Neither changes content, status or ownership.
+A refresh ignores an observation older than the one it holds, so a slower
+overlapping run cannot move confirmed state backwards. The desktop starts
+refreshing on launch and periodically through one in-process
+`RefreshCoordinator` (one run at a time, exponential backoff on failure, rate
+limits honored across restarts); there is no daemon, and `ticketd source refresh`
+and `ticketd source status` work without the desktop.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.

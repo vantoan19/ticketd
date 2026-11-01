@@ -1188,6 +1188,57 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
   expect(screen.getByText("1 new, 0 updated")).toBeTruthy();
 });
 
+test("the sidebar footer follows persisted source health and keeps the list", async () => {
+  let health: unknown = {
+    refreshing: false,
+    sources: [
+      {
+        provider: "github",
+        last_attempt_at: "2026-02-01T00:10:00Z",
+        last_refreshed_at: "2026-02-01T00:00:00Z",
+        error: { code: "unavailable", message: "Network is down." },
+        failing_since: "2026-02-01T00:10:00Z",
+        retry_after: null,
+        unavailable_tickets: 1,
+      },
+    ],
+  };
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    count_tickets: { ...zeroCounts, todo: 1 },
+    source_health: () => health,
+  });
+  const footer = screen.getByRole("group", { name: "Ticket sources" });
+  expect(within(footer).getByText("GitHub unavailable")).toBeTruthy();
+  // The failure never empties the list.
+  expect(screen.getByText("First")).toBeTruthy();
+  // A refresh started elsewhere (startup or periodic) shows up on the next poll.
+  health = { ...(health as object), refreshing: true };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2100);
+  });
+  expect(within(footer).getByText("Refreshing GitHub…")).toBeTruthy();
+  health = {
+    refreshing: false,
+    sources: [
+      {
+        provider: "github",
+        last_attempt_at: "2026-02-01T00:20:00Z",
+        last_refreshed_at: "2026-02-01T00:20:00Z",
+        error: null,
+        failing_since: null,
+        retry_after: null,
+        unavailable_tickets: 0,
+      },
+    ],
+  };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2100);
+  });
+  expect(within(footer).queryByText("GitHub unavailable")).toBeNull();
+  expect(within(footer).getByText(/GitHub synced/)).toBeTruthy();
+});
+
 test("Previous and Next follow the visible list across groups and keep the selection", async () => {
   const tickets = [
     bulkTicket(2, { status: "In progress", availability: null }),

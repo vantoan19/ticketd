@@ -36,6 +36,8 @@ export function bridgeDefault(
         canceled: 0,
         duplicate: 0,
       };
+    case "source_health":
+      return { refreshing: false, sources: [] };
     case "count_by_source":
       return { all: 0, local: 0, providers: {} };
     case "sidebar_counts":
@@ -52,7 +54,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 24,
+        format_version: 25,
       };
     case "check_cli":
       return {

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { StatusDot } from "@/components/ui/status-dot";
 import { sourcesClient } from "@/lib/api/sources";
+import { useSourceActivity } from "./source-activity";
 import { SourceLink } from "./SourceLink";
 import {
   duplicateTargetText,
@@ -244,6 +245,7 @@ export function TicketProperties({
   }
   const disabled = ticket.trashed || !!pending;
   const owner = externalSource(ticket);
+  const activity = useSourceActivity();
   const ownerName = owner ? providerName(owner.provider) : "";
   // While the issue is open its Todo, In progress and In review are local;
   // closing states follow the source and cannot be chosen here.
@@ -411,7 +413,7 @@ export function TicketProperties({
               })()}
             </span>
             <small className="rail-note">
-              {pending === "Source" ? (
+              {pending === "Source" || activity.refreshing ? (
                 <span role="status">Refreshing {ownerName}…</span>
               ) : (
                 <>

@@ -820,22 +820,78 @@ fn save_source(
     Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
 }
 
+/// The one refresh coordinator of this process: the startup and periodic runs and
+/// every explicit refresh go through it, so they never overlap or retry in a tight loop.
+struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
+
+fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
+    Workspace::open_default()
+}
+
 /// Imports matching issues and refreshes every externally owned ticket (or just `ticket`).
 /// Provider calls finish before the workspace is written; per-ticket failures come back
-/// in the report so the saved content stays visible beside the warning.
+/// in the report so the saved content stays visible beside the warning. An explicit
+/// refresh waits for a running one instead of overlapping it.
 #[tauri::command(async)]
 fn refresh_sources(
     ticket: Option<String>,
+    refresher: tauri::State<'_, Refresher>,
 ) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
-    let mut workspace = Workspace::open_default()?;
-    Ok(workspace.refresh_sources(
+    Ok(refresher.0.refresh_now(
         &ticketd_core::source::Engine::builtin(),
-        &ticketd_core::source::RefreshOptions { ticket, now: None },
+        &open_workspace,
+        ticket.as_deref(),
     )?)
 }
 
+#[derive(serde::Serialize)]
+struct SourceHealth {
+    /// A refresh is running now (startup, periodic or explicit).
+    refreshing: bool,
+    sources: Vec<ticketd_core::source::SourceStatus>,
+}
+
+/// What the interface needs to say how fresh each source is: persisted status plus
+/// whether a refresh is running. It does no network I/O.
+#[tauri::command]
+fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth, SourceFailure> {
+    let sources = Workspace::open_default()?.source_statuses()?;
+    Ok(SourceHealth {
+        refreshing: refresher.0.is_refreshing(),
+        sources,
+    })
+}
+
+/// Starts the periodic refresh while the desktop runs. It wakes every few seconds only
+/// to ask the coordinator whether a run is due; nothing outlives the app.
+fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::RefreshCoordinator>) {
+    let spawned = std::thread::Builder::new()
+        .name("source-refresh".into())
+        .spawn(move || {
+            let engine = ticketd_core::source::Engine::builtin();
+            loop {
+                // A failed tick is recorded per source by the refresh itself; the
+                // coordinator already spaces the next attempt.
+                let _ = coordinator.tick(&engine, &open_workspace);
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("could not start periodic source refresh: {error}");
+    }
+}
+
 pub fn run() -> Result<(), tauri::Error> {
+    let coordinator = std::sync::Arc::new(ticketd_core::source::RefreshCoordinator::new(
+        std::sync::Arc::new(ticketd_core::source::SystemClock),
+        ticketd_core::source::RefreshPolicy::default(),
+    ));
     tauri::Builder::default()
+        .manage(Refresher(std::sync::Arc::clone(&coordinator)))
+        .setup(move |_| {
+            start_periodic_refresh(coordinator);
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -843,6 +899,7 @@ pub fn run() -> Result<(), tauri::Error> {
             backup_workspace,
             list_sources,
             refresh_sources,
+            source_health,
             count_by_source,
             source_check_connection,
             source_options,
