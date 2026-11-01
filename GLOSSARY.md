@@ -39,7 +39,7 @@ A ticket whose outcome is broken into subtickets. It may be Done while subticket
 A ticket describing part of its parent ticket's work, possibly linked to a different project or belonging to a different Effort. Its ownership and Effort membership are independent of its parent's.
 
 **Blocking dependency**:
-A directed relationship in which one ticket must be Done before another is considered Ready, including across projects. A canceled blocker remains unresolved until the relationship is removed; readiness guides selection without preventing work from starting.
+A directed relationship in which one ticket must be Done before another is considered Ready, including across projects. A canceled or duplicate blocker remains unresolved until the relationship is removed; readiness guides selection without preventing work from starting.
 
 **Ready**:
 A Todo ticket with no unresolved blocking dependencies.

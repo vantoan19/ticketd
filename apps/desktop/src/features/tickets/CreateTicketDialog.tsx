@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { client, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
+import { directStatuses } from "./StatusIcon";
 import { PropertyPicker } from "./TicketProperties";
 import "./create-ticket.css";
 
@@ -284,13 +285,7 @@ export function CreateTicketDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {[
-                      "Todo",
-                      "In progress",
-                      "In review",
-                      "Done",
-                      "Canceled",
-                    ].map((status) => (
+                    {directStatuses.map((status) => (
                       <SelectItem key={status} value={status}>
                         {status}
                       </SelectItem>

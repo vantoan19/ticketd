@@ -55,7 +55,7 @@ beforeEach(() => {
     if (command === "show_ticket")
       return { ...ticket, id: "2", reference: "T-2", title: "Canonical" };
     if (reviewError) throw reviewError;
-    return { ...ticket, status: "Canceled", duplicate_of: "T-2" };
+    return { ...ticket, status: "Duplicate", duplicate_of: "T-2" };
   });
 });
 afterEach(() => {
@@ -117,7 +117,7 @@ test("the summary and the apply label follow the choices", async () => {
   ).toBeTruthy();
   expect(screen.getByText("T-3 waits for T-2 to be Done instead")).toBeTruthy();
   expect(
-    screen.getByText("T-4 stays blocked by a canceled ticket"),
+    screen.getByText("T-4 stays blocked by a duplicate ticket"),
   ).toBeTruthy();
 });
 
@@ -224,12 +224,14 @@ test("shows both tickets with their statuses, and the duplicate's status change"
   await openReview();
   expect(screen.getByText("Canonical")).toBeTruthy();
   const duplicate = screen.getByRole("group", { name: "Duplicate" });
-  expect(duplicate.textContent).toContain("Todo → Canceled · Duplicate of T-2");
+  expect(duplicate.textContent).toContain(
+    "Todo → Duplicate · Duplicate of T-2",
+  );
   const canonical = screen.getByRole("group", { name: "Canonical ticket" });
   expect(canonical.textContent).toContain("Todo · unchanged");
 });
 
-test("a separate review does not claim the kept endpoint is canceled", async () => {
+test("a separate review does not claim the kept endpoint is a duplicate", async () => {
   current = {
     canonical: "T-1",
     edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
@@ -246,5 +248,5 @@ test("a separate review does not claim the kept endpoint is canceled", async () 
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 stays blocked by T-9")).toBeTruthy();
-  expect(screen.queryByText(/canceled ticket/)).toBeNull();
+  expect(screen.queryByText(/duplicate ticket/)).toBeNull();
 });

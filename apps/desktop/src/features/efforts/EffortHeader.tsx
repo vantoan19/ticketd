@@ -17,6 +17,7 @@ const countKeys = {
   "In review": "in_review",
   Done: "done",
   Canceled: "canceled",
+  Duplicate: "duplicate",
 } as const;
 
 const list = (names: string[]) =>

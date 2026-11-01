@@ -163,7 +163,7 @@ test("builds every row from the one relationships read, including all dependents
       },
     ],
     parent: { reference: "T-3", title: "Epic" },
-    duplicate_of: { reference: "T-9", title: "Original", status: "Canceled" },
+    duplicate_of: { reference: "T-9", title: "Original", status: "Duplicate" },
   });
   renderSection(base);
   await screen.findByText("Sibling");
