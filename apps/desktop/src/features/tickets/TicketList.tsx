@@ -115,11 +115,15 @@ function RowDetails({ ticket, scope }: { ticket: Ticket; scope: RowScope }) {
         {readinessLabel(state)}
       </span>
       {context && <span className="ticket-row-context">{context}</span>}
-      {ticket.tags.map((tag) => (
-        <span key={tag} className="ticket-tag">
-          {tag}
+      {ticket.tags.length > 0 && (
+        <span className="ticket-row-tags">
+          {ticket.tags.map((tag) => (
+            <span key={tag} className="ticket-tag">
+              {tag}
+            </span>
+          ))}
         </span>
-      ))}
+      )}
     </span>
   );
 }

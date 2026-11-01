@@ -215,6 +215,16 @@
     font-size: 12px;
     line-height: 16px;
   }
+  /* Geist Mono's contextual alternates join "--" into one stroke that covers
+     the space before it, so "list --project" reads as "list--project".
+     Commands and paths are read and copied exactly as typed. */
+  code,
+  kbd,
+  pre,
+  samp,
+  .font-mono {
+    font-variant-ligatures: none;
+  }
   button:focus-visible,
   summary:focus-visible,
   a:focus-visible {

@@ -75,10 +75,22 @@
   white-space: nowrap;
 }
 .ticket-row-context {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Tags take only the space the readiness and context leave. Pills that don't
+   fit wrap onto a hidden second line, so none is ever cut in half. */
+.ticket-row-tags {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  min-width: 0;
+  height: 16px;
+  overflow: hidden;
 }
 .ticket-tag {
   flex: none;

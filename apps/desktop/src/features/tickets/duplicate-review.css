@@ -42,6 +42,11 @@
 .duplicate-change {
   height: auto;
   padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.duplicate-form .duplicate-change {
+  margin-top: 12px;
 }
 .dependencies h3 {
   margin: 0 0 4px;

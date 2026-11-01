@@ -221,13 +221,20 @@ export function LinkedWork({
         </p>
       )}
       <ul className="linked-work-rows">
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <li
             key={`${row.kind}-${row.reference}`}
             className="linked-work-row"
             data-kind={row.kind}
           >
-            <span className="linked-work-label">{linkLabel(row.kind)}</span>
+            {/* Rows of one kind read as a group: only the first shows its
+                label, and screen readers still hear it on every row. */}
+            <span
+              className="linked-work-label"
+              data-repeat={rows[index - 1]?.kind === row.kind || undefined}
+            >
+              {linkLabel(row.kind)}
+            </span>
             <StatusIcon
               status={row.status}
               size={14}

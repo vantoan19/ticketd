@@ -4,15 +4,37 @@
   gap: 12px;
   padding: 20px 20px 12px;
 }
+/* The name and actions share the first line; the context line runs the full
+   width beneath them instead of wrapping in the space the actions leave. */
 .effort-title-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 12px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name actions"
+    "context context";
+  align-items: center;
+  gap: 4px 16px;
 }
 .effort-title {
-  flex: 1 1 200px;
-  min-width: 0;
+  display: contents;
+}
+.effort-name-row {
+  grid-area: name;
+}
+.effort-title p {
+  grid-area: context;
+}
+.effort-actions {
+  grid-area: actions;
+}
+@container (max-width: 440px) {
+  .effort-title-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "context"
+      "actions";
+  }
 }
 .effort-name-row {
   display: flex;
@@ -39,7 +61,7 @@
   line-height: 16px;
 }
 .effort-title p {
-  margin: 4px 0 0;
+  margin: 0;
   color: var(--muted-foreground);
 }
 .effort-actions {
@@ -87,12 +109,21 @@
   flex: 1 1 200px;
   max-width: 360px;
 }
+/* Matches the other management pages: one centered column. */
 .effort-index {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 680px;
-  padding: 24px 20px 40px;
+  width: 100%;
+  max-width: 768px;
+  margin-inline: auto;
+  padding: 32px 24px 48px;
+  overflow-y: auto;
+}
+.effort-index > h1 + .effort-note {
+  margin-top: -12px;
+  font-size: 14px;
+  line-height: 20px;
 }
 .effort-index-list {
   display: flex;

@@ -15,10 +15,7 @@
   letter-spacing: -0.28px;
 }
 .evidence-empty {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
+  margin: 0;
 }
 .evidence-label {
   display: flex;
@@ -40,27 +37,40 @@
   flex-direction: column;
   gap: 2px;
 }
+/* The actions keep the top-right corner; a long name or meta line wraps
+   beside them instead of pushing them onto a line of their own. */
 .evidence-item-heading {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0 8px;
+  align-items: flex-start;
+  gap: 8px;
 }
-.evidence-item-heading > strong {
+.evidence-item-title {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  min-width: 0;
+  /* Centers the first line on the 32px action buttons. */
+  padding-top: 6px;
+}
+.evidence-item-title > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
 }
-.evidence-item-heading > span:not(.evidence-item-actions) {
+.evidence-item-meta {
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
 }
 .evidence-item-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 4px;
-  margin-inline-start: auto;
 }
 .evidence-item-value {
   max-height: 96px;
@@ -73,4 +83,5 @@
 .evidence-item-value[data-kind="code"] {
   font-family: var(--font-mono);
   font-size: 13px;
+  font-variant-ligatures: none;
 }

@@ -5,6 +5,7 @@ import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { workspaceClient } from "@/lib/api/workspace";
 import { cliClient, type CliStatus } from "@/lib/api/cli";
 import { SettingsCard } from "@/features/settings/SettingsCard";
+import { CommandText } from "@/features/settings/CommandText";
 
 const INSTALL_GUIDE_URL =
   "https://github.com/vantoan19/ticketd/blob/main/docs/install.md";
@@ -192,7 +193,9 @@ export function CommandLineCard() {
           <li key={item.command}>
             <p className="settings-hint">{item.label}</p>
             <div className="cli-command">
-              <code>{item.command}</code>
+              <code>
+                <CommandText command={item.command} />
+              </code>
               <CopyButton
                 aria-label={`Copy: ${item.label}`}
                 text={item.command}

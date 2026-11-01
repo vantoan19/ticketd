@@ -59,7 +59,10 @@ export function TicketEditor({
     title: ticket.title,
     body: ticket.body,
   });
-  const [state, setState] = useState<"saved" | "pending" | "failed">("saved");
+  // "idle" until something is saved, so an untouched ticket doesn't say "Saved".
+  const [state, setState] = useState<"idle" | "saved" | "pending" | "failed">(
+    "idle",
+  );
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [bodyMode, setBodyMode] = useState<"unopened" | "editing" | "reading">(
@@ -257,7 +260,9 @@ export function TicketEditor({
             ? "Pending save"
             : state === "failed"
               ? "Save failed"
-              : "Saved"}
+              : state === "saved"
+                ? "Saved"
+                : ""}
       </p>
       {state === "failed" && (
         <p role="alert">

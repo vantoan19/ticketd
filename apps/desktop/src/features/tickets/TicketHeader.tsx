@@ -103,6 +103,7 @@ export function TicketHeader({
         </h2>
         {selected && (
           <IconButton
+            className="copy-reference"
             label="Copy reference"
             onClick={() => void copy("Reference", selected)}
           >

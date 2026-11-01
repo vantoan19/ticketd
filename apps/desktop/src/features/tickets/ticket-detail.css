@@ -17,6 +17,17 @@
 .ticket-personal-actions {
   flex-wrap: wrap;
 }
+.ticket-detail {
+  container: ticket-detail / inline-size;
+}
+/* A narrow detail keeps the header on one line: the reference copy is also in
+   Ticket actions, and the reminder keeps its bell and accessible name. */
+@container ticket-detail (max-width: 460px) {
+  .detail-header .copy-reference,
+  .detail-header .reminder-label {
+    display: none;
+  }
+}
 .duplicate-dialog {
   max-height: 85vh;
   overflow-y: auto;

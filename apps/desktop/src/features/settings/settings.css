@@ -87,6 +87,19 @@
   gap: 16px;
   flex-wrap: wrap;
 }
+/* The text yields width to the control, which stays on the right and only
+   wraps below when the card is too narrow for both. */
+.settings-row:not(.settings-row-stacked) > :first-child {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.settings-row:has(> [role="switch"]) {
+  align-items: flex-start;
+  gap: 24px;
+}
+.settings-row > [role="switch"] {
+  margin-top: 2px;
+}
 .settings-row-stacked {
   align-items: stretch;
   flex-direction: column;
@@ -174,6 +187,9 @@
   border-radius: 6px;
   background: var(--surface);
   font-size: 13px;
+}
+.command-part {
+  white-space: nowrap;
 }
 
 /* Open tickets: two selectable cards with small layout previews. */
@@ -303,6 +319,12 @@
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 12px;
   margin: 16px 0 0;
+}
+/* A label that wraps keeps its value on the same line as the others. */
+.workspace-fact {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
 .workspace-fact dt {
   font-size: 12px;

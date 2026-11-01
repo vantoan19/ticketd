@@ -28,6 +28,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { modifierKeyLabel, fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
 import { writeClipboard } from "@/lib/clipboard";
+import { CommandText } from "@/features/settings/CommandText";
 import { revealFile } from "@/lib/reveal";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
@@ -501,7 +502,9 @@ function ExportCard() {
         </p>
         <p className="settings-hint">From the command line:</p>
         <div className="settings-actions">
-          <code className="workspace-path">{EXPORT_COMMAND}</code>
+          <code className="workspace-path">
+            <CommandText command={EXPORT_COMMAND} />
+          </code>
           <Button
             type="button"
             variant="outline"

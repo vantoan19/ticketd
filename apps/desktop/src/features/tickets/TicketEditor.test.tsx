@@ -55,6 +55,19 @@ async function editDescription() {
   });
 }
 
+test("an untouched ticket reports no save state until something is saved", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockResolvedValue({ ...initial, title: "Renamed" });
+  render(<Harness />);
+  expect(screen.getByRole("status").textContent).toBe("");
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Renamed" },
+  });
+  expect(screen.getByRole("status").textContent).toBe("Pending save");
+  await autosave();
+  expect(screen.getByRole("status").textContent).toBe("Saved");
+});
+
 test("a title-only save should not overwrite an externally updated body", async () => {
   vi.useFakeTimers();
   let stored = { ...initial, body: "External agent body" };

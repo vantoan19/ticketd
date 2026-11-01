@@ -176,7 +176,7 @@ export function Evidence({
           Implementation evidence{" "}
           <span className="text-muted-foreground">{items.length || ""}</span>
         </h3>
-        {!trashed && items.length > 0 && (
+        {!trashed && (
           <Button variant="ghost" size="sm" onClick={startAdding}>
             <Plus data-icon="inline-start" />
             Add evidence
@@ -184,27 +184,21 @@ export function Evidence({
         )}
       </div>
       {!items.length && (
-        <div className="evidence-empty">
-          <p className="text-muted-foreground text-xs">
-            Link a pull request, commit, or verification result.
-          </p>
-          {!trashed && (
-            <Button variant="ghost" size="sm" onClick={startAdding}>
-              <Plus data-icon="inline-start" />
-              Add evidence
-            </Button>
-          )}
-        </div>
+        <p className="evidence-empty text-muted-foreground text-xs">
+          Link a pull request, commit, or verification result.
+        </p>
       )}
       {error && !composing && <p role="alert">{error}</p>}
       <ol className="evidence-list">
         {items.map((item) => (
           <li key={item.id} className="evidence-item">
             <div className="evidence-item-heading">
-              <strong>{item.name}</strong>
-              <span title={item.updated_at}>
-                {typeNames[item.kind]} · {formatDateTime(item.updated_at)}
-                {item.editing_agent && ` · ${item.editing_agent}`}
+              <span className="evidence-item-title">
+                <strong>{item.name}</strong>
+                <span className="evidence-item-meta" title={item.updated_at}>
+                  {typeNames[item.kind]} · {formatDateTime(item.updated_at)}
+                  {item.editing_agent && ` · ${item.editing_agent}`}
+                </span>
               </span>
               <span className="evidence-item-actions">
                 <Button

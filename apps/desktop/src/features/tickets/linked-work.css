@@ -1,5 +1,7 @@
 .linked-work {
   margin-top: 24px;
+  /* Rows follow the section's own width, which a split view narrows. */
+  container-type: inline-size;
 }
 .linked-work[data-empty] {
   margin-top: 16px;
@@ -40,12 +42,39 @@
 .linked-work-row {
   position: relative;
   display: grid;
-  grid-template-columns: 12rem 14px auto minmax(0, 1fr) auto 32px;
+  grid-template-columns: 7.5rem 14px 3rem minmax(0, 1fr) auto 32px;
+  grid-auto-flow: row dense;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   min-height: 36px;
   padding: 2px 4px;
   border-radius: 6px;
+}
+.linked-work-label {
+  grid-column: 1;
+}
+.linked-work-icon {
+  grid-column: 2;
+}
+.linked-work-reference {
+  grid-column: 3;
+}
+.linked-work-title {
+  grid-column: 4;
+}
+.linked-work-status {
+  grid-column: 5;
+}
+.linked-work-remove {
+  grid-column: 6;
+}
+.linked-work-label[data-repeat] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .linked-work-row:hover,
 .linked-work-row:focus-within {
@@ -88,21 +117,45 @@
 .linked-work-row:focus-within .linked-work-remove {
   opacity: 1;
 }
-@media (max-width: 767px) {
+/* Narrow: the kind becomes a small heading over its group of rows. */
+@container (max-width: 520px) {
   .linked-work-row {
-    grid-template-columns: 14px auto minmax(0, 1fr) 32px;
-    row-gap: 0;
+    grid-template-columns: 14px 3rem minmax(0, 1fr) auto 32px;
   }
   .linked-work-label {
     grid-column: 1 / -1;
+    padding-top: 6px;
+  }
+  .linked-work-icon {
+    grid-column: 1;
+  }
+  .linked-work-reference {
+    grid-column: 2;
+  }
+  .linked-work-title {
+    grid-column: 3;
+  }
+  .linked-work-status {
+    grid-column: 4;
+  }
+  .linked-work-remove {
+    grid-column: 5;
+  }
+}
+/* Narrowest: the status moves under the title so the title stays readable. */
+@container (max-width: 380px) {
+  .linked-work-row {
+    grid-template-columns: 14px 3rem minmax(0, 1fr) 32px;
   }
   .linked-work-status {
     grid-column: 3;
-    grid-row: 3;
   }
   .linked-work-remove {
     grid-column: 4;
-    grid-row: 2;
+  }
+}
+@media (hover: none), (max-width: 767px) {
+  .linked-work-remove {
     opacity: 1;
   }
 }
