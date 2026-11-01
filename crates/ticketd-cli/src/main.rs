@@ -118,7 +118,13 @@ enum Command {
         agent: Option<String>,
     },
     /// Preview dependencies before marking a duplicate
-    PreviewDuplicate { source: String, canonical: String },
+    PreviewDuplicate {
+        source: String,
+        canonical: String,
+        /// Judge readiness as a separate dependency review, which does not cancel the source
+        #[arg(long)]
+        separate: bool,
+    },
     /// Remove a duplicate designation
     RemoveDuplicate {
         source: String,
@@ -678,9 +684,15 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             &canonical,
             agent.as_deref(),
         )?)?,
-        Command::PreviewDuplicate { source, canonical } => {
-            serde_json::to_string(&workspace.preview_duplicate_dependencies(&source, &canonical)?)?
-        }
+        Command::PreviewDuplicate {
+            source,
+            canonical,
+            separate,
+        } => serde_json::to_string(&if separate {
+            workspace.preview_dependency_move(&source, &canonical)?
+        } else {
+            workspace.preview_duplicate_dependencies(&source, &canonical)?
+        })?,
         Command::RemoveDuplicate { source, agent } => {
             serde_json::to_string(&workspace.remove_duplicate(&source, agent.as_deref())?)?
         }

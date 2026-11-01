@@ -12,7 +12,7 @@ use ticketd_core::{
 /// the interface never has to parse it to decide what to do.
 #[derive(Debug, serde::Serialize)]
 struct BridgeFailure {
-    /// `batch_operation` (see `index`), `review_changed`, or `failed`.
+    /// `batch_operation` (see `index`), `review_changed`, `review_mode`, or `failed`.
     code: &'static str,
     /// For `batch_operation`, which operation of the batch was rejected.
     index: Option<usize>,
@@ -41,6 +41,11 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 code: "review_changed",
                 index: None,
                 message: ticketd_core::Error::DependencyReviewChanged.to_string(),
+            },
+            ticketd_core::Error::DependencyReviewMode(mode) => Self {
+                code: "review_mode",
+                index: None,
+                message: ticketd_core::Error::DependencyReviewMode(mode).to_string(),
             },
             other => Self {
                 code: "failed",
@@ -448,10 +453,37 @@ fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
 fn preview_duplicate_dependencies(
     source: String,
     canonical: String,
+    separate: Option<bool>,
 ) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
     Workspace::open_default()
-        .and_then(|workspace| workspace.preview_duplicate_dependencies(&source, &canonical))
+        .and_then(|workspace| {
+            if separate.unwrap_or(false) {
+                workspace.preview_dependency_move(&source, &canonical)
+            } else {
+                workspace.preview_duplicate_dependencies(&source, &canonical)
+            }
+        })
         .map_err(|e| e.to_string())
+}
+
+/// What a whole set of choices does to each waiting ticket, for the review to show.
+#[tauri::command]
+fn evaluate_dependency_review(
+    source: String,
+    canonical: String,
+    separate: bool,
+    decisions: Vec<ticketd_core::DependencyDecision>,
+) -> Result<Vec<ticketd_core::WaitingOutcome>, BridgeFailure> {
+    let mode = if separate {
+        ticketd_core::ReviewMode::Separate
+    } else {
+        ticketd_core::ReviewMode::Duplicate
+    };
+    Workspace::open_default()
+        .and_then(|workspace| {
+            workspace.evaluate_dependency_review(&source, &canonical, mode, &decisions)
+        })
+        .map_err(BridgeFailure::from)
 }
 
 #[tauri::command]
@@ -736,6 +768,7 @@ pub fn run() -> Result<(), tauri::Error> {
             add_tag,
             remove_tag,
             preview_duplicate_dependencies,
+            evaluate_dependency_review,
             mark_duplicate_reviewed,
             edit_dependencies_reviewed,
             remove_duplicate,

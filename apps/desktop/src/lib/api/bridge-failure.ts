@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export type FailureCode = "batch_operation" | "review_changed" | "failed";
+export type FailureCode =
+  "batch_operation" | "review_changed" | "review_mode" | "failed";
 
 /** A bridge failure with the kind the core reported, so callers never read its message to decide. */
 export class BridgeFailure extends Error {
@@ -15,7 +16,7 @@ export class BridgeFailure extends Error {
 }
 
 const failureSchema = z.object({
-  code: z.enum(["batch_operation", "review_changed", "failed"]),
+  code: z.enum(["batch_operation", "review_changed", "review_mode", "failed"]),
   index: z.number().nullable(),
   message: z.string(),
 });

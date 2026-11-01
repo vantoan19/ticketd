@@ -110,9 +110,38 @@ To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
 T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
 with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
 with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
-optional agent. If the affected edges or resolved canonical change, preview again.
+optional agent. The preview records its `mode` (`duplicate`, or `separate` with
+`--separate`) and the normalized `source`. The preview
+also lists each dependent (`waiting`) with its current status, trash state,
+readiness and unresolved blockers, and, per edge, the reason Replace is invalid
+(`already_exists`, `self_block`, `cycle`, or `trashed`). A ticket reviewed against
+itself, or a trashed source or canonical in a duplicate review, is rejected up
+front. Each edge carries that `mode` and two opaque fingerprints. `basis` covers
+what Remove and Keep depend on (the edges, and each dependent's and its blockers'
+status and trash state); `replacement_basis` covers what only Replace depends on
+(the replacement endpoints and the replacement dependent's blockers) and is
+compared only for Replace decisions. Submit edges unchanged. An edge missing
+`mode`, `basis` or `replacement_basis` is rejected, so requests built from an
+older preview must be previewed again. If the affected edges, any of that state,
+or the resolved canonical change, the review is stale and must be previewed
+again; edits to unrelated tickets do not make it stale. Feasibility of a Replace
+(a new cycle, a trashed endpoint) is not in the fingerprints; it is re-checked on
+evaluate and apply, and a Replace that is no longer possible is also reported as a
+changed review. A preview
+submitted to the other kind of review fails with a distinct "different kind of
+review" error instead.
+
+The core also judges all of a review's choices together. The desktop calls
+`evaluate_dependency_review` (core `evaluate_dependency_review`) with the preview's
+source and canonical, the mode, and the decisions, and receives one outcome per
+waiting ticket (each dependent and, for Replace, the replacement dependent, so the
+canonical appears when the duplicate is a dependent): its status, `before` and
+`after` readiness (`ready`, `blocked`, or `no_ready_state`), and the blockers
+still unresolved afterwards. Readiness uses `Status::satisfies_dependency`; a
+started, finished, or trashed ticket has no Ready state, matching the Ready list.
+The duplicate counts as Canceled afterwards in a duplicate review.
 For a separate graph edit after undo, preview the current endpoint against the
-replacement endpoint and submit the same fields with operation
+replacement endpoint with `--separate` and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived
 edges; a retained canceled prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.

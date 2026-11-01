@@ -2349,7 +2349,7 @@ fn reviewed_duplicate_rollback_cycle_and_separate_undo_edit() {
         canonical.reference
     );
     let review = ws
-        .preview_duplicate_dependencies(&canonical.reference, &source.reference)
+        .preview_dependency_move(&canonical.reference, &source.reference)
         .unwrap();
     let decisions = review
         .edges
@@ -3190,4 +3190,419 @@ fn a_prerequisite_is_unresolved_until_it_is_done() {
             (blockers[2].clone(), false)
         ]
     );
+}
+
+mod duplicate_review_outcomes {
+    // Helpers here set up and read back fixtures; a failure should abort the test, as unwrap
+    // does inside a #[test] function, which Clippy permits but not in these shared helpers.
+    #![allow(clippy::unwrap_used)]
+    use ticketd_core::{
+        DependencyChoice, DependencyDecision, DuplicateDependencyPreview, Error, Readiness,
+        ReviewMode, Status, TicketPatch, WaitingOutcome, Workspace,
+    };
+
+    fn workspace() -> (tempfile::TempDir, Workspace) {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+        (dir, ws)
+    }
+
+    /// Creates T-1 (the duplicate), T-2 (the canonical) and `others` more tickets.
+    fn tickets(ws: &mut Workspace, others: usize) {
+        for title in ["Duplicate", "Canonical"] {
+            ws.create_ticket(title).unwrap();
+        }
+        for n in 0..others {
+            ws.create_ticket(&format!("Other {n}")).unwrap();
+        }
+    }
+
+    fn set_status(ws: &mut Workspace, reference: &str, status: Status) {
+        let patch = TicketPatch {
+            status: Some(status),
+            ..Default::default()
+        };
+        ws.change_ticket(reference, patch).unwrap();
+    }
+
+    fn block(ws: &mut Workspace, blocker: &str, dependent: &str) {
+        ws.add_dependency(blocker, dependent, None).unwrap();
+    }
+
+    fn decide(
+        preview: &DuplicateDependencyPreview,
+        choices: &[(&str, &str, DependencyChoice)],
+    ) -> Vec<DependencyDecision> {
+        preview
+            .edges
+            .iter()
+            .map(|edge| DependencyDecision {
+                edge: edge.clone(),
+                choice: choices
+                    .iter()
+                    .find(|(b, d, _)| *b == edge.blocker && *d == edge.dependent)
+                    .map_or(DependencyChoice::Retain, |(_, _, choice)| choice.clone()),
+            })
+            .collect()
+    }
+
+    fn outcome(outcomes: &[WaitingOutcome], ticket: &str) -> WaitingOutcome {
+        outcomes
+            .iter()
+            .find(|o| o.ticket == ticket)
+            .unwrap()
+            .clone()
+    }
+
+    fn evaluate(
+        ws: &Workspace,
+        preview: &DuplicateDependencyPreview,
+        decisions: &[DependencyDecision],
+    ) -> Vec<WaitingOutcome> {
+        ws.evaluate_dependency_review("T-1", "T-2", preview.mode, decisions)
+            .unwrap()
+    }
+
+    fn availability(ws: &Workspace, reference: &str) -> Option<String> {
+        ws.show_ticket(reference).unwrap().availability
+    }
+
+    #[test]
+    fn outcomes_judge_all_choices_together_and_match_what_apply_does() {
+        use DependencyChoice::{Remove, Replace};
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        // T-1 (duplicate) blocks canonical T-2, and T-3 blocks T-1.
+        block(&mut ws, "T-1", "T-2");
+        block(&mut ws, "T-3", "T-1");
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        assert_eq!(preview.source, "T-1");
+        assert_eq!(preview.mode, ReviewMode::Duplicate);
+        let decisions = decide(&preview, &[("T-1", "T-2", Remove), ("T-3", "T-1", Replace)]);
+        let outcomes = evaluate(&ws, &preview, &decisions);
+        // Removing T-1's edge alone would make T-2 Ready, but Replace gives it T-3.
+        let canonical = outcome(&outcomes, "T-2");
+        assert_eq!(canonical.before, Readiness::Blocked);
+        assert_eq!(canonical.after, Readiness::Blocked);
+        assert_eq!(canonical.unresolved_after, ["T-3"]);
+        assert_eq!(outcome(&outcomes, "T-1").after, Readiness::NoReadyState);
+
+        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+            .unwrap();
+        assert_eq!(availability(&ws, "T-2").as_deref(), Some("Blocked"));
+        // What is left to wait for is what the outcome said, not just the label.
+        let applied: Vec<String> = ws
+            .show_ticket("T-2")
+            .unwrap()
+            .prerequisites
+            .into_iter()
+            .filter(|p| p.unresolved)
+            .map(|p| p.reference)
+            .collect();
+        assert_eq!(applied, canonical.unresolved_after);
+    }
+
+    #[test]
+    fn canonical_readiness_is_reported_when_the_duplicate_is_the_dependent() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-3", "T-1");
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let replaced = decide(&preview, &[("T-3", "T-1", DependencyChoice::Replace)]);
+        let canonical = outcome(&evaluate(&ws, &preview, &replaced), "T-2");
+        assert_eq!(canonical.before, Readiness::Ready);
+        assert_eq!(canonical.after, Readiness::Blocked);
+        assert_eq!(canonical.unresolved_after, ["T-3"]);
+        let kept = decide(&preview, &[]);
+        assert_eq!(
+            outcome(&evaluate(&ws, &preview, &kept), "T-2").after,
+            Readiness::Ready
+        );
+    }
+
+    #[test]
+    fn a_replacement_that_is_already_done_leaves_the_dependent_ready() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-1", "T-3");
+        set_status(&mut ws, "T-2", Status::Done);
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+        let dependent = outcome(&evaluate(&ws, &preview, &decisions), "T-3");
+        assert_eq!(dependent.before, Readiness::Blocked);
+        assert_eq!(dependent.after, Readiness::Ready);
+        assert!(dependent.unresolved_after.is_empty());
+    }
+
+    #[test]
+    fn other_blockers_stay_listed_and_a_started_or_trashed_dependent_has_no_ready_state() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 4);
+        block(&mut ws, "T-1", "T-3");
+        block(&mut ws, "T-4", "T-3");
+        block(&mut ws, "T-1", "T-5");
+        block(&mut ws, "T-1", "T-6");
+        set_status(&mut ws, "T-5", Status::InProgress);
+        ws.set_trashed("T-6", true, None).unwrap();
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let remove = |dependent: &'static str| ("T-1", dependent, DependencyChoice::Remove);
+        let decisions = decide(&preview, &[remove("T-3"), remove("T-5"), remove("T-6")]);
+        let outcomes = evaluate(&ws, &preview, &decisions);
+        let blocked = outcome(&outcomes, "T-3");
+        assert_eq!(blocked.after, Readiness::Blocked);
+        assert_eq!(blocked.unresolved_after, ["T-4"]);
+        let started = outcome(&outcomes, "T-5");
+        assert_eq!(
+            (started.status, started.after),
+            (Status::InProgress, Readiness::NoReadyState)
+        );
+        let trashed = outcome(&outcomes, "T-6");
+        assert!(trashed.trashed);
+        assert_eq!(
+            (trashed.before, trashed.after),
+            (Readiness::NoReadyState, Readiness::NoReadyState)
+        );
+        // The detail view agrees: a trashed ticket has no Ready indicator either.
+        assert_eq!(availability(&ws, "T-6"), None);
+    }
+
+    #[test]
+    fn a_separate_review_does_not_cancel_the_existing_endpoint() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-1", "T-3");
+        set_status(&mut ws, "T-1", Status::Done);
+        let separate = ws.preview_dependency_move("T-1", "T-2").unwrap();
+        assert_eq!(separate.mode, ReviewMode::Separate);
+        let kept = decide(&separate, &[]);
+        assert_eq!(
+            outcome(&evaluate(&ws, &separate, &kept), "T-3").after,
+            Readiness::Ready
+        );
+        let duplicate = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let kept = decide(&duplicate, &[]);
+        assert_eq!(
+            outcome(&evaluate(&ws, &duplicate, &kept), "T-3").after,
+            Readiness::Blocked
+        );
+    }
+
+    #[test]
+    fn a_preview_applied_in_the_other_mode_is_rejected_with_its_own_error() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-1", "T-3");
+        let duplicate = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let decisions = decide(&duplicate, &[("T-1", "T-3", DependencyChoice::Remove)]);
+        let error = ws
+            .edit_dependencies_reviewed("T-1", "T-2", &duplicate.canonical, decisions.clone(), None)
+            .unwrap_err();
+        assert!(matches!(error, Error::DependencyReviewMode(_)), "{error}");
+        assert!(error.to_string().contains("different kind of review"));
+        let error = ws
+            .evaluate_dependency_review("T-1", "T-2", ReviewMode::Separate, &decisions)
+            .unwrap_err();
+        assert!(matches!(error, Error::DependencyReviewMode(_)), "{error}");
+        // Nothing was applied, and the matching mode still works.
+        ws.mark_duplicate_reviewed("T-1", "T-2", &duplicate.canonical, decisions, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_change_to_anything_the_outcomes_depend_on_is_stale_but_unrelated_edits_are_not() {
+        type Change = fn(&mut Workspace);
+        let changes: [(&str, Change); 3] = [
+            // The replacement is In progress when previewed and Done by apply time.
+            ("canonical status", |ws| set_status(ws, "T-2", Status::Done)),
+            ("other blocker status", |ws| {
+                set_status(ws, "T-4", Status::Done)
+            }),
+            ("dependent status", |ws| {
+                set_status(ws, "T-3", Status::InProgress)
+            }),
+        ];
+        for (name, change) in changes {
+            let (_dir, mut ws) = workspace();
+            tickets(&mut ws, 3);
+            block(&mut ws, "T-1", "T-3");
+            block(&mut ws, "T-4", "T-3");
+            set_status(&mut ws, "T-2", Status::InProgress);
+            let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+            let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+            change(&mut ws);
+            let error = ws
+                .mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+                .unwrap_err();
+            assert!(
+                matches!(error, Error::DependencyReviewChanged),
+                "{name}: {error}"
+            );
+            assert_eq!(
+                ws.show_ticket("T-1").unwrap().status,
+                Status::Todo,
+                "{name}"
+            );
+        }
+
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 3);
+        block(&mut ws, "T-1", "T-3");
+        block(&mut ws, "T-4", "T-3");
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Remove)]);
+        set_status(&mut ws, "T-5", Status::Done);
+        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, decisions, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn the_preview_names_the_normalized_source_and_refuses_an_oversized_review() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        let preview = ws.preview_dependency_move("T-01", "T-2").unwrap();
+        assert_eq!(preview.source, "T-1");
+        for n in 0..1001 {
+            let dependent = ws.create_ticket(&format!("Dependent {n}")).unwrap();
+            block(&mut ws, "T-1", &dependent.reference);
+        }
+        let error = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap_err();
+        assert!(matches!(error, Error::InvalidBatch(_)), "{error}");
+    }
+
+    #[test]
+    fn the_preview_lists_each_dependent_with_its_current_status_and_readiness() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 3);
+        block(&mut ws, "T-1", "T-3");
+        block(&mut ws, "T-1", "T-4");
+        block(&mut ws, "T-5", "T-4");
+        set_status(&mut ws, "T-5", Status::Done);
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let rows: Vec<_> = preview
+            .waiting
+            .iter()
+            .map(|w| {
+                (
+                    w.ticket.as_str(),
+                    w.status,
+                    w.readiness,
+                    w.unresolved.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "T-3",
+                    Status::Todo,
+                    Readiness::Blocked,
+                    vec!["T-1".to_string()]
+                ),
+                (
+                    "T-4",
+                    Status::Todo,
+                    Readiness::Blocked,
+                    vec!["T-1".to_string()]
+                ),
+            ]
+        );
+        // The baseline is the detail view's answer.
+        assert_eq!(availability(&ws, "T-3").as_deref(), Some("Blocked"));
+    }
+
+    #[test]
+    fn a_trashed_ticket_has_no_ready_state_in_detail_graph_and_context() {
+        use ticketd_core::ContextOptions;
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-2", "T-3"); // a blocked, trashed Todo
+        ws.set_trashed("T-1", true, None).unwrap(); // an unblocked, trashed Todo
+        ws.set_trashed("T-3", true, None).unwrap();
+        for reference in ["T-1", "T-3"] {
+            let detail = ws.show_ticket(reference).unwrap().availability;
+            let context = ws
+                .ticket_context(reference, ContextOptions::default())
+                .unwrap()
+                .ticket
+                .availability;
+            let graph = ws
+                .dependency_graph(reference)
+                .unwrap()
+                .nodes
+                .into_iter()
+                .find(|n| n.reference == reference)
+                .unwrap()
+                .availability;
+            assert_eq!((detail, context, graph), (None, None, None), "{reference}");
+        }
+        ws.set_trashed("T-3", false, None).unwrap();
+        assert_eq!(availability(&ws, "T-3").as_deref(), Some("Blocked"));
+    }
+
+    #[test]
+    fn trashed_endpoints_and_the_same_ticket_are_reported_before_apply() {
+        use ticketd_core::ReplacementIssue;
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 2);
+        block(&mut ws, "T-1", "T-3");
+        block(&mut ws, "T-4", "T-1");
+        ws.set_trashed("T-3", true, None).unwrap();
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        // Replace would add T-2 -> T-3, which cannot be done to a trashed ticket.
+        assert_eq!(
+            preview.replacement_issues[0],
+            Some(ReplacementIssue::Trashed)
+        );
+        assert_eq!(preview.replacement_issues[1], None);
+
+        let error = ws.preview_duplicate_dependencies("T-1", "T-1").unwrap_err();
+        assert!(matches!(error, Error::ReviewSameTicket), "{error}");
+        let error = ws.preview_dependency_move("T-01", "T-1").unwrap_err();
+        assert!(matches!(error, Error::ReviewSameTicket), "{error}");
+
+        // A trashed canonical fails whatever the choices, so a duplicate review says so now.
+        ws.set_trashed("T-2", true, None).unwrap();
+        let error = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap_err();
+        assert!(matches!(error, Error::Trashed(_)), "{error}");
+        // A separate review only needs to add edges, so each Replace is marked instead.
+        let separate = ws.preview_dependency_move("T-1", "T-2").unwrap();
+        assert_eq!(
+            separate.replacement_issues[1],
+            Some(ReplacementIssue::Trashed)
+        );
+    }
+
+    #[test]
+    fn a_replacement_that_became_impossible_is_a_changed_review_when_evaluating_too() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-1", "T-3");
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let decisions = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+        evaluate(&ws, &preview, &decisions);
+        // An unrelated edit makes T-2 -> T-3 circular; no readiness input changed.
+        block(&mut ws, "T-3", "T-2");
+        let error = ws
+            .evaluate_dependency_review("T-1", "T-2", preview.mode, &decisions)
+            .unwrap_err();
+        assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
+    }
+
+    #[test]
+    fn the_canonical_only_matters_to_the_review_when_a_replace_uses_it() {
+        let (_dir, mut ws) = workspace();
+        tickets(&mut ws, 1);
+        block(&mut ws, "T-1", "T-3");
+        let preview = ws.preview_duplicate_dependencies("T-1", "T-2").unwrap();
+        let remove = decide(&preview, &[("T-1", "T-3", DependencyChoice::Remove)]);
+        let replace = decide(&preview, &[("T-1", "T-3", DependencyChoice::Replace)]);
+        set_status(&mut ws, "T-2", Status::Done);
+        let error = ws
+            .evaluate_dependency_review("T-1", "T-2", preview.mode, &replace)
+            .unwrap_err();
+        assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
+        ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, remove, None)
+            .unwrap();
+    }
 }

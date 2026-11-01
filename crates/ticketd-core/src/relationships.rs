@@ -44,17 +44,14 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             })
         })?
         .collect::<Result<_, _>>()?;
-    ticket.availability = if ticket.status == Status::Todo {
-        Some(
-            if ticket.prerequisites.iter().all(|p| !p.unresolved) {
-                "Ready"
-            } else {
-                "Blocked"
-            }
-            .into(),
-        )
-    } else {
-        None
+    ticket.availability = match history::readiness(
+        ticket.status,
+        ticket.trashed,
+        ticket.prerequisites.iter().map(|p| p.status),
+    ) {
+        history::Readiness::Ready => Some("Ready".into()),
+        history::Readiness::Blocked => Some("Blocked".into()),
+        history::Readiness::NoReadyState => None,
     };
     Ok(())
 }

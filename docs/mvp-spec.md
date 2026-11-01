@@ -129,9 +129,10 @@ People and agents may transition directly between any statuses. Review may be sk
 
 `Ready` and `Blocked` are derived information, not manually maintained statuses:
 
-- **Ready:** a Todo ticket without unresolved blocking dependencies.
-- **Blocked:** a Todo ticket with unresolved blocking dependencies.
+- **Ready:** a Todo ticket outside the trash without unresolved blocking dependencies.
+- **Blocked:** a Todo ticket outside the trash with unresolved blocking dependencies.
 - In progress, In review, Done, and Canceled tickets have neither indicator. Their dependency lists still show unresolved prerequisites.
+- A trashed ticket has neither indicator, whatever its status, in every view (detail, context, dependency graph); the Ready list and sidebar count already exclude it. Restoring it recalculates the indicator.
 - Only a Done prerequisite satisfies an existing dependency. In review and Canceled prerequisites remain unresolved.
 - Remove an obsolete dependency or replace it with the appropriate relationship; cancellation does not resolve it.
 - Reopening a prerequisite recalculates availability for Todo dependents. Started dependents retain their status and only show the open prerequisite in their dependency lists.
