@@ -42,8 +42,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ConfigValues, Engine, ExternalIdentity, ExternalIssue, PublishRequest, SourceError,
-    SourceFailure,
+    ConfigValues, Engine, ExternalIdentity, ExternalIssue, ExternalRef, PublicationSearch,
+    PublishRequest, SourceError, SourceFailure,
     tracking::{self, Origin},
 };
 use crate::{Error, Status, Ticket, Workspace, history, notes, transaction_write_lock};
@@ -198,6 +198,53 @@ pub enum PublicationError {
         attempt_id: String,
         message: String,
     },
+    /// Resolution was asked for a ticket with no uncertain attempt.
+    #[error("{reference} has no uncertain publication to resolve")]
+    NothingToResolve { reference: String },
+    /// The create call may still be running; wait for it to finish or expire.
+    #[error("{reference} is still being published; wait until that finishes before resolving it")]
+    StillRunning {
+        reference: String,
+        attempt_id: String,
+    },
+    /// The source could not give the evidence needed. The attempt stays
+    /// unresolved: this is not proof that anything was or was not created.
+    #[error(
+        "{reference}: this could not be verified ({source}). The attempt stays unresolved; nothing was changed"
+    )]
+    Unverified {
+        reference: String,
+        attempt_id: String,
+        #[source]
+        source: SourceError,
+    },
+    /// The named issue cannot be the result of this attempt, or the answer asked
+    /// for contradicts what is known.
+    #[error("{reference}: {message}")]
+    Mismatch {
+        reference: String,
+        attempt_id: String,
+        message: String,
+    },
+    /// Issues that look like this attempt's result exist, so "nothing was
+    /// created" cannot be concluded. Confirm one of them instead.
+    #[error(
+        "{reference}: the destination already holds {} that may be this publication ({}); confirm one of them instead of treating the attempt as failed",
+        issues.len(),
+        issues.iter().map(|i| i.display.as_str()).collect::<Vec<_>>().join(", ")
+    )]
+    Candidates {
+        reference: String,
+        attempt_id: String,
+        issues: Vec<PublishedIssue>,
+    },
+    /// Another resolution settled the attempt first; nothing was changed here.
+    #[error("{reference}: {message}")]
+    Settled {
+        reference: String,
+        attempt_id: String,
+        message: String,
+    },
 }
 
 impl PublicationError {
@@ -206,7 +253,105 @@ impl PublicationError {
             Self::Ineligible { .. } => "publication_ineligible",
             Self::Failed { .. } => "publication_failed",
             Self::Unresolved { .. } => "publication_unresolved",
+            Self::NothingToResolve { .. } => "publication_nothing_to_resolve",
+            Self::StillRunning { .. } => "publication_still_running",
+            Self::Unverified { .. } => "publication_unverified",
+            Self::Mismatch { .. } => "publication_mismatch",
+            Self::Candidates { .. } => "publication_candidates",
+            Self::Settled { .. } => "publication_settled",
         }
+    }
+}
+
+/// How a person settles an uncertain attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Resolution {
+    /// The issue was created. `issue` names it (a number, `owner/name#number` or
+    /// a link in the destination); it may be left out when the attempt already
+    /// recorded the issue. The source verifies it before it is attached.
+    Attach { issue: Option<String> },
+    /// Nothing was created. Accepted only when the source's recent issues are
+    /// read completely and none could be this publication's.
+    NotCreated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolveOptions {
+    pub resolution: Resolution,
+    /// The time to record, as RFC 3339; the database clock when absent.
+    pub now: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionKind {
+    Attach,
+    NotCreated,
+}
+
+/// One way forward for an uncertain attempt, with why it is or is not offered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolutionAction {
+    pub kind: ActionKind,
+    pub available: bool,
+    pub label: String,
+    pub detail: String,
+}
+
+/// What a person needs to settle an uncertain attempt: what ticketd knows, what
+/// it cannot know, and the safe next actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationReview {
+    pub attempt: PublicationAttempt,
+    pub provider_name: String,
+    pub known: Vec<String>,
+    pub unknown: String,
+    /// Why publishing is blocked and why another try is not safe yet.
+    pub note: String,
+    pub actions: Vec<ResolutionAction>,
+    /// Issues in the destination that may be this publication's result.
+    pub candidates: Vec<PublishedIssue>,
+    /// `None` when no search ran or it failed; `Some(true)` when the whole
+    /// window was read.
+    pub candidates_complete: Option<bool>,
+    pub lookup_failure: Option<SourceFailure>,
+}
+
+/// An issue created before the attempt began cannot be its result. A few
+/// minutes of tolerance absorbs clock differences with the provider.
+const CLOCK_TOLERANCE_SECONDS: i64 = 300;
+
+fn parse_time(text: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(text).ok()
+}
+
+/// The earliest instant the attempt could have created an issue.
+fn search_start(started_at: &str) -> String {
+    parse_time(started_at)
+        .map(|time| time - chrono::Duration::seconds(CLOCK_TOLERANCE_SECONDS))
+        .map(|time| {
+            time.with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        })
+        .unwrap_or_else(|| started_at.to_owned())
+}
+
+fn predates(issue_created_at: &str, started_at: &str) -> bool {
+    match (parse_time(issue_created_at), parse_time(started_at)) {
+        (Some(created), Some(started)) => {
+            created < started - chrono::Duration::seconds(CLOCK_TOLERANCE_SECONDS)
+        }
+        _ => false,
+    }
+}
+
+fn published(issue: &ExternalIssue) -> PublishedIssue {
+    PublishedIssue {
+        identity: issue.reference.identity.clone(),
+        locator: issue.reference.locator.clone(),
+        display: issue.display.clone(),
+        url: issue.url.clone(),
     }
 }
 
@@ -766,61 +911,18 @@ impl Workspace {
             return Ok(Linked::Conflict);
         }
         let now = clock(&transaction, now)?;
-        // Edits made while the create call was running are not on the provider.
-        // Keep them as a local note instead of letting the next refresh drop them.
-        let (title, body): (String, String) = transaction.query_row(
-            "SELECT title, body FROM tickets WHERE id = ?1",
-            [&started.ticket_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if title != started.request.title || body != started.request.body {
-            let note = format!(
-                "Edited while publishing to {}. The published issue holds the previewed text; these are the later local edits.\n\nTitle: {title}\n\n{body}",
-                started.request.destination
-            );
-            notes::add(&transaction, &started.ticket_id, &note, Some(provider))?;
-            transaction.execute(
-                "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
-                params![
-                    started.ticket_id,
-                    started.request.title,
-                    started.request.body
-                ],
-            )?;
-        }
-        tracking::link(
+        let attempt = complete_attempt(
             &transaction,
-            &started.ticket_id,
+            &Sent {
+                attempt_id: &started.attempt_id,
+                ticket_id: &started.ticket_id,
+                title: &started.request.title,
+                body: &started.request.body,
+                destination: &started.request.destination,
+            },
+            provider,
             issue,
-            Origin::Published,
             &now,
-        )?;
-        transaction.execute(
-            "UPDATE publication_attempts SET status = 'succeeded', updated_at = ?2, failure_code = NULL, failure_message = NULL, \
-             external_id = ?3, locator = ?4, display = ?5, url = ?6 WHERE id = ?1",
-            params![
-                started.attempt_id,
-                now,
-                identity.id,
-                issue.reference.locator,
-                issue.display,
-                issue.url
-            ],
-        )?;
-        history::record(
-            &transaction,
-            &started.ticket_id,
-            "source",
-            "",
-            &issue.display,
-            Some(provider),
-        )?;
-        let attempt = transaction.query_row(
-            &format!(
-                "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?1"
-            ),
-            [&started.attempt_id],
-            attempt_from_row,
         )?;
         transaction.commit()?;
         Ok(Linked::Done(Box::new(attempt)))
@@ -860,6 +962,494 @@ impl Workspace {
     }
 }
 
+fn latest_attempt(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<PublicationAttempt>, Error> {
+    Ok(connection
+        .query_row(
+            &format!(
+                "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id \
+                 WHERE a.ticket_id = ?1 ORDER BY a.started_at DESC, a.rowid DESC LIMIT 1"
+            ),
+            [ticket_id],
+            attempt_from_row,
+        )
+        .optional()?)
+}
+
+/// Resolution of uncertain attempts. Each resolution is verified outside any
+/// transaction, then settled in one write that compares the attempt's stored
+/// status with what was read, so competing resolvers, a running publisher and
+/// discovery can never both win.
+impl Workspace {
+    /// What is known about the uncertain attempt on `reference`, what is not, and
+    /// what may safely be done next. With `search`, also asks the source for
+    /// issues that may be this publication's result (a network call; a failure is
+    /// reported, never read as "none").
+    pub fn review_publication(
+        &self,
+        engine: &Engine,
+        reference: &str,
+        search: bool,
+    ) -> Result<PublicationReview, Error> {
+        let ticket = subject(&self.connection, reference)?;
+        let Some(attempt) = open_attempt(&self.connection, &ticket.id)? else {
+            return Err(PublicationError::NothingToResolve {
+                reference: ticket.reference,
+            }
+            .into());
+        };
+        let name = engine.descriptor(&attempt.provider)?.name;
+        let running = attempt.state == AttemptState::InFlight;
+        let mut known = vec![format!(
+            "ticketd asked {name} to create \"{}\" in {}.",
+            attempt.title, attempt.destination
+        )];
+        if let Some(issue) = &attempt.issue {
+            known.push(format!("{} ({}) was created for it.", issue.display, issue.url));
+        }
+        known.push(match attempt.failure.as_ref().map(|f| f.code.as_str()) {
+            _ if running => "The request is still in progress.".to_owned(),
+            Some("unavailable" | "protocol") => {
+                "The request was sent, but no usable answer came back.".to_owned()
+            }
+            Some("interrupted") => {
+                "ticketd stopped or lost contact before the answer arrived.".to_owned()
+            }
+            Some("local_persistence_failed") => format!(
+                "{name} confirmed the issue, but ticketd could not record it on this ticket."
+            ),
+            Some("identity_conflict") => {
+                "That issue was already imported as another ticket, so it was not attached here."
+                    .to_owned()
+            }
+            Some(_) => attempt
+                .failure
+                .as_ref()
+                .map(|f| f.message.clone())
+                .unwrap_or_default(),
+            None => String::new(),
+        });
+        known.retain(|line| !line.is_empty());
+        known.push(format!(
+            "{} is still a local ticket with all its progress and organization.",
+            ticket.reference
+        ));
+        let unknown = if attempt.issue.is_some() {
+            "Nothing about the issue itself; it is only not attached to this ticket yet.".to_owned()
+        } else {
+            format!("whether {name} created an issue for this attempt.")
+        };
+
+        let mut candidates = Vec::new();
+        let mut candidates_complete = None;
+        let mut lookup_failure = None;
+        if search && !running && attempt.issue.is_none() {
+            if let Some(saved) = self.saved_source(&attempt.provider)? {
+                match engine.find_published(
+                    &attempt.provider,
+                    &saved.config,
+                    &search_for(&attempt),
+                ) {
+                    Ok(found) => {
+                        candidates = found.matches.iter().map(published).collect();
+                        candidates_complete = Some(found.complete);
+                    }
+                    Err(error) => lookup_failure = Some(failure(&error)),
+                }
+            }
+        }
+
+        let not_created_available = !running && attempt.issue.is_none() && candidates.is_empty();
+        let actions = vec![
+            ResolutionAction {
+                kind: ActionKind::Attach,
+                available: !running,
+                label: "Attach the created issue".into(),
+                detail: if running {
+                    "Wait for the request to finish first.".into()
+                } else if attempt.issue.is_some() {
+                    format!(
+                        "Confirm {} and finish publishing. {name} is asked to verify it first.",
+                        attempt.issue.as_ref().map(|i| i.display.as_str()).unwrap_or_default()
+                    )
+                } else {
+                    format!(
+                        "Name the issue in {} (a number or link). {name} is asked to verify it before anything is attached.",
+                        attempt.destination
+                    )
+                },
+            },
+            ResolutionAction {
+                kind: ActionKind::NotCreated,
+                available: not_created_available,
+                label: "Confirm nothing was created".into(),
+                detail: if running {
+                    "Wait for the request to finish first.".into()
+                } else if attempt.issue.is_some() {
+                    "Not possible: the issue is known to exist.".into()
+                } else if !candidates.is_empty() {
+                    "Not possible: issues that may be this publication already exist.".into()
+                } else {
+                    format!(
+                        "Only when {name}'s recent issues in {} can be read completely and none matches. Anything less leaves this unresolved.",
+                        attempt.destination
+                    )
+                },
+            },
+        ];
+        Ok(PublicationReview {
+            provider_name: name,
+            known,
+            unknown,
+            note: "Publishing again is blocked: if the issue exists, creating another would duplicate it. It becomes available only after nothing is confirmed to have been created.".into(),
+            actions,
+            candidates,
+            candidates_complete,
+            lookup_failure,
+            attempt,
+        })
+    }
+
+    /// Settles the uncertain attempt on `reference`. See [`Resolution`].
+    ///
+    /// Evidence that cannot be obtained (unreachable source, lost credentials, an
+    /// incomplete read) leaves the attempt unresolved and is reported as
+    /// [`PublicationError::Unverified`]. Asking again after the attempt was
+    /// settled returns the ticket with `replayed` set.
+    pub fn resolve_publication(
+        &mut self,
+        engine: &Engine,
+        reference: &str,
+        options: &ResolveOptions,
+    ) -> Result<PublishOutcome, Error> {
+        let ticket = subject(&self.connection, reference)?;
+        let Some(attempt) = open_attempt(&self.connection, &ticket.id)? else {
+            return self.settled_instead(&ticket, &options.resolution, None);
+        };
+        if attempt.state == AttemptState::InFlight {
+            return Err(PublicationError::StillRunning {
+                reference: ticket.reference,
+                attempt_id: attempt.id,
+            }
+            .into());
+        }
+        let unverified = |source| {
+            Error::Publication(PublicationError::Unverified {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                source,
+            })
+        };
+        let Some(saved) = self.saved_source(&attempt.provider)? else {
+            return Err(unverified(SourceError::InvalidConfiguration(vec![
+                super::FieldIssue {
+                    field: "source".into(),
+                    message: format!(
+                        "connect {} again before resolving this publication",
+                        attempt.provider
+                    ),
+                },
+            ])));
+        };
+        match &options.resolution {
+            Resolution::Attach { issue } => {
+                let found = match (issue.as_deref().map(str::trim).filter(|t| !t.is_empty()), &attempt.issue) {
+                    (Some(text), _) => engine
+                        .locate(&attempt.provider, &saved.config, &attempt.destination, text)
+                        .map_err(&unverified)?,
+                    (None, Some(known)) => engine
+                        .fetch(
+                            &attempt.provider,
+                            &saved.config,
+                            &ExternalRef {
+                                identity: known.identity.clone(),
+                                locator: known.locator.clone(),
+                            },
+                        )
+                        .map_err(&unverified)?,
+                    (None, None) => {
+                        return Err(PublicationError::Mismatch {
+                            reference: ticket.reference,
+                            attempt_id: attempt.id,
+                            message: format!(
+                                "name the issue that was created in {} (a number or link); ticketd never guesses it from the title",
+                                attempt.destination
+                            ),
+                        }
+                        .into());
+                    }
+                };
+                self.attach_verified(&ticket, &attempt, &found, options.now.as_deref())
+            }
+            Resolution::NotCreated => {
+                self.rule_out(engine, &ticket, &attempt, &saved.config, options.now.as_deref())
+            }
+        }
+    }
+
+    /// The outcome when no attempt is open: a replay of the same resolution, a
+    /// settled attempt that disagrees, or nothing to resolve.
+    fn settled_instead(
+        &self,
+        ticket: &Subject,
+        resolution: &Resolution,
+        identity: Option<&ExternalIdentity>,
+    ) -> Result<PublishOutcome, Error> {
+        let settled = |attempt: &PublicationAttempt, message: &str| {
+            Error::Publication(PublicationError::Settled {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                message: message.to_owned(),
+            })
+        };
+        let Some(latest) = latest_attempt(&self.connection, &ticket.id)? else {
+            return Err(PublicationError::NothingToResolve {
+                reference: ticket.reference.clone(),
+            }
+            .into());
+        };
+        let replay = |attempt: PublicationAttempt| -> Result<PublishOutcome, Error> {
+            Ok(PublishOutcome {
+                ticket: self.show_ticket(&ticket.reference)?,
+                attempt,
+                replayed: true,
+            })
+        };
+        match (resolution, latest.state) {
+            (Resolution::Attach { .. }, AttemptState::Succeeded) => {
+                let same = identity.is_none_or(|id| {
+                    latest.issue.as_ref().is_some_and(|issue| &issue.identity == id)
+                });
+                if same {
+                    replay(latest)
+                } else {
+                    Err(settled(
+                        &latest,
+                        "this publication was already completed with a different issue; nothing was changed",
+                    ))
+                }
+            }
+            (Resolution::NotCreated, AttemptState::Failed)
+                if latest.failure.as_ref().is_some_and(|f| f.code == RULED_OUT) =>
+            {
+                replay(latest)
+            }
+            (_, AttemptState::Succeeded) => Err(settled(
+                &latest,
+                "this publication was already completed; nothing was changed",
+            )),
+            (_, AttemptState::Failed)
+                if latest.failure.as_ref().is_some_and(|f| f.code == RULED_OUT) =>
+            {
+                Err(settled(
+                    &latest,
+                    "this publication was already confirmed as not created; nothing was changed",
+                ))
+            }
+            _ => Err(PublicationError::NothingToResolve {
+                reference: ticket.reference.clone(),
+            }
+            .into()),
+        }
+    }
+
+    /// Attaches an issue the source has verified, if the attempt is still open.
+    fn attach_verified(
+        &mut self,
+        ticket: &Subject,
+        attempt: &PublicationAttempt,
+        issue: &ExternalIssue,
+        now: Option<&str>,
+    ) -> Result<PublishOutcome, Error> {
+        let identity = &issue.reference.identity;
+        let mismatch = |message: String| {
+            Error::Publication(PublicationError::Mismatch {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                message,
+            })
+        };
+        if let Some(known) = &attempt.issue
+            && &known.identity != identity
+        {
+            return Err(mismatch(format!(
+                "this attempt already created {}, not {}",
+                known.display, issue.display
+            )));
+        }
+        if attempt.issue.is_none() && predates(&issue.created_at, &attempt.started_at) {
+            return Err(mismatch(format!(
+                "{} was created before this publication began, so it cannot be its result",
+                issue.display
+            )));
+        }
+        let transaction = self.connection.savepoint()?;
+        transaction_write_lock(&transaction)?;
+        // Compare-and-set: the attempt must still be the same open attempt.
+        let still_open = open_attempt(&transaction, &ticket.id)?
+            .is_some_and(|open| open.id == attempt.id && open.state != AttemptState::InFlight);
+        if !still_open {
+            drop(transaction);
+            return self.settled_instead(ticket, &Resolution::Attach { issue: None }, Some(identity));
+        }
+        let owned: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?2)",
+            params![identity.provider, identity.id],
+            |row| row.get(0),
+        )?;
+        let linked: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM external_identities WHERE ticket_id = ?1)",
+            [&ticket.id],
+            |row| row.get(0),
+        )?;
+        if owned || linked {
+            // Discovery (or another path) owns it first. Keep what was learned and
+            // leave the attempt unresolved; never attach one identity twice.
+            let now = clock(&transaction, now)?;
+            let message = format!(
+                "{} is already linked to a ticket, so it was not attached here.",
+                issue.display
+            );
+            transaction.execute(
+                "UPDATE publication_attempts SET status = 'unresolved', updated_at = ?2, failure_code = 'identity_conflict', failure_message = ?3, \
+                 external_id = ?4, locator = ?5, display = ?6, url = ?7 WHERE id = ?1 AND status IN ('in_flight', 'unresolved') AND (external_id IS NULL OR external_id = ?4)",
+                params![
+                    attempt.id,
+                    now,
+                    message,
+                    identity.id,
+                    issue.reference.locator,
+                    issue.display,
+                    issue.url
+                ],
+            )?;
+            transaction.commit()?;
+            return Err(PublicationError::Unresolved {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                message,
+            }
+            .into());
+        }
+        let now = clock(&transaction, now)?;
+        let settled = complete_attempt(
+            &transaction,
+            &Sent {
+                attempt_id: &attempt.id,
+                ticket_id: &ticket.id,
+                title: &attempt.title,
+                body: &attempt.body,
+                destination: &attempt.destination,
+            },
+            &attempt.provider,
+            issue,
+            &now,
+        )?;
+        transaction.commit()?;
+        Ok(PublishOutcome {
+            ticket: self.show_ticket(&ticket.reference)?,
+            attempt: settled,
+            replayed: false,
+        })
+    }
+
+    /// Accepts "nothing was created" only on positive evidence: the source read
+    /// the whole window and nothing in it could be this publication's result.
+    fn rule_out(
+        &mut self,
+        engine: &Engine,
+        ticket: &Subject,
+        attempt: &PublicationAttempt,
+        config: &ConfigValues,
+        now: Option<&str>,
+    ) -> Result<PublishOutcome, Error> {
+        let publication = Error::Publication;
+        if let Some(issue) = &attempt.issue {
+            return Err(publication(PublicationError::Mismatch {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                message: format!(
+                    "{} was created by this attempt, so it cannot be treated as not created; attach it instead",
+                    issue.display
+                ),
+            }));
+        }
+        let unverified = |source| {
+            publication(PublicationError::Unverified {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                source,
+            })
+        };
+        let found = engine
+            .find_published(&attempt.provider, config, &search_for(attempt))
+            .map_err(&unverified)?;
+        if !found.matches.is_empty() {
+            return Err(publication(PublicationError::Candidates {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                issues: found.matches.iter().map(published).collect(),
+            }));
+        }
+        if !found.complete {
+            return Err(unverified(SourceError::Unavailable(format!(
+                "only part of the recent issues in {} could be read",
+                attempt.destination
+            ))));
+        }
+        let transaction = self.connection.savepoint()?;
+        transaction_write_lock(&transaction)?;
+        let now = clock(&transaction, now)?;
+        let changed = transaction.execute(
+            "UPDATE publication_attempts SET status = 'failed', updated_at = ?2, failure_code = ?3, failure_message = ?4 \
+             WHERE id = ?1 AND status IN ('in_flight', 'unresolved') AND external_id IS NULL \
+             AND (status = 'unresolved' OR lease_expires_at <= ?2)",
+            params![
+                attempt.id,
+                now,
+                RULED_OUT,
+                format!(
+                    "Confirmed not created: the recent issues in {} were read completely and none matched, so a new attempt is safe.",
+                    attempt.destination
+                ),
+            ],
+        )?;
+        if changed == 0 {
+            drop(transaction);
+            return self.settled_instead(ticket, &Resolution::NotCreated, None);
+        }
+        let settled = transaction.query_row(
+            &format!(
+                "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?1"
+            ),
+            [&attempt.id],
+            attempt_from_row,
+        )?;
+        transaction.commit()?;
+        Ok(PublishOutcome {
+            ticket: self.show_ticket(&ticket.reference)?,
+            attempt: settled,
+            replayed: false,
+        })
+    }
+}
+
+/// Failure code of an attempt a person confirmed was never created.
+const RULED_OUT: &str = "ruled_out";
+
+fn search_for(attempt: &PublicationAttempt) -> PublicationSearch {
+    PublicationSearch {
+        request: PublishRequest {
+            title: attempt.title.clone(),
+            body: attempt.body.clone(),
+            destination: attempt.destination.clone(),
+        },
+        since: search_start(&attempt.started_at),
+    }
+}
+
 /// An attempt that has been persisted and is about to call the connector.
 struct Started {
     attempt_id: String,
@@ -875,6 +1465,75 @@ enum Linked {
     Conflict,
     /// Another process settled the attempt (for example after its lease ran out).
     SettledElsewhere,
+}
+
+/// What an open attempt sent, as stored on it.
+struct Sent<'a> {
+    attempt_id: &'a str,
+    ticket_id: &'a str,
+    title: &'a str,
+    body: &'a str,
+    destination: &'a str,
+}
+
+/// Links the confirmed issue to the attempt's ticket, transfers ownership and
+/// marks the attempt `succeeded`, inside the caller's write transaction. The
+/// caller has already checked that the attempt is still open and that the
+/// issue's identity is unowned. Shared by the publisher and by resolution.
+fn complete_attempt(
+    transaction: &Connection,
+    sent: &Sent<'_>,
+    provider: &str,
+    issue: &ExternalIssue,
+    now: &str,
+) -> Result<PublicationAttempt, Error> {
+    let identity = &issue.reference.identity;
+    // Edits made after the text was sent are not on the provider. Keep them as a
+    // local note instead of letting the next refresh drop them.
+    let (title, body): (String, String) = transaction.query_row(
+        "SELECT title, body FROM tickets WHERE id = ?1",
+        [sent.ticket_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if title != sent.title || body != sent.body {
+        let note = format!(
+            "Edited while publishing to {}. The published issue holds the previewed text; these are the later local edits.\n\nTitle: {title}\n\n{body}",
+            sent.destination
+        );
+        notes::add(transaction, sent.ticket_id, &note, Some(provider))?;
+        transaction.execute(
+            "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
+            params![sent.ticket_id, sent.title, sent.body],
+        )?;
+    }
+    tracking::link(transaction, sent.ticket_id, issue, Origin::Published, now)?;
+    transaction.execute(
+        "UPDATE publication_attempts SET status = 'succeeded', updated_at = ?2, failure_code = NULL, failure_message = NULL, \
+         external_id = ?3, locator = ?4, display = ?5, url = ?6 WHERE id = ?1",
+        params![
+            sent.attempt_id,
+            now,
+            identity.id,
+            issue.reference.locator,
+            issue.display,
+            issue.url
+        ],
+    )?;
+    history::record(
+        transaction,
+        sent.ticket_id,
+        "source",
+        "",
+        &issue.display,
+        Some(provider),
+    )?;
+    Ok(transaction.query_row(
+        &format!(
+            "SELECT {ATTEMPT_COLUMNS} FROM publication_attempts a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?1"
+        ),
+        [sent.attempt_id],
+        attempt_from_row,
+    )?)
 }
 
 fn chosen_destination(requested: Option<&str>, suggested: &[String]) -> Option<String> {

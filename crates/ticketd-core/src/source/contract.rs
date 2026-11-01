@@ -174,6 +174,25 @@ pub struct PublishRequest {
     pub destination: String,
 }
 
+/// A search for issues an earlier, uncertain publish may have created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationSearch {
+    /// Exactly what the earlier attempt sent.
+    pub request: PublishRequest,
+    /// RFC 3339 instant before which the attempt cannot have created anything.
+    pub since: String,
+}
+
+/// What a search found. `matches` holds every issue the connector saw that could
+/// be the created one (same title or same description). `complete` is true only
+/// when the connector read the whole window: then an empty `matches` proves that
+/// nothing was created, while an incomplete read proves nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationCandidates {
+    pub matches: Vec<ExternalIssue>,
+    pub complete: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
     #[error("{0}")]
@@ -329,5 +348,28 @@ pub trait Connector: Send + Sync {
         _request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
         Err(SourceError::Unsupported("publishing"))
+    }
+
+    /// Reads one issue the person named (`text`: a number, a reference or a
+    /// link), which must belong to `destination`. Used to attach an issue to an
+    /// uncertain publication, so it must refuse an issue elsewhere. Only called
+    /// when the descriptor declares [`Capability::Publish`].
+    fn locate(
+        &self,
+        _config: &ConfigValues,
+        _destination: &str,
+        _text: &str,
+    ) -> Result<ExternalIssue, SourceError> {
+        Err(SourceError::Unsupported("looking up published issues"))
+    }
+
+    /// Looks for issues in the destination that the described publish may have
+    /// created. See [`PublicationCandidates::complete`] for what an answer proves.
+    fn find_published(
+        &self,
+        _config: &ConfigValues,
+        _search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError> {
+        Err(SourceError::Unsupported("searching for published issues"))
     }
 }

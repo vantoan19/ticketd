@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
-    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, PublishRequest,
-    SourceError,
+    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+    PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
@@ -35,8 +35,9 @@ pub use freshness::{
     DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
 };
 pub use publication::{
-    AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
-    PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
+    ActionKind, AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
+    PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
+    Resolution, ResolutionAction, ResolveOptions,
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{

@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
-        DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, PublishRequest, SourceError,
+        DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, PublicationCandidates,
+        PublicationSearch, PublishRequest, SourceError,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -341,6 +342,54 @@ impl Engine {
             ));
         }
         Ok(issue)
+    }
+
+    /// Reads the issue the person named for `destination`, checked to be an
+    /// issue of this provider.
+    pub fn locate(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, SourceError> {
+        let connector = self.connector(provider)?;
+        if !self.can_publish(provider) {
+            return Err(SourceError::Unsupported("publishing"));
+        }
+        let config = self.validate(provider, raw)?;
+        let issue = connector.locate(&config, destination, text)?;
+        if issue.reference.identity.provider != provider {
+            return Err(SourceError::Protocol(
+                "the issue named a different provider".into(),
+            ));
+        }
+        Ok(issue)
+    }
+
+    /// Looks for issues an uncertain publish may have created.
+    pub fn find_published(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError> {
+        let connector = self.connector(provider)?;
+        if !self.can_publish(provider) {
+            return Err(SourceError::Unsupported("publishing"));
+        }
+        let config = self.validate(provider, raw)?;
+        let found = connector.find_published(&config, search)?;
+        if found
+            .matches
+            .iter()
+            .any(|issue| issue.reference.identity.provider != provider)
+        {
+            return Err(SourceError::Protocol(
+                "an issue named a different provider".into(),
+            ));
+        }
+        Ok(found)
     }
 
     /// Reads an issue's conversation, sorted chronologically with comments

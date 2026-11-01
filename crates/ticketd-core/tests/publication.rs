@@ -19,8 +19,8 @@ use ticketd_core::{
         AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues,
         ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
         Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FieldKind, IneligibleReason, OptionSource, Origin, Ownership, PublicationError,
-        PublishOptions, PublishRequest, RefreshOptions, SchemaField, SourceError, ValueFormat,
+        FieldKind, IneligibleReason, OptionSource, Origin, Ownership, PublicationCandidates,
+        PublicationError, PublicationSearch, Resolution, ResolveOptions, ActionKind, PublishOptions, PublishRequest, RefreshOptions, SchemaField, SourceError, ValueFormat,
     },
 };
 
@@ -44,6 +44,12 @@ struct Remote {
     issues: BTreeMap<u64, ExternalIssue>,
     /// Runs inside `publish`, after the remote issue exists, before it answers.
     hook: Option<Hook>,
+    /// Lookups (locate, find_published) fail as if the provider were unreachable.
+    lookup_down: bool,
+    /// Whether a search reads the whole window.
+    search_complete: bool,
+    /// Runs inside a lookup, after its answer is computed, before it returns.
+    lookup_hook: Option<Hook>,
 }
 
 #[derive(Clone)]
@@ -56,7 +62,36 @@ impl Fake {
             created: Vec::new(),
             issues: BTreeMap::new(),
             hook: None,
+            lookup_down: false,
+            search_complete: true,
+            lookup_hook: None,
         })))
+    }
+}
+
+fn now_rfc3339() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    chrono::DateTime::from_timestamp(seconds as i64, 0)
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+impl Fake {
+    fn answer<T>(&self, compute: impl FnOnce(&Remote) -> Result<T, SourceError>) -> Result<T, SourceError> {
+        let (result, hook) = {
+            let remote = self.0.lock().unwrap();
+            if remote.lookup_down {
+                return Err(SourceError::Unavailable("provider unreachable".into()));
+            }
+            (compute(&remote), remote.lookup_hook.clone())
+        };
+        if let Some(hook) = hook {
+            hook();
+        }
+        result
     }
 }
 
@@ -122,6 +157,53 @@ impl Connector for Fake {
             .ok_or_else(|| SourceError::NotFound("gone".into()))
     }
 
+    fn locate(
+        &self,
+        _: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, SourceError> {
+        self.answer(|remote| {
+            let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
+            if repository != destination {
+                return Err(SourceError::InvalidConfiguration(vec![
+                    ticketd_core::source::FieldIssue {
+                        field: "issue".into(),
+                        message: format!("is not in {destination}"),
+                    },
+                ]));
+            }
+            let id: u64 = number
+                .parse()
+                .map_err(|_| SourceError::NotFound("not an issue".into()))?;
+            remote
+                .issues
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| SourceError::NotFound("no such issue".into()))
+        })
+    }
+
+    fn find_published(
+        &self,
+        _: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError> {
+        self.answer(|remote| {
+            Ok(PublicationCandidates {
+                matches: remote
+                    .issues
+                    .values()
+                    .filter(|issue| {
+                        issue.title == search.request.title || issue.body == search.request.body
+                    })
+                    .cloned()
+                    .collect(),
+                complete: remote.search_complete,
+            })
+        })
+    }
+
     fn destinations(&self, config: &ConfigValues) -> Vec<String> {
         config["repositories"]
             .as_array()
@@ -160,8 +242,8 @@ impl Connector for Fake {
                 state: ExternalState::Open,
                 assignees: vec![],
                 labels: vec![],
-                created_at: "2026-01-01T00:00:00Z".into(),
-                updated_at: "2026-01-01T00:00:00Z".into(),
+                created_at: now_rfc3339(),
+                updated_at: now_rfc3339(),
                 duplicate_of: None,
             };
             remote.issues.insert(id, issue);
@@ -792,4 +874,399 @@ fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
     assert_eq!(after.title, "Escalate");
     assert!(after.publication.is_none());
     drop(dir);
+}
+
+// ---- Resolving an uncertain publication (#109) ----
+
+fn attach(issue: Option<&str>) -> ResolveOptions {
+    ResolveOptions {
+        resolution: Resolution::Attach {
+            issue: issue.map(str::to_owned),
+        },
+        now: None,
+    }
+}
+
+fn not_created() -> ResolveOptions {
+    ResolveOptions {
+        resolution: Resolution::NotCreated,
+        now: None,
+    }
+}
+
+impl Fixture {
+    fn resolve(
+        &mut self,
+        reference: &str,
+        options: &ResolveOptions,
+    ) -> Result<ticketd_core::source::PublishOutcome, Error> {
+        self.workspace
+            .resolve_publication(&self.engine, reference, options)
+    }
+
+    /// A ticket whose create call was answered with a timeout: the issue exists.
+    fn lost_response(&mut self, title: &str) -> Ticket {
+        let ticket = describe(self, title, "Body");
+        self.mode(Mode::LoseResponse);
+        self.publish(&ticket.reference).unwrap_err();
+        self.mode(Mode::Create);
+        ticket
+    }
+
+    fn still_unresolved(&self, reference: &str) {
+        let after = self.ticket(reference);
+        assert!(after.source.is_none(), "ownership must not transfer");
+        assert_eq!(
+            after.publication.expect("still blocked").state,
+            AttemptState::Unresolved
+        );
+    }
+}
+
+#[test]
+fn confirming_the_created_issue_completes_the_handoff_and_keeps_local_progress() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    set_status(&mut f, &ticket.reference, Status::InProgress);
+    f.workspace
+        .add_note(&ticket.reference, "local progress", None)
+        .unwrap();
+
+    let outcome = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+
+    assert!(!outcome.replayed);
+    assert_eq!(outcome.attempt.state, AttemptState::Succeeded);
+    let after = f.ticket(&ticket.reference);
+    assert_eq!(after.id, ticket.id, "same local ticket");
+    assert_eq!(after.status, Status::InProgress);
+    assert!(after.publication.is_none());
+    let source = after.source.expect("the source now owns the ticket");
+    assert_eq!(source.display, "o/r#101");
+    assert_eq!(source.origin, Origin::Published);
+    assert!(matches!(source.ownership, Ownership::External));
+    assert_eq!(
+        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        1
+    );
+    // Attached once, and nothing further is ever created.
+    assert_eq!(f.created(), 1);
+    assert!(f.publish(&ticket.reference).unwrap().replayed);
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn a_replayed_or_duplicate_resolution_attaches_nothing_more() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+
+    let again = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert!(again.replayed);
+    // A different resolver (another process) sees the settled attempt too.
+    let mut other = Workspace::open(f.path()).unwrap();
+    let from_other = other
+        .resolve_publication(&f.engine, &ticket.reference, &attach(None))
+        .unwrap();
+    assert!(from_other.replayed);
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
+    // The opposite claim cannot overturn a settled attempt.
+    assert!(matches!(
+        publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err()),
+        PublicationError::Settled { .. }
+    ));
+    assert!(f.ticket(&ticket.reference).source.is_some());
+}
+
+#[test]
+fn the_issue_recorded_on_the_attempt_can_be_confirmed_without_naming_it() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    let path = f.path();
+    f.hook(move || {
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TRIGGER refuse_link BEFORE INSERT ON external_identities BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+        )
+        .unwrap();
+    });
+    f.publish(&ticket.reference).unwrap_err();
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute_batch("DROP TRIGGER refuse_link").unwrap();
+    drop(db);
+
+    // The known issue means "created" is the only honest answer.
+    assert!(matches!(
+        publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err()),
+        PublicationError::Mismatch { .. }
+    ));
+    f.still_unresolved(&ticket.reference);
+    let outcome = f.resolve(&ticket.reference, &attach(None)).unwrap();
+    assert_eq!(outcome.attempt.issue.unwrap().display, "o/r#101");
+    assert_eq!(
+        f.ticket(&ticket.reference).source.unwrap().display,
+        "o/r#101"
+    );
+}
+
+#[test]
+fn an_issue_that_cannot_be_verified_or_is_not_this_one_leaves_the_attempt_unresolved() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+
+    // Provider unreachable: not proof of anything.
+    f.fake.0.lock().unwrap().lookup_down = true;
+    for options in [attach(Some("101")), not_created()] {
+        assert!(matches!(
+            publication_error(f.resolve(&ticket.reference, &options).unwrap_err()),
+            PublicationError::Unverified { .. }
+        ));
+        f.still_unresolved(&ticket.reference);
+    }
+    f.fake.0.lock().unwrap().lookup_down = false;
+
+    // No such issue, an issue in another repository, and nothing named at all.
+    for text in [Some("999"), Some("elsewhere/repo#101"), None] {
+        let error = publication_error(f.resolve(&ticket.reference, &attach(text)).unwrap_err());
+        assert!(
+            matches!(
+                error,
+                PublicationError::Unverified { .. } | PublicationError::Mismatch { .. }
+            ),
+            "{error}"
+        );
+        f.still_unresolved(&ticket.reference);
+    }
+
+    // An issue that existed before the attempt began cannot be its result.
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        let mut old = remote.issues[&101].clone();
+        old.reference.identity.id = "7".into();
+        old.reference.locator = "o/r#7".into();
+        old.created_at = "2020-01-01T00:00:00Z".into();
+        remote.issues.insert(7, old);
+    }
+    assert!(matches!(
+        publication_error(
+            f.resolve(&ticket.reference, &attach(Some("7")))
+                .unwrap_err()
+        ),
+        PublicationError::Mismatch { .. }
+    ));
+    f.still_unresolved(&ticket.reference);
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn a_candidate_after_a_crash_must_be_confirmed_across_restart() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    f.mode(Mode::Crash);
+    let engine = f.engine.clone();
+    let mut o = options();
+    o.now = Some("2000-01-01T00:00:00Z".into());
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let _ = f.workspace.publish_ticket(&engine, &ticket.reference, &o);
+    }));
+    let mut f = f.reopen();
+    f.mode(Mode::Create);
+
+    // The process died after creating: a match exists, so it cannot be ruled out.
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    let PublicationError::Candidates { issues, .. } = error else {
+        panic!("expected candidates");
+    };
+    assert_eq!(issues[0].display, "o/r#101");
+    f.still_unresolved(&ticket.reference);
+
+    let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert_eq!(done.attempt.state, AttemptState::Succeeded);
+}
+
+#[test]
+fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Never sent");
+    // The create never actually landed.
+    f.fake.0.lock().unwrap().issues.clear();
+
+    // An incomplete read proves nothing.
+    f.fake.0.lock().unwrap().search_complete = false;
+    assert!(matches!(
+        publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err()),
+        PublicationError::Unverified { .. }
+    ));
+    f.still_unresolved(&ticket.reference);
+    assert!(matches!(
+        publication_error(f.publish(&ticket.reference).unwrap_err()),
+        PublicationError::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
+    ));
+
+    f.fake.0.lock().unwrap().search_complete = true;
+    let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
+    assert_eq!(outcome.attempt.state, AttemptState::Failed);
+    assert_eq!(outcome.attempt.failure.unwrap().code, "ruled_out");
+    assert!(f.ticket(&ticket.reference).source.is_none());
+    assert!(f.ticket(&ticket.reference).publication.is_none());
+    // Now, and only now, publishing again is allowed.
+    let created = f.publish(&ticket.reference).unwrap();
+    assert_eq!(created.attempt.state, AttemptState::Succeeded);
+}
+
+#[test]
+fn discovery_owning_the_issue_first_keeps_the_attempt_unresolved_and_identity_unique() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+
+    let error = publication_error(
+        f.resolve(&ticket.reference, &attach(Some("101")))
+            .unwrap_err(),
+    );
+    assert!(matches!(error, PublicationError::Unresolved { .. }));
+    f.still_unresolved(&ticket.reference);
+    let attempt = f.ticket(&ticket.reference).publication.unwrap();
+    assert_eq!(attempt.failure.unwrap().code, "identity_conflict");
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+}
+
+#[test]
+fn a_resolver_that_loses_a_race_to_the_same_attach_reports_a_replay() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let path = f.path();
+    let engine = f.engine.clone();
+    let reference = ticket.reference.clone();
+    // Another resolver attaches while this one is still verifying.
+    let fake = f.fake.clone();
+    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
+        fake.0.lock().unwrap().lookup_hook = None;
+        let mut other = Workspace::open(&path).unwrap();
+        other
+            .resolve_publication(&engine, &reference, &attach(Some("101")))
+            .unwrap();
+    }));
+    let racing = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert!(racing.replayed, "same issue, already attached by the winner");
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(f.ticket(&ticket.reference).source.unwrap().display, "o/r#101");
+}
+
+#[test]
+fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    // The search sees nothing (the issue is hidden), then another resolver finds and
+    // attaches it before this verdict is saved.
+    let hidden = f.fake.0.lock().unwrap().issues.remove(&101).unwrap();
+    let path = f.path();
+    let engine = f.engine.clone();
+    let reference = ticket.reference.clone();
+    let fake = f.fake.clone();
+    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
+        fake.0.lock().unwrap().lookup_hook = None;
+        fake.0.lock().unwrap().issues.insert(101, hidden.clone());
+        let mut other = Workspace::open(&path).unwrap();
+        other
+            .resolve_publication(&engine, &reference, &attach(Some("101")))
+            .unwrap();
+    }));
+
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    assert!(matches!(error, PublicationError::Settled { .. }), "{error}");
+    assert_eq!(f.ticket(&ticket.reference).source.unwrap().display, "o/r#101");
+    assert_eq!(
+        f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
+        AttemptState::Succeeded
+    );
+}
+
+#[test]
+fn a_running_attempt_is_not_resolvable_and_a_clean_ticket_has_nothing_to_resolve() {
+    let mut f = Fixture::new();
+    let live = describe(&mut f, "Live", "Body");
+    f.mode(Mode::Crash);
+    let engine = f.engine.clone();
+    let mut o = options();
+    o.now = Some("2999-01-01T00:00:00Z".into());
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let _ = f.workspace.publish_ticket(&engine, &live.reference, &o);
+    }));
+    f.mode(Mode::Create);
+    let mut f = f.reopen();
+    assert!(matches!(
+        publication_error(
+            f.resolve(&live.reference, &attach(Some("101")))
+                .unwrap_err()
+        ),
+        PublicationError::StillRunning { .. }
+    ));
+    let clean = describe(&mut f, "Clean", "Body");
+    assert!(matches!(
+        publication_error(
+            f.resolve(&clean.reference, &attach(Some("101")))
+                .unwrap_err()
+        ),
+        PublicationError::NothingToResolve { .. }
+    ));
+}
+
+#[test]
+fn the_review_states_what_is_known_and_unknown_and_which_actions_are_safe() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert_eq!(review.attempt.state, AttemptState::Unresolved);
+    assert!(review.known.iter().any(|line| line.contains("o/r")));
+    assert!(review.unknown.contains("whether"));
+    assert_eq!(review.candidates.len(), 1);
+    assert_eq!(review.candidates_complete, Some(true));
+    let kinds: Vec<_> = review
+        .actions
+        .iter()
+        .map(|a| (a.kind, a.available))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![(ActionKind::Attach, true), (ActionKind::NotCreated, false)]
+    );
+
+    // A failed search is reported, not mistaken for an empty one.
+    f.fake.0.lock().unwrap().lookup_down = true;
+    let down = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert!(down.candidates.is_empty());
+    assert_eq!(down.candidates_complete, None);
+    assert_eq!(down.lookup_failure.unwrap().code, "unavailable");
+}
+
+#[test]
+fn resolution_outcomes_survive_export_backup_and_restore() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    let exported = f.workspace.export().unwrap();
+    assert_eq!(exported["publication_attempts"][0]["status"], "succeeded");
+
+    let backup = f.dir.path().join("backup.sqlite3");
+    f.workspace.backup(&backup).unwrap();
+    let path = f.path();
+    let Fixture { workspace, .. } = f;
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    let restored = workspace.show_ticket(&ticket.reference).unwrap();
+    assert_eq!(restored.source.unwrap().display, "o/r#101");
 }
