@@ -39,7 +39,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 20,
+        format_version: 21,
       };
     case "check_cli":
       return {

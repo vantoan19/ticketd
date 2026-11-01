@@ -22,6 +22,7 @@ pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspa
 
 mod efforts;
 mod retry;
+pub mod source;
 pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
@@ -56,7 +57,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 20;
+pub const FORMAT_VERSION: i64 = 21;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -137,6 +138,8 @@ pub enum Error {
     EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
+    #[error(transparent)]
+    Source(#[from] source::SourceError),
     #[error("could not determine the application data directory")]
     NoDataDirectory,
     #[error("a file already exists at {}; ticketd never replaces an existing file, so choose a new name", .0.display())]
@@ -353,6 +356,9 @@ impl Workspace {
         }
         if version < 20 {
             transaction.execute_batch("CREATE TABLE last_backup (id INTEGER PRIMARY KEY CHECK (id = 1), path TEXT NOT NULL, completed_at TEXT NOT NULL); PRAGMA user_version = 20;")?;
+        }
+        if version < 21 {
+            source::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(())
