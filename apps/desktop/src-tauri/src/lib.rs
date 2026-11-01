@@ -886,6 +886,40 @@ fn publish_ticket(
     )?)
 }
 
+/// What is known and unknown about an unresolved publication and which actions are
+/// safe. With `search`, asks the source for issues that may be the one created; a
+/// failed search is reported in the review, never read as "none".
+#[tauri::command(async)]
+fn review_publication(
+    reference: String,
+    search: bool,
+) -> Result<ticketd_core::source::PublicationReview, SourceFailure> {
+    let workspace = Workspace::open_default()?;
+    Ok(workspace.review_publication(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        search,
+    )?)
+}
+
+/// Settles an unresolved publication: attach a verified issue, or confirm that
+/// nothing was created. Evidence the source cannot give leaves it unresolved.
+#[tauri::command(async)]
+fn resolve_publication(
+    reference: String,
+    resolution: ticketd_core::source::Resolution,
+) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
+    let mut workspace = Workspace::open_default()?;
+    Ok(workspace.resolve_publication(
+        &ticketd_core::source::Engine::builtin(),
+        &reference,
+        &ticketd_core::source::ResolveOptions {
+            resolution,
+            now: None,
+        },
+    )?)
+}
+
 #[derive(serde::Serialize)]
 struct SourceHealth {
     /// A refresh is running now (startup, periodic or explicit).
@@ -944,6 +978,8 @@ pub fn run() -> Result<(), tauri::Error> {
             source_health,
             preview_publication,
             publish_ticket,
+            review_publication,
+            resolve_publication,
             count_by_source,
             source_check_connection,
             source_options,
