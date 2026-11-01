@@ -30,6 +30,8 @@ export function TicketDetailPane({
     revision,
     refresh,
     updateTicket,
+    position,
+    openAdjacent,
   } = workspace;
   return (
     <>
@@ -55,6 +57,8 @@ export function TicketDetailPane({
         revision={revision}
         refresh={refresh}
         updateTicket={updateTicket}
+        position={position}
+        onAdjacent={openAdjacent}
       />
     </>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,125 +13,35 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { client, type Relationships, type Ticket } from "@/lib/api/client";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import {
-  linkLabel,
-  linkRows,
-  mergePage,
-  nextOffset,
-  removeLink,
-  type LinkRow,
-} from "@/features/tickets/linked-work";
+import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
+import { RailSection } from "@/features/tickets/RailSection";
+import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
-
-type Loaded = {
-  reference: string;
-  links: Relationships | null;
-  /** Why the read failed, when it did. */
-  failure: string;
-};
 
 const isDuplicateKind = (kind: LinkRow["kind"]) =>
   kind === "duplicate_of" || kind === "duplicates";
 
-/** Every link of a ticket as one flat section, grouped by meaning. */
-export function LinkedWork({
-  ticket,
-  revision,
-  refresh,
-  select,
-  onOpenGraph,
-}: {
-  ticket: Ticket;
-  revision: number;
-  refresh: () => Promise<void>;
-  select: (reference: string) => void;
-  onOpenGraph: () => void;
-}) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [reload, setReload] = useState(0);
-  const [linking, setLinking] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
-  const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
-  const attempts = useRef(new Map<string, string>());
-  const reference = ticket.reference;
-
-  // One bounded read of the core's relationships feeds every row. It reruns
-  // whenever the workspace revision moves, so links made elsewhere appear.
-  useEffect(() => {
-    let active = true;
-    client.contextualRelationships(reference, 0).then(
-      (links) => {
-        if (active) setLoaded({ reference, links, failure: "" });
-      },
-      (reason: unknown) => {
-        if (active)
-          setLoaded((previous) => ({
-            reference,
-            // Keep what was shown for this ticket; say the refresh failed.
-            links: previous?.reference === reference ? previous.links : null,
-            failure: String(reason),
-          }));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [reference, revision, reload]);
-
-  const current = loaded?.reference === reference ? loaded : null;
-  const rows = current?.links ? linkRows(current.links) : [];
-  const more = current?.links ? nextOffset(current.links) : null;
-
-  async function remove(row: LinkRow) {
-    const key = JSON.stringify([row.kind, row.reference]);
-    const id = attempts.current.get(key) ?? crypto.randomUUID();
-    attempts.current.set(key, id);
-    setPending(true);
-    setError("");
-    try {
-      await removeLink(reference, row.kind, row.reference, id);
-      attempts.current.delete(key);
-      setReload((value) => value + 1);
-      await refresh();
-    } catch (reason) {
-      setError(
-        `Could not remove ${linkLabel(row.kind)} ${row.reference}: ${String(reason)}`,
-      );
-    } finally {
-      setPending(false);
-    }
-  }
-  async function showMore() {
-    if (!current?.links || more === null) return;
-    try {
-      const page = await client.contextualRelationships(reference, more);
-      setLoaded((previous) =>
-        previous?.links && previous.reference === reference
-          ? { ...previous, links: mergePage(previous.links, page) }
-          : previous,
-      );
-    } catch (reason) {
-      setError(`Could not load more links: ${String(reason)}`);
-    }
-  }
-
-  const dialogs = (
+/** The dialogs the relationship actions open; one instance serves the rail and Subtickets. */
+export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
+  const { ticket, refresh, retry } = work;
+  return (
     <>
       <LinkTicketDialog
         ticket={ticket}
-        open={linking}
-        onOpenChange={setLinking}
+        open={work.linking !== null}
+        {...(work.linking && { initialKind: work.linking })}
+        onOpenChange={(open) => {
+          if (!open) work.closeLink();
+        }}
         onLinked={async () => {
-          setReload((value) => value + 1);
+          retry();
           await refresh();
         }}
       />
-      <Dialog open={reviewing} onOpenChange={setReviewing}>
+      <Dialog open={work.reviewing} onOpenChange={work.setReviewing}>
         <DialogContent className="duplicate-dialog">
           <DialogHeader>
             <DialogTitle>Review dependency changes</DialogTitle>
@@ -144,68 +54,135 @@ export function LinkedWork({
             ticket={ticket}
             startSeparate
             refresh={async () => {
-              setReload((value) => value + 1);
+              retry();
               await refresh();
             }}
-            onDone={() => setReviewing(false)}
-            onCancel={() => setReviewing(false)}
+            onDone={() => work.setReviewing(false)}
+            onCancel={() => work.setReviewing(false)}
           />
         </DialogContent>
       </Dialog>
     </>
   );
+}
+
+/**
+ * Every link except subtickets as the rail's Relationships section, grouped by
+ * meaning. Subtickets read under the description instead.
+ */
+export function LinkedWork({
+  work,
+  select,
+  onOpenGraph,
+}: {
+  work: LinkedWorkState;
+  select: (reference: string) => void;
+  onOpenGraph: () => void;
+}) {
+  const { reference, current, pending, error } = work;
+  const rows = work.rows.filter((row) => row.kind !== "subticket");
   const linkAction = (
-    <Button variant="ghost" size="sm" onClick={() => setLinking(true)}>
+    <Button variant="ghost" size="sm" onClick={() => work.openLink()}>
       <Plus aria-hidden="true" />
-      Link ticket
+      Add relationship
     </Button>
   );
   // Collapse to the bare action only after a successful read found nothing;
   // loading and failed look different from "no links".
   if (!current?.links || rows.length === 0)
     return (
-      <section
-        id={`linked-work-${reference}`}
-        className="linked-work"
-        data-empty
-        aria-label="Linked work"
-      >
-        {linkAction}
-        {!current && (
-          <span className="linked-work-state" role="status">
-            Loading linked work…
-          </span>
-        )}
-        {current && !current.links && (
-          <span className="linked-work-state" role="alert">
-            Could not load linked work: {current.failure}{" "}
-            <Button
-              variant="link"
-              size="xs"
-              onClick={() => setReload((value) => value + 1)}
-            >
-              Try again
-            </Button>
-          </span>
-        )}
-        {error && <p role="alert">{error}</p>}
-        {dialogs}
-      </section>
+      <RailSection label="Relationships">
+        <div id={`linked-work-${reference}`} className="linked-work" data-empty>
+          {linkAction}
+          {!current && (
+            <span className="linked-work-state" role="status">
+              Loading relationships…
+            </span>
+          )}
+          {current && !current.links && (
+            <span className="linked-work-state" role="alert">
+              Could not load relationships: {current.failure}{" "}
+              <Button variant="link" size="xs" onClick={work.retry}>
+                Try again
+              </Button>
+            </span>
+          )}
+          {error && <p role="alert">{error}</p>}
+        </div>
+      </RailSection>
     );
   return (
-    <section
-      id={`linked-work-${reference}`}
-      className="linked-work"
-      aria-label="Linked work"
-    >
-      <div className="detail-section-heading">
-        <h3>
-          Linked work{" "}
-          <span className="linked-work-count">
-            {rows.length}
-            {more !== null && "+"}
-          </span>
-        </h3>
+    <RailSection label="Relationships">
+      <div id={`linked-work-${reference}`} className="linked-work">
+        {error && <p role="alert">{error}</p>}
+        {current.failure && (
+          <p role="alert">
+            Relationships could not be refreshed: {current.failure}
+          </p>
+        )}
+        <ul className="linked-work-rows">
+          {rows.map((row, index) => (
+            <li
+              key={`${row.kind}-${row.reference}`}
+              className="linked-work-row"
+              data-kind={row.kind}
+            >
+              {/* Rows of one kind read as a group: only the first shows its
+                  label, and screen readers still hear it on every row. */}
+              <span
+                className="linked-work-label"
+                data-repeat={rows[index - 1]?.kind === row.kind || undefined}
+              >
+                {linkLabel(row.kind)}
+              </span>
+              <StatusIcon
+                status={row.status}
+                size={14}
+                decorative
+                className="linked-work-icon"
+              />
+              <span className="linked-work-reference">{row.reference}</span>
+              <Button
+                variant="link"
+                className="linked-work-title"
+                onClick={() => select(row.reference)}
+              >
+                {row.title}
+              </Button>
+              <span className="linked-work-status">{statusText(row)}</span>
+              {isDuplicateKind(row.kind) ? (
+                <RemoveDuplicate
+                  row={row}
+                  ticket={reference}
+                  disabled={pending}
+                  onRemove={() => void work.remove(row)}
+                  onReview={() => work.setReviewing(true)}
+                />
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="linked-work-remove"
+                  title="Remove relationship"
+                  aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+                  disabled={pending}
+                  onClick={() => void work.remove(row)}
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+        {work.more !== null && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void work.showMore()}
+          >
+            Show more links
+          </Button>
+        )}
         <div className="linked-work-actions">
           <Button variant="ghost" size="sm" onClick={onOpenGraph}>
             <Network aria-hidden="true" />
@@ -214,73 +191,7 @@ export function LinkedWork({
           {linkAction}
         </div>
       </div>
-      {error && <p role="alert">{error}</p>}
-      {current.failure && (
-        <p role="alert">
-          Linked work could not be refreshed: {current.failure}
-        </p>
-      )}
-      <ul className="linked-work-rows">
-        {rows.map((row, index) => (
-          <li
-            key={`${row.kind}-${row.reference}`}
-            className="linked-work-row"
-            data-kind={row.kind}
-          >
-            {/* Rows of one kind read as a group: only the first shows its
-                label, and screen readers still hear it on every row. */}
-            <span
-              className="linked-work-label"
-              data-repeat={rows[index - 1]?.kind === row.kind || undefined}
-            >
-              {linkLabel(row.kind)}
-            </span>
-            <StatusIcon
-              status={row.status}
-              size={14}
-              decorative
-              className="linked-work-icon"
-            />
-            <span className="linked-work-reference">{row.reference}</span>
-            <Button
-              variant="link"
-              className="linked-work-title"
-              onClick={() => select(row.reference)}
-            >
-              {row.title}
-            </Button>
-            <span className="linked-work-status">{statusText(row)}</span>
-            {isDuplicateKind(row.kind) ? (
-              <RemoveDuplicate
-                row={row}
-                ticket={reference}
-                disabled={pending}
-                onRemove={() => void remove(row)}
-                onReview={() => setReviewing(true)}
-              />
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="linked-work-remove"
-                title="Remove relationship"
-                aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
-                disabled={pending}
-                onClick={() => void remove(row)}
-              >
-                <X aria-hidden="true" />
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
-      {more !== null && (
-        <Button variant="outline" size="sm" onClick={() => void showMore()}>
-          Show more links
-        </Button>
-      )}
-      {dialogs}
-    </section>
+    </RailSection>
   );
 }
 

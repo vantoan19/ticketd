@@ -1,42 +1,80 @@
+/* The property rail: labeled sections on the canvas surface, beside the
+   document column, or below it when the detail pane is narrower than 652px
+   (a 420px document column plus a 232px rail). */
 .ticket-properties {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 12px;
-  margin: 16px 0 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 20px;
+  min-width: 0;
+  padding: 20px 32px 48px;
+  background: var(--background);
 }
-.ticket-properties-inline {
-  align-items: center;
-  gap: 4px 8px;
-  margin: 12px -12px 24px;
+@container ticket-detail (max-width: 651px) {
+  /* Below the document, sections keep their order but share the width. */
+  .ticket-properties {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  }
 }
-.ticket-property {
+@container ticket-detail (min-width: 652px) {
+  .ticket-properties {
+    padding: 20px;
+  }
+}
+.rail-section {
   display: flex;
   flex-direction: column;
-  align-items: start;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 4px;
   min-width: 0;
   max-width: 100%;
 }
-.ticket-property > span {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  line-height: 20px;
+.rail-label {
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
 }
-.ticket-property > button {
-  max-width: 100%;
+/* Ghost values line up with their label's text rather than their own padding. */
+.rail-section > :is(button, [data-slot="select-trigger"]),
+.rail-attention > button {
+  max-width: calc(100% + 12px);
+  margin-left: -12px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ticket-property small[role="alert"],
+.rail-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.rail-value svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.rail-attention {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.rail-section small {
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.rail-section small[role="alert"],
 .ticket-properties > small[role="alert"] {
-  color: var(--destructive);
+  color: var(--error-foreground);
   max-width: 240px;
 }
 .property-popover {
   width: 280px;
   padding: 8px;
-}
-.ticket-properties > [data-slot="dropdown-menu-trigger"] {
-  margin-left: auto;
 }

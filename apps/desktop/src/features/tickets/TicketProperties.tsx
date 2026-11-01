@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Command,
   CommandEmpty,
@@ -7,8 +7,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
+import { Folder, HardDrive, Layers, Tag, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RailSection } from "./RailSection";
 import { StatusIcon, ticketStatuses } from "./StatusIcon";
 import { Duplicates } from "./Duplicates";
 import {
@@ -47,8 +48,11 @@ export function PropertyPicker({
   compact = false,
   readOnly = false,
   icon: Icon,
+  align = "start",
 }: {
   label: string;
+  /** Which edge of the trigger the choices line up with. */
+  align?: "start" | "end";
   compact?: boolean;
   readOnly?: boolean;
   icon?: LucideIcon;
@@ -82,7 +86,7 @@ export function PropertyPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        align="start"
+        align={align}
         className="property-popover"
         aria-label={`${label} choices`}
       >
@@ -135,12 +139,15 @@ export function TicketProperties({
   onSaved,
   refresh,
   onOpenTicket,
+  children,
 }: {
   ticket: Ticket;
   projects: Project[];
   efforts: Effort[];
   onSaved: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
+  /** Sections that follow Tags in the rail, such as Relationships and Attention. */
+  children?: ReactNode;
   /** Opens another ticket, such as the canonical ticket of a duplicate. */
   onOpenTicket?: (reference: string) => void;
 }) {
@@ -223,60 +230,72 @@ export function TicketProperties({
   const effortName = effort
     ? `${effort.name}${effort.archived ? " (archived)" : ""}`
     : ticket.effort_id || "No Effort";
-  function property(label: string, control: React.ReactNode) {
+  function property(label: string, control: ReactNode) {
     return (
-      <div className="ticket-property">
-        <span className="sr-only">{label}</span>
+      <RailSection label={label}>
         {control}
         {pending === label && <small role="status">Saving…</small>}
         {errors[label] && <small role="alert">{errors[label]}</small>}
-      </div>
+      </RailSection>
     );
   }
   return (
-    <div
+    <aside
       ref={propertiesRef}
-      className="ticket-properties ticket-properties-inline"
+      className="ticket-properties"
       data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
     >
       {property(
         "Status",
-        <Select
-          value={ticket.status}
-          disabled={disabled}
-          onValueChange={(status) => {
-            if (status === ticket.status) return;
-            // Duplicate needs a canonical ticket, so it opens the review.
-            if (status === "Duplicate") {
-              setDuplicateOpen(true);
-              return;
-            }
-            void save("Status", () =>
-              client.changeTicket(ticket.reference, { status }),
-            );
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            variant="ghost"
-            readOnly={ticket.trashed}
-            aria-label={`Status: ${ticket.status}`}
-            title="Status"
+        <>
+          <Select
+            value={ticket.status}
+            disabled={disabled}
+            onValueChange={(status) => {
+              if (status === ticket.status) return;
+              // Duplicate needs a canonical ticket, so it opens the review.
+              if (status === "Duplicate") {
+                setDuplicateOpen(true);
+                return;
+              }
+              void save("Status", () =>
+                client.changeTicket(ticket.reference, { status }),
+              );
+            }}
           >
-            <StatusIcon status={ticket.status} decorative />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {ticketStatuses.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {status}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>,
+            <SelectTrigger
+              size="sm"
+              variant="ghost"
+              readOnly={ticket.trashed}
+              aria-label={`Status: ${ticket.status}`}
+              title="Status"
+            >
+              <StatusIcon status={ticket.status} decorative />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {ticketStatuses.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {/* The canonical link belongs beside the status, trashed or not. */}
+          {ticket.duplicate_of && (
+            <Button
+              variant="link"
+              size="sm"
+              className="duplicate-of-link"
+              onClick={() => onOpenTicket?.(ticket.duplicate_of!)}
+            >
+              Duplicate of {ticket.duplicate_of}
+            </Button>
+          )}
+        </>,
       )}
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent className="duplicate-dialog">
@@ -295,21 +314,17 @@ export function TicketProperties({
           />
         </DialogContent>
       </Dialog>
-      {/* The canonical link belongs beside the status, trashed or not. */}
-      {ticket.duplicate_of && (
-        <Button
-          variant="link"
-          size="sm"
-          className="duplicate-of-link"
-          onClick={() => onOpenTicket?.(ticket.duplicate_of!)}
-        >
-          Duplicate of {ticket.duplicate_of}
-        </Button>
-      )}
+      <RailSection label="Source">
+        <span className="rail-value" title="Created and edited in ticketd">
+          <HardDrive aria-hidden="true" />
+          Local
+        </span>
+      </RailSection>
       {property(
         "Project",
         <PropertyPicker
           compact
+          align="end"
           readOnly={ticket.trashed}
           icon={Folder}
           label="Project"
@@ -332,6 +347,7 @@ export function TicketProperties({
         "Effort",
         <PropertyPicker
           compact
+          align="end"
           readOnly={ticket.trashed}
           icon={Layers}
           label="Effort"
@@ -354,6 +370,7 @@ export function TicketProperties({
         "Tags",
         <PropertyPicker
           compact
+          align="end"
           readOnly={ticket.trashed}
           icon={Tag}
           label="Tags"
@@ -379,6 +396,7 @@ export function TicketProperties({
       {vocabularyError && !ticket.trashed && (
         <small role="status">{vocabularyError}</small>
       )}
-    </div>
+      {children}
+    </aside>
   );
 }

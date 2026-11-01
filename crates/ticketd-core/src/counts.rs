@@ -38,3 +38,20 @@ impl Workspace {
         Ok(counts)
     }
 }
+
+/// Tickets of one filtered result set, by status.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusCounts {
+    pub todo: u64,
+    pub in_progress: u64,
+    pub in_review: u64,
+    pub done: u64,
+    pub canceled: u64,
+    pub duplicate: u64,
+}
+
+impl StatusCounts {
+    pub fn total(&self) -> u64 {
+        self.todo + self.in_progress + self.in_review + self.done + self.canceled + self.duplicate
+    }
+}

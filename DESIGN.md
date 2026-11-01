@@ -409,6 +409,7 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 | Group       | Sections                                |
 | ----------- | --------------------------------------- |
 | Preferences | Appearance, Attention                   |
+| Sources     | GitHub                                  |
 | Workspace   | Location, Backups, Export, Command line |
 | Sources     | One section per available source        |
 | Help        | Keyboard shortcuts, About               |

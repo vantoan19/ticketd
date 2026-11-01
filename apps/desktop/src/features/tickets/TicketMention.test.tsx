@@ -13,6 +13,7 @@ import { TicketWorkspaceView } from "./TicketWorkspaceView";
 import { useBulkEdit } from "./useBulkEdit";
 import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
+import { bridgeDefault } from "@/test/bridge-defaults";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -118,6 +119,8 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                 },
               ]
             : [];
+        case "count_tickets":
+          return bridgeDefault(command);
         case "get_note":
           return null;
         case "is_following":

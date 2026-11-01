@@ -26,6 +26,15 @@ export function bridgeDefault(
     case "search_tags":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
+    case "count_tickets":
+      return {
+        todo: 0,
+        in_progress: 0,
+        in_review: 0,
+        done: 0,
+        canceled: 0,
+        duplicate: 0,
+      };
     case "sidebar_counts":
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":

@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { client, type Project, type Ticket } from "@/lib/api/client";
+import {
+  client,
+  type FindFilter,
+  type Project,
+  type StatusCounts,
+  type Ticket,
+} from "@/lib/api/client";
 import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
+export const PAGE_SIZE = 50;
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
+export function statusTotal(counts: StatusCounts) {
+  return (
+    counts.todo +
+    counts.in_progress +
+    counts.in_review +
+    counts.done +
+    counts.canceled +
+    counts.duplicate
+  );
+}
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
  * fetched after the selection, so it is judged against the stored text rather than
@@ -42,6 +59,12 @@ export function useTicketWorkspace(
   const [family, setFamily] = useState("");
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  // The counts describe the whole filtered result; they are null in Trash,
+  // which lists tickets flat.
+  const [counts, setCounts] = useState<StatusCounts | null>(null);
+  // The offset the displayed tickets were read at, for page-edge navigation.
+  const [loadedOffset, setLoadedOffset] = useState(0);
+  const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null);
   const [selected, selectTicket] = useState<string | null>(null);
   const [mention, setMention] = useState<FollowedMention | null>(null);
   // Counts every selection, including of the ticket already open, so each one
@@ -67,28 +90,30 @@ export function useTicketWorkspace(
     const request = ++generation.current;
     let timeout = 0;
     try {
+      // A search lists newest first, like Trash; every other list is grouped by
+      // status, so it pages through workflow order.
+      const filterArgs: FindFilter = {
+        query,
+        project: filter === "all" || filter === "unlinked" ? null : filter,
+        unlinked: filter === "unlinked",
+        effort: effort || null,
+        status: status || null,
+        tags: tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        availability: availability || null,
+        family: family || null,
+        order: query ? "Newest" : "Workflow",
+        limit: PAGE_SIZE,
+        offset,
+      };
       const result = await Promise.race([
         Promise.all([
-          trash
-            ? client.listTrash()
-            : client.findTickets({
-                query,
-                project:
-                  filter === "all" || filter === "unlinked" ? null : filter,
-                unlinked: filter === "unlinked",
-                effort: effort || null,
-                status: status || null,
-                tags: tags
-                  .split(",")
-                  .map((tag) => tag.trim())
-                  .filter(Boolean),
-                availability: availability || null,
-                family: family || null,
-                limit: 50,
-                offset,
-              }),
+          trash ? client.listTrash() : client.findTickets(filterArgs),
           client.listProjects(),
           client.listEfforts(),
+          trash ? Promise.resolve(null) : client.countTickets(filterArgs),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -100,6 +125,8 @@ export function useTicketWorkspace(
       if (request !== generation.current) return;
       setQueryError(false);
       setTickets(result[0]);
+      setLoadedOffset(offset);
+      setCounts(result[3]);
       setProjects(result[1]);
       setEfforts(result[2]);
       setRevision((value) => value + 1);
@@ -138,6 +165,13 @@ export function useTicketWorkspace(
       generationRef.current++;
     };
   }, [refresh]);
+  // Previous or Next at the edge of a page moves to the neighboring page and
+  // opens the ticket at its near edge once that page has loaded.
+  if (pendingEdge && loadedOffset === offset) {
+    const target = pendingEdge === "first" ? tickets[0] : tickets.at(-1);
+    setPendingEdge(null);
+    if (target) setSelected(target.reference);
+  }
   useEffect(() => {
     if (!selected) return;
     let active = true;
@@ -209,6 +243,28 @@ export function useTicketWorkspace(
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
   }, []);
+  const total = counts ? statusTotal(counts) : tickets.length;
+  const selectedIndex = tickets.findIndex(
+    (item) => item.reference === selected,
+  );
+  /** The selected ticket's place in the visible list, across pages. */
+  const position =
+    selectedIndex >= 0 && loadedOffset === offset
+      ? { index: offset + selectedIndex + 1, total }
+      : null;
+  function openAdjacent(direction: 1 | -1) {
+    if (selectedIndex < 0) return;
+    const next = tickets[selectedIndex + direction];
+    if (next) {
+      setSelected(next.reference);
+    } else if (direction === 1 && offset + tickets.length < total) {
+      setPendingEdge("first");
+      setOffset(offset + PAGE_SIZE);
+    } else if (direction === -1 && offset > 0) {
+      setPendingEdge("last");
+      setOffset(Math.max(0, offset - PAGE_SIZE));
+    }
+  }
   const scopeName =
     navigation.kind === "trash"
       ? "Trash"
@@ -273,6 +329,11 @@ export function useTicketWorkspace(
     trash,
     setTrash,
     tickets,
+    counts,
+    total,
+    grouped: !trash && !query,
+    position,
+    openAdjacent,
     selected,
     mention,
     clearMention,

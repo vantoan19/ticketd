@@ -4,8 +4,8 @@ mod cli_status;
 use ticketd_core::{
     BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence,
     EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Project, SafetyBackup, SidebarCounts,
-    Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo,
-    WriteRequest, WriteResult,
+    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -180,6 +180,12 @@ fn show_ticket(reference: String) -> Result<Ticket, String> {
 fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
     Workspace::open_default()
         .and_then(|w| w.find_tickets(&filter))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, String> {
+    Workspace::open_default()
+        .and_then(|w| w.count_tickets(&filter))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -829,6 +835,7 @@ pub fn run() -> Result<(), tauri::Error> {
             show_ticket,
             search_tickets,
             find_tickets,
+            count_tickets,
             dependency_graph,
             list_trash,
             set_trashed,

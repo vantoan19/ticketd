@@ -29,7 +29,7 @@ export function TicketWorkspaceView({
   bulk: BulkEdit;
   hidden: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
-  onCreate: (trigger: HTMLButtonElement) => void;
+  onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
   const { selected, setSelected, clearMention } = workspace;
   // This view is hidden, not unmounted, when another view opens. Leaving counts as
