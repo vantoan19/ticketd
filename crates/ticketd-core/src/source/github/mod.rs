@@ -15,8 +15,9 @@ use serde_json::Value;
 use super::{
     contract::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
-        ConnectorDescriptor, DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue,
+        ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue,
         ExternalRef, ExternalState, SourceError,
+        ExternalComment, ExternalEvent, ExternalEventKind,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -30,6 +31,8 @@ pub const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
 const MAX_REDIRECTS: usize = 3;
 const OPTION_PAGES: usize = 5;
 const LABEL_REPOSITORIES: usize = 5;
+/// Pages (of 100) read for one issue's comments or events before giving up.
+const CONVERSATION_PAGES: usize = 50;
 
 pub struct GithubConnector {
     api_url: String,
@@ -186,7 +189,11 @@ impl Connector for GithubConnector {
             provider: PROVIDER.into(),
             name: "GitHub".into(),
             contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
+            capabilities: vec![
+                Capability::Discover,
+                Capability::Fetch,
+                Capability::Comments,
+            ],
             schema: Self::schema(),
         }
     }
@@ -352,15 +359,7 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
-        let (repository, number) = reference
-            .locator
-            .rsplit_once('#')
-            .filter(|(repository, number)| {
-                ValueFormat::OwnerName.is_valid(repository)
-                    && !number.is_empty()
-                    && number.chars().all(|c| c.is_ascii_digit())
-            })
-            .ok_or_else(|| SourceError::Protocol("the issue locator is not valid".into()))?;
+        let (repository, number) = split_locator(&reference.locator)?;
         let url = format!(
             "{}/repos/{}/issues/{number}",
             self.api_url,
@@ -374,6 +373,131 @@ impl Connector for GithubConnector {
             ))
         })
     }
+
+    fn conversation(
+        &self,
+        _config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Conversation, SourceError> {
+        let (repository, number) = split_locator(&reference.locator)?;
+        let subject = format!("issue {}", reference.locator);
+        let base = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(repository)
+        );
+        let mut conversation = Conversation::default();
+        for item in self.all_pages(&format!("{base}/comments?per_page=100"), &subject)? {
+            conversation.comments.push(translate_comment(&item)?);
+        }
+        for item in self.all_pages(&format!("{base}/events?per_page=100"), &subject)? {
+            if let Some(event) = translate_event(&item)? {
+                conversation.events.push(event);
+            }
+        }
+        Ok(conversation)
+    }
+}
+
+impl GithubConnector {
+    /// Every item of a paginated list, following `Link` headers that stay under the API.
+    fn all_pages(&self, first: &str, subject: &str) -> Result<Vec<Value>, SourceError> {
+        let mut items = Vec::new();
+        let mut url = Some(first.to_owned());
+        for _ in 0..CONVERSATION_PAGES {
+            let Some(current) = url.take() else {
+                return Ok(items);
+            };
+            let (page, next) = self.json(&current, subject)?;
+            items.extend(
+                page.as_array()
+                    .ok_or_else(|| SourceError::Protocol("expected a list".into()))?
+                    .iter()
+                    .cloned(),
+            );
+            url = next;
+        }
+        match url {
+            None => Ok(items),
+            Some(_) => Err(SourceError::Protocol(
+                "the conversation has too many pages to read".into(),
+            )),
+        }
+    }
+}
+
+fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
+    locator
+        .rsplit_once('#')
+        .filter(|(repository, number)| {
+            ValueFormat::OwnerName.is_valid(repository)
+                && !number.is_empty()
+                && number.chars().all(|c| c.is_ascii_digit())
+        })
+        .ok_or_else(|| SourceError::Protocol("the issue locator is not valid".into()))
+}
+
+fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
+    let text = |key: &str| item.get(key).and_then(Value::as_str);
+    let id = item
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| SourceError::Protocol("a comment had no id".into()))?;
+    let created_at = text("created_at").unwrap_or_default().to_owned();
+    Ok(ExternalComment {
+        id: id.to_string(),
+        // GitHub reports a deleted account's comments with no user.
+        author: item
+            .get("user")
+            .and_then(|user| user.get("login"))
+            .and_then(Value::as_str)
+            .unwrap_or("ghost")
+            .to_owned(),
+        body: text("body").unwrap_or_default().to_owned(),
+        url: text("html_url").unwrap_or_default().to_owned(),
+        updated_at: text("updated_at").map_or_else(|| created_at.clone(), str::to_owned),
+        created_at,
+    })
+}
+
+/// Only the events the design shows; labels, milestones, references and the
+/// rest are not part of the conversation.
+fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
+    let kind = match item.get("event").and_then(Value::as_str) {
+        Some("closed") => ExternalEventKind::Closed(
+            match item.get("state_reason").and_then(Value::as_str) {
+                Some("completed") => ClosureReason::Completed,
+                Some("not_planned") => ClosureReason::NotPlanned,
+                Some("duplicate") => ClosureReason::Duplicate,
+                _ => ClosureReason::Unknown,
+            },
+        ),
+        Some("reopened") => ExternalEventKind::Reopened,
+        Some("assigned") => ExternalEventKind::Assigned,
+        Some("unassigned") => ExternalEventKind::Unassigned,
+        _ => return Ok(None),
+    };
+    let id = item
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| SourceError::Protocol("an event had no id".into()))?;
+    let login = |key: &str| {
+        item.get(key)
+            .and_then(|who| who.get("login"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    };
+    Ok(Some(ExternalEvent {
+        id: id.to_string(),
+        kind,
+        actor: login("actor"),
+        subject: login("assignee"),
+        created_at: item
+            .get("created_at")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    }))
 }
 
 #[derive(Default)]
