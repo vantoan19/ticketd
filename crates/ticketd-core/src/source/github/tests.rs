@@ -802,3 +802,129 @@ fn publishing_without_a_credential_sends_nothing() {
     assert!(error.ruled_out_creation());
     assert!(fixture.urls().is_empty());
 }
+
+fn conversation_of(engine: &Engine) -> Result<Conversation, SourceError> {
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "7".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    engine
+        .conversation(
+            "github",
+            &config(json!({"repositories": ["o/one"]})),
+            &reference,
+        )
+        .map(|read| read.expect("github reads conversations"))
+}
+
+fn gh_comment(id: u64, login: Option<&str>, body: &str, at: &str) -> Value {
+    json!({
+        "id": id, "user": login.map(|l| json!({"login": l})), "body": body,
+        "html_url": format!("https://github.example/o/one/issues/7#issuecomment-{id}"),
+        "created_at": at, "updated_at": at
+    })
+}
+
+#[test]
+fn comments_and_events_follow_every_page_and_translate_to_neutral_entries() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let comments = format!("{API}/repos/o/one/issues/7/comments?per_page=100");
+    let comments_two = format!("{API}/repos/o/one/issues/7/comments?per_page=100&page=2");
+    let events = format!("{API}/repos/o/one/issues/7/events?per_page=100");
+    fixture.respond(
+        &comments,
+        ok_with(
+            json!([gh_comment(
+                11,
+                Some("alice"),
+                "first",
+                "2026-01-02T00:00:00Z"
+            )]),
+            &[("link", &format!("<{comments_two}>; rel=\"next\""))],
+        ),
+    );
+    let mut edited = gh_comment(12, None, "from a deleted account", "2026-01-03T00:00:00Z");
+    edited["updated_at"] = json!("2026-01-04T00:00:00Z");
+    fixture.respond(&comments_two, ok(json!([edited])));
+    fixture.respond(
+        &events,
+        ok(json!([
+            {"id": 21, "event": "labeled", "actor": {"login": "alice"}, "created_at": "2026-01-01T00:00:00Z"},
+            {"id": 22, "event": "assigned", "actor": {"login": "alice"}, "assignee": {"login": "bob"}, "created_at": "2026-01-01T01:00:00Z"},
+            {"id": 23, "event": "unassigned", "actor": {"login": "alice"}, "assignee": {"login": "bob"}, "created_at": "2026-01-01T02:00:00Z"},
+            {"id": 24, "event": "closed", "actor": {"login": "carol"}, "state_reason": "duplicate", "created_at": "2026-01-05T00:00:00Z"},
+            {"id": 25, "event": "reopened", "actor": {"login": "carol"}, "created_at": "2026-01-06T00:00:00Z"},
+            {"id": 26, "event": "closed", "actor": {"login": "carol"}, "state_reason": "not_planned", "created_at": "2026-01-07T00:00:00Z"},
+            {"id": 27, "event": "closed", "actor": null, "created_at": "2026-01-08T00:00:00Z"}
+        ])),
+    );
+
+    let read = conversation_of(&engine).unwrap();
+
+    assert_eq!(read.comments.len(), 2);
+    assert_eq!(read.comments[0].id, "11");
+    assert_eq!(read.comments[0].author, "alice");
+    assert_eq!(
+        read.comments[0].url,
+        "https://github.example/o/one/issues/7#issuecomment-11"
+    );
+    assert_eq!(read.comments[1].author, "ghost");
+    assert_eq!(read.comments[1].updated_at, "2026-01-04T00:00:00Z");
+    let kinds: Vec<_> = read.events.iter().map(|e| e.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            ExternalEventKind::Assigned,
+            ExternalEventKind::Unassigned,
+            ExternalEventKind::Closed(ClosureReason::Duplicate),
+            ExternalEventKind::Reopened,
+            ExternalEventKind::Closed(ClosureReason::NotPlanned),
+            ExternalEventKind::Closed(ClosureReason::Unknown),
+        ],
+        "unrelated events such as labels are left out"
+    );
+    assert_eq!(read.events[0].subject.as_deref(), Some("bob"));
+    assert_eq!(read.events[0].actor.as_deref(), Some("alice"));
+    assert_eq!(read.events[5].actor, None);
+    assert_eq!(fixture.urls(), [comments, comments_two, events]);
+}
+
+#[test]
+fn conversation_failures_are_classified_and_never_follow_foreign_links() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/one/issues/7/comments?per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    assert!(matches!(
+        conversation_of(&engine),
+        Err(SourceError::NotFound(_))
+    ));
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/one/issues/7/comments?per_page=100"),
+        ok_with(
+            json!([]),
+            &[("link", "<https://elsewhere.example/steal>; rel=\"next\"")],
+        ),
+    );
+    assert!(matches!(
+        conversation_of(&engine),
+        Err(SourceError::Protocol(_))
+    ));
+    assert!(!fixture.urls().iter().any(|u| u.contains("elsewhere")));
+}
+
+#[test]
+fn github_declares_that_it_reads_comments() {
+    let (_, engine) = setup(Some(TOKEN));
+    assert!(
+        engine.connectors()[0]
+            .capabilities
+            .contains(&Capability::Comments)
+    );
+}

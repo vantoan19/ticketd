@@ -130,6 +130,14 @@ with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets.
 
+The source conversation (an external ticket's comments and timeline events) is
+a read-only mirror in `source_conversation`, keyed by ticket and the source's
+own entry id. It has no write workflow: refresh replaces it in the same short
+write as the ticket, only when the issue changed since it was last read, and a
+failed read keeps what was retrieved. Authors are the source's identities, never
+an editing agent, and the rows survive takeover as provenance. Agents read it
+with `ticketd context T-n --conversation`.
+
 Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility and saves the attempt as `in_flight` with the exact title,

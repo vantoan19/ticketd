@@ -27,6 +27,8 @@ pub enum Capability {
     Fetch,
     /// Create an ordinary issue from a local ticket (optional).
     Publish,
+    /// Read an issue's comments and timeline events (optional).
+    Comments,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +100,50 @@ pub struct ExternalIssue {
     /// contract 1; connectors that cannot tell leave it `None`.
     #[serde(default)]
     pub duplicate_of: Option<ExternalRef>,
+}
+
+/// A comment on an external issue, as its source reports it. Authors are the
+/// source's own identities, never ticketd editing agents.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalComment {
+    /// Stable within the issue; repeated reads of one comment return one id.
+    pub id: String,
+    pub author: String,
+    pub body: String,
+    /// Where the comment can be viewed at the source.
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// What happened in an external timeline event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event", content = "reason", rename_all = "snake_case")]
+pub enum ExternalEventKind {
+    Closed(ClosureReason),
+    Reopened,
+    Assigned,
+    Unassigned,
+}
+
+/// A timeline event such as a closure, reopening or assignment change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalEvent {
+    pub id: String,
+    pub kind: ExternalEventKind,
+    /// Who acted, when the source says.
+    pub actor: Option<String>,
+    /// Whom an assignment change concerns.
+    pub subject: Option<String>,
+    pub created_at: String,
+}
+
+/// An issue's whole conversation. Order is not significant; the engine sorts
+/// it chronologically.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Conversation {
+    pub comments: Vec<ExternalComment>,
+    pub events: Vec<ExternalEvent>,
 }
 
 /// One request for a page of discovery results.
@@ -253,6 +299,17 @@ pub trait Connector: Send + Sync {
         config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
+
+    /// Returns every comment and timeline event of one issue, following the
+    /// provider's paging itself. Only called when the descriptor declares
+    /// [`Capability::Comments`].
+    fn conversation(
+        &self,
+        _config: &ConfigValues,
+        _reference: &ExternalRef,
+    ) -> Result<Conversation, SourceError> {
+        Err(SourceError::Unsupported("comments"))
+    }
 
     /// Where an issue can be published for this configuration, as values for
     /// [`PublishRequest::destination`]. Empty when the connector cannot say.

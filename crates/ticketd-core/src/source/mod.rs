@@ -11,6 +11,7 @@
 //!   network I/O ever happens while the database is locked.
 
 pub mod contract;
+mod conversation;
 pub mod engine;
 pub mod github;
 mod publication;
@@ -22,9 +23,11 @@ use serde::{Deserialize, Serialize};
 
 pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
-    DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    PublishRequest, SourceError,
+    Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
+    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, PublishRequest,
+    SourceError,
 };
+pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use publication::{
     AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
@@ -75,11 +78,17 @@ pub(crate) fn migrate_tracking(connection: &rusqlite::Connection) -> Result<(), 
     tracking::migrate(connection)
 }
 
-/// Step 24: publication attempts.
+/// Step 24: retrieved source comments and timeline events.
+pub(crate) fn migrate_conversation(connection: &rusqlite::Connection) -> Result<(), Error> {
+    conversation::migrate(connection)
+}
+
+/// Step 25: publication attempts.
 pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
     publication::migrate(connection)
 }
 
+pub(crate) use conversation::load as conversation_entries;
 pub(crate) use tracking::{guard_change, guard_duplicate};
 
 /// Fills the ticket's external side and any blocking publication attempt.

@@ -57,6 +57,19 @@ fn serve() -> String {
                            "state_reason": "completed", "html_url": "https://github.example/o/r/issues/1",
                            "assignees": [], "labels": [], "created_at": "", "updated_at": ""}),
                 )
+            } else if path.starts_with("/repos/o/r/issues/1/comments") {
+                (
+                    "200 OK",
+                    json!([{"id": 501, "user": {"login": "alice"}, "body": "Please take a look",
+                            "html_url": "https://github.example/o/r/issues/1#issuecomment-501",
+                            "created_at": "2026-01-02T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"}]),
+                )
+            } else if path.starts_with("/repos/o/r/issues/1/events") {
+                (
+                    "200 OK",
+                    json!([{"id": 601, "event": "closed", "actor": {"login": "bob"}, "state_reason": "completed",
+                            "created_at": "2026-01-03T00:00:00Z"}]),
+                )
             } else if path.starts_with("/repos/o/r/issues") {
                 (
                     "200 OK",
@@ -279,6 +292,25 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     assert_eq!(shown["source"]["display"], "o/r#1");
     assert_eq!(shown["source"]["ownership"], "external");
     assert_eq!(shown["source"]["content_locked"], true);
+    // The source conversation is available to agents, apart from local notes.
+    cli.run(&["note", "add", "T-1", "--content", "my own observation"]);
+    let context = cli.run(&["context", "T-1", "--conversation", "--notes"]);
+    let first = &context["source_conversation"]["items"][0];
+    assert_eq!(
+        (first["type"].as_str(), first["author"].as_str()),
+        (Some("comment"), Some("alice"))
+    );
+    assert_eq!(first["body"]["text"], "Please take a look");
+    assert_eq!(
+        context["source_conversation"]["items"][1]["event"],
+        "closed_completed"
+    );
+    assert_eq!(context["notes"]["items"].as_array().unwrap().len(), 1);
+    assert!(
+        cli.run(&["context", "T-1"])
+            .get("source_conversation")
+            .is_none()
+    );
     // External content is read-only; local progress is allowed.
     let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
     assert!(stderr.contains("owned by github"), "{stderr}");

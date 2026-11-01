@@ -169,6 +169,16 @@ fn ticket_backlinks(
         .map_err(|e| e.to_string())
 }
 
+/// The source's comments and events retrieved for a ticket (read-only).
+#[tauri::command]
+fn source_conversation(
+    reference: String,
+) -> Result<Vec<ticketd_core::source::ConversationEntry>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.source_conversation(&reference))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn show_ticket(reference: String) -> Result<Ticket, String> {
     Workspace::open_default()
@@ -923,6 +933,7 @@ pub fn run() -> Result<(), tauri::Error> {
             edit_evidence,
             delete_evidence,
             ticket_backlinks,
+            source_conversation,
             list_notes,
             get_note,
             add_note,

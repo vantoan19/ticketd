@@ -8,6 +8,7 @@ import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
+import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SourceLink } from "@/features/tickets/SourceLink";
@@ -157,6 +158,14 @@ export function TicketPage({
             reference={ticket.reference}
             revision={revision}
             select={onMention}
+          />
+        )}
+        {active && ticket.source && (
+          <SourceConversation
+            source={ticket.source}
+            reference={ticket.reference}
+            revision={revision}
+            select={select}
           />
         )}
         {source && (
