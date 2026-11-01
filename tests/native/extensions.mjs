@@ -79,6 +79,20 @@ const waitForSelectionReset = () =>
       ),
     "Bulk selection did not reset",
   );
+// Radix closes a hover-opened submenu as soon as the pointer seems to leave its
+// trigger, and in the WebKitGTK smoke run one closed under a resting pointer.
+// Choose from submenus with the keyboard instead, as a keyboard user would, so
+// the open submenu doesn't depend on where the pointer is.
+async function chooseFromSubmenu(submenu, item) {
+  const trigger = await browser.$(`[role="menuitem"]=${submenu}`);
+  await trigger.waitForDisplayed({ timeout: 15000 });
+  await browser.execute((element) => element.focus(), trigger);
+  await browser.keys("ArrowRight");
+  const choice = await browser.$(item);
+  await choice.waitForDisplayed({ timeout: 15000 });
+  await browser.execute((element) => element.focus(), choice);
+  await browser.keys("Enter");
+}
 try {
   // Follow in desktop, observe external CLI changes and navigate to the note.
   await open(source.title);
@@ -311,8 +325,10 @@ try {
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await click(await browser.$('[aria-label="Organize selected tickets"]'));
-  await click(await browser.$('[role="menuitem"]=Move to project'));
-  await click(await browser.$(`[role="menuitem"]=${project.name}`));
+  await chooseFromSubmenu(
+    "Move to project",
+    `[role="menuitem"]=${project.name}`,
+  );
   await waitFor(
     () =>
       run("show", source.reference).project_id === project.id &&
@@ -323,8 +339,7 @@ try {
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await click(await browser.$('[aria-label="Organize selected tickets"]'));
-  await click(await browser.$('[role="menuitem"]=Set Effort'));
-  await click(await browser.$(`[role="menuitem"]*=${effort.name}`));
+  await chooseFromSubmenu("Set Effort", `[role="menuitem"]*=${effort.name}`);
   await waitFor(
     () =>
       run("show", source.reference).effort_id === effort.id &&
