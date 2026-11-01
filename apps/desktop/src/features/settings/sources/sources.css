@@ -1,0 +1,118 @@
+/* Source cards: schema-rendered form, suggestions, and discovery preview. */
+.source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+.source-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.source-required {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.source-status {
+  margin-top: 12px;
+}
+.source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 6px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  font-size: 13px;
+}
+.source-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+.source-chip button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.source-chip button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-suggestions {
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.source-suggestions > p {
+  margin: 0;
+  padding: 6px 8px;
+}
+.source-suggestions ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source-suggestions li button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+.source-suggestions li button:hover {
+  background: var(--accent);
+}
+.source-suggestions li button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-preview {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--recessed);
+}
+.source-preview-list {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.source-preview-list li {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.source-preview-ref {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.source-preview-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

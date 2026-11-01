@@ -24,6 +24,7 @@ export function bridgeDefault(
     case "inbox":
     case "safety_backups":
     case "search_tags":
+    case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":
       return {
@@ -48,7 +49,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 20,
+        format_version: 22,
       };
     case "check_cli":
       return {

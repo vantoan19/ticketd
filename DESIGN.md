@@ -411,12 +411,14 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 | Preferences | Appearance, Attention                   |
 | Sources     | GitHub                                  |
 | Workspace   | Location, Backups, Export, Command line |
+| Sources     | One section per available source        |
 | Help        | Keyboard shortcuts, About               |
 
 - **Page:** one centered column of cards. Each card has a 12px radius and the shadow ring (no separate border), with 32px between cards.
 - **Card footer:** a card may end with a recessed footer (recessed surface) for explanations and secondary actions. Keep export and backup explanations in the footer beside their actions.
 - **Controls:** use a segmented control for an exclusive choice among two to four options and a switch for an on/off preference.
 - **Applying changes:** changes apply immediately. There is no Save button for preferences; show a failure beside the control if one cannot be applied.
+- **Sources:** a source appears only when its connector is available. Its card is the exception to immediate application: it shows Saved configuration or Unsaved changes, and Save stays unavailable until Preview matches has run for the current rules. Saving stores rules only and says that no tickets were imported.
 - **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
 - **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
 - **Sources:** add a source’s section only when its connector exists. It shows the connection, discovery filters with a preview of matching issues before saving, the refresh schedule, and the last refresh.

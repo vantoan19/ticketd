@@ -46,6 +46,10 @@ impl Workspace {
             ("dependencies", "blocker_id, dependent_id"),
             ("contextual_relationships", "kind, source_id, target_id"),
             ("ticket_parents", "child_id, parent_id"),
+            (
+                "source_configurations",
+                "provider, configuration, account, contract_version, saved_at",
+            ),
         ] {
             let mut statement =
                 tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;
