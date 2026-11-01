@@ -1,4 +1,4 @@
-use crate::{Error, Ticket, Workspace, history, relationships};
+use crate::{Error, Status, Ticket, Workspace, history, relationships};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,19 @@ pub struct DependencyEdge {
     pub dependent: String,
     pub replacement_blocker: String,
     pub replacement_dependent: String,
+    /// The dependent's status when the review was built.
+    pub dependent_status: Status,
+    /// Whether the dependent is Ready now: Todo with every blocker Done.
+    pub dependent_ready: bool,
+    /// Whether the waiting ticket would be Ready after each choice, by the same blocker rule
+    /// as everywhere else. The waiting ticket is the dependent, except that Replace moves the
+    /// edge to `replacement_dependent`. The duplicate counts as Canceled in a duplicate review.
+    pub ready_if_replaced: bool,
+    pub ready_if_removed: bool,
+    pub ready_if_kept: bool,
 }
+// The edge is what a review must still match when applied, so these live fields make a
+// status change in the dependent or its other blockers a stale review.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyChoice {
@@ -36,6 +48,12 @@ pub struct DuplicateDependencyPreview {
     /// Parallel to `edges`: the reason Replace is invalid for that edge, if any.
     #[serde(default)]
     pub replacement_issues: Vec<Option<ReplacementIssue>>,
+}
+
+/// Which ticket a review cancels, for judging readiness after its choices.
+struct ReadinessView<'a> {
+    source_id: &'a str,
+    source_canceled: bool,
 }
 
 pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
@@ -163,7 +181,26 @@ impl Workspace {
         source: &str,
         canonical: &str,
     ) -> Result<DuplicateDependencyPreview, Error> {
-        let (destination, edges) = self.dependency_edges(source, canonical)?;
+        self.preview_dependencies(source, canonical, true)
+    }
+
+    /// Previews moving `source`'s dependencies to `canonical` without canceling `source`,
+    /// as a separate dependency review does.
+    pub fn preview_dependency_move(
+        &self,
+        source: &str,
+        canonical: &str,
+    ) -> Result<DuplicateDependencyPreview, Error> {
+        self.preview_dependencies(source, canonical, false)
+    }
+
+    fn preview_dependencies(
+        &self,
+        source: &str,
+        canonical: &str,
+        source_canceled: bool,
+    ) -> Result<DuplicateDependencyPreview, Error> {
+        let (destination, edges) = self.dependency_edges(source, canonical, source_canceled)?;
         let replacement_issues = edges
             .iter()
             .map(|edge| self.replacement_issue(edge))
@@ -182,6 +219,7 @@ impl Workspace {
         &self,
         source: &str,
         canonical: &str,
+        source_canceled: bool,
     ) -> Result<(String, Vec<DependencyEdge>), Error> {
         let source_id = relationships::id(&self.connection, source)?;
         let canonical_id = relationships::id(&self.connection, canonical)?;
@@ -192,32 +230,114 @@ impl Workspace {
         )?;
         let destination: String = self.connection.query_row("SELECT 'T-' || t.number FROM tickets t WHERE t.id = COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| r.get(0))?;
         let mut stmt = self.connection.prepare("SELECT 'T-' || b.number, 'T-' || d.number FROM dependencies e JOIN tickets b ON b.id=e.blocker_id JOIN tickets d ON d.id=e.dependent_id WHERE e.blocker_id=?1 OR e.dependent_id=?1 ORDER BY b.number,d.number LIMIT 1001")?;
-        let edges: Vec<DependencyEdge> = stmt
-            .query_map([&source_id], |r| {
-                let blocker: String = r.get(0)?;
-                let dependent: String = r.get(1)?;
-                Ok(DependencyEdge {
-                    replacement_blocker: if blocker == source {
-                        destination.clone()
-                    } else {
-                        blocker.clone()
-                    },
-                    replacement_dependent: if dependent == source {
-                        destination.clone()
-                    } else {
-                        dependent.clone()
-                    },
-                    blocker,
-                    dependent,
-                })
-            })?
+        let pairs: Vec<(String, String)> = stmt
+            .query_map([&source_id], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?;
+        drop(stmt);
+        let view = ReadinessView {
+            source_id: &source_id,
+            source_canceled,
+        };
+        let mut edges = Vec::with_capacity(pairs.len());
+        for (blocker, dependent) in pairs {
+            let replacement_blocker = if blocker == source {
+                destination.clone()
+            } else {
+                blocker.clone()
+            };
+            let replacement_dependent = if dependent == source {
+                destination.clone()
+            } else {
+                dependent.clone()
+            };
+            let blocker_id = relationships::id(&self.connection, &blocker)?;
+            let dependent_id = relationships::id(&self.connection, &dependent)?;
+            let new_blocker_id = relationships::id(&self.connection, &replacement_blocker)?;
+            let new_dependent_id = relationships::id(&self.connection, &replacement_dependent)?;
+            let current = ReadinessView {
+                source_id: &source_id,
+                source_canceled: false,
+            };
+            // Replace moves the edge; when only its blocker changes the waiting ticket
+            // loses the old blocker, and when only its dependent changes the new
+            // dependent gains this blocker on top of its own.
+            let dropped = (new_dependent_id == dependent_id).then_some(blocker_id.as_str());
+            edges.push(DependencyEdge {
+                dependent_status: self.status_of(&dependent_id)?,
+                dependent_ready: self.ready_after(&dependent_id, None, None, &current)?,
+                ready_if_replaced: self.ready_after(
+                    &new_dependent_id,
+                    dropped,
+                    Some(&new_blocker_id),
+                    &view,
+                )?,
+                ready_if_removed: self.ready_after(
+                    &dependent_id,
+                    Some(&blocker_id),
+                    None,
+                    &view,
+                )?,
+                ready_if_kept: self.ready_after(&dependent_id, None, None, &view)?,
+                replacement_blocker,
+                replacement_dependent,
+                blocker,
+                dependent,
+            });
+        }
         if edges.len() > 1000 {
             return Err(Error::InvalidBatch(
                 "dependency review exceeds 1000 edges".into(),
             ));
         }
         Ok((destination, edges))
+    }
+
+    fn status_of(&self, id: &str) -> Result<Status, Error> {
+        let status: String =
+            self.connection
+                .query_row("SELECT status FROM tickets WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
+        Ok(status.parse()?)
+    }
+
+    /// Whether `ticket` is Ready (Todo, every blocker satisfying a dependency) with the
+    /// `dropped` blocker removed and the `added` one present. The duplicate marked by
+    /// the review counts as Canceled when `view` says it will be.
+    fn ready_after(
+        &self,
+        ticket: &str,
+        dropped: Option<&str>,
+        added: Option<&str>,
+        view: &ReadinessView,
+    ) -> Result<bool, Error> {
+        let status_after = |id: &str| -> Result<Status, Error> {
+            if view.source_canceled && id == view.source_id {
+                Ok(Status::Canceled)
+            } else {
+                self.status_of(id)
+            }
+        };
+        if status_after(ticket)? != Status::Todo {
+            return Ok(false);
+        }
+        let mut stmt = self
+            .connection
+            .prepare("SELECT blocker_id FROM dependencies WHERE dependent_id = ?1")?;
+        let blockers = stmt
+            .query_map([ticket], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for blocker in blockers
+            .iter()
+            .map(String::as_str)
+            .filter(|b| Some(*b) != dropped)
+            .chain(added)
+        {
+            if !status_after(blocker)?.satisfies_dependency() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Judges the replacement against the graph without the edge it would replace.
@@ -260,7 +380,14 @@ impl Workspace {
             .execute_batch("SAVEPOINT duplicate_review")?;
         let result = (|| {
             crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(source, canonical, expected_canonical, &decisions, agent)?;
+            self.apply_dependency_review(
+                source,
+                canonical,
+                expected_canonical,
+                &decisions,
+                true,
+                agent,
+            )?;
             self.mark_duplicate_internal(source, canonical, agent, true)
         })();
         match result {
@@ -287,7 +414,14 @@ impl Workspace {
             .execute_batch("SAVEPOINT dependency_review")?;
         let result = (|| {
             crate::transaction_write_lock(&self.connection)?;
-            self.apply_dependency_review(source, canonical, expected_canonical, &decisions, agent)?;
+            self.apply_dependency_review(
+                source,
+                canonical,
+                expected_canonical,
+                &decisions,
+                false,
+                agent,
+            )?;
             self.show_ticket(source)
         })();
         match result {
@@ -309,9 +443,11 @@ impl Workspace {
         canonical: &str,
         expected_canonical: &str,
         decisions: &[DependencyDecision],
+        source_canceled: bool,
         agent: Option<&str>,
     ) -> Result<(), Error> {
-        let (destination, current_edges) = self.dependency_edges(source, canonical)?;
+        let (destination, current_edges) =
+            self.dependency_edges(source, canonical, source_canceled)?;
         let edges: Vec<_> = decisions.iter().map(|d| d.edge.clone()).collect();
         if edges != current_edges || expected_canonical != destination {
             return Err(Error::DependencyReviewChanged);

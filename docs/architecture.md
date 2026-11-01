@@ -110,7 +110,12 @@ To review duplicate dependencies through the CLI, run `ticketd preview-duplicate
 T-1 T-2`. Submit the returned `canonical` as `expected_canonical` and each edge
 with an explicit `replace`, `remove`, or `retain` choice using `ticketd write`
 with operation `mark_duplicate_reviewed`, source, canonical, decisions, and an
-optional agent. If the affected edges or resolved canonical change, preview again.
+optional agent. Each edge also reports the dependent's current status and
+whether it is Ready, and whether it would be Ready after Replace, Remove, or Keep
+(`ready_if_replaced`, `ready_if_removed`, `ready_if_kept`), using the shared
+blocker rule. Pass `--separate` to judge a separate dependency review, which does
+not cancel the source. If the affected edges, their dependents' status or
+readiness, or the resolved canonical change, preview again.
 For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived

@@ -84,6 +84,18 @@ const dependencyEdgeSchema = z.object({
   dependent: z.string(),
   replacement_blocker: z.string(),
   replacement_dependent: z.string(),
+  dependent_status: z.enum([
+    "Todo",
+    "In progress",
+    "In review",
+    "Done",
+    "Canceled",
+  ]),
+  dependent_ready: z.boolean(),
+  // Whether the waiting ticket is Ready after each choice, decided by the core.
+  ready_if_replaced: z.boolean(),
+  ready_if_removed: z.boolean(),
+  ready_if_kept: z.boolean(),
 });
 const duplicatePreviewSchema = z.object({
   canonical: z.string(),
@@ -203,9 +215,13 @@ export const client = {
         ),
       );
   },
-  async previewDuplicate(source: string, canonical: string) {
+  async previewDuplicate(source: string, canonical: string, separate = false) {
     return duplicatePreviewSchema.parse(
-      await invoke("preview_duplicate_dependencies", { source, canonical }),
+      await invoke("preview_duplicate_dependencies", {
+        source,
+        canonical,
+        separate,
+      }),
     );
   },
   async markDuplicateReviewed(

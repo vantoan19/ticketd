@@ -448,9 +448,16 @@ fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
 fn preview_duplicate_dependencies(
     source: String,
     canonical: String,
+    separate: Option<bool>,
 ) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
     Workspace::open_default()
-        .and_then(|workspace| workspace.preview_duplicate_dependencies(&source, &canonical))
+        .and_then(|workspace| {
+            if separate.unwrap_or(false) {
+                workspace.preview_dependency_move(&source, &canonical)
+            } else {
+                workspace.preview_duplicate_dependencies(&source, &canonical)
+            }
+        })
         .map_err(|e| e.to_string())
 }
 

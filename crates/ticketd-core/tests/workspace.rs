@@ -3191,3 +3191,112 @@ fn a_prerequisite_is_unresolved_until_it_is_done() {
         ]
     );
 }
+
+fn set_status(
+    ws: &mut Workspace,
+    reference: &str,
+    status: Status,
+) -> Result<(), ticketd_core::Error> {
+    ws.change_ticket(
+        reference,
+        TicketPatch {
+            status: Some(status),
+            ..Default::default()
+        },
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn duplicate_preview_reports_each_dependents_status_and_readiness_per_choice() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let waiting = ws.create_ticket("Waits only on duplicate").unwrap();
+    let also_blocked = ws.create_ticket("Has another open blocker").unwrap();
+    let other = ws.create_ticket("Other blocker").unwrap();
+    let started = ws.create_ticket("Already started").unwrap();
+    for dependent in [&waiting, &also_blocked, &started] {
+        ws.add_dependency(&source.reference, &dependent.reference, None)
+            .unwrap();
+    }
+    ws.add_dependency(&other.reference, &also_blocked.reference, None)
+        .unwrap();
+    set_status(&mut ws, &started.reference, Status::InProgress).unwrap();
+    set_status(&mut ws, &canonical.reference, Status::Done).unwrap();
+
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let edge = |dependent: &str| {
+        preview
+            .edges
+            .iter()
+            .find(|e| e.blocker == source.reference && e.dependent == dependent)
+            .unwrap()
+            .clone()
+    };
+    let waiting = edge(&waiting.reference);
+    assert_eq!(waiting.dependent_status, Status::Todo);
+    assert!(!waiting.dependent_ready);
+    assert!(waiting.ready_if_replaced, "canonical is Done");
+    assert!(waiting.ready_if_removed);
+    assert!(!waiting.ready_if_kept, "a canceled blocker never resolves");
+    let also_blocked = edge(&also_blocked.reference);
+    assert!(!also_blocked.ready_if_replaced && !also_blocked.ready_if_removed);
+    let started = edge(&started.reference);
+    assert_eq!(started.dependent_status, Status::InProgress);
+    assert!(!started.ready_if_replaced && !started.ready_if_removed);
+
+    // A separate review does not cancel the existing endpoint, so keeping it can stay Ready.
+    set_status(&mut ws, &source.reference, Status::Done).unwrap();
+    let moved = ws
+        .preview_dependency_move(&source.reference, &canonical.reference)
+        .unwrap();
+    let kept = moved
+        .edges
+        .iter()
+        .find(|e| e.dependent == waiting.dependent)
+        .unwrap();
+    assert!(kept.dependent_ready && kept.ready_if_kept);
+}
+
+#[test]
+fn a_dependent_whose_status_changed_since_the_preview_is_a_stale_review() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, Error};
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = ws.create_ticket("Duplicate").unwrap();
+    let canonical = ws.create_ticket("Canonical").unwrap();
+    let dependent = ws.create_ticket("Dependent").unwrap();
+    ws.add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = ws
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .cloned()
+        .map(|edge| DependencyDecision {
+            edge,
+            choice: DependencyChoice::Remove,
+        })
+        .collect();
+    set_status(&mut ws, &dependent.reference, Status::InProgress).unwrap();
+    let error = ws
+        .mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            decisions,
+            None,
+        )
+        .unwrap_err();
+    assert!(matches!(error, Error::DependencyReviewChanged), "{error}");
+    assert_eq!(
+        ws.show_ticket(&source.reference).unwrap().status,
+        Status::Todo
+    );
+}

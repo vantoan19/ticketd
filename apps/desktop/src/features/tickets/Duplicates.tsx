@@ -96,6 +96,7 @@ export function Duplicates({
       const result = await client.previewDuplicate(
         sourceRef,
         separate ? ticket.reference : target,
+        separate,
       );
       const resolved = separate
         ? null

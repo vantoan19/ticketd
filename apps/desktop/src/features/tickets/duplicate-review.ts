@@ -33,7 +33,8 @@ export function replacementIssueReason(
 /**
  * One line describing what a choice does to the ticket that waits on the edge.
  * In a separate review the existing endpoint is not canceled, so Keep leaves a
- * live dependency rather than one on a canceled ticket.
+ * live dependency rather than one on a canceled ticket. Whether the waiting
+ * ticket is Ready afterwards is the core's answer; this only words it.
  */
 export function consequence(
   source: string,
@@ -42,18 +43,33 @@ export function consequence(
   separate = false,
 ): string {
   if (edge.blocker === source) {
-    if (choice === "replace")
-      return `${edge.dependent} waits for ${edge.replacement_blocker} to be Done instead`;
-    if (choice === "remove")
-      return `${edge.dependent} no longer waits on ${source}`;
-    return separate
-      ? `${edge.dependent} stays blocked by ${source}`
-      : `${edge.dependent} stays blocked by a canceled ticket`;
+    const effect =
+      choice === "replace"
+        ? `it waits for ${edge.replacement_blocker} to be Done instead`
+        : choice === "remove"
+          ? `it no longer waits on ${source}`
+          : separate
+            ? `it keeps waiting on ${source}`
+            : "it keeps waiting on a canceled ticket";
+    const ready = {
+      replace: edge.ready_if_replaced,
+      remove: edge.ready_if_removed,
+      retain: edge.ready_if_kept,
+    }[choice];
+    return `${readiness(edge, ready)}; ${effect}`;
   }
   if (choice === "replace")
     return `${edge.replacement_dependent} waits for ${edge.blocker} to be Done`;
   if (choice === "remove") return `${edge.blocker} no longer blocks ${source}`;
   return `${source} keeps its dependency on ${edge.blocker}`;
+}
+
+/** How a choice changes whether the dependent is Ready; only Todo tickets have a Ready state. */
+function readiness(edge: DependencyEdge, ready: boolean): string {
+  if (edge.dependent_status !== "Todo")
+    return `${edge.dependent} is ${edge.dependent_status} and has no Ready state`;
+  const verb = ready === edge.dependent_ready ? "stays" : "becomes";
+  return `${edge.dependent} ${verb} ${ready ? "Ready" : "Blocked"}`;
 }
 
 /** The number of dependency changes the current choices apply; Keep changes nothing. */
