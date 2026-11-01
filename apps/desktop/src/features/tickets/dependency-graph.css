@@ -102,6 +102,8 @@
   color: var(--foreground);
   text-align: left;
   cursor: pointer;
+  /* React Flow disables pointer events on nodes without handlers. */
+  pointer-events: auto;
 }
 .graph-node:hover {
   background: var(--muted);
