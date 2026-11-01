@@ -351,8 +351,10 @@ try {
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await click(await browser.$('[aria-label="Organize selected tickets"]'));
   await click(await browser.$('[role="menuitem"]=Add or remove tags…'));
-  // The field is named by its visible "Tag name" label.
-  await (await browser.$("#bulk-tag-name")).setValue("native");
+  // The field is a combobox named "Tag name".
+  await (
+    await browser.$('[role="dialog"] [role="combobox"]')
+  ).setValue("native");
   await click(await browser.$("button=Add tag"));
   await waitFor(
     () =>

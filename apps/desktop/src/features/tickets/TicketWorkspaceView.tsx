@@ -31,7 +31,12 @@ export function TicketWorkspaceView({
   inboxTarget: { reference: string; id: string; key: number } | null;
   onCreate: (trigger: HTMLButtonElement) => void;
 }) {
-  const { selected, setSelected } = workspace;
+  const { selected, setSelected, clearMention } = workspace;
+  // This view is hidden, not unmounted, when another view opens. Leaving counts as
+  // navigating, so a followed mention is not still highlighted on return.
+  useEffect(() => {
+    if (hidden) clearMention();
+  }, [hidden, clearMention]);
   const { openTickets } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
@@ -120,9 +125,9 @@ export function TicketWorkspaceView({
             setNarrowDetail(false);
             focusPane.current = "list";
           }}
-          onSelect={(value) => {
+          onSelect={(value, mention) => {
             if (value === null) focusPane.current = "list";
-            setSelected(value);
+            setSelected(value, mention);
           }}
         />
       </ResizablePanel>

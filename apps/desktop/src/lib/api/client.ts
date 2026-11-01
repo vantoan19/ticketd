@@ -79,19 +79,56 @@ const graphSchema = z.object({
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
+const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
+const reviewModeSchema = z.enum(["duplicate", "separate"]);
+const statusSchema = z.enum([
+  "Todo",
+  "In progress",
+  "In review",
+  "Done",
+  "Canceled",
+]);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),
   replacement_blocker: z.string(),
   replacement_dependent: z.string(),
+  // Stamped by the preview; submitted back unchanged with each decision.
+  mode: reviewModeSchema,
+  basis: z.string(),
+  replacement_basis: z.string(),
 });
 const duplicatePreviewSchema = z.object({
+  source: z.string(),
+  mode: reviewModeSchema,
   canonical: z.string(),
   edges: z.array(dependencyEdgeSchema),
+  // Each dependent as it is now; what a choice changes comes from evaluating.
+  waiting: z.array(
+    z.object({
+      ticket: z.string(),
+      status: statusSchema,
+      trashed: z.boolean(),
+      readiness: readinessSchema,
+      unresolved: z.array(z.string()),
+    }),
+  ),
   replacement_issues: z
-    .array(z.enum(["already_exists", "self_block", "cycle"]).nullable())
+    .array(
+      z.enum(["already_exists", "self_block", "cycle", "trashed"]).nullable(),
+    )
     .default([]),
 });
+// What every choice together does to one waiting ticket; decided by the core.
+const waitingOutcomeSchema = z.object({
+  ticket: z.string(),
+  status: statusSchema,
+  trashed: z.boolean(),
+  before: readinessSchema,
+  after: readinessSchema,
+  unresolved_after: z.array(z.string()),
+});
+export type WaitingOutcome = z.infer<typeof waitingOutcomeSchema>;
 export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>;
 export type DuplicatePreview = z.infer<typeof duplicatePreviewSchema>;
 export type DependencyDecision = {
@@ -203,9 +240,30 @@ export const client = {
         ),
       );
   },
-  async previewDuplicate(source: string, canonical: string) {
+  async previewDuplicate(source: string, canonical: string, separate = false) {
     return duplicatePreviewSchema.parse(
-      await invoke("preview_duplicate_dependencies", { source, canonical }),
+      await invoke("preview_duplicate_dependencies", {
+        source,
+        canonical,
+        separate,
+      }),
+    );
+  },
+  async evaluateDuplicate(
+    source: string,
+    canonical: string,
+    separate: boolean,
+    decisions: DependencyDecision[],
+  ) {
+    return z.array(waitingOutcomeSchema).parse(
+      await structured(
+        invoke("evaluate_dependency_review", {
+          source,
+          canonical,
+          separate,
+          decisions,
+        }),
+      ),
     );
   },
   async markDuplicateReviewed(
@@ -345,6 +403,8 @@ export const client = {
           source_title: z.string(),
           note_id: z.string().nullable(),
           passage: z.string(),
+          mention_start: z.number().int().nonnegative(),
+          mention_end: z.number().int().nonnegative(),
         }),
       )
       .parse(

@@ -68,20 +68,6 @@ test("shows an editing agent only when one was recorded and words history as sen
   expect(screen.queryByText(/status:/)).toBeNull();
 });
 
-test("reveals the description passage a backlink pointed to", async () => {
-  bridge.invoke.mockResolvedValue([]);
-  render(
-    <Activity
-      {...props}
-      reference="T-23"
-      mention={{ passage: "Blocked on T-1 today.", mentioned: "T-1", key: 1 }}
-    />,
-  );
-  const passage = await screen.findByLabelText("Mentioned passage");
-  expect(passage.textContent).toContain("Blocked on T-1 today.");
-  expect(passage.querySelector("mark")?.textContent).toBe("T-1");
-});
-
 test("keeps a note draft when the ticket is left and revisited, until it is discarded", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_notes" || command === "ticket_history") return [];

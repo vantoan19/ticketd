@@ -32,3 +32,22 @@
   outline: 1px solid var(--input-focus);
   outline-offset: 2px;
 }
+.description-document [data-mention-target] {
+  border-radius: var(--radius-md, 8px);
+  background: var(--accent);
+  color: var(--accent-foreground);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.mention-missing {
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.editor-body:focus {
+  outline: none;
+}
+.editor-body:focus-visible {
+  outline: 2px solid var(--ring);
+}

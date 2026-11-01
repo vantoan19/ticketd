@@ -87,10 +87,16 @@ const detail = () =>
   browser.$(
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
+// A ticket row is a button in the list. Its status icon is named by the status,
+// and its text carries the status, or Ready/Blocked for a Todo ticket.
+const ticketRow = async (title) =>
+  (await browser.$(".ticket-rows")).$(`button*=${title}`);
+const rowReports = (title, text) => async () =>
+  (await (await ticketRow(title)).getText()).includes(text);
 const header = () =>
   browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
 try {
-  const newTicket = await browser.$("button=New ticket");
+  const newTicket = await browser.$('button[aria-label="New ticket"]');
   await newTicket.waitForDisplayed({ timeout: 15000 });
   await newTicket.click();
   const creation = await browser.$('.create-panel[role="dialog"]');
@@ -120,9 +126,7 @@ try {
   await (await creation.$('[aria-label="Close new ticket"]')).click();
   await creation.waitForDisplayed({ reverse: true });
 
-  const row = await browser.$(
-    "button*=Exercise installed desktop and CLI together",
-  );
+  const row = await ticketRow("Exercise installed desktop and CLI together");
   await row.waitForDisplayed({ timeout: 15000 });
   await row.click();
   await (await detail()).waitForDisplayed({ timeout: 10000 });
@@ -149,13 +153,37 @@ try {
     await detail()
   ).$('[role="textbox"][aria-label="New note rich text"]');
   await noteEditor.click();
-  await browser.keys("Reviewed rich notes in the installed desktop.");
+  const sentence = "Reviewed rich notes in the installed desktop.";
+  // The WebKit driver may drop a keystroke. Retype a bounded number of times,
+  // but always require the exact literal text.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Send doubled letters in separate calls: see issue #99.
+    for (const chunk of sentence
+      .replace(/(.)(?=\1)/g, "$1\u0000")
+      .split("\u0000"))
+      await browser.keys(chunk);
+    const shown = (await noteEditor.getText()).trim();
+    if (shown === sentence) break;
+    console.log(
+      `Note attempt ${attempt + 1}: getText=${JSON.stringify(shown)} textContent=${JSON.stringify(
+        await browser.execute(
+          () =>
+            document.querySelector(
+              '[role="textbox"][aria-label="New note rich text"]',
+            )?.textContent,
+        ),
+      )}`,
+    );
+    await browser.keys(["Control", "a"]);
+    await browser.keys(["Backspace"]);
+  }
+  assert.equal((await noteEditor.getText()).trim(), sentence);
   assert.equal(run("note", "list", harness.reference).length, 0);
   await (await (await detail()).$("button=Add note")).click();
   await browser.waitUntil(
     () =>
       run("note", "list", harness.reference).some((note) =>
-        note.content.includes("Reviewed rich notes in the installed desktop."),
+        note.content.includes(sentence),
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
@@ -169,12 +197,32 @@ try {
         ).$$("button*=Record native workflow evidence")
       ).length === 0,
   );
-  await search.clearValue();
+  // Clear with keys: clearValue sets the value without an input event, so the
+  // filter would stay applied and hide the other rows.
+  await search.click();
+  await browser.keys(["Control", "a"]);
+  await browser.keys(["Backspace"]);
+  await browser.waitUntil(async () => (await search.getValue()) === "", {
+    timeout: 5000,
+    timeoutMsg: "Search did not clear",
+  });
   await (await (await detail()).$("button=Graph")).click();
   const graphView = await browser.$('section[aria-label="Dependency graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
   const graphNode = await graphView.$(`button*=${evidence.reference}`);
   await graphNode.waitForDisplayed({ timeout: 10000 });
+  // A real pointer must reach the node: nothing may sit over it or disable it.
+  assert(
+    await browser.execute((node) => {
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return hit !== null && node.contains(hit);
+    }, graphNode),
+    "Graph node is not the pointer hit target",
+  );
   await graphNode.click();
   await (await graphView.$(`button*=Open ${evidence.reference}`)).click();
   await browser.waitUntil(
@@ -184,7 +232,7 @@ try {
       ).getValue()) === evidence.title,
   );
   console.log(
-    "Desktop review: keyboard title and Markdown edits, search, mouse graph navigation",
+    "Desktop review: keyboard title and Markdown edits, search, mouse graph navigation (native click on a node)",
   );
   run(
     "change",
@@ -212,16 +260,20 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Blocked");
+  await browser.waitUntil(rowReports(harness.title, "In review"), {
+    timeout: 10000,
+    timeoutMsg: "External status change did not refresh the ticket row",
+  });
+  await (
+    await (
+      await ticketRow(harness.title)
+    ).$('[role="img"][aria-label="In review"]')
+  ).waitForExist({ timeout: 10000 });
   await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$("button*=Record native workflow evidence")
-        ).getText()
-      ).includes(`Blocked by ${harness.reference}`),
+    rowReports(evidence.title, `Blocked by ${harness.reference}`),
     {
       timeout: 10000,
-      timeoutMsg: "External blocked state did not refresh in the ticket row",
+      timeoutMsg: "Evidence row is not still blocked after In review",
     },
   );
   run(
@@ -233,29 +285,26 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Ready");
-  await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$("button*=Record native workflow evidence")
-        ).getText()
-      ).includes("Ready"),
-    { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
-  );
+  await browser.waitUntil(rowReports(evidence.title, "Ready"), {
+    timeout: 10000,
+    timeoutMsg: "External readiness change did not refresh",
+  });
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Move to trash"]')
+  ).click();
   await (
     await (
       await browser.$('nav[aria-label="Trash and settings"]')
     ).$("button=Trash")
   ).click();
-  await (await browser.$("button*=Record native workflow evidence")).click();
+  await (await ticketRow(evidence.title)).click();
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
+  await (await browser.$('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,

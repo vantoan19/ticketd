@@ -11,7 +11,7 @@ mod context;
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
-    ReplacementIssue,
+    ReplacementIssue, ReviewMode, WaitingOutcome, WaitingTicket,
 };
 mod evidence;
 mod export;
@@ -51,7 +51,7 @@ pub use counts::SidebarCounts;
 mod inbox;
 pub use inbox::InboxEntry;
 mod notes;
-pub use history::{HistoryEntry, Status};
+pub use history::{HistoryEntry, Readiness, Status};
 pub use notes::{Note, NotePatch};
 pub use projects::Project;
 
@@ -120,6 +120,12 @@ pub enum Error {
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
     DependencyReviewChanged,
+    #[error(
+        "this review was previewed for a different kind of review; preview again for a {0} review"
+    )]
+    DependencyReviewMode(duplicates::ReviewMode),
+    #[error("a ticket cannot be reviewed against itself")]
+    ReviewSameTicket,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]

@@ -10,15 +10,53 @@ pub struct Backlink {
     pub source_title: String,
     pub note_id: Option<String>,
     pub passage: String,
+    /// Where the mention sits in the Markdown body, counted in Unicode scalar values
+    /// (chars), as `passage` is, with a leading U+FEFF not counted:
+    /// `body.chars().skip(mention_start).take(mention_end - mention_start)` is the
+    /// span. The span is the reference itself when its source has no escapes or
+    /// entities; otherwise it is the whole run of text the reference was decoded from.
+    pub mention_start: usize,
+    pub mention_end: usize,
+}
+
+/// Byte offset of the first occurrence of `reference` that is not part of a longer word.
+fn find_reference(text: &str, reference: &str) -> Option<usize> {
+    text.match_indices(reference)
+        .find(|(start, _)| {
+            let before = text[..*start].chars().next_back();
+            let after = text[start + reference.len()..].chars().next();
+            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
+            before.is_none_or(boundary) && after.is_none_or(boundary)
+        })
+        .map(|(start, _)| start)
+}
+
+/// The byte span of a mention within its text run. A run whose source holds escapes
+/// or entities decoded to different text, so only the whole run is trustworthy; any
+/// other run is searched for the reference token (a table row's run covers the pipes).
+fn mention_span(
+    content: &str,
+    run: &std::ops::Range<usize>,
+    reference: &str,
+) -> std::ops::Range<usize> {
+    let raw = &content[run.clone()];
+    if raw.contains(['&', '\\']) {
+        return run.clone();
+    }
+    find_reference(raw, reference).map_or(run.clone(), |at| {
+        run.start + at..run.start + at + reference.len()
+    })
+}
+
+/// A byte offset as a count of chars, not counting a leading byte order mark: the
+/// Markdown parser drops it, so renderers never see it.
+fn char_offset(content: &str, byte: usize) -> usize {
+    let chars = content[..byte].chars().count();
+    chars - usize::from(content.starts_with('\u{feff}') && byte > 0)
 }
 
 fn contains_reference(text: &str, reference: &str) -> bool {
-    text.match_indices(reference).any(|(start, _)| {
-        let before = text[..start].chars().next_back();
-        let after = text[start + reference.len()..].chars().next();
-        let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
-        before.is_none_or(boundary) && after.is_none_or(boundary)
-    })
+    find_reference(text, reference).is_some()
 }
 
 // Markdown escapes and entities can split one visible text node into several events.
@@ -100,10 +138,13 @@ pub(crate) fn query(
                 .find('\n')
                 .map_or(content.len(), |i| range.end + i);
             if seen >= offset {
+                let mention = mention_span(&content, &range, reference);
                 links.push(Backlink {
                     source_reference: format!("T-{number}"),
                     source_title: title.chars().take(256).collect(),
                     note_id: note_id.clone(),
+                    mention_start: char_offset(&content, mention.start),
+                    mention_end: char_offset(&content, mention.end),
                     passage: {
                         let line = &content[start..end];
                         let reference_offset = line.find(reference).unwrap_or(range.start - start);
@@ -127,4 +168,17 @@ pub(crate) fn query(
     drop(rows);
     drop(statement);
     Ok(links)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::char_offset;
+
+    #[test]
+    fn char_offsets_skip_a_leading_byte_order_mark_and_count_chars() {
+        let content = "\u{feff}😀 T-1";
+        let at = content.find("T-1").unwrap();
+        assert_eq!(char_offset(content, at), 2);
+        assert_eq!(char_offset("😀 T-1", "😀 ".len()), 2);
+    }
 }

@@ -27,7 +27,6 @@ import { client, type Note, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
-import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
 import "./activity.css";
 
@@ -47,7 +46,6 @@ export function Activity({
   select,
   target,
   efforts = [],
-  mention = null,
 }: {
   reference: string;
   status: string;
@@ -58,13 +56,10 @@ export function Activity({
   select?: (reference: string) => void;
   target?: { id: string; key: number } | null;
   efforts?: Effort[];
-  /** A description passage the person navigated here to read. */
-  mention?: { passage: string; mentioned: string; key: number } | null;
 }) {
   const [loadError, setLoadError] = useState("");
   const [targetNote, setTargetNote] = useState<Note | null>(null);
   const targetRef = useRef<HTMLDivElement>(null);
-  const mentionRef = useRef<HTMLDivElement>(null);
   const targetId = target?.id;
   const targetKey = target?.key;
   useEffect(() => {
@@ -88,13 +83,6 @@ export function Activity({
       targetRef.current?.focus({ preventScroll: true });
     }
   }, [active, targetId, targetKey, targetNote]);
-  const mentionKey = mention?.key;
-  useEffect(() => {
-    if (active && mentionKey !== undefined) {
-      mentionRef.current?.scrollIntoView?.({ block: "center" });
-      mentionRef.current?.focus({ preventScroll: true });
-    }
-  }, [active, mentionKey]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -232,7 +220,6 @@ export function Activity({
       projects.find((project) => project.id === id)?.name,
     effort: (id: string) => efforts.find((effort) => effort.id === id)?.name,
   };
-  const [dismissedMention, setDismissedMention] = useState<number | null>(null);
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
@@ -244,32 +231,6 @@ export function Activity({
             select={select}
             revision={revision}
           />
-        </div>
-      )}
-      {active && mention && dismissedMention !== mention.key && (
-        <div
-          ref={mentionRef}
-          tabIndex={-1}
-          className="activity-mention"
-          aria-label="Mentioned passage"
-        >
-          <div className="activity-mention-heading">
-            <strong>Mentions {mention.mentioned} in the description</strong>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDismissedMention(mention.key)}
-            >
-              Dismiss
-            </Button>
-          </div>
-          <p>
-            <EmphasizedPassage
-              text={mention.passage}
-              reference={mention.mentioned}
-            />
-          </p>
         </div>
       )}
       <div className="activity-heading">

@@ -26,6 +26,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
   render(
     <TicketDetails
       selected="T-2"
+      mention={null}
       expanded={false}
       onExpand={vi.fn()}
       onReturn={vi.fn()}
@@ -68,6 +69,7 @@ test("the full-width view marks the reading column and drops the repeated headin
   const { container } = render(
     <TicketDetails
       selected="T-3"
+      mention={null}
       expanded
       onExpand={vi.fn()}
       onReturn={vi.fn()}

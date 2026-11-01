@@ -204,6 +204,29 @@
   display: grid;
   gap: 16px;
 }
+.bulk-tag-combobox {
+  height: auto;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border);
+}
+.bulk-tag-combobox [cmdk-list][hidden] {
+  display: none;
+}
+.bulk-tag-combobox [data-slot="command-input-wrapper"] {
+  border-bottom: 0;
+}
+.bulk-tag-combobox [data-slot="command-input-wrapper"] {
+  height: 40px;
+}
+/* Same focus treatment as .ui-input. */
+.bulk-tag-combobox:has([cmdk-input]:focus-visible) {
+  outline: 1px solid var(--input-focus);
+  outline-offset: 2px;
+}
+.bulk-tag-note {
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
 
 .ticket-row-action {
   display: flex;

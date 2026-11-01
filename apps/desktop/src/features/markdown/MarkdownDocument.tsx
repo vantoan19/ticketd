@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, createElement, useContext } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -10,9 +10,18 @@ import { MermaidDiagram } from "./MermaidDiagram";
 import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
+import {
+  MENTION_BLOCKS,
+  isMentionBlock,
+  type MentionSpan,
+  type PositionedNode,
+} from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
 const remarkPlugins = [remarkGfm, references];
+/** The passage to mark, and the element that describes it to assistive technology. */
+type MentionMark = MentionSpan & { describedBy: string };
+const MentionTarget = createContext<MentionMark | null>(null);
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -96,6 +105,32 @@ function CodeBlock({ node }: ExtraProps) {
   );
 }
 
+// The block holding the mention gets its mark as props, so React owns it and
+// every other attribute (a code block's tab stop included) stays untouched.
+function mentionBlock(tag: string) {
+  return function MentionBlock({
+    node,
+    children,
+    ...props
+  }: Record<string, unknown> & ExtraProps) {
+    const mark = useContext(MentionTarget);
+    const marked =
+      mark !== null && isMentionBlock(node as PositionedNode, mark);
+    return createElement(
+      tag,
+      marked
+        ? {
+            ...props,
+            "data-mention-target": "",
+            tabIndex: -1,
+            "aria-describedby": mark.describedBy,
+          }
+        : props,
+      children as React.ReactNode,
+    );
+  };
+}
+
 // React treats each component function as a type. Recreating these functions
 // during workspace polling would remount diagrams and discard their SVG/state.
 const components: Components = {
@@ -111,32 +146,40 @@ const components: Components = {
     </div>
   ),
   pre: CodeBlock,
+  ...Object.fromEntries(
+    [...MENTION_BLOCKS].map((tag) => [tag, mentionBlock(tag)]),
+  ),
 };
 
 export function MarkdownDocument({
   source,
   select,
   revision,
+  mention,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
   revision?: number | undefined;
+  /** A passage to mark: highlighted, focusable and described. */
+  mention?: MentionMark | undefined;
 }) {
   return (
     <div className="markdown-document">
       <TicketNavigation.Provider value={{ select, revision }}>
-        <MarkdownSource.Provider value={source}>
-          <ReactMarkdown
-            remarkPlugins={remarkPlugins}
-            urlTransform={(url) =>
-              url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
-            }
-            skipHtml
-            components={components}
-          >
-            {source}
-          </ReactMarkdown>
-        </MarkdownSource.Provider>
+        <MentionTarget.Provider value={mention ?? null}>
+          <MarkdownSource.Provider value={source}>
+            <ReactMarkdown
+              remarkPlugins={remarkPlugins}
+              urlTransform={(url) =>
+                url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
+              }
+              skipHtml
+              components={components}
+            >
+              {source}
+            </ReactMarkdown>
+          </MarkdownSource.Provider>
+        </MentionTarget.Provider>
       </TicketNavigation.Provider>
     </div>
   );

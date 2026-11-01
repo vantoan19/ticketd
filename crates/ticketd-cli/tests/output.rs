@@ -179,6 +179,8 @@ fn backlinks_command_returns_source_and_passage() {
     let result = run(&["backlinks", "T-1"]);
     assert_eq!(result[0]["source_reference"], "T-2");
     assert_eq!(result[0]["passage"], "See T-1 for context");
+    assert_eq!(result[0]["mention_start"], 4);
+    assert_eq!(result[0]["mention_end"], 7);
 }
 
 #[test]
@@ -256,6 +258,11 @@ fn cli_previews_and_applies_reviewed_duplicate_dependencies() {
     run(&["add-dependency", "T-1", "T-3"], None);
     let preview = run(&["preview-duplicate", "T-1", "T-2"], None);
     assert_eq!(preview["edges"][0]["replacement_blocker"], "T-2");
+    assert_eq!(preview["source"], "T-1");
+    assert_eq!(preview["mode"], "duplicate");
+    let separate = run(&["preview-duplicate", "--separate", "T-1", "T-2"], None);
+    assert_eq!(separate["mode"], "separate");
+    assert_eq!(separate["edges"][0]["mode"], "separate");
     let request = serde_json::json!({ "operation": "mark_duplicate_reviewed", "source": "T-1", "canonical": "T-2", "expected_canonical": preview["canonical"], "decisions": [{"edge": preview["edges"][0], "choice": "replace"}], "agent": null });
     run(
         &["write", "-", "--request-id", "review"],
