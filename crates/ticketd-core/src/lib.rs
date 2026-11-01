@@ -30,7 +30,7 @@ mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
-pub use search::{Availability, TicketFilter};
+pub use search::{Availability, TicketFilter, TicketOrder};
 mod tags;
 pub use efforts::{Effort, EffortCounts, EffortView};
 
@@ -46,7 +46,7 @@ use uuid::Uuid;
 
 mod counts;
 mod history;
-pub use counts::SidebarCounts;
+pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod notes;

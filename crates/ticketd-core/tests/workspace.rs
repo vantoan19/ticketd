@@ -3405,6 +3405,68 @@ fn duplicate_status_survives_export_and_backup_restore() {
     assert_eq!(restored.duplicate_of, Some(target.reference));
 }
 
+#[test]
+fn workflow_order_and_status_counts_describe_the_same_filtered_result() {
+    use ticketd_core::{StatusCounts, TicketFilter, TicketOrder};
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let mut make = |title: &str, status: Status| {
+        let ticket = w.create_ticket(title).unwrap();
+        set_status(&mut w, &ticket.reference, status);
+        ticket.reference
+    };
+    let todo_old = make("Todo old", Status::Todo);
+    let done = make("Done", Status::Done);
+    let review = make("Review", Status::InReview);
+    let progress = make("Progress", Status::InProgress);
+    let canceled = make("Canceled", Status::Canceled);
+    let todo_new = make("Todo new", Status::Todo);
+    let trashed = make("Trashed progress", Status::InProgress);
+    w.set_trashed(&trashed, true, None).unwrap();
+    let grouped = TicketFilter {
+        order: TicketOrder::Workflow,
+        ..Default::default()
+    };
+    let order: Vec<_> = w
+        .find_tickets(&grouped)
+        .unwrap()
+        .into_iter()
+        .map(|ticket| ticket.reference)
+        .collect();
+    assert_eq!(
+        order,
+        [progress, review, todo_new.clone(), todo_old, done, canceled]
+    );
+    assert_eq!(
+        w.count_tickets(&grouped).unwrap(),
+        StatusCounts {
+            todo: 2,
+            in_progress: 1,
+            in_review: 1,
+            done: 1,
+            canceled: 1,
+            duplicate: 0,
+        }
+    );
+    // Paging walks the grouped order, and the counts ignore the page.
+    let second_page = TicketFilter {
+        limit: 2,
+        offset: 2,
+        ..grouped.clone()
+    };
+    let page = w.find_tickets(&second_page).unwrap();
+    assert_eq!(page[0].reference, todo_new);
+    assert_eq!(w.count_tickets(&second_page).unwrap().total(), 6);
+    // A filter narrows both the same way.
+    let query = TicketFilter {
+        query: "todo".into(),
+        ..grouped
+    };
+    assert_eq!(w.find_tickets(&query).unwrap().len(), 2);
+    assert_eq!(w.count_tickets(&query).unwrap().todo, 2);
+    assert_eq!(w.count_tickets(&query).unwrap().total(), 2);
+}
+
 /// Build a version-20 workspace holding every legacy duplicate shape, then open it so
 /// migration step 21 runs.
 #[test]
