@@ -1,4 +1,4 @@
-import type { Ticket, TicketSource } from "@/lib/api/client";
+import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
 
 /** The statuses a person manages locally while an externally owned issue is open. */
 export const localProgressStatuses = ["Todo", "In progress", "In review"];
@@ -84,11 +84,52 @@ export function unavailableNotice(
   };
 }
 
+/**
+ * How a closed duplicate's canonical target reads. An external-only target is
+ * never presented as a local ticket; one that resolved names the local ticket
+ * beside the source's own reference.
+ */
+export function duplicateTargetParts(target: DuplicateTarget): {
+  /** What the target is called. */
+  label: string;
+  /** The local ticket it resolved to, which can be opened. */
+  ticket: string | null;
+  note: string;
+} {
+  if (target.kind === "unknown")
+    return {
+      label: "Unknown",
+      ticket: null,
+      note: "The source did not name an accessible original.",
+    };
+  if (target.problem === "cycle")
+    return {
+      label: target.display,
+      ticket: null,
+      note: "Not followed: it leads back to this ticket.",
+    };
+  if (target.ticket)
+    return {
+      label: target.ticket,
+      ticket: target.ticket,
+      note: target.display,
+    };
+  return {
+    label: target.display,
+    ticket: null,
+    note: "Not imported into ticketd.",
+  };
+}
+
 /** What a closed duplicate says about its canonical issue, never inventing one. */
 export function duplicateTargetText(source: TicketSource): string | null {
   const target = source.duplicate_target;
   if (!target) return null;
-  return target.kind === "external"
-    ? `Duplicate of ${target.display}`
-    : "Duplicate; the source did not name an accessible original";
+  if (target.kind === "unknown")
+    return "Duplicate; the source did not name an accessible original";
+  if (target.problem === "cycle")
+    return `Duplicate of ${target.display}; not followed because it leads back to this ticket`;
+  return target.ticket
+    ? `Duplicate of ${target.ticket} (${target.display})`
+    : `Duplicate of ${target.display}`;
 }

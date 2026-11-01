@@ -38,7 +38,7 @@ export function rowContext(ticket: Ticket, scope: RowScope): string | null {
   const target = ticket.source?.duplicate_target;
   if (ticket.status === "Duplicate" && target)
     return target.kind === "external"
-      ? `Duplicate of ${target.display}`
+      ? `Duplicate of ${target.ticket ?? target.display}`
       : "Duplicate; original unknown";
   if (ticket.parent)
     return `Parent ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;

@@ -73,7 +73,24 @@ pub enum DuplicateTarget {
         identity: ExternalIdentity,
         locator: String,
         display: String,
+        /// The local ticket this reference resolves to once discovery has imported
+        /// the canonical issue, followed through duplicate designations to the final
+        /// canonical ticket. Resolution is by identity at read time and never imports.
+        #[serde(default)]
+        ticket: Option<String>,
+        /// Set when following the reference would loop back to this ticket; the
+        /// reference is then shown but never resolved.
+        #[serde(default)]
+        problem: Option<TargetProblem>,
     },
+}
+
+/// Why an external duplicate target was not resolved to a local ticket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetProblem {
+    /// Following the canonical chain returns to this ticket.
+    Cycle,
 }
 
 /// The external side of a ticket, as the clients see it.
@@ -382,28 +399,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         Ownership::Local
     };
     let external = ownership == Ownership::External;
-    let duplicate_target = connection
-        .query_row(
-            "SELECT provider, external_id, locator, display FROM external_duplicate_targets WHERE ticket_id = ?1",
-            [&ticket.id],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            },
-        )
-        .optional()?
-        .map(|(provider, id, locator, display)| match (provider, id) {
-            (Some(provider), Some(id)) => DuplicateTarget::External {
-                identity: ExternalIdentity { provider, id },
-                locator: locator.unwrap_or_default(),
-                display: display.unwrap_or_default(),
-            },
-            _ => DuplicateTarget::Unknown,
-        });
+    let duplicate_target = duplicate_target(connection, &ticket.id)?;
     let unavailable = match (&error_code, failing_since) {
         (Some(code), since) if external && freshness::is_unavailable_code(code) => {
             Some(SourceUnavailable {
@@ -445,6 +441,114 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         duplicate_target,
     });
     Ok(())
+}
+
+/// The canonical issue recorded for a ticket the source closed as a duplicate,
+/// resolved against the tickets ticketd knows. `None` when none is recorded.
+pub(crate) fn duplicate_target(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<DuplicateTarget>, Error> {
+    let row = connection
+        .query_row(
+            "SELECT provider, external_id, locator, display FROM external_duplicate_targets WHERE ticket_id = ?1",
+            [ticket_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(match row {
+        None => None,
+        Some((Some(provider), Some(id), locator, display)) => {
+            let identity = ExternalIdentity { provider, id };
+            let (ticket, problem) = resolve_target(connection, ticket_id, &identity)?;
+            Some(DuplicateTarget::External {
+                identity,
+                locator: locator.unwrap_or_default(),
+                display: display.unwrap_or_default(),
+                ticket,
+                problem,
+            })
+        }
+        Some(_) => Some(DuplicateTarget::Unknown),
+    })
+}
+
+/// Follows an external canonical reference to the final local canonical ticket:
+/// the ticket holding that identity, then onward through its own duplicate
+/// designation (local or external) as far as the chain is known. A chain that
+/// reaches `ticket_id` again is a cycle and resolves to nothing.
+fn resolve_target(
+    connection: &Connection,
+    ticket_id: &str,
+    identity: &ExternalIdentity,
+) -> Result<(Option<String>, Option<TargetProblem>), Error> {
+    let mut visited = std::collections::HashSet::from([ticket_id.to_owned()]);
+    let mut last = None;
+    let mut current = ticket_for_identity(connection, identity)?;
+    while let Some(id) = current {
+        if !visited.insert(id.clone()) {
+            return Ok((None, Some(TargetProblem::Cycle)));
+        }
+        let next: Option<String> = connection
+            .query_row(
+                "SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        current = match next {
+            Some(next) => Some(next),
+            None => {
+                let external: Option<(Option<String>, Option<String>)> = connection
+                    .query_row(
+                        "SELECT provider, external_id FROM external_duplicate_targets WHERE ticket_id = ?1",
+                        [&id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                match external {
+                    Some((Some(provider), Some(external_id))) => ticket_for_identity(
+                        connection,
+                        &ExternalIdentity {
+                            provider,
+                            id: external_id,
+                        },
+                    )?,
+                    _ => None,
+                }
+            }
+        };
+        last = Some(id);
+    }
+    let reference = match last {
+        Some(id) => Some(connection.query_row(
+            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            [&id],
+            |row| row.get(0),
+        )?),
+        None => None,
+    };
+    Ok((reference, None))
+}
+
+fn ticket_for_identity(
+    connection: &Connection,
+    identity: &ExternalIdentity,
+) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT ticket_id FROM external_identities WHERE provider = ?1 AND external_id = ?2",
+            params![identity.provider, identity.id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// The status an observed external state implies, given the state last observed
@@ -883,8 +987,10 @@ fn apply_issue(
                 )?;
                 changed = true;
             }
-            if next == Status::Duplicate && previous != Some(issue.state) {
-                set_duplicate_target(connection, &id, issue)?;
+            // The source may name a different canonical issue, or withdraw it, while
+            // the issue stays a duplicate.
+            if next == Status::Duplicate && set_duplicate_target(connection, &id, issue)? {
+                changed = true;
             }
             let observed = format!("{state}:{}", reason.unwrap_or(""));
             if observed != old_state {
@@ -914,13 +1020,43 @@ fn apply_issue(
 }
 
 /// Records the canonical issue of an externally closed duplicate: the one the
-/// connector supplied, or an explicit unknown target. It never invents a local link.
+/// connector supplied, or an explicit unknown target. It never invents a local
+/// link. A target naming the issue itself is not a canonical issue and is kept
+/// as unknown. A known target is replaced by a different one but never by silence.
+/// Returns whether the stored target changed.
 fn set_duplicate_target(
     connection: &Connection,
     id: &str,
     issue: &ExternalIssue,
-) -> Result<(), Error> {
-    match &issue.duplicate_of {
+) -> Result<bool, Error> {
+    let target = issue
+        .duplicate_of
+        .as_ref()
+        .filter(|target| target.identity != issue.reference.identity);
+    let stored: Option<(Option<String>, Option<String>, Option<String>)> = connection
+        .query_row(
+            "SELECT provider, external_id, locator FROM external_duplicate_targets WHERE ticket_id = ?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let wanted = target.map(|t| {
+        (
+            Some(t.identity.provider.clone()),
+            Some(t.identity.id.clone()),
+            Some(t.locator.clone()),
+        )
+    });
+    let wanted = wanted.unwrap_or((None, None, None));
+    if stored.as_ref() == Some(&wanted) {
+        return Ok(false);
+    }
+    // A later observation that supplies no accessible target (permissions or
+    // visibility changed) does not erase an identity we already hold.
+    if target.is_none() && matches!(&stored, Some((Some(_), Some(_), _))) {
+        return Ok(false);
+    }
+    match target {
         Some(target) => connection.execute(
             "INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display) \
              VALUES (?1, ?2, ?3, ?4, ?4) \
@@ -933,7 +1069,7 @@ fn set_duplicate_target(
             [id],
         )?,
     };
-    Ok(())
+    Ok(true)
 }
 
 /// Gives `ticket_id` its external identity, external ownership and first sync

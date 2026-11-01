@@ -351,3 +351,69 @@ test("Add subticket opens the link dialog already saying this ticket is the pare
     (within(dialog).getByLabelText("Relationship") as HTMLSelectElement).value,
   ).toBe("subticket");
 });
+
+test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {
+  bridge();
+  const target = (extra: object) => ({
+    kind: "external" as const,
+    identity: { provider: "github", id: "9" },
+    locator: "acme/api#9",
+    display: "acme/api#9",
+    ...extra,
+  });
+  const duplicate = (duplicate_target: object) =>
+    ({
+      ...base,
+      status: "Duplicate",
+      source: {
+        provider: "github",
+        id: "1",
+        locator: "acme/api#1",
+        display: "acme/api#1",
+        url: "",
+        origin: "imported",
+        ownership: "external",
+        state: { state: "closed", reason: "duplicate" },
+        closure_unrecognized: false,
+        last_refreshed_at: null,
+        last_attempt_at: null,
+        last_error: null,
+        content_locked: true,
+        status_locked: true,
+        duplicate_target,
+      },
+    }) as unknown as Ticket;
+  const view = render(
+    <Section
+      ticket={duplicate(target({}))}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  const row = (await screen.findByText("acme/api#9")).closest("li")!;
+  expect(within(row).getByText("Duplicate of")).toBeTruthy();
+  expect(within(row).getByText("Not imported into ticketd.")).toBeTruthy();
+  expect(within(row).queryByRole("button")).toBeNull();
+  view.rerender(
+    <Section
+      ticket={duplicate(target({ ticket: "T-7" }))}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  const resolved = (await screen.findByRole("button", { name: "T-7" })).closest(
+    "li",
+  )!;
+  expect(within(resolved).getByText("acme/api#9")).toBeTruthy();
+  view.rerender(
+    <Section
+      ticket={duplicate({ kind: "unknown" })}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByText("The source did not name an accessible original."),
+  ).toBeTruthy();
+  expect(screen.getByText("Unknown")).toBeTruthy();
+});
