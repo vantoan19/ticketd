@@ -16,7 +16,9 @@ import {
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
+import type { DuplicateTarget } from "@/lib/api/client";
 import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
+import { duplicateTargetParts } from "@/features/tickets/ticket-source";
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
@@ -81,6 +83,13 @@ export function LinkedWork({
 }) {
   const { reference, current, pending, error } = work;
   const rows = work.rows.filter((row) => row.kind !== "subticket");
+  // A duplicate closed by its source names a canonical issue that may not be a
+  // local ticket; it is information and has no remove action.
+  const external =
+    work.ticket.status === "Duplicate" && !work.ticket.duplicate_of
+      ? work.ticket.source?.duplicate_target
+      : null;
+  const externalAt = rows.findIndex((row) => row.kind === "duplicates");
   const linkAction = (
     <Button variant="ghost" size="sm" onClick={() => work.openLink()}>
       <Plus aria-hidden="true" />
@@ -89,7 +98,7 @@ export function LinkedWork({
   );
   // Collapse to the bare action only after a successful read found nothing;
   // loading and failed look different from "no links".
-  if (!current?.links || rows.length === 0)
+  if (!current?.links || (rows.length === 0 && !external))
     return (
       <RailSection label="Relationships">
         <div id={`linked-work-${reference}`} className="linked-work" data-empty>
@@ -111,6 +120,59 @@ export function LinkedWork({
         </div>
       </RailSection>
     );
+  const split = externalAt < 0 ? rows.length : externalAt;
+  const renderRow = (row: LinkRow, index: number) => (
+    <li
+      key={`${row.kind}-${row.reference}`}
+      className="linked-work-row"
+      data-kind={row.kind}
+    >
+      {/* Rows of one kind read as a group: only the first shows its
+                  label, and screen readers still hear it on every row. */}
+      <span
+        className="linked-work-label"
+        data-repeat={rows[index - 1]?.kind === row.kind || undefined}
+      >
+        {linkLabel(row.kind)}
+      </span>
+      <StatusIcon
+        status={row.status}
+        size={14}
+        decorative
+        className="linked-work-icon"
+      />
+      <span className="linked-work-reference">{row.reference}</span>
+      <Button
+        variant="link"
+        className="linked-work-title"
+        onClick={() => select(row.reference)}
+      >
+        {row.title}
+      </Button>
+      <span className="linked-work-status">{statusText(row)}</span>
+      {isDuplicateKind(row.kind) ? (
+        <RemoveDuplicate
+          row={row}
+          ticket={reference}
+          disabled={pending}
+          onRemove={() => void work.remove(row)}
+          onReview={() => work.setReviewing(true)}
+        />
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="linked-work-remove"
+          title="Remove relationship"
+          aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+          disabled={pending}
+          onClick={() => void work.remove(row)}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      )}
+    </li>
+  );
   return (
     <RailSection label="Relationships">
       <div id={`linked-work-${reference}`} className="linked-work">
@@ -121,58 +183,9 @@ export function LinkedWork({
           </p>
         )}
         <ul className="linked-work-rows">
-          {rows.map((row, index) => (
-            <li
-              key={`${row.kind}-${row.reference}`}
-              className="linked-work-row"
-              data-kind={row.kind}
-            >
-              {/* Rows of one kind read as a group: only the first shows its
-                  label, and screen readers still hear it on every row. */}
-              <span
-                className="linked-work-label"
-                data-repeat={rows[index - 1]?.kind === row.kind || undefined}
-              >
-                {linkLabel(row.kind)}
-              </span>
-              <StatusIcon
-                status={row.status}
-                size={14}
-                decorative
-                className="linked-work-icon"
-              />
-              <span className="linked-work-reference">{row.reference}</span>
-              <Button
-                variant="link"
-                className="linked-work-title"
-                onClick={() => select(row.reference)}
-              >
-                {row.title}
-              </Button>
-              <span className="linked-work-status">{statusText(row)}</span>
-              {isDuplicateKind(row.kind) ? (
-                <RemoveDuplicate
-                  row={row}
-                  ticket={reference}
-                  disabled={pending}
-                  onRemove={() => void work.remove(row)}
-                  onReview={() => work.setReviewing(true)}
-                />
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="linked-work-remove"
-                  title="Remove relationship"
-                  aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
-                  disabled={pending}
-                  onClick={() => void work.remove(row)}
-                >
-                  <X aria-hidden="true" />
-                </Button>
-              )}
-            </li>
-          ))}
+          {rows.slice(0, split).map((row, index) => renderRow(row, index))}
+          {external && <ExternalTargetRow target={external} select={select} />}
+          {rows.slice(split).map((row, index) => renderRow(row, split + index))}
         </ul>
         {work.more !== null && (
           <Button
@@ -192,6 +205,36 @@ export function LinkedWork({
         </div>
       </div>
     </RailSection>
+  );
+}
+
+/** The canonical issue a source named for a duplicate, without pretending it is a local ticket. */
+function ExternalTargetRow({
+  target,
+  select,
+}: {
+  target: DuplicateTarget;
+  select: (reference: string) => void;
+}) {
+  const { label, ticket, note } = duplicateTargetParts(target);
+  return (
+    <li className="linked-work-row" data-kind="duplicate_of" data-external>
+      <span className="linked-work-label">{linkLabel("duplicate_of")}</span>
+      <span className="linked-work-external">
+        {ticket ? (
+          <Button
+            variant="link"
+            className="linked-work-title"
+            onClick={() => select(ticket)}
+          >
+            {label}
+          </Button>
+        ) : (
+          <span className="linked-work-reference">{label}</span>
+        )}{" "}
+        <span className="linked-work-note">{note}</span>
+      </span>
+    </li>
   );
 }
 

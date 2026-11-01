@@ -539,6 +539,177 @@ fn secrets_and_requests_never_debug_print_the_credential() {
     assert!(!format!("{request:?}").contains(TOKEN));
 }
 
+const GRAPHQL: &str = "https://api.example.test/graphql";
+
+fn closed_duplicate(id: u64, number: u64) -> Value {
+    let mut closed = issue(id, number, "o/one");
+    closed["state"] = json!("closed");
+    closed["state_reason"] = json!("duplicate");
+    closed
+}
+
+fn fetch_duplicate(
+    fixture: &Fixture,
+    engine: &Engine,
+    timeline: Result<HttpResponse, String>,
+) -> ExternalIssue {
+    fixture.respond(
+        &format!("{API}/repos/o/one/issues/7"),
+        ok(closed_duplicate(7, 7)),
+    );
+    fixture.respond(GRAPHQL, timeline);
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "7".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    engine
+        .fetch(
+            "github",
+            &config(json!({"repositories": ["o/one"]})),
+            &reference,
+        )
+        .unwrap()
+}
+
+fn timeline(nodes: Value) -> Result<HttpResponse, String> {
+    ok(json!({"data": {"repository": {"issue": {"timelineItems": {"nodes": nodes}}}}}))
+}
+
+fn marked(duplicate: u64, canonical: Value) -> Value {
+    json!({"__typename": "MarkedAsDuplicateEvent", "duplicate": {"databaseId": duplicate}, "canonical": canonical})
+}
+
+fn issue_node(id: u64, number: u64, repo: &str) -> Value {
+    json!({"__typename": "Issue", "databaseId": id, "number": number, "repository": {"nameWithOwner": repo}})
+}
+
+#[test]
+fn a_duplicate_names_its_canonical_issue_from_the_graphql_timeline_in_another_repository() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([marked(7, issue_node(900, 12, "o/other"))])),
+    );
+    let target = fetched.duplicate_of.expect("a canonical issue");
+    assert_eq!(target.identity.provider, "github");
+    assert_eq!(target.identity.id, "900");
+    assert_eq!(target.locator, "o/other#12");
+    // One authenticated POST to the GraphQL endpoint, asking about this issue only.
+    let requests = fixture.requests.lock().unwrap();
+    let post = requests
+        .iter()
+        .find(|request| request.url == GRAPHQL)
+        .unwrap();
+    assert!(matches!(post.method, Method::Post));
+    assert!(
+        post.headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v.contains(TOKEN))
+    );
+    let body: Value = serde_json::from_slice(post.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        body["variables"],
+        json!({"owner": "o", "name": "one", "number": 7})
+    );
+}
+
+#[test]
+fn only_events_about_this_issue_count_and_the_latest_wins() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    // Someone else was marked a duplicate of this issue (the event also appears on
+    // the canonical issue's timeline): that is not this issue's target.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([marked(55, issue_node(7, 7, "o/one"))])),
+    );
+    assert!(fetched.duplicate_of.is_none());
+    // A later mark replaces an earlier one; an unmark withdraws it.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            marked(7, issue_node(900, 9, "o/one")),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            {"__typename": "UnmarkedAsDuplicateEvent", "duplicate": {"databaseId": 7}},
+        ])),
+    );
+    assert!(fetched.duplicate_of.is_none());
+}
+
+#[test]
+fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed_fetch() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let pull_request = json!({"__typename": "PullRequest"});
+    for response in [
+        timeline(json!([marked(7, pull_request)])),
+        timeline(json!([marked(7, Value::Null)])),
+        ok(json!({"data": null, "errors": [{"message": "Could not resolve"}]})),
+        status(502, json!({}), &[]),
+        Err("connection reset".into()),
+    ] {
+        let fetched = fetch_duplicate(&fixture, &engine, response);
+        assert!(fetched.duplicate_of.is_none());
+        assert_eq!(
+            fetched.state,
+            ExternalState::Closed {
+                reason: ClosureReason::Duplicate
+            }
+        );
+    }
+}
+
+#[test]
+fn only_duplicate_closures_ask_for_a_canonical_issue() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut closed = issue(7, 7, "o/one");
+    closed["state"] = json!("closed");
+    closed["state_reason"] = json!("completed");
+    fixture.respond(&format!("{API}/repos/o/one/issues/7"), ok(closed));
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "7".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    engine
+        .fetch(
+            "github",
+            &config(json!({"repositories": ["o/one"]})),
+            &reference,
+        )
+        .unwrap();
+    assert!(!fixture.urls().iter().any(|url| url == GRAPHQL));
+}
+
+#[test]
+fn enterprise_graphql_lives_beside_the_rest_root() {
+    let connector = |api: &str| {
+        GithubConnector::new(api, Box::new(Shared(Arc::default())), Box::new(Token(None)))
+    };
+    assert_eq!(
+        connector("https://ghe.example/api/v3/").graphql_url(),
+        "https://ghe.example/api/graphql"
+    );
+    assert_eq!(
+        connector("https://api.github.com").graphql_url(),
+        "https://api.github.com/graphql"
+    );
+}
+
 fn publish_request() -> PublishRequest {
     PublishRequest {
         title: "Escalate".into(),

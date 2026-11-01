@@ -262,3 +262,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.linked-work-external {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.linked-work-note {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}

@@ -63,6 +63,9 @@ pub struct ContextRelationships {
     pub discovered_while: ContextPage<ContextRelated>,
     pub discoveries: ContextPage<ContextRelated>,
     pub duplicate_of: Option<ContextRelated>,
+    /// The canonical issue an external source named for this duplicate: an
+    /// external reference (possibly resolved to a local ticket) or explicitly unknown.
+    pub external_duplicate_of: Option<crate::source::DuplicateTarget>,
     pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
@@ -217,6 +220,7 @@ impl Workspace {
                 discovered_while: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 discoveries: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                external_duplicate_of: crate::source::duplicate_target(&tx, &id)?,
                 duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 children: related(
                     &tx,

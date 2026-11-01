@@ -16,8 +16,13 @@ const duplicateTargetSchema = z.discriminatedUnion("kind", [
     identity: z.object({ provider: z.string(), id: z.string() }),
     locator: z.string(),
     display: z.string(),
+    /** The local ticket the reference resolves to once the canonical issue was imported. */
+    ticket: z.string().nullish(),
+    /** The reference is shown but not followed because it would loop back to this ticket. */
+    problem: z.enum(["cycle"]).nullish(),
   }),
 ]);
+export type DuplicateTarget = z.infer<typeof duplicateTargetSchema>;
 /** The external issue a ticket is or was, with who owns it now and how fresh it is. */
 const ticketSourceSchema = z.object({
   provider: z.string(),

@@ -168,6 +168,53 @@ test("a closed duplicate names the source's canonical issue or says it is unknow
   expect(screen.getByText(/did not name an accessible original/)).toBeTruthy();
 });
 
+test("a resolved canonical issue opens its local ticket, and a loop is not followed", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const closed = {
+    state: { state: "closed", reason: "duplicate" },
+    status_locked: true,
+  } as const;
+  const external = {
+    kind: "external",
+    identity: { provider: "github", id: "7" },
+    locator: "acme/api#7",
+    display: "acme/api#7",
+  } as const;
+  const onOpen = vi.fn();
+  render(
+    <TicketProperties
+      ticket={ticket({
+        status: "Duplicate",
+        source: source({
+          ...closed,
+          duplicate_target: { ...external, ticket: "T-9" },
+        }),
+      })}
+      projects={[]}
+      efforts={[]}
+      onSaved={() => {}}
+      refresh={vi.fn(async () => {})}
+      onOpenTicket={onOpen}
+    />,
+  );
+  expect(screen.getByText("Duplicate of T-9 (acme/api#7)")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open T-9" }));
+  expect(onOpen).toHaveBeenCalledWith("T-9");
+  const rows = (target: object) =>
+    rowContext(
+      ticket({
+        status: "Duplicate",
+        source: source({ ...closed, duplicate_target: target as never }),
+      }),
+      { showEffort: false, showProject: false, efforts: [], projects: [] },
+    );
+  expect(rows({ ...external, ticket: "T-9" })).toBe("Duplicate of T-9");
+  expect(rows({ ...external, problem: "cycle" })).toBe(
+    "Duplicate of acme/api#7",
+  );
+  expect(rows(external)).toBe("Duplicate of acme/api#7");
+});
+
 test("the Source section shows the owner, the state, freshness and refreshes one ticket", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
     command === "refresh_sources"

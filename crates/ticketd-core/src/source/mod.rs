@@ -34,9 +34,10 @@ pub use publication::{
     AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
 };
+pub(crate) use tracking::duplicate_target;
 pub use tracking::{
     DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport,
-    SourceCounts, SourceFailure, SourceFilter, TicketSource,
+    SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
 };
 
 use crate::{Error, Workspace, transaction_write_lock};

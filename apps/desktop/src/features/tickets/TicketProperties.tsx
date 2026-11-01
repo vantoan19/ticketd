@@ -249,6 +249,11 @@ export function TicketProperties({
   // While the issue is open its Todo, In progress and In review are local;
   // closing states follow the source and cannot be chosen here.
   const statusLocked = Boolean(owner?.status_locked);
+  const target =
+    owner && ticket.status === "Duplicate" && !ticket.duplicate_of
+      ? owner.duplicate_target
+      : null;
+  const resolvedTarget = target?.kind === "external" ? target.ticket : null;
   const statusChoices = owner
     ? owner.status_locked
       ? [ticket.status]
@@ -349,6 +354,16 @@ export function TicketProperties({
           )}
           {owner && ticket.status === "Duplicate" && !ticket.duplicate_of && (
             <small>{duplicateTargetText(owner)}</small>
+          )}
+          {resolvedTarget && (
+            <Button
+              variant="link"
+              size="sm"
+              className="duplicate-of-link"
+              onClick={() => onOpenTicket?.(resolvedTarget)}
+            >
+              Open {resolvedTarget}
+            </Button>
           )}
           {owner && (
             <small className="rail-note">
