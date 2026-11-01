@@ -24,6 +24,8 @@ export function bridgeDefault(
     case "inbox":
     case "safety_backups":
     case "search_tags":
+    // No built-in source connector in tests unless a test supplies one.
+    case "list_sources":
       return [];
     case "sidebar_counts":
       return { unread_inbox: 0, ready: 0, in_progress: 0 };

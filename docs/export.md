@@ -10,7 +10,7 @@ partial file; use `--file` for safe publication.
 The root object has integer `format_version` 1 and arrays named `projects`,
 `project_checkouts`, `efforts`, `tickets`, `notes`, `evidence`, `ticket_history`,
 `ticket_follows`, `inbox_entries`, `tags`, `ticket_tags`, `dependencies`,
-`duplicate_tickets`, and `ticket_parents`. Each array contains objects
+`duplicate_tickets`, `ticket_parents`, and `source_configurations`. Each array contains objects
 with the corresponding record fields. IDs are strings; `ticket_id`, `project_id`,
 `effort_id`, `child_id`, `parent_id`, `blocker_id`, and `dependent_id` refer to
 IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`. Ticket
@@ -19,7 +19,7 @@ Optional values are null; `trashed` and `archived` are integers 0 or 1. History
 values are recorded strings, with their meaning determined by `kind`. Checkout
 paths describe the source machine and may need adjustment on another machine.
 Evidence preserves full values and optional editing-agent attribution. Follows and inbox entries use the stable `local-person` preference scope, which is not an account or editing-agent identity.
-`duplicate_tickets` records `source_id`, `canonical_id`, and nullable `restore_status`; the first two refer to ticket IDs. All arrays represent the same SQLite read snapshot, including trash.
+`duplicate_tickets` records `source_id`, `canonical_id`, and nullable `restore_status`; the first two refer to ticket IDs. `source_configurations` holds each saved ticket-source configuration as a JSON string in `configuration` (repositories and filters only, never a credential), with the `provider`, the `account` it was validated as, and `saved_at`. All arrays represent the same SQLite read snapshot, including trash.
 
 Follow and inbox records use `local-person` as a stable personal preference scope, independent of editing-agent attribution. Note inbox entries retain the note ID and original content in `from_value` and `to_value`, and `editing_agent` is descriptive attribution.
 

@@ -35,6 +35,9 @@ import { AttentionCard } from "@/features/settings/AttentionCard";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
+import { SourceCard } from "@/features/settings/sources/SourceCard";
+import { useSources } from "@/features/settings/sources/use-sources";
+import "@/features/settings/sources/sources.css";
 import "@/features/settings/settings.css";
 
 const THEME_OPTIONS = [
@@ -620,6 +623,7 @@ export function SettingsView({
   // reads fresh data on each visit. A restore replaces the workspace under an
   // open page, so the Location card reads again afterwards.
   const [restores, setRestores] = useState(0);
+  const { entries: sources } = useSources();
   const heading = useRef<HTMLHeadingElement>(null);
   // Opening Settings replaces the sidebar, which held focus; land on the title.
   useEffect(() => heading.current?.focus(), []);
@@ -641,6 +645,9 @@ export function SettingsView({
         />
         <ExportCard />
         <CommandLineCard />
+        {sources.map((entry) => (
+          <SourceCard key={entry.connector.provider} entry={entry} />
+        ))}
         <KeyboardShortcutsCard />
         <AboutCard />
       </div>

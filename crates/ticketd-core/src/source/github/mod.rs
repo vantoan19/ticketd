@@ -184,7 +184,7 @@ impl Connector for GithubConnector {
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),
-            name: "GitHub Issues".into(),
+            name: "GitHub".into(),
             contract_version: CONTRACT_VERSION,
             capabilities: vec![Capability::Discover, Capability::Fetch],
             schema: Self::schema(),

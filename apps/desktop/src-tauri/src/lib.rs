@@ -680,6 +680,91 @@ fn safety_backups() -> Result<Vec<SafetyBackup>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// A source operation that failed. `code` is the core's stable kind, and
+/// `fields` carries per-field validation problems when the settings were invalid.
+#[derive(Debug, serde::Serialize)]
+struct SourceFailure {
+    code: &'static str,
+    message: String,
+    fields: Vec<ticketd_core::source::FieldIssue>,
+}
+
+impl From<ticketd_core::Error> for SourceFailure {
+    fn from(error: ticketd_core::Error) -> Self {
+        match error {
+            ticketd_core::Error::Source(source) => Self {
+                code: source.code(),
+                fields: source.issues().to_vec(),
+                message: source.to_string(),
+            },
+            other => Self {
+                code: "failed",
+                message: other.to_string(),
+                fields: Vec::new(),
+            },
+        }
+    }
+}
+
+impl From<ticketd_core::source::SourceError> for SourceFailure {
+    fn from(error: ticketd_core::source::SourceError) -> Self {
+        ticketd_core::Error::from(error).into()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SourceEntry {
+    connector: ticketd_core::source::ConnectorDescriptor,
+    saved: Option<ticketd_core::source::SavedSource>,
+}
+
+/// The built-in sources and what is saved for each. Network commands below run
+/// off the UI thread; none holds a database handle while it waits.
+#[tauri::command(async)]
+fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
+    let workspace = Workspace::open_default()?;
+    let engine = ticketd_core::source::Engine::builtin();
+    engine
+        .connectors()
+        .into_iter()
+        .map(|connector| {
+            let saved = workspace.saved_source(&connector.provider)?;
+            Ok(SourceEntry { connector, saved })
+        })
+        .collect()
+}
+#[tauri::command(async)]
+fn source_check_connection(
+    provider: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<ticketd_core::source::ConnectionInfo, SourceFailure> {
+    Ok(ticketd_core::source::Engine::builtin().check_connection(&provider, &config)?)
+}
+#[tauri::command(async)]
+fn source_options(
+    provider: String,
+    field: String,
+    query: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<Vec<ticketd_core::source::ChoiceOption>, SourceFailure> {
+    Ok(ticketd_core::source::Engine::builtin().options(&provider, &field, &query, &config)?)
+}
+#[tauri::command(async)]
+fn source_preview(
+    provider: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
+    Ok(ticketd_core::source::Engine::builtin().preview(&provider, &config)?)
+}
+#[tauri::command(async)]
+fn save_source(
+    provider: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    let mut workspace = Workspace::open_default()?;
+    Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -687,6 +772,11 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
+            list_sources,
+            source_check_connection,
+            source_options,
+            source_preview,
+            save_source,
             last_backup,
             workspace_info,
             restore_workspace,

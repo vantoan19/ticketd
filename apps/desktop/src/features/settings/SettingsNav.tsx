@@ -3,11 +3,26 @@ import {
   SETTINGS_GROUPS,
   SETTINGS_SECTIONS,
   settingsCardId,
+  sourceSection,
+  type SettingsCardKey,
+  type SettingsGroup,
 } from "@/features/settings/settings-sections";
+import { useSources } from "@/features/settings/sources/use-sources";
 import "@/features/settings/settings.css";
 
 /** Takes the workspace sidebar's place while Settings is open. */
 export function SettingsNav({ onBack }: { onBack: () => void }) {
+  const { entries } = useSources();
+  const allSections: {
+    id: SettingsCardKey;
+    label: string;
+    group: SettingsGroup;
+  }[] = [
+    ...SETTINGS_SECTIONS,
+    ...entries.map(({ connector }) =>
+      sourceSection(connector.provider, connector.name),
+    ),
+  ];
   return (
     <aside className="settings-nav" aria-label="Settings">
       <button type="button" className="settings-back" onClick={onBack}>
@@ -15,7 +30,7 @@ export function SettingsNav({ onBack }: { onBack: () => void }) {
       </button>
       <nav aria-label="Settings sections">
         {SETTINGS_GROUPS.map((group) => {
-          const sections = SETTINGS_SECTIONS.filter(
+          const sections = allSections.filter(
             (section) => section.group === group,
           );
           if (sections.length === 0) return null;
