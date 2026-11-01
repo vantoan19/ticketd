@@ -214,7 +214,11 @@ impl GithubConnector {
             .as_array()?;
         let mut target = None;
         for node in nodes {
-            if node.pointer("/duplicate/databaseId").and_then(Value::as_u64) != Some(id) {
+            if node
+                .pointer("/duplicate/databaseId")
+                .and_then(Value::as_u64)
+                != Some(id)
+            {
                 continue;
             }
             target = match node.get("__typename").and_then(Value::as_str) {

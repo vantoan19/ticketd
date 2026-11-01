@@ -698,11 +698,7 @@ fn only_duplicate_closures_ask_for_a_canonical_issue() {
 #[test]
 fn enterprise_graphql_lives_beside_the_rest_root() {
     let connector = |api: &str| {
-        GithubConnector::new(
-            api,
-            Box::new(Shared(Arc::default())),
-            Box::new(Token(None)),
-        )
+        GithubConnector::new(api, Box::new(Shared(Arc::default())), Box::new(Token(None)))
     };
     assert_eq!(
         connector("https://ghe.example/api/v3/").graphql_url(),

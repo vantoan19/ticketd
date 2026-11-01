@@ -492,9 +492,13 @@ fn resolve_target(
                     )
                     .optional()?;
                 match external {
-                    Some((Some(provider), Some(external_id))) => {
-                        ticket_for_identity(connection, &ExternalIdentity { provider, id: external_id })?
-                    }
+                    Some((Some(provider), Some(external_id))) => ticket_for_identity(
+                        connection,
+                        &ExternalIdentity {
+                            provider,
+                            id: external_id,
+                        },
+                    )?,
                     _ => None,
                 }
             }

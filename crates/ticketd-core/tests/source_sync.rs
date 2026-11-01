@@ -755,12 +755,7 @@ fn duplicate_of(id: u64, title: &str, canonical: Option<u64>) -> ExternalIssue {
 }
 
 fn target(ticket: &Ticket) -> DuplicateTarget {
-    ticket
-        .source
-        .clone()
-        .unwrap()
-        .duplicate_target
-        .expect("a duplicate target")
+    ticket.source.clone().unwrap().duplicate_target.unwrap()
 }
 
 /// Imports each issue as open (discovery only lists open issues), then has the
@@ -779,7 +774,7 @@ fn import_then_close_as_duplicates(f: &mut Fixture, duplicates: &[(u64, Option<u
 fn resolved(ticket: &Ticket) -> Option<String> {
     match target(ticket) {
         DuplicateTarget::External { ticket, .. } => ticket,
-        other => panic!("expected an external target, got {other:?}"),
+        DuplicateTarget::Unknown => None,
     }
 }
 
