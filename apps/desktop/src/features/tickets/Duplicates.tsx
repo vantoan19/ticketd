@@ -29,6 +29,14 @@ import { toFailure } from "@/lib/api/bridge-failure";
 import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
+/** Why the preview can no longer be applied: its review changed, or it is for the other kind of review. */
+type Stale = "" | "changed" | "mode";
+
+function staleKind(code: string): Stale {
+  if (code === "review_changed") return "changed";
+  if (code === "review_mode") return "mode";
+  return "";
+}
 
 function TicketSummary({
   label,
@@ -79,8 +87,13 @@ export function Duplicates({
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
   const [error, setError] = useState("");
-  const [outcomes, setOutcomes] = useState<WaitingOutcome[]>([]);
-  const [stale, setStale] = useState(false);
+  // The core's answer for one set of choices, kept with the key of the choices it answers.
+  const [answer, setAnswer] = useState<{
+    key: string;
+    outcomes: WaitingOutcome[];
+    failure: string;
+  } | null>(null);
+  const [stale, setStale] = useState<Stale>("");
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState<{ key: string; id: string } | null>(
     null,
@@ -95,6 +108,12 @@ export function Duplicates({
 
   // The core judges all choices together; the review only shows what it answers. Choices
   // not made yet count as Keep, which is the current graph.
+  const answerKey = preview
+    ? `${preview.edges[0]?.basis ?? ""}|${separate}|${choices.join(",")}`
+    : "";
+  const evaluating =
+    !!preview && preview.edges.length > 0 && answer?.key !== answerKey;
+  const outcomes = answer?.key === answerKey ? answer.outcomes : [];
   useEffect(() => {
     if (!preview || preview.edges.length === 0) return;
     let current = true;
@@ -106,22 +125,27 @@ export function Duplicates({
     );
     client
       .evaluateDuplicate(preview.source, canonicalArg, separate, decisions)
-      .then((result) => current && setOutcomes(result))
+      .then((result) => {
+        if (current)
+          setAnswer({ key: answerKey, outcomes: result, failure: "" });
+      })
       .catch((reason: unknown) => {
         if (!current) return;
         const failure = toFailure(reason);
-        if (failure.code === "review_changed") setStale(true);
-        else setError(failure.message);
+        const kind = staleKind(failure.code);
+        if (kind) setStale(kind);
+        // Never leave the previous choice's lines beside the error.
+        setAnswer({ key: answerKey, outcomes: [], failure: failure.message });
       });
     return () => {
       current = false;
     };
-  }, [preview, choices, canonicalArg, separate]);
+  }, [preview, choices, canonicalArg, separate, answerKey]);
 
   async function loadPreview() {
     setPending(true);
     setError("");
-    setStale(false);
+    setStale("");
     try {
       const result = await client.previewDuplicate(
         separate ? target : ticket.reference,
@@ -132,7 +156,6 @@ export function Duplicates({
         ? null
         : await client.showTicket(result.canonical);
       setPreview(result);
-      setOutcomes([]);
       setCanonicalTicket(resolved);
       setChoices(result.edges.map(() => ""));
     } catch (reason) {
@@ -154,7 +177,7 @@ export function Duplicates({
     setCanonicalTicket(null);
     setChoices([]);
     setError("");
-    setStale(false);
+    setStale("");
     setTimeout(() => canonicalInput.current?.focus());
   }
 
@@ -190,13 +213,15 @@ export function Duplicates({
       onDone?.();
     } catch (reason) {
       const failure = toFailure(reason);
-      if (failure.code === "review_changed") setStale(true);
+      const kind = staleKind(failure.code);
+      if (kind) setStale(kind);
       else setError(failure.message);
     } finally {
       setPending(false);
     }
   }
 
+  const shownError = error || (answer?.key === answerKey ? answer.failure : "");
   const complete = !!preview && choices.every((choice) => choice);
   return (
     <div className="duplicate-review" aria-label="Duplicate review">
@@ -338,8 +363,9 @@ export function Duplicates({
           {stale && (
             <div role="alert" className="duplicate-stale">
               <p>
-                Dependencies changed after this preview, so nothing was applied.
-                Refresh the preview to review the current dependencies.
+                {stale === "mode"
+                  ? "This preview was made for a different kind of review, so nothing was applied. Refresh the preview to review it again."
+                  : "Dependencies changed after this preview, so nothing was applied. Refresh the preview to review the current dependencies."}
               </p>
               <Button
                 type="button"
@@ -352,9 +378,9 @@ export function Duplicates({
               </Button>
             </div>
           )}
-          {error && (
+          {shownError && (
             <p role="alert" className="duplicate-error">
-              {error}
+              {shownError}
             </p>
           )}
           <DialogFooter>
@@ -362,7 +388,7 @@ export function Duplicates({
               Cancel
             </Button>
             <Button
-              disabled={pending || stale || !complete}
+              disabled={pending || !!stale || evaluating || !complete}
               onClick={() => void apply()}
             >
               {separate ? "Apply dependency changes" : applyLabel(choices)}
@@ -399,6 +425,7 @@ export function Duplicates({
             type="button"
             variant="link"
             className="duplicate-change"
+            disabled={pending}
             onClick={() => changeCanonical(!separate)}
           >
             {separate

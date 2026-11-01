@@ -59,6 +59,30 @@ pub(crate) fn readiness(
     }
 }
 
+/// The "Ready" or "Blocked" indicator of the ticket `id`, read from its blockers' current
+/// statuses through [`readiness`]; none when the ticket has no Ready state.
+pub(crate) fn availability(
+    connection: &Connection,
+    id: &str,
+    status: Status,
+    trashed: bool,
+) -> Result<Option<String>, Error> {
+    let mut statement = connection.prepare(
+        "SELECT b.status FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = ?1",
+    )?;
+    let blockers = statement
+        .query_map([id], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .map(|status| status.parse::<Status>())
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(match readiness(status, trashed, blockers) {
+        Readiness::Ready => Some("Ready".into()),
+        Readiness::Blocked => Some("Blocked".into()),
+        Readiness::NoReadyState => None,
+    })
+}
+
 /// The blockers, with their statuses, that do not satisfy a dependency.
 pub(crate) fn unresolved_blockers(
     blockers: impl IntoIterator<Item = (String, Status)>,

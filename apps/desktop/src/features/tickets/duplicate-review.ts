@@ -28,6 +28,8 @@ export function replacementIssueReason(
       return `it would make ${edge.replacement_dependent} block itself`;
     case "cycle":
       return `it would create a dependency cycle`;
+    case "trashed":
+      return `${edge.replacement_blocker} or ${edge.replacement_dependent} is in the trash`;
   }
 }
 
@@ -47,17 +49,13 @@ export function consequence(
   const waiting =
     choice === "replace" ? edge.replacement_dependent : edge.dependent;
   const outcome = outcomes.find((candidate) => candidate.ticket === waiting);
-  // A ticket canceled by this review has no readiness worth stating.
-  const clause =
-    outcome && !(waiting === source && !separate) ? readiness(outcome) : "";
-  const subject = clause ? "it" : waiting;
-  const effect = (() => {
+  const added = edge.replacement_blocker;
+  // What the choice does to the dependency, with the subject named or not.
+  const effect = (subject: string) => {
     if (edge.blocker === source) {
       if (choice === "replace") {
-        const done =
-          outcome &&
-          !outcome.unresolved_after.includes(edge.replacement_blocker);
-        return `${subject} now waits on ${edge.replacement_blocker}${done ? ", which is Done" : ""}`;
+        const done = outcome && !outcome.unresolved_after.includes(added);
+        return `${subject} now waits on ${added}${done ? ", which is Done" : ""}`;
       }
       if (choice === "remove") return `${subject} no longer waits on ${source}`;
       return separate
@@ -68,21 +66,25 @@ export function consequence(
       return `${subject} takes over ${source}'s dependency on ${edge.blocker}`;
     if (choice === "remove")
       return `${edge.blocker} no longer blocks ${source}`;
-    return `${source} keeps its dependency on ${edge.blocker}`;
-  })();
-  return clause ? `${clause}; ${effect}` : effect;
-}
-
-/** How the core says all choices together change a waiting ticket's readiness. */
-function readiness(outcome: WaitingOutcome): string {
-  const { ticket } = outcome;
+    return `${waiting === source ? subject : source} keeps its dependency on ${edge.blocker}`;
+  };
+  if (!outcome) return effect(waiting);
+  const { unresolved_after: unresolved } = outcome;
+  if (waiting === source && !separate)
+    return `${waiting} is Canceled and has no Ready state; ${effect("it")}`;
   if (outcome.after === "no_ready_state")
-    return outcome.trashed
-      ? `${ticket} is in the trash and has no Ready state`
-      : `${ticket} is ${outcome.status} and has no Ready state`;
+    return `${waiting} is ${outcome.trashed ? "in the trash" : outcome.status} and has no Ready state; ${effect("it")}`;
   if (outcome.after === "ready")
-    return `${ticket} ${outcome.before === "ready" ? "stays" : "becomes"} Ready`;
-  return `${ticket} ${outcome.before === "blocked" ? "stays" : "becomes"} Blocked, waiting on ${outcome.unresolved_after.join(", ")}`;
+    return `${waiting} ${outcome.before === "ready" ? "stays" : "becomes"} Ready; ${effect("it")}`;
+  // Blocked afterwards. Name the replacement once: either as the one thing left to wait
+  // for, or in the list of what is still unresolved.
+  const mentionsAdded = choice === "replace" && unresolved.includes(added);
+  if (mentionsAdded && unresolved.length === 1)
+    return outcome.before === "ready"
+      ? `${waiting} becomes Blocked until ${added} is Done`
+      : `${waiting} becomes Ready once ${added} is Done`;
+  const state = `${waiting} ${outcome.before === "blocked" ? "stays" : "becomes"} Blocked, waiting on ${unresolved.join(", ")}`;
+  return mentionsAdded ? state : `${state}; ${effect("it")}`;
 }
 
 /** The number of dependency changes the current choices apply; Keep changes nothing. */

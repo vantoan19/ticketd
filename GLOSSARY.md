@@ -24,10 +24,10 @@ A ticket describing part of its parent ticket's work, possibly linked to a diffe
 A directed relationship in which one ticket must be Done before another is considered Ready, including across projects. A canceled blocker remains unresolved until the relationship is removed; readiness guides selection without preventing work from starting.
 
 **Ready**:
-A Todo ticket with no unresolved blocking dependencies.
+A Todo ticket that is not in the trash and has no unresolved blocking dependencies.
 
 **Blocked**:
-A Todo ticket with unresolved blocking dependencies. Started and terminal tickets have neither Ready nor Blocked indicators; their dependency lists still show unresolved prerequisites.
+A Todo ticket that is not in the trash and has unresolved blocking dependencies. Started, terminal, and trashed tickets have neither Ready nor Blocked indicators; their dependency lists still show unresolved prerequisites.
 
 **Project**:
 A repository associated with tickets, with an explicit identity preserved across repository moves and renames. Multiple local checkouts of the same repository represent the same project.

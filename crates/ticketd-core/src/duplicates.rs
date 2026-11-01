@@ -24,11 +24,15 @@ impl std::fmt::Display for ReviewMode {
 
 /// One dependency of the source and where each choice would put it.
 ///
-/// `mode` and `basis` are stamped by the preview and must be submitted unchanged. `basis`
-/// is an opaque fingerprint of everything the review's outcomes depend on: the edges, the
-/// status and trash state of every ticket involved, and the blockers of each waiting ticket.
-/// Applying with a different `basis` is a stale review; edits to unrelated tickets do not
-/// change it.
+/// `mode`, `basis` and `replacement_basis` are stamped by the preview and must be submitted
+/// unchanged. `basis` is an opaque fingerprint of the readiness inputs of Remove and Keep:
+/// the edges, and the status and trash state of each dependent and of its blockers.
+/// `replacement_basis` fingerprints what only Replace depends on: the status and trash
+/// state of the replacement endpoints and the blockers of the replacement dependent. It is
+/// compared only for Replace decisions, so a Remove-only review does not go stale when the
+/// canonical changes. Applying with a different fingerprint is a stale review; edits to
+/// unrelated tickets change neither. Whether a Replace is still possible (a new cycle, a
+/// trashed endpoint) is not in the fingerprints; it is re-checked on evaluate and apply.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DependencyEdge {
     pub blocker: String,
@@ -37,6 +41,18 @@ pub struct DependencyEdge {
     pub replacement_dependent: String,
     pub mode: ReviewMode,
     pub basis: String,
+    pub replacement_basis: String,
+}
+
+/// A ticket that waits on one of the review's dependencies, as it is when previewed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaitingTicket {
+    pub ticket: String,
+    pub status: Status,
+    pub trashed: bool,
+    pub readiness: Readiness,
+    /// Blockers that are not Done now.
+    pub unresolved: Vec<String>,
 }
 
 /// What a whole set of choices does to one ticket that waits on a blocker.
@@ -72,6 +88,8 @@ pub enum ReplacementIssue {
     AlreadyExists,
     SelfBlock,
     Cycle,
+    /// An endpoint of the replacement is in the trash, so the dependency cannot be added.
+    Trashed,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DuplicateDependencyPreview {
@@ -80,6 +98,10 @@ pub struct DuplicateDependencyPreview {
     pub mode: ReviewMode,
     pub canonical: String,
     pub edges: Vec<DependencyEdge>,
+    /// Each dependent of an edge with its current status and readiness, from the same
+    /// snapshot as the edges. What each choice would change is answered by evaluating.
+    #[serde(default)]
+    pub waiting: Vec<WaitingTicket>,
     /// Parallel to `edges`: the reason Replace is invalid for that edge, if any.
     #[serde(default)]
     pub replacement_issues: Vec<Option<ReplacementIssue>>,
@@ -211,8 +233,9 @@ struct Snapshot {
     destination: String,
     edges: Vec<DependencyEdge>,
     facts: HashMap<String, Facts>,
-    /// Current blockers of every waiting ticket.
+    /// Current blockers of every dependent and of every replacement dependent.
     blockers: BTreeMap<String, BTreeSet<String>>,
+    dependents: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -234,7 +257,7 @@ fn by_number(references: impl IntoIterator<Item = String>) -> Vec<String> {
     sorted
 }
 
-/// A stable 64-bit FNV-1a hash; the basis only has to be equal for equal state.
+/// A stable 64-bit FNV-1a hash; a fingerprint only has to be equal for equal state.
 fn fingerprint(text: &str) -> String {
     let hash = text.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
@@ -251,12 +274,24 @@ impl Snapshot {
     ) -> Result<Self, Error> {
         let source_id = relationships::id(connection, source)?;
         let canonical_id = relationships::id(connection, canonical)?;
+        if source_id == canonical_id {
+            return Err(Error::ReviewSameTicket);
+        }
         let source: String = connection.query_row(
             "SELECT 'T-' || number FROM tickets WHERE id=?1",
             [&source_id],
             |r| r.get(0),
         )?;
-        let destination: String = connection.query_row("SELECT 'T-' || t.number FROM tickets t WHERE t.id = COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| r.get(0))?;
+        let (destination_id, destination): (String, String) = connection.query_row("SELECT t.id, 'T-' || t.number FROM tickets t WHERE t.id = COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if mode == ReviewMode::Duplicate {
+            // Marking the duplicate fails for these whatever the choices, so say so up front.
+            if source_id == destination_id {
+                return Err(Error::DuplicateCycle);
+            }
+            for id in [&source_id, &canonical_id, &destination_id] {
+                crate::ensure_editable(connection, id)?;
+            }
+        }
         // The cap is checked before any further work, so a huge review is cheap to refuse.
         let mut stmt = connection.prepare("SELECT 'T-' || b.number, 'T-' || d.number FROM dependencies e JOIN tickets b ON b.id=e.blocker_id JOIN tickets d ON d.id=e.dependent_id WHERE e.blocker_id=?1 OR e.dependent_id=?1 ORDER BY b.number,d.number LIMIT 1001")?;
         let pairs: Vec<(String, String)> = stmt
@@ -284,26 +319,22 @@ impl Snapshot {
                 dependent,
                 mode,
                 basis: String::new(),
+                replacement_basis: String::new(),
             })
             .collect();
 
         // Facts about every ticket the outcomes mention, each read once.
         let mut facts: HashMap<String, Facts> = HashMap::new();
         let mut blockers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        let mut involved: BTreeSet<String> = BTreeSet::from([source.clone(), destination.clone()]);
+        let mut dependents = BTreeSet::new();
+        let mut needed: BTreeSet<String> = BTreeSet::new();
         for edge in &edges {
-            for reference in [
-                &edge.blocker,
-                &edge.dependent,
-                &edge.replacement_blocker,
-                &edge.replacement_dependent,
-            ] {
-                involved.insert(reference.clone());
-            }
+            dependents.insert(edge.dependent.clone());
             blockers.entry(edge.dependent.clone()).or_default();
             blockers
                 .entry(edge.replacement_dependent.clone())
                 .or_default();
+            needed.insert(edge.replacement_blocker.clone());
         }
         let mut blocker_stmt = connection.prepare("SELECT 'T-' || b.number, b.status, b.trashed FROM dependencies d JOIN tickets b ON b.id = d.blocker_id JOIN tickets w ON w.id = d.dependent_id WHERE w.number = ?1")?;
         for (waiting, set) in &mut blockers {
@@ -330,7 +361,7 @@ impl Snapshot {
         drop(blocker_stmt);
         let mut fact_stmt =
             connection.prepare("SELECT status, trashed FROM tickets WHERE number = ?1")?;
-        for reference in involved.iter().chain(blockers.keys()) {
+        for reference in needed.iter().chain(blockers.keys()) {
             if facts.contains_key(reference) {
                 continue;
             }
@@ -355,16 +386,50 @@ impl Snapshot {
             edges: Vec::new(),
             facts,
             blockers,
+            dependents,
         };
-        let basis = snapshot.basis(&edges);
+        let basis = snapshot.basis(&edges)?;
         for edge in &mut edges {
             edge.basis = basis.clone();
+            edge.replacement_basis = snapshot.replacement_basis(edge)?;
         }
         snapshot.edges = edges;
         Ok(snapshot)
     }
 
-    fn basis(&self, edges: &[DependencyEdge]) -> String {
+    fn fact(&self, reference: &str) -> Result<Facts, Error> {
+        self.facts
+            .get(reference)
+            .copied()
+            .ok_or_else(|| Error::NotFound(reference.into()))
+    }
+
+    fn blockers_of(&self, waiting: &str) -> Result<&BTreeSet<String>, Error> {
+        self.blockers
+            .get(waiting)
+            .ok_or_else(|| Error::NotFound(waiting.into()))
+    }
+
+    fn fact_text(&self, reference: &str) -> Result<String, Error> {
+        let facts = self.fact(reference)?;
+        Ok(format!(
+            "{reference}:{}:{}",
+            facts.status,
+            u8::from(facts.trashed)
+        ))
+    }
+
+    /// A ticket's own facts and those of each of its blockers: all its readiness depends on.
+    fn waiting_text(&self, waiting: &str) -> Result<String, Error> {
+        let mut text = format!("{}<", self.fact_text(waiting)?);
+        for blocker in by_number(self.blockers_of(waiting)?.iter().cloned()) {
+            text.push_str(&self.fact_text(&blocker)?);
+            text.push(',');
+        }
+        Ok(text)
+    }
+
+    fn basis(&self, edges: &[DependencyEdge]) -> Result<String, Error> {
         let mut text = format!("{:?}|{}|{}", self.mode, self.source, self.destination);
         for edge in edges {
             text.push_str(&format!(
@@ -372,41 +437,73 @@ impl Snapshot {
                 edge.blocker, edge.dependent, edge.replacement_blocker, edge.replacement_dependent
             ));
         }
-        let mut references: Vec<_> = self.facts.keys().cloned().collect();
-        references.sort_by_key(|r| number(r));
-        for reference in references {
-            if let Some(facts) = self.facts.get(&reference) {
-                text.push_str(&format!(
-                    "|{reference}:{}:{}",
-                    facts.status,
-                    u8::from(facts.trashed)
-                ));
-            }
+        for dependent in by_number(self.dependents.iter().cloned()) {
+            text.push('|');
+            text.push_str(&self.waiting_text(&dependent)?);
         }
-        for (waiting, set) in &self.blockers {
-            text.push_str(&format!(
-                "|{waiting}<{}",
-                by_number(set.iter().cloned()).join(",")
-            ));
-        }
-        fingerprint(&text)
+        Ok(fingerprint(&text))
     }
 
-    /// Whether `decisions` answer exactly this review: the same mode, edges and basis.
+    fn replacement_basis(&self, edge: &DependencyEdge) -> Result<String, Error> {
+        Ok(fingerprint(&format!(
+            "{}|{}",
+            self.fact_text(&edge.replacement_blocker)?,
+            self.waiting_text(&edge.replacement_dependent)?
+        )))
+    }
+
+    /// Whether `decisions` answer exactly this review: the same mode, edges and fingerprints.
     fn check(&self, decisions: &[DependencyDecision]) -> Result<(), Error> {
         if decisions.iter().any(|d| d.edge.mode != self.mode) {
             return Err(Error::DependencyReviewMode(self.mode));
         }
-        let edges: Vec<_> = decisions.iter().map(|d| &d.edge).collect();
-        if edges.len() != self.edges.len() || edges.iter().zip(&self.edges).any(|(a, b)| *a != b) {
-            return Err(Error::DependencyReviewChanged);
+        let same = decisions.len() == self.edges.len()
+            && decisions
+                .iter()
+                .zip(&self.edges)
+                .all(|(decision, current)| {
+                    let mut submitted = decision.edge.clone();
+                    if decision.choice != DependencyChoice::Replace {
+                        submitted.replacement_basis = current.replacement_basis.clone();
+                    }
+                    submitted == *current
+                });
+        if same {
+            Ok(())
+        } else {
+            Err(Error::DependencyReviewChanged)
         }
-        Ok(())
+    }
+
+    /// The dependents as they are now.
+    fn baseline(&self) -> Result<Vec<WaitingTicket>, Error> {
+        by_number(self.dependents.iter().cloned())
+            .into_iter()
+            .map(|waiting| {
+                let facts = self.fact(&waiting)?;
+                let blockers = self
+                    .blockers_of(&waiting)?
+                    .iter()
+                    .map(|b| Ok((b.clone(), self.fact(b)?.status)))
+                    .collect::<Result<Vec<_>, Error>>()?;
+                Ok(WaitingTicket {
+                    readiness: readiness(
+                        facts.status,
+                        facts.trashed,
+                        blockers.iter().map(|(_, status)| *status),
+                    ),
+                    unresolved: by_number(unresolved_blockers(blockers)),
+                    status: facts.status,
+                    trashed: facts.trashed,
+                    ticket: waiting,
+                })
+            })
+            .collect()
     }
 
     /// Readiness of every waiting ticket before and after all of `decisions` are applied
     /// together; the duplicate counts as Canceled afterwards when the review cancels it.
-    fn outcomes(&self, decisions: &[DependencyDecision]) -> Vec<WaitingOutcome> {
+    fn outcomes(&self, decisions: &[DependencyDecision]) -> Result<Vec<WaitingOutcome>, Error> {
         let mut after_blockers = self.blockers.clone();
         for decision in decisions {
             let edge = &decision.edge;
@@ -425,48 +522,50 @@ impl Snapshot {
                     .insert(edge.replacement_blocker.clone());
             }
         }
-        let status_after = |reference: &str| {
+        let status_after = |reference: &str| -> Result<Status, Error> {
             if self.mode == ReviewMode::Duplicate && reference == self.source {
-                Status::Canceled
+                Ok(Status::Canceled)
             } else {
-                self.facts
-                    .get(reference)
-                    .map_or(Status::Canceled, |f| f.status)
+                Ok(self.fact(reference)?.status)
             }
         };
-        let status_now = |reference: &str| {
-            self.facts
-                .get(reference)
-                .map_or(Status::Canceled, |f| f.status)
+        let status_now =
+            |reference: &str| -> Result<Status, Error> { Ok(self.fact(reference)?.status) };
+        let judge = |waiting: &str,
+                     blockers: &BTreeSet<String>,
+                     status: &dyn Fn(&str) -> Result<Status, Error>|
+         -> Result<(Readiness, Vec<String>), Error> {
+            let trashed = self.fact(waiting)?.trashed;
+            let statuses = blockers
+                .iter()
+                .map(|b| Ok((b.clone(), status(b)?)))
+                .collect::<Result<Vec<(String, Status)>, Error>>()?;
+            Ok((
+                readiness(
+                    status(waiting)?,
+                    trashed,
+                    statuses.iter().map(|(_, status)| *status),
+                ),
+                unresolved_blockers(statuses),
+            ))
         };
-        let judge =
-            |waiting: &str, blockers: &BTreeSet<String>, status: &dyn Fn(&str) -> Status| {
-                let trashed = self.facts.get(waiting).is_some_and(|f| f.trashed);
-                let statuses: Vec<(String, Status)> =
-                    blockers.iter().map(|b| (b.clone(), status(b))).collect();
-                (
-                    readiness(
-                        status(waiting),
-                        trashed,
-                        statuses.iter().map(|(_, status)| *status),
-                    ),
-                    unresolved_blockers(statuses),
-                )
-            };
         by_number(self.blockers.keys().cloned())
             .into_iter()
             .map(|waiting| {
-                let (before, _) = judge(&waiting, &self.blockers[&waiting], &status_now);
-                let (after, unresolved) = judge(&waiting, &after_blockers[&waiting], &status_after);
-                let facts = self.facts.get(&waiting);
-                WaitingOutcome {
-                    status: status_now(&waiting),
-                    trashed: facts.is_some_and(|f| f.trashed),
+                let (before, _) = judge(&waiting, self.blockers_of(&waiting)?, &status_now)?;
+                let after_set = after_blockers
+                    .get(&waiting)
+                    .ok_or_else(|| Error::NotFound(waiting.clone()))?;
+                let (after, unresolved) = judge(&waiting, after_set, &status_after)?;
+                let facts = self.fact(&waiting)?;
+                Ok(WaitingOutcome {
+                    status: facts.status,
+                    trashed: facts.trashed,
                     ticket: waiting,
                     before,
                     after,
                     unresolved_after: by_number(unresolved),
-                }
+                })
             })
             .collect()
     }
@@ -506,6 +605,7 @@ impl Workspace {
             .map(|edge| self.replacement_issue(edge))
             .collect::<Result<_, _>>()?;
         Ok(DuplicateDependencyPreview {
+            waiting: snapshot.baseline()?,
             source: snapshot.source,
             mode,
             canonical: snapshot.destination,
@@ -516,7 +616,9 @@ impl Workspace {
 
     /// What the whole set of `decisions` would do to each ticket that waits on one of the
     /// review's dependencies. The decisions must answer a current preview of the same mode;
-    /// a mismatched mode or a changed review is an error rather than a misleading answer.
+    /// a mismatched mode or a changed review is an error rather than a misleading answer,
+    /// and so is a Replace that can no longer be applied (a new cycle, a trashed endpoint),
+    /// exactly as when applying.
     pub fn evaluate_dependency_review(
         &self,
         source: &str,
@@ -527,7 +629,21 @@ impl Workspace {
         let tx = self.connection.unchecked_transaction()?;
         let snapshot = Snapshot::load(&tx, source, canonical, mode)?;
         snapshot.check(decisions)?;
-        Ok(snapshot.outcomes(decisions))
+        self.ensure_replaceable(decisions)?;
+        snapshot.outcomes(decisions)
+    }
+
+    /// A replacement that became impossible since the review was shown, through an unrelated
+    /// change, is as stale as a changed edge.
+    fn ensure_replaceable(&self, decisions: &[DependencyDecision]) -> Result<(), Error> {
+        for decision in decisions {
+            if decision.choice == DependencyChoice::Replace
+                && self.replacement_issue(&decision.edge)?.is_some()
+            {
+                return Err(Error::DependencyReviewChanged);
+            }
+        }
+        Ok(())
     }
 
     /// Judges the replacement against the graph without the edge it would replace.
@@ -537,6 +653,16 @@ impl Workspace {
         }
         let blocker = relationships::id(&self.connection, &edge.replacement_blocker)?;
         let dependent = relationships::id(&self.connection, &edge.replacement_dependent)?;
+        for id in [&blocker, &dependent] {
+            let trashed: bool = self.connection.query_row(
+                "SELECT trashed FROM tickets WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )?;
+            if trashed {
+                return Ok(Some(ReplacementIssue::Trashed));
+            }
+        }
         let exists: bool = self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM dependencies WHERE blocker_id = ?1 AND dependent_id = ?2)",
             params![blocker, dependent],
@@ -641,15 +767,7 @@ impl Workspace {
         if expected_canonical != snapshot.destination {
             return Err(Error::DependencyReviewChanged);
         }
-        // A replacement that became a cycle or a duplicate since the review was
-        // shown, through an unrelated change, is as stale as a changed edge.
-        for decision in decisions {
-            if decision.choice == DependencyChoice::Replace
-                && self.replacement_issue(&decision.edge)?.is_some()
-            {
-                return Err(Error::DependencyReviewChanged);
-            }
-        }
+        self.ensure_replaceable(decisions)?;
         for decision in decisions {
             if decision.choice != DependencyChoice::Retain {
                 self.remove_dependency(&decision.edge.blocker, &decision.edge.dependent, agent)?;

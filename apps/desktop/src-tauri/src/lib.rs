@@ -12,7 +12,7 @@ use ticketd_core::{
 /// the interface never has to parse it to decide what to do.
 #[derive(Debug, serde::Serialize)]
 struct BridgeFailure {
-    /// `batch_operation` (see `index`), `review_changed`, or `failed`.
+    /// `batch_operation` (see `index`), `review_changed`, `review_mode`, or `failed`.
     code: &'static str,
     /// For `batch_operation`, which operation of the batch was rejected.
     index: Option<usize>,
@@ -41,6 +41,11 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 code: "review_changed",
                 index: None,
                 message: ticketd_core::Error::DependencyReviewChanged.to_string(),
+            },
+            ticketd_core::Error::DependencyReviewMode(mode) => Self {
+                code: "review_mode",
+                index: None,
+                message: ticketd_core::Error::DependencyReviewMode(mode).to_string(),
             },
             other => Self {
                 code: "failed",

@@ -79,6 +79,7 @@ const graphSchema = z.object({
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
+const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
 const reviewModeSchema = z.enum(["duplicate", "separate"]);
 const statusSchema = z.enum([
   "Todo",
@@ -95,14 +96,27 @@ const dependencyEdgeSchema = z.object({
   // Stamped by the preview; submitted back unchanged with each decision.
   mode: reviewModeSchema,
   basis: z.string(),
+  replacement_basis: z.string(),
 });
 const duplicatePreviewSchema = z.object({
   source: z.string(),
   mode: reviewModeSchema,
   canonical: z.string(),
   edges: z.array(dependencyEdgeSchema),
+  // Each dependent as it is now; what a choice changes comes from evaluating.
+  waiting: z.array(
+    z.object({
+      ticket: z.string(),
+      status: statusSchema,
+      trashed: z.boolean(),
+      readiness: readinessSchema,
+      unresolved: z.array(z.string()),
+    }),
+  ),
   replacement_issues: z
-    .array(z.enum(["already_exists", "self_block", "cycle"]).nullable())
+    .array(
+      z.enum(["already_exists", "self_block", "cycle", "trashed"]).nullable(),
+    )
     .default([]),
 });
 // What every choice together does to one waiting ticket; decided by the core.
@@ -110,8 +124,8 @@ const waitingOutcomeSchema = z.object({
   ticket: z.string(),
   status: statusSchema,
   trashed: z.boolean(),
-  before: z.enum(["ready", "blocked", "no_ready_state"]),
-  after: z.enum(["ready", "blocked", "no_ready_state"]),
+  before: readinessSchema,
+  after: readinessSchema,
   unresolved_after: z.array(z.string()),
 });
 export type WaitingOutcome = z.infer<typeof waitingOutcomeSchema>;

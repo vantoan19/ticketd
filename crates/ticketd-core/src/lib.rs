@@ -11,7 +11,7 @@ mod context;
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
-    ReplacementIssue, ReviewMode, WaitingOutcome,
+    ReplacementIssue, ReviewMode, WaitingOutcome, WaitingTicket,
 };
 mod evidence;
 mod export;
@@ -121,6 +121,8 @@ pub enum Error {
         "this review was previewed for a different kind of review; preview again for a {0} review"
     )]
     DependencyReviewMode(duplicates::ReviewMode),
+    #[error("a ticket cannot be reviewed against itself")]
+    ReviewSameTicket,
     #[error("dependency would create a cycle or self-link")]
     DependencyCycle,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
