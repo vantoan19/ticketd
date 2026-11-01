@@ -4,13 +4,15 @@
 
 This document defines the target visual and interaction design for ticketd's desktop application. It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
-Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, platform sync, a board, or a chat panel. Track implementation and deviations in GitHub Issues, not in this document.
+Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, a board, or a chat panel. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
 
 ### Reference and adaptation
 
 The visual reference is the third-party [Vercel design language analysis by design-bites](https://github.com/educlopez/design-bites/blob/main/design-mds/vercel.com/DESIGN.md). Use its published numeric values for the light palette, type scale, control sizes, spacing scale, radii, focus treatment, and elevation. It is a third-party observation rather than an official Vercel specification. The tables below distinguish those source values from ticketd-specific layout assignments and dark-theme extensions.
 
 Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
+
+The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, and an external issue’s description and comments shown as read-only source cards with compact event rows. Borrow these structures, not those products’ styling or branding.
 
 ## 1. Visual character and hierarchy
 
@@ -27,7 +29,7 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 ### Composition rules
 
 - Establish grouping with alignment and spacing first. Use a shadow boundary where navigation or independently scrolling planes meet. Separate document sections with spacing.
-- Use flat document sections. Do not wrap each property, note, empty state, or relationship type in its own card.
+- Use flat document sections. Do not wrap each property, note, empty state, or relationship type in its own card. The one exception is content owned by an external source, which sits in read-only source cards (see Documents and activity).
 - Give each action surface one primary action. The workspace's New ticket action and a focused dialog's submit action may coexist.
 - Keep headings, body text, inputs, and section actions on consistent left and right edges.
 - Keep small supporting text readable. Do not use low contrast, tiny text, or excessive truncation to make a screen seem cleaner.
@@ -86,19 +88,30 @@ Normal text must meet 4.5:1 contrast against its actual surface; large text and 
 
 Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
-| Meaning     | Icon treatment                               | Visible label     |
-| ----------- | -------------------------------------------- | ----------------- |
-| Todo        | Empty circle                                 | Todo              |
-| In progress | Circle with center mark                      | In progress       |
-| In review   | Dashed circle                                | In review         |
-| Done        | Circle with check                            | Done              |
-| Canceled    | Circle with slash                            | Canceled          |
-| Ready       | Status dot beside the word, on Todo tickets  | Ready             |
-| Blocked     | Status dot beside the word, with the reason  | Blocked by T-18   |
-| Duplicate   | Canceled status plus a canonical-ticket link | Duplicate of T-10 |
-| Unread      | Status dot plus accessible unread state      | Unread            |
+| Meaning            | Icon treatment                              | Visible label      |
+| ------------------ | ------------------------------------------- | ------------------ |
+| Todo               | Empty circle                                | Todo               |
+| In progress        | Circle with center mark                     | In progress        |
+| In review          | Dashed circle                               | In review          |
+| Done               | Circle with check                           | Done               |
+| Canceled           | Circle with slash                           | Canceled           |
+| Ready              | Status dot beside the word, on Todo tickets | Ready              |
+| Blocked            | Status dot beside the word, with the reason | Blocked by T-18    |
+| Duplicate          | Circle with two horizontal lines            | Duplicate of T-10  |
+| Source unavailable | Status dot beside the words                 | Source unavailable |
+| Unread             | Status dot plus accessible unread state     | Unread             |
 
-Ready and Blocked are availability indicators, not extra statuses. Canceled must never look completed. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
+Ready and Blocked are availability indicators, not extra statuses. Canceled must never look completed. Duplicate is a status of its own: it never looks Canceled or Done, and it always names its canonical ticket, or the source’s reference when that ticket is not in the workspace. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
+
+Each dot color keeps one meaning across every view:
+
+| Dot    | Value     | Meaning                                                                                                                      |
+| ------ | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Green  | `#45A557` | Ready, and other positive states such as an external source that is open and synced                                          |
+| Orange | `#FF990A` | Blocked, and other states that need attention: Source unavailable, an unrecognized closure reason, an unresolved publication |
+| Blue   | `#0062D1` | Unread                                                                                                                       |
+
+Transient and settled states, such as Refreshing GitHub… or Closed on GitHub, use words without a dot.
 
 ## 3. Typography
 
@@ -201,33 +214,37 @@ The document plane, ticket rows, and inline sections remain flat. Floating menus
 Navigation stays on the canvas surface. Every view sits in one inset, elevated content panel: 12px radius, the small elevation shadow ring, and 8px from the window edges. There is no global top bar. The list pane has its own header and the detail pane has its own header, both inside the panel.
 
 ```text
-┌───────────────┬──────────────────────────────────────────────────────┐
-│ ticketd    +  │ ┌────────────────────────┬─────────────────────────┐ │
-│               │ │ View title  12   ⟳ 🔍 ≡│ T-42 ⧉   Follow ⏰ … ⤢ ✕ │ │
-│ Inbox     3   │ ├────────────────────────┤                         │ │
-│ All tickets   │ │ ○ T-41  Ticket title   │ Ticket title            │ │
-│ Ready         │ │ ◐ T-42  Selected       │ Status · Project · …    │ │
-│ In progress   │ │ ○ T-43  Ticket title   │                         │ │
-│               │ │                        │ Description             │ │
-│ Projects  ⚙   │ │                        │ Linked work             │ │
-│ Efforts   ⚙   │ │                        │ Activity                │ │
-│ Archived …    │ │                        │                         │ │
-│ Trash         │ └────────────────────────┴─────────────────────────┘ │
-│ Settings      │                                                      │
-└───────────────┴──────────────────────────────────────────────────────┘
+┌──────────────┬───────────────────────────────────────────────────────────────────────┐
+│ ticketd   +  │ ┌─────────────────────────┬─────────────────────────────────────────┐ │
+│              │ │ All tickets      ⟳ ⌕ ≡  │ T-42 ⧉ repo #98 ↗  2 of 11 ˄ ˅ … ⤢ ✕    │ │
+│ Inbox     3  │ │ All 11 GitHub 7 Local 4 ├───────────────────────────┬─────────────┤ │
+│ All tickets  │ ├─────────────────────────┤ Ticket title              │ Status      │ │
+│ Ready     4  │ │ ◐ In progress  2     +  │ ● Open on GitHub · #98    │ Source      │ │
+│ In progress  │ │ ◐ T-42 Selected     #98 │ ┌ GitHub · Read-only ──┐  │ Project     │ │
+│              │ │ ◐ T-43 Ticket title     │ │ Description          │  │ Effort      │ │
+│ Projects  ⚙  │ │ ◌ In review    1     +  │ └──────────────────────┘  │ Tags        │ │
+│ Efforts   ⚙  │ │ ◌ T-44 Ticket title  #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
+│ Archived …   │ │ ○ Todo         3     +  │ GitHub conversation       │ Attention   │ │
+│              │ │ ○ T-45 Ticket title     │ Notes and history         │             │ │
+│ ● GitHub     │ └─────────────────────────┴───────────────────────────┴─────────────┘ │
+│ Trash        │                                                                       │
+│ Settings     │                                                                       │
+└──────────────┴───────────────────────────────────────────────────────────────────────┘
 ```
 
-The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar.
+The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
 | Region          | Geometry and behavior                                                                           |
 | --------------- | ----------------------------------------------------------------------------------------------- |
 | Navigation      | 208px default width on the canvas; 12px outer inset; independently scrollable groups            |
 | Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                   |
-| List header     | 48px: view title, count, Refresh, then search and Filters (32px small controls)                 |
-| Detail header   | 48px: ticket reference and actions (see Ticket detail)                                          |
+| List header     | 48px: view title, Refresh, then search and Filters (32px small controls)                        |
+| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts           |
+| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)             |
 | List pane       | At least 360px in split mode; remaining width allocated with the detail pane                    |
 | Detail pane     | At least 480px in split mode; start near 55% of content panel width                             |
-| Detail content  | 32px desktop gutters, 16px on narrow windows; split view capped at 800px including gutters      |
+| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters   |
+| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding             |
 | Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                  |
 | Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context |
 
@@ -243,6 +260,7 @@ Measure the available content panel width after navigation, not just the screen 
 | Content width below 840px    | Selecting a ticket replaces the list in the content area; explicit Back returns to its prior position |
 | Window below 768px           | Navigation moves into a sheet; retain a labeled navigation trigger                                    |
 | Window near 390px            | One content column, 16px gutters, wrapping property values, full-width action forms where needed      |
+| Detail pane below 652px      | The property rail moves below the document column and keeps its section order                         |
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.
 
@@ -263,10 +281,12 @@ Use 20px between groups and 8px between a group heading and its rows. Active nav
 
 ### List anatomy
 
-Use stable columns: selection, status, reference, title, then optional supporting metadata. Titles receive flexible width. Reference and status columns do not move when a checkbox becomes checked.
+Use stable columns: selection, status, reference, title, then the source pill of an externally owned ticket. Titles receive flexible width. Reference and status columns do not move when a checkbox becomes checked.
 
+- Group rows by status in workflow order: In progress, In review, Todo, Done, Canceled, Duplicate. Each group has a 32px header on the canvas surface with the status icon, the status name in the subsection role, a 12px count, and an Add ticket action for that status. Omit empty groups. A status change moves the ticket to its new group without animating the reorder.
+- Once an external source is configured, a source filter below the list header offers All, GitHub, and Local with counts. It narrows the groups; it does not regroup the list by source.
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
-- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, then the title. Line two: the status word or, for Todo tickets, a small status dot with Ready or "Blocked by T-n"; then one context item (parent, project, or Effort relevant to the current view) and tag pills. Do not repeat the current project on every row.
+- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Effort relevant to the current view), tag pills, and the 12px updated time. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
@@ -280,16 +300,20 @@ Search retains its query while opening details. Filter controls show active cons
 
 ### Required reading order
 
-1. **Detail header:** the ticket reference with Copy, then Follow, the reminder summary, an actions menu, expand, and close. Avoid repeating “Ticket details” above the reference and title.
+1. **Detail header:** the ticket reference with Copy; for an externally owned ticket, its source location (`owner / repo #98`) as a link that opens the source; then the ticket’s position in the current list (“2 of 11”) with Previous and Next, the actions menu, expand, and close. Avoid repeating “Ticket details” above the reference and title.
 2. **Title:** wraps to its content height. Reading must not look like an empty resizable form. Editing retains a clear focus treatment.
-3. **Properties:** Status, Project, Effort, and Tags appear as 32px ghost controls with identifying icons in a wrapping inline band. Keep their accessible names; visible field labels and outlined boxes belong in creation forms, not the reading view. Hover and keyboard focus reveal interactivity.
-4. **Description:** primary reading surface, with editing on demand.
-5. **Linked work and evidence:** one flat Linked work section instead of nested disclosures, with concise existing information and contextual add/edit actions.
-6. **Activity:** authored notes, distinguishable recorded changes, and explicit note submission.
+3. **State line:** one 14px line under the title. An externally owned ticket shows its source state as a dot and words (Open on GitHub, Source unavailable), then its external number, author, and opening date; a closed one reads “Closed on GitHub as completed” without a dot. A local ticket reads “Local ticket · created Oct 31”.
+4. **Description:** primary reading surface, with editing on demand. An externally owned description is a read-only source card (see Documents and activity).
+5. **Subtickets:** directly under the description, a heading with a compact neutral progress bar and “1 of 2 done”, rows with status icon, reference, title, and status word, and Add subticket. On an externally owned ticket, a caption states that subtickets stay local.
+6. **Evidence and backlinks:** flat sections with concise existing information and contextual add/edit actions.
+7. **Source conversation:** externally owned tickets only. The source’s comments and events, read-only, with a link to comment at the source.
+8. **Notes and history:** authored notes, distinguishable recorded changes, and explicit note submission. On an externally owned ticket, a caption states that notes stay in ticketd and are never sent to the source.
 
-In split view, description text is 14px. In the full-width (expanded) view, content is a centered column of at most 800px and description text is 16px.
+The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Effort, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
 
-Use 8px from reference to title, 16px from title to properties, and 24px from properties to description. Use 24px between major reading sections. Use section spacing instead of divider lines; shadow boundaries belong to pane edges and floating surfaces.
+In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
+
+Use 8px from title to state line and 24px from state line to the description. Use 24px between major reading sections and 32px before the source conversation and the notes. Use section spacing instead of divider lines; shadow boundaries belong to pane edges, floating surfaces, and source cards.
 
 A save state belongs next to the edited content, in 12px supporting text. Stable Saved feedback must not take an entire standalone section. Pending save, Saving, and failures remain visible and accessible. Never hide a failure to achieve a cleaner screenshot.
 
@@ -297,21 +321,34 @@ A save state belongs next to the edited content, in 12px supporting text. Stable
 
 | Information/action         | Default presentation                                               | Editing surface                                      |
 | -------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
-| Follow                     | Compact labeled toggle in the header action group                  | Immediate action with pending/error feedback         |
-| Reminder                   | Remind me trigger, or a short scheduled-time summary               | Focused popover; expand to sheet when space requires |
-| Status/project/Effort/tags | Current values in the property band                                | Anchored picker; explicit clear/add/remove choices   |
-| Description                | Rendered document, or an unobtrusive Add description action        | In-place rich editor; source mode remains available  |
-| Parent/subtickets          | Existing ticket rows with references and titles                    | Search/select action near the group heading          |
-| Blocking dependencies      | Existing blockers and their status; blocked reason remains visible | Focused add/remove workflow and graph access         |
-| Related/discovered work    | Existing reference rows grouped by relationship meaning            | Add relationship action with explicit direction      |
-| Duplicate                  | Canonical link beside status context when present                  | Mark as duplicate workflow in the actions menu       |
+| Follow                     | Labeled toggle in the rail’s Attention section                     | Immediate action with pending/error feedback         |
+| Reminder                   | Remind me trigger, or a short scheduled-time summary, in Attention | Focused popover; expand to sheet when space requires |
+| Status/project/Effort/tags | Labeled values in the property rail                                | Anchored picker; explicit clear/add/remove choices   |
+| Source                     | Rail Source section: identity link, freshness, ownership, actions  | Explicit Refresh, Publish, Retry, or Take ownership  |
+| Description                | Rendered document, or an unobtrusive Add description action        | In-place rich editor for local tickets only          |
+| Parent/subtickets          | Subtickets with progress under the description; parent in the rail | Search/select action near the group heading          |
+| Blocking dependencies      | Rail Relationships with each blocker’s status; reason in the row   | Focused add/remove workflow and graph access         |
+| Related/discovered work    | Rail Relationships grouped by relationship meaning                 | Add relationship action with explicit direction      |
+| Duplicate                  | Duplicate status, with the canonical ticket in Relationships       | Mark as duplicate workflow in the actions menu       |
 | Evidence                   | Named records with type, value/link, and date                      | Add evidence or Edit opens a focused form            |
 | Backlinks                  | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                       |
+| Source conversation        | External comments and events in source order, read-only            | Comment at the source                                |
 | Activity                   | Notes and history readable in one chronological area               | Add note; edit/delete beside the relevant note       |
 
-Linked work is one flat section. Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups may collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
+Relationships are one flat rail section, grouped by meaning: parent, blocked by, blocks, related, discovered while, and duplicate of. Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
 
 Destructive actions belong in a labeled menu or focused review surface. Describe the result precisely: Trash ticket, Remove relationship, or Delete note. Duplicate handling is not a generic delete operation.
+
+### Externally owned tickets
+
+A ticket is either Local or owned by an external source. Retained provenance is not ownership: after Take ownership the ticket reads Local, and the rail adds “was owner/repo#n.”
+
+- **Ownership cues:** show the owner in three places: the list row’s source pill, the detail header’s source link, and the rail’s Source section. A local ticket has no source pill.
+- **Read-only content:** the title, description, and source comments of an externally owned ticket are read-only. Do not show editing affordances on them. The description card’s header says Read-only and links to edit at the source.
+- **Local progress:** while the issue is open, the Status picker offers Todo, In progress, and In review, with a caption that closing states follow the source. Once it is closed, the picker’s choices are disabled and its caption explains that reopening at the source returns the ticket to Todo. The rail’s Status note says that progress is kept in ticketd.
+- **Freshness:** the rail shows “Synced 4 min ago” beside a green dot and says which fields the source owns. While refreshing, the list header and the rail read “Refreshing GitHub…” without a dot.
+- **Unavailable source:** a recessed notice at the top of the document column states what failed and since when, says that nothing was deleted or completed, and offers Retry and Take ownership…. The list row and the rail carry the orange Source unavailable dot.
+- **Publishing:** an eligible local ticket (Todo, In progress, or In review) offers Publish to GitHub… in the rail’s Source section; an ineligible one states why. Publication goes through a dialog that previews the issue exactly as it will be sent.
 
 ## 8. Documents and activity
 
@@ -324,6 +361,8 @@ Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with
 - Tables stay within a labeled horizontal scroll region. Preserve cell readability instead of shrinking the whole table.
 - Mermaid diagrams fit the reading column and provide source and expand actions. Rendering errors stay beside the diagram; source remains editable and savable.
 - A note is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
+- Content owned by an external source is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The card is the provenance signal; locally authored notes stay unboxed.
+- The source conversation shows the source’s comments as source cards and its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, as compact rows: a 28px circular icon, the actor, the event, and the time.
 - Automatic history is visually quieter than authored notes. Group its label, changed values, and time into a compact row.
 - The empty note composer begins as a compact Add a note affordance. Once opened, keep the draft and tools available until submission or explicit discard; blur is not submission.
 
@@ -351,7 +390,7 @@ Provide an appropriate explicit open action where supported; always retain Copy 
 
 ### Duplicate dependency review
 
-Use a dialog or expanded review pane, not a small popover. Show the duplicate and canonical ticket by reference and title, the resulting Canceled state, and each affected dependency with its current and proposed endpoints.
+Use a dialog or expanded review pane, not a small popover. Show the duplicate and canonical ticket by reference and title, the resulting Duplicate status, and each affected dependency with its current and proposed endpoints.
 
 Each edge has an explicit retain, remove, or replace choice where valid. The final action states what will be applied. A stale preview or cycle error keeps the review visible and requests a fresh preview; no partial success presentation is allowed. Removing a duplicate designation must explain that dependency replacements are reviewed separately. Preserve access to the duplicate's description and history.
 
@@ -370,6 +409,7 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 | Group       | Sections                                |
 | ----------- | --------------------------------------- |
 | Preferences | Appearance, Attention                   |
+| Sources     | GitHub                                  |
 | Workspace   | Location, Backups, Export, Command line |
 | Help        | Keyboard shortcuts, About               |
 
@@ -379,7 +419,7 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 - **Applying changes:** changes apply immediately. There is no Save button for preferences; show a failure beside the control if one cannot be applied.
 - **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
 - **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
-- Do not add platform integration settings before those integrations exist.
+- **Sources:** add a source’s section only when its connector exists. It shows the connection, discovery filters with a preview of matching issues before saving, the refresh schedule, and the last refresh.
 
 ## 11. Shared control and state recipes
 
@@ -407,16 +447,18 @@ Menus are for short action choices. Popovers are for small, focused edits. Dialo
 
 Use a small set of observable states rather than transient notifications everywhere. Empty, loading, unavailable, failed, saved, and externally changed data must be distinguishable.
 
-| Situation                       | Presentation                                                   |
-| ------------------------------- | -------------------------------------------------------------- |
-| Initial list load               | Row-shaped placeholders using the final row geometry           |
-| Background refresh              | Retain the current content and scroll; avoid blanking the pane |
-| No tickets                      | Short explanation and New ticket action                        |
-| No filter matches               | Current query context and Clear filters                        |
-| No selected ticket              | Quiet selection hint; no large illustration                    |
-| Missing/trashed reference       | Readable reference plus unavailable/trashed explanation        |
-| Save failure                    | Draft stays editable with Retry and a clear failure message    |
-| External change beneath a draft | Local notice with explicit reload/overwrite choices            |
+| Situation                       | Presentation                                                             |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| Initial list load               | Row-shaped placeholders using the final row geometry                     |
+| Background refresh              | Retain the current content and scroll; avoid blanking the pane           |
+| No tickets                      | Short explanation and New ticket action                                  |
+| No filter matches               | Current query context and Clear filters                                  |
+| No selected ticket              | Quiet selection hint; no large illustration                              |
+| Missing/trashed reference       | Readable reference plus unavailable/trashed explanation                  |
+| Save failure                    | Draft stays editable with Retry and a clear failure message              |
+| External change beneath a draft | Local notice with explicit reload/overwrite choices                      |
+| Source refresh                  | Retain content; “Refreshing GitHub…”, then the new sync time             |
+| Source unavailable              | Last synced content stays readable; notice with Retry and Take ownership |
 
 Buttons and links change color/background without scale, translation, or opacity animation. Overlay motion uses the reference’s 200ms popover / 300ms modal duration, scale from 0.96, and `cubic-bezier(.175, .885, .32, 1.1)` easing. Avoid animated row reordering and decorative loading loops. Honor reduced-motion preferences with immediate state changes. Motion is never required to understand completion or selection.
 
@@ -445,6 +487,7 @@ Review a complete workflow with realistic content, not only an empty screenshot.
 - Short and multiline titles, a long description, code, a table, a Mermaid diagram, notes, blockers, evidence, and empty optional content.
 - Bulk selection, open pickers, reminder editing, duplicate dependency review, save errors, and external-change notices.
 - Keyboard focus, selected and hovered rows, disabled/pending controls, and 200% zoom.
+- Externally owned tickets that are open, closed, and unavailable; a local ticket ready to publish; the source filter; and a status change that moves a row between groups.
 
 ### Acceptance questions
 
@@ -458,13 +501,14 @@ Review a complete workflow with realistic content, not only an empty screenshot.
 8. Do drafts, focus, and scroll survive refreshes, navigation, and layout changes?
 9. Do errors explain what happened and the next available action without exposing internal event keys?
 10. Does the screen remain useful with mouse, keyboard, larger text, and reduced motion?
+11. For any ticket, can someone tell who owns each field and how fresh an external copy is?
 
 A design change is ready for implementation review only when these questions can be answered from the rendered screens and interaction evidence. Record unresolved exceptions in the corresponding GitHub issue. Do not label a change visually complete solely because formatting, tests, or a build passed.
 
 ### Compact workspace density
 
-Keep the 16px root so rem-based shared controls remain predictable. Working-pane text and ticket-row titles use 14px/20px; captions stay 12px/16px. Ticket and view titles use the ticketd-specific 24px/32px heading above. Navigation items are 32px high, the brand row and the list and detail pane headers are 48px high, and ticket rows have a 48px minimum with 8px vertical padding and no inter-row margin. List headers use 16px top and 12px bottom padding. Use 32px desktop document gutters and 16px narrow-window gutters. These application density choices take precedence over spacious display roles; preserve the reference palette, font families, shadows, and focus treatment.
+Keep the 16px root so rem-based shared controls remain predictable. Working-pane text and ticket-row titles use 14px/20px; captions stay 12px/16px. Ticket and view titles use the ticketd-specific 24px/32px heading above. Navigation items are 32px high, the brand row and the list and detail pane headers are 48px high, and ticket rows have a 48px minimum with 8px vertical padding and no inter-row margin. Status group headers are 32px high. List headers use 16px top and 12px bottom padding. Use 32px desktop document gutters and 16px narrow-window gutters. These application density choices take precedence over spacious display roles; preserve the reference palette, font families, shadows, and focus treatment.
 
 ### Workspace hierarchy
 
-The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the content panel. Preserve one subtle boundary between the list and detail panes; do not add nested cards around these regions. Properties use the shared ghost button and select variants. The full creation form keeps labeled, outlined controls.
+The ticket title is the strongest heading in the split workspace. The list heading is 14px/20px at weight 500, with a 12px count on the same line. Search and Filters use the 32px small-control role and transparent resting surfaces. Use the canvas color for navigation and the elevated surface color for the content panel. Preserve one subtle boundary between the list and detail panes; do not add nested cards around these regions. Properties in the rail use the shared ghost button and select variants beneath their labels. The full creation form keeps labeled, outlined controls.
