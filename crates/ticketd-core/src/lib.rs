@@ -57,7 +57,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 23;
+pub const FORMAT_VERSION: i64 = 24;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -160,6 +160,8 @@ pub enum Error {
     NotSynchronized(String),
     #[error(transparent)]
     Source(#[from] source::SourceError),
+    #[error(transparent)]
+    Publication(#[from] source::PublicationError),
     #[error("could not determine the application data directory")]
     NoDataDirectory,
     #[error("a file already exists at {}; ticketd never replaces an existing file, so choose a new name", .0.display())]
@@ -192,6 +194,10 @@ pub struct Ticket {
     /// The external issue this ticket is or was, with current ownership and freshness.
     #[serde(default)]
     pub source: Option<source::TicketSource>,
+    /// The publication attempt that is running or whose outcome is unknown. While
+    /// it is set the ticket cannot be published again.
+    #[serde(default)]
+    pub publication: Option<source::PublicationAttempt>,
     pub parent: Option<hierarchy::RelatedTicket>,
     pub children: Vec<hierarchy::RelatedTicket>,
 }
@@ -401,6 +407,9 @@ impl Workspace {
         if version < 23 {
             source::migrate_tracking(&transaction)?;
         }
+        if version < 24 {
+            source::migrate_publication(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -448,6 +457,7 @@ impl Workspace {
             duplicate_of: None,
             duplicates: Vec::new(),
             source: None,
+            publication: None,
             parent: None,
             children: Vec::new(),
         })
@@ -704,6 +714,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         duplicate_of: None,
         duplicates: Vec::new(),
         source: None,
+        publication: None,
         parent: None,
         children: Vec::new(),
     })

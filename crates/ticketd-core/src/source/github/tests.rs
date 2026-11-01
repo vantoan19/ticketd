@@ -538,3 +538,96 @@ fn secrets_and_requests_never_debug_print_the_credential() {
     };
     assert!(!format!("{request:?}").contains(TOKEN));
 }
+
+fn publish_request() -> PublishRequest {
+    PublishRequest {
+        title: "Escalate".into(),
+        body: "Details".into(),
+        destination: "o/r".into(),
+    }
+}
+
+fn publish_to(engine: &Engine) -> Result<ExternalIssue, SourceError> {
+    engine.publish(
+        "github",
+        &config(json!({"repositories": ["o/r"]})),
+        &publish_request(),
+    )
+}
+
+#[test]
+fn publishing_posts_only_the_title_and_description_and_returns_the_created_issue() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/r/issues"),
+        status(201, issue(77, 12, "o/r"), &[]),
+    );
+
+    let created = publish_to(&engine).unwrap();
+
+    assert_eq!(created.reference.identity.id, "77");
+    assert_eq!(created.reference.locator, "o/r#12");
+    assert_eq!(created.state, ExternalState::Open);
+    let requests = fixture.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, Method::Post);
+    // Nothing ticketd-specific: no labels, assignees, milestone or markers.
+    let sent: Value = serde_json::from_slice(requests[0].body.as_ref().unwrap()).unwrap();
+    assert_eq!(sent, json!({"title": "Escalate", "body": "Details"}));
+}
+
+#[test]
+fn a_refusal_proves_nothing_was_created_but_an_unclear_answer_does_not() {
+    let url = format!("{API}/repos/o/r/issues");
+    for (response, code, ruled_out) in [
+        (status(401, json!({}), &[]), "unauthenticated", true),
+        (
+            status(403, json!({"message": "nope"}), &[]),
+            "forbidden",
+            true,
+        ),
+        (status(404, json!({}), &[]), "not_found", true),
+        (
+            status(410, json!({"message": "Issues are disabled"}), &[]),
+            "rejected",
+            true,
+        ),
+        (
+            status(422, json!({"message": "Validation Failed"}), &[]),
+            "rejected",
+            true,
+        ),
+        (
+            status(429, json!({}), &[("retry-after", "30")]),
+            "rate_limited",
+            true,
+        ),
+        // The create may have happened: a server error, a redirect, a lost answer
+        // and an unreadable success.
+        (status(502, json!({}), &[]), "unavailable", false),
+        (
+            status(307, json!({}), &[("location", &url)]),
+            "protocol",
+            false,
+        ),
+        (Err("connection reset".into()), "unavailable", false),
+        (status(201, json!("not an issue"), &[]), "protocol", false),
+    ] {
+        let (fixture, engine) = setup(Some(TOKEN));
+        fixture.respond(&url, response);
+        let error = publish_to(&engine).unwrap_err();
+        assert_eq!(error.code(), code);
+        assert_eq!(error.ruled_out_creation(), ruled_out, "{code}");
+        // The POST is never retried or redirected.
+        assert_eq!(fixture.urls().len(), 1);
+        assert!(!error.to_string().contains(TOKEN));
+    }
+}
+
+#[test]
+fn publishing_without_a_credential_sends_nothing() {
+    let (fixture, engine) = setup(None);
+    let error = publish_to(&engine).unwrap_err();
+    assert!(error.ruled_out_creation());
+    assert!(fixture.urls().is_empty());
+}

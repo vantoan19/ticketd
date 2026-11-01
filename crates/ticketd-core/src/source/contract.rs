@@ -117,9 +117,9 @@ pub struct DiscoveryPage {
     pub next_cursor: Option<String>,
 }
 
-/// A request to create an ordinary issue. Reserved for the publication
-/// workflow; connectors that do not declare [`Capability::Publish`] keep the
-/// default implementation.
+/// A request to create an ordinary issue. Connectors that do not declare
+/// [`Capability::Publish`] keep the default implementation. It carries exactly
+/// what the person previewed: no ticketd metadata, labels or comments.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishRequest {
     pub title: String,
@@ -140,6 +140,11 @@ pub enum SourceError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("{0}")]
     Unavailable(String),
+    /// The provider answered and refused the request itself (for GitHub, a
+    /// validation failure or a repository with issues disabled). Unlike
+    /// [`Self::Unavailable`] and [`Self::Protocol`], nothing was created.
+    #[error("{0}")]
+    Rejected(String),
     #[error("unexpected response from the source: {0}")]
     Protocol(String),
     #[error("this source does not support {0}")]
@@ -164,11 +169,33 @@ impl SourceError {
             Self::NotFound(_) => "not_found",
             Self::RateLimited { .. } => "rate_limited",
             Self::Unavailable(_) => "unavailable",
+            Self::Rejected(_) => "rejected",
             Self::Protocol(_) => "protocol",
             Self::Unsupported(_) => "unsupported",
             Self::InvalidConfiguration(_) => "invalid_configuration",
             Self::UnknownProvider(_) => "unknown_provider",
             Self::IncompatibleContract { .. } => "incompatible_contract",
+        }
+    }
+
+    /// Whether a failed `publish` proves the provider created nothing.
+    ///
+    /// True only when the provider answered and refused, or the request was
+    /// never sent. A timeout, dropped connection, server error or unreadable
+    /// answer proves nothing: the issue may exist, so those return false and the
+    /// publication stays unresolved until someone can look.
+    pub fn ruled_out_creation(&self) -> bool {
+        match self {
+            Self::Unauthenticated(_)
+            | Self::Forbidden(_)
+            | Self::NotFound(_)
+            | Self::RateLimited { .. }
+            | Self::Rejected(_)
+            | Self::Unsupported(_)
+            | Self::InvalidConfiguration(_)
+            | Self::UnknownProvider(_)
+            | Self::IncompatibleContract { .. } => true,
+            Self::Unavailable(_) | Self::Protocol(_) => false,
         }
     }
 
@@ -227,8 +254,18 @@ pub trait Connector: Send + Sync {
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
 
-    /// Creates an ordinary issue. Only called when the descriptor declares
-    /// [`Capability::Publish`].
+    /// Where an issue can be published for this configuration, as values for
+    /// [`PublishRequest::destination`]. Empty when the connector cannot say.
+    fn destinations(&self, _config: &ConfigValues) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Creates an ordinary open issue and returns it as the provider now reports
+    /// it. Only called when the descriptor declares [`Capability::Publish`].
+    ///
+    /// An error must classify honestly through
+    /// [`SourceError::ruled_out_creation`]: report a variant that proves nothing
+    /// was created only when that is certain.
     fn publish(
         &self,
         _config: &ConfigValues,

@@ -16,7 +16,7 @@ use super::{
     contract::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue,
-        ExternalRef, ExternalState, SourceError,
+        ExternalRef, ExternalState, PublishRequest, SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -162,6 +162,63 @@ impl GithubConnector {
         Err(SourceError::Protocol("too many redirects".into()))
     }
 
+    /// Creates an issue. A POST is never repeated or redirected: whether the
+    /// first one took effect is the caller's question, so any answer other than
+    /// a definite refusal or a readable 201 leaves creation unproven.
+    fn create_issue(
+        &self,
+        repository: &str,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError> {
+        let token = self.credentials.token().ok_or_else(|| {
+            SourceError::Unauthenticated(
+                "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can create issues".into(),
+            )
+        })?;
+        let body = serde_json::json!({ "title": request.title, "body": request.body });
+        let http = HttpRequest {
+            method: Method::Post,
+            url: format!("{}/repos/{}/issues", self.api_url, encode_path(repository)),
+            headers: vec![
+                ("Accept".into(), "application/vnd.github+json".into()),
+                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
+                ("User-Agent".into(), "ticketd".into()),
+                ("Content-Type".into(), "application/json".into()),
+                ("Authorization".into(), format!("Bearer {}", token.expose())),
+            ],
+            body: Some(body.to_string().into_bytes()),
+        };
+        let response = self.transport.send(&http).map_err(|error| {
+            // No answer: the request may or may not have been processed.
+            SourceError::Unavailable(format!(
+                "GitHub did not answer, so the issue may or may not have been created: {error}"
+            ))
+        })?;
+        if response.status == 201 {
+            let value: Value = serde_json::from_slice(&response.body).map_err(|_| {
+                SourceError::Protocol("GitHub created the issue but the answer is not JSON".into())
+            })?;
+            return translate_issue(&value, repository)?
+                .ok_or_else(|| SourceError::Protocol("GitHub's answer was not an issue".into()));
+        }
+        let subject = format!("creating an issue in {repository}");
+        match response.status {
+            // The request was understood and declined (validation, issues
+            // disabled, gone): the shared classification would call these protocol errors.
+            400 | 405 | 410 | 422 => Err(SourceError::Rejected(match response_message(&response) {
+                Some(message) => format!("GitHub refused {subject}: {message}"),
+                None => format!("GitHub refused {subject} (status {})", response.status),
+            })),
+            // Redirects, other 2xx and server errors prove nothing.
+            _ => match classify(response, &subject) {
+                Ok(_) => Err(SourceError::Protocol(
+                    "GitHub answered the new issue with an unexpected success status".into(),
+                )),
+                Err(error) => Err(error),
+            },
+        }
+    }
+
     fn is_api_url(&self, url: &str) -> bool {
         url.strip_prefix(&self.api_url)
             .is_some_and(|rest| rest.starts_with('/'))
@@ -186,7 +243,7 @@ impl Connector for GithubConnector {
             provider: PROVIDER.into(),
             name: "GitHub".into(),
             contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
+            capabilities: vec![Capability::Discover, Capability::Fetch, Capability::Publish],
             schema: Self::schema(),
         }
     }
@@ -345,6 +402,26 @@ impl Connector for GithubConnector {
             issues,
             next_cursor,
         })
+    }
+
+    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
+        Self::repositories(config)
+    }
+
+    fn publish(
+        &self,
+        _config: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError> {
+        if !ValueFormat::OwnerName.is_valid(&request.destination) {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: "destination".into(),
+                    message: "must be a repository in the form owner/name".into(),
+                },
+            ]));
+        }
+        self.create_issue(&request.destination, request)
     }
 
     fn fetch(

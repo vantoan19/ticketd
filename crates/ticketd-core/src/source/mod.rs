@@ -14,6 +14,7 @@ pub mod contract;
 pub mod engine;
 pub mod github;
 pub mod schema;
+mod publication;
 mod tracking;
 
 use rusqlite::{OptionalExtension, params};
@@ -28,6 +29,10 @@ pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
     ValueFormat,
+};
+pub use publication::{
+    AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
+    PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
 };
 pub use tracking::{
     DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport,
@@ -69,7 +74,21 @@ pub(crate) fn migrate_tracking(connection: &rusqlite::Connection) -> Result<(), 
     tracking::migrate(connection)
 }
 
-pub(crate) use tracking::{guard_change, guard_duplicate, populate};
+/// Step 24: publication attempts.
+pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
+    publication::migrate(connection)
+}
+
+pub(crate) use tracking::{guard_change, guard_duplicate};
+
+/// Fills the ticket's external side and any blocking publication attempt.
+pub(crate) fn populate(
+    connection: &rusqlite::Connection,
+    ticket: &mut crate::Ticket,
+) -> Result<(), Error> {
+    tracking::populate(connection, ticket)?;
+    publication::populate(connection, ticket)
+}
 
 impl Workspace {
     /// The saved configuration for `provider`, if one was saved.

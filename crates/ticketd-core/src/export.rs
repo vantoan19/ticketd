@@ -63,6 +63,10 @@ impl Workspace {
                 "external_duplicate_targets",
                 "ticket_id, provider, external_id, locator, display",
             ),
+            (
+                "publication_attempts",
+                "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url",
+            ),
         ] {
             let mut statement =
                 tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;
