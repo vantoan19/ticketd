@@ -75,7 +75,7 @@ The core owns migrations, export, backup/restore, and data access. Domain valida
 
 ## External changes
 
-The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Effort counts. The notification or polling mechanism remains to be chosen; unsaved editor drafts remain owned by the UI.
+The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Effort counts. The desktop polls. Each refresh also reads the core's change token, which is the SQLite file change counter from the database header. It moves after a committed write by any process, so the desktop skips reads that are costly to repeat (linked work and backlinks) while the token holds still. The token is only compared for equality. It depends on the workspace using the rollback journal: the core checks the header's journal-mode bytes and, in any other mode (such as WAL, which does not advance the counter), reports the token as unknown. The desktop treats an unknown or failed token read as a change and re-reads. `PRAGMA data_version` was not used because the desktop opens a new connection per command; a long-lived monitor connection would also work, and the header token was the smaller change. Unsaved editor drafts remain owned by the UI.
 
 ## Verification and future evolution
 

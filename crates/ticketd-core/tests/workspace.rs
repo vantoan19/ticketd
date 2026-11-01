@@ -1608,6 +1608,35 @@ fn change_token_moves_on_a_write_from_another_handle_and_holds_otherwise() {
     assert_eq!(reader.change_token().unwrap(), before);
     writer.create_ticket("Changed elsewhere").unwrap();
     assert_ne!(reader.change_token().unwrap(), before);
+    assert!(before.is_some());
+}
+
+#[test]
+fn change_token_moves_on_vacuum() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.create_ticket("Kept").unwrap();
+    let before = workspace.change_token().unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("VACUUM")
+        .unwrap();
+    assert_ne!(workspace.change_token().unwrap(), before);
+}
+
+#[test]
+fn change_token_is_unknown_in_wal_mode_so_callers_re_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.change_token().unwrap().is_some());
+    // WAL commits do not advance the header counter, so no token may be offered.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    assert_eq!(workspace.change_token().unwrap(), None);
 }
 
 #[test]

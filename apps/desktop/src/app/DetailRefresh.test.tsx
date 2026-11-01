@@ -53,10 +53,13 @@ const ticket = {
 };
 
 /** Open T-1 and return the bridge calls made since the selection settled. */
-async function openTicket(token: { value: number }) {
+async function openTicket(token: { value: number | null | "fail" }) {
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
-      if (command === "change_token") return token.value;
+      if (command === "change_token") {
+        if (token.value === "fail") throw new Error("unreadable");
+        return token.value;
+      }
       if (command === "find_tickets") return [ticket];
       if (command === "show_ticket") return ticket;
       return bridgeDefault(command, args);
@@ -98,6 +101,29 @@ test("a changed workspace makes the next refresh re-read Backlinks and relations
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
+  expect(reads("ticket_backlinks")).toBe(2);
+  expect(reads("contextual_relationships")).toBe(2);
+});
+
+test("an unknown token re-reads the sections on every refresh", async () => {
+  await openTicket({ value: null });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(reads("ticket_backlinks")).toBe(2);
+  expect(reads("contextual_relationships")).toBe(2);
+});
+
+test("a failing token read still refreshes the list and re-reads the sections", async () => {
+  const token: { value: number | null | "fail" } = { value: 7 };
+  await openTicket(token);
+  token.value = "fail";
+  const refreshes = reads("find_tickets");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(reads("find_tickets")).toBeGreaterThan(refreshes);
+  expect(screen.queryByText(/Refresh failed/)).toBeNull();
   expect(reads("ticket_backlinks")).toBe(2);
   expect(reads("contextual_relationships")).toBe(2);
 });

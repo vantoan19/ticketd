@@ -95,7 +95,7 @@ fn sidebar_counts() -> Result<SidebarCounts, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn change_token() -> Result<u32, String> {
+fn change_token() -> Result<Option<u32>, String> {
     Workspace::open_default()
         .and_then(|w| w.change_token())
         .map_err(|e| e.to_string())

@@ -216,6 +216,7 @@ fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
 
 pub struct Workspace {
     connection: Connection,
+    path: std::path::PathBuf,
     _lock: std::fs::File,
 }
 
@@ -248,6 +249,7 @@ impl Workspace {
                 connection.pragma_update(None, "foreign_keys", "ON")?;
                 return Ok(Self {
                     connection,
+                    path: path.to_path_buf(),
                     _lock: lock,
                 });
             }

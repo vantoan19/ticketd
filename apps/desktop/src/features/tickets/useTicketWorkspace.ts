@@ -94,7 +94,8 @@ export function useTicketWorkspace(
           client.listProjects(),
           client.listEfforts(),
           // A write landing after this read moves the token at the next refresh.
-          client.changeToken(),
+          // An unreadable token must not fail the list refresh: it means unknown.
+          client.changeToken().catch(() => null),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -109,7 +110,8 @@ export function useTicketWorkspace(
       setProjects(result[1]);
       setEfforts(result[2]);
       setRevision((value) => value + 1);
-      if (changeToken.current !== result[3]) {
+      // `null` is unknown, so it always counts as a change and is never kept.
+      if (result[3] === null || changeToken.current !== result[3]) {
         changeToken.current = result[3];
         setChanges((value) => value + 1);
       }

@@ -412,12 +412,16 @@ export const client = {
         await invoke("ticket_backlinks", { reference, limit: 20, offset }),
       );
   },
-  /** Differs after any write to the workspace, by any process. */
+  /**
+   * Differs after any write to the workspace, by any process; `null` when the
+   * core cannot tell, which callers treat as "changed".
+   */
   async changeToken() {
     return z
       .number()
       .int()
       .nonnegative()
+      .nullable()
       .parse(await invoke("change_token"));
   },
   async notes(reference: string, offset: number) {
