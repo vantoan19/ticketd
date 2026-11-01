@@ -97,7 +97,7 @@ test("editor modes and keyboard operations never create a ticket; explicit submi
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   const source = screen.getByRole("textbox", { name: "Description source" });
   fireEvent.change(source, { target: { value: "# Draft\n\n- [ ] Keep this" } });
-  fireEvent.keyDown(source, { key: "Enter", ctrlKey: true });
+  fireEvent.keyDown(source, { key: "Enter" });
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
@@ -154,6 +154,22 @@ test("Ctrl+Enter in the title creates the ticket", async () => {
   const title = screen.getByRole("textbox", { name: "Title" });
   fireEvent.change(title, { target: { value: "Quick" } });
   fireEvent.keyDown(title, { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+});
+
+test("Ctrl+Enter in the Description editor creates the ticket; plain Enter does not", async () => {
+  const create = vi.fn().mockResolvedValue("T-1");
+  render(<Harness create={create} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "From editor" },
+  });
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  fireEvent.keyDown(editor, { key: "Enter" });
+  fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true, isComposing: true });
+  expect(create).not.toHaveBeenCalled();
+  fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
 });
 

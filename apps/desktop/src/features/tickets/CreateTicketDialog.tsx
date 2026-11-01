@@ -241,7 +241,25 @@ export function CreateTicketDialog({
                   <small>Optional. Markdown and checklists work.</small>
                 </span>
               </FieldLabel>
-              <div onKeyDown={(event) => event.stopPropagation()}>
+              <div
+                // The editor owns its keys (Enter, slash menu, IME, Escape), so
+                // they stop here. Only a non-composing Cmd/Ctrl+Enter creates the
+                // ticket. The editor swallows it before it bubbles to the form,
+                // so it is taken in the capture phase.
+                onKeyDownCapture={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    (event.ctrlKey || event.metaKey) &&
+                    !event.nativeEvent.isComposing &&
+                    event.keyCode !== 229
+                  ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.currentTarget.closest("form")?.requestSubmit();
+                  }
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
                 <LazyMarkdownEditor
                   label="Description"
                   readOnly={pending}
