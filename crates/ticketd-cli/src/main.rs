@@ -265,6 +265,12 @@ enum SourceCommand {
         #[command(flatten)]
         settings: SourceSettings,
     },
+    /// Import matching issues and refresh every externally owned ticket now, or one ticket
+    Refresh {
+        /// Refresh only this externally owned ticket, for example T-12
+        #[arg(long)]
+        ticket: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -291,6 +297,9 @@ struct FindArgs {
     /// Include the named parent ticket and its subtickets
     #[arg(long)]
     family: Option<String>,
+    /// Only tickets owned by a source (for example github) or only local ones (local)
+    #[arg(long)]
+    source: Option<String>,
     #[arg(long, default_value_t = 50)]
     limit: u32,
     #[arg(long, default_value_t = 0)]
@@ -310,6 +319,13 @@ impl FindArgs {
                 AvailabilityArg::Blocked => Availability::Blocked,
             }),
             family: self.family,
+            source: self.source.map(|source| {
+                if source == "local" {
+                    ticketd_core::source::SourceFilter::Local
+                } else {
+                    ticketd_core::source::SourceFilter::Provider(source)
+                }
+            }),
             limit: self.limit,
             offset: self.offset,
             ..TicketFilter::default()
@@ -866,6 +882,27 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
+        Command::Source {
+            command: SourceCommand::Refresh { ticket },
+        } => {
+            let report = workspace.refresh_sources(
+                &ticketd_core::source::Engine::builtin(),
+                &ticketd_core::source::RefreshOptions { ticket, now: None },
+            )?;
+            // The report is always printed; a failed refresh also fails the command so
+            // scripts and agents notice that the saved content is not current.
+            writeln!(output, "{}", serde_json::to_string(&report)?)?;
+            if let Some(failure) = report.failures.first() {
+                return Err(format!(
+                    "refresh failed for {} ({}): {}",
+                    failure.reference.as_deref().unwrap_or(&failure.provider),
+                    failure.code,
+                    failure.message
+                )
+                .into());
+            }
+            return Ok(());
+        }
         Command::Source { command } => source_command(&mut workspace, command)?,
     };
     writeln!(output, "{text}")?;
@@ -942,7 +979,12 @@ fn source_command(
             let values = resolve(workspace, &provider, settings)?;
             serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
         }
+        SourceCommand::Refresh { .. } => unreachable_refresh()?,
     })
+}
+
+fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
+    Err("refresh is handled before source configuration commands".into())
 }
 
 fn main() {

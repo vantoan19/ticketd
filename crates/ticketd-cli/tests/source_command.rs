@@ -35,6 +35,14 @@ fn serve() -> String {
                     "200 OK",
                     json!([{"full_name": "o/alpha", "private": false}, {"full_name": "o/beta", "private": true}]),
                 )
+            } else if path == "/repos/o/r/issues/1" {
+                // The single-issue read used to refresh a tracked ticket: closed since import.
+                (
+                    "200 OK",
+                    json!({"id": 1, "number": 1, "title": "Real issue, renamed", "body": "secret description", "state": "closed",
+                           "state_reason": "completed", "html_url": "https://github.example/o/r/issues/1",
+                           "assignees": [], "labels": [], "created_at": "", "updated_at": ""}),
+                )
             } else if path.starts_with("/repos/o/r/issues") {
                 (
                     "200 OK",
@@ -243,4 +251,38 @@ fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
         "BET",
     ]);
     assert_eq!(options[0]["value"], "o/beta");
+}
+
+#[test]
+fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let report = cli.run(&["source", "refresh"]);
+    assert_eq!(report["imported"], json!(["T-1"]));
+    assert_eq!(report["failures"], json!([]));
+    let shown = cli.run(&["show", "T-1"]);
+    assert_eq!(shown["title"], "Real issue");
+    assert_eq!(shown["source"]["display"], "o/r#1");
+    assert_eq!(shown["source"]["ownership"], "external");
+    assert_eq!(shown["source"]["content_locked"], true);
+    // External content is read-only; local progress is allowed.
+    let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
+    assert!(stderr.contains("owned by github"), "{stderr}");
+    cli.run(&["change", "T-1", "--status", "In progress"]);
+    assert_eq!(cli.run(&["list", "--source", "github"]).as_array().unwrap().len(), 1);
+    assert_eq!(cli.run(&["list", "--source", "local"]), json!([]));
+    // Refreshing the single ticket observes that the issue closed.
+    let report = cli.run(&["source", "refresh", "--ticket", "T-1"]);
+    assert_eq!(report["updated"], json!(["T-1"]));
+    let shown = cli.run(&["show", "T-1"]);
+    assert_eq!(shown["status"], "Done");
+    assert_eq!(shown["title"], "Real issue, renamed");
+    // A failed refresh reports and fails, and leaves the saved content alone.
+    let output = cli.command(&["source", "refresh", "--ticket", "T-1"], Some("wrong"));
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["failures"][0]["code"], "unauthenticated");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("wrong"));
+    assert_eq!(cli.run(&["show", "T-1"])["title"], "Real issue, renamed");
+    assert!(cli.run(&["show", "T-1"])["source"]["last_error"]["code"] == "unauthenticated");
 }
