@@ -113,6 +113,7 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                   source_reference: "T-2",
                   source_title: "Source",
                   note_id: null,
+                  created_at: null,
                   passage: "Blocked on T-1 today.",
                   ...span,
                 },
@@ -120,6 +121,10 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
             : [];
         case "get_note":
           return null;
+        // A token that never moves: the Backlinks and Linked work reads are
+        // skipped after the first, yet following a mention must still reveal it.
+        case "change_token":
+          return 1;
         case "is_following":
           return false;
         case "reminder":
