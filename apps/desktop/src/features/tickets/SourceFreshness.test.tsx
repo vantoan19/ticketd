@@ -215,10 +215,9 @@ test("the unavailable notice says what failed, since when, that nothing was lost
     within(notice).getByText(/Nothing was deleted or completed/),
   ).toBeTruthy();
   expect(within(notice).getByText(/Synced 30 min ago/)).toBeTruthy();
-  // Taking ownership is a different ticket's action and is not offered here.
   expect(
-    within(notice).queryByRole("button", { name: /ownership/i }),
-  ).toBeNull();
+    within(notice).getByRole("button", { name: /Take ownership/ }),
+  ).toBeTruthy();
   fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {

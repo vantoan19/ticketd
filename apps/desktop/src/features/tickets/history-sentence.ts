@@ -86,6 +86,8 @@ export function describeChange(
           : from === to
             ? `Updated evidence ${quote(to)}`
             : `Renamed evidence ${quote(from)} to ${quote(to)}`;
+    case "ownership":
+      return `Took ownership from ${from === "github" ? "GitHub" : from}; the ticket is now local`;
     case "source":
       return `Published to ${to}`;
     case "trash":

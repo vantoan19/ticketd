@@ -18,6 +18,7 @@ pub mod github;
 mod publication;
 mod schedule;
 pub mod schema;
+mod takeover;
 mod tracking;
 
 use rusqlite::{OptionalExtension, params};

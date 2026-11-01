@@ -585,6 +585,25 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String
 }
 
 #[tauri::command]
+fn take_ownership(reference: String, request_id: String) -> Result<Ticket, String> {
+    let result = Workspace::open_default()
+        .and_then(|mut workspace| {
+            workspace.write(
+                Some(&request_id),
+                WriteRequest::TakeOwnership {
+                    reference,
+                    agent: None,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    match result {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected write result".into()),
+    }
+}
+
+#[tauri::command]
 fn contextual_relationships(
     reference: String,
     offset: u32,
@@ -941,6 +960,7 @@ pub fn run() -> Result<(), tauri::Error> {
             backup_workspace,
             list_sources,
             refresh_sources,
+            take_ownership,
             source_health,
             preview_publication,
             publish_ticket,
