@@ -282,11 +282,21 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     cli.run(&["note", "add", "T-1", "--content", "my own observation"]);
     let context = cli.run(&["context", "T-1", "--conversation", "--notes"]);
     let first = &context["source_conversation"]["items"][0];
-    assert_eq!((first["type"].as_str(), first["author"].as_str()), (Some("comment"), Some("alice")));
+    assert_eq!(
+        (first["type"].as_str(), first["author"].as_str()),
+        (Some("comment"), Some("alice"))
+    );
     assert_eq!(first["body"]["text"], "Please take a look");
-    assert_eq!(context["source_conversation"]["items"][1]["event"], "closed_completed");
+    assert_eq!(
+        context["source_conversation"]["items"][1]["event"],
+        "closed_completed"
+    );
     assert_eq!(context["notes"]["items"].as_array().unwrap().len(), 1);
-    assert!(cli.run(&["context", "T-1"]).get("source_conversation").is_none());
+    assert!(
+        cli.run(&["context", "T-1"])
+            .get("source_conversation")
+            .is_none()
+    );
     // External content is read-only; local progress is allowed.
     let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
     assert!(stderr.contains("owned by github"), "{stderr}");

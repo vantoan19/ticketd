@@ -115,7 +115,9 @@ test("comments are read-only source cards and events are quiet rows in source or
   expect(within(card).getByText("take").tagName).toBe("STRONG");
   // Nothing in the conversation can be edited, deleted or composed locally.
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.queryByRole("button", { name: /edit|delete|reply/i })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /edit|delete|reply/i }),
+  ).toBeNull();
 
   const rows = screen.getAllByRole("listitem");
   const text = rows.map((row) => row.textContent ?? "");
@@ -149,7 +151,9 @@ test("an externally owned ticket with no conversation says so and still links to
   conversation([]);
   render(view(source()));
   expect(await screen.findByText("No comments on GitHub yet.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Comment on GitHub" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Comment on GitHub" }),
+  ).toBeTruthy();
 });
 
 test("a ticket whose ownership was taken shows retained entries, or nothing", async () => {
@@ -163,7 +167,9 @@ test("a ticket whose ownership was taken shows retained entries, or nothing", as
   render(view(source({ ownership: "local" })));
   expect(await screen.findByText("kept")).toBeTruthy();
   // Provenance only: it is no longer the source's ticket to comment on.
-  expect(screen.queryByRole("button", { name: "Comment on GitHub" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Comment on GitHub" }),
+  ).toBeNull();
 });
 
 test("a refresh keeps the cards in place and a failed reload keeps what was retrieved", async () => {
@@ -171,7 +177,10 @@ test("a refresh keeps the cards in place and a failed reload keeps what was retr
   const { rerender } = render(view(source()));
   const card = await screen.findByRole("article");
 
-  conversation([comment("501", "alice", "first"), comment("502", "bob", "second")]);
+  conversation([
+    comment("501", "alice", "first"),
+    comment("502", "bob", "second"),
+  ]);
   rerender(view(source({ last_refreshed_at: "2026-02-02T00:00:00Z" })));
   await screen.findByText("second");
   // The same element, so scroll position and selection survive the refresh.

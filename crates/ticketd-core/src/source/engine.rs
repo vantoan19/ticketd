@@ -322,8 +322,12 @@ impl Engine {
         conversation
             .events
             .retain(|event| events.insert(event.id.clone()));
-        conversation.comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-        conversation.events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation
+            .comments
+            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation
+            .events
+            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
         Ok(Some(conversation))
     }
 

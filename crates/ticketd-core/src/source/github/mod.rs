@@ -15,9 +15,9 @@ use serde_json::Value;
 use super::{
     contract::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
-        ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalIdentity, ExternalIssue,
-        ExternalRef, ExternalState, SourceError,
-        ExternalComment, ExternalEvent, ExternalEventKind,
+        ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
+        ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
+        ExternalState, SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -464,14 +464,14 @@ fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
 /// rest are not part of the conversation.
 fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
     let kind = match item.get("event").and_then(Value::as_str) {
-        Some("closed") => ExternalEventKind::Closed(
-            match item.get("state_reason").and_then(Value::as_str) {
+        Some("closed") => {
+            ExternalEventKind::Closed(match item.get("state_reason").and_then(Value::as_str) {
                 Some("completed") => ClosureReason::Completed,
                 Some("not_planned") => ClosureReason::NotPlanned,
                 Some("duplicate") => ClosureReason::Duplicate,
                 _ => ClosureReason::Unknown,
-            },
-        ),
+            })
+        }
         Some("reopened") => ExternalEventKind::Reopened,
         Some("assigned") => ExternalEventKind::Assigned,
         Some("unassigned") => ExternalEventKind::Unassigned,

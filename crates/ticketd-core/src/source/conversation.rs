@@ -120,7 +120,10 @@ fn key(entry: &ConversationEntry) -> (&'static str, &str) {
     }
 }
 
-pub(crate) fn load(connection: &Connection, ticket_id: &str) -> Result<Vec<ConversationEntry>, Error> {
+pub(crate) fn load(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Vec<ConversationEntry>, Error> {
     let mut statement = connection.prepare(
         "SELECT kind, entry_id, actor, event, subject, body, url, created_at, edited_at \
          FROM source_conversation WHERE ticket_id = ?1 ORDER BY position, rowid",

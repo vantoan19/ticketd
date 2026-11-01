@@ -573,7 +573,12 @@ fn comments_and_events_follow_every_page_and_translate_to_neutral_entries() {
     fixture.respond(
         &comments,
         ok_with(
-            json!([gh_comment(11, Some("alice"), "first", "2026-01-02T00:00:00Z")]),
+            json!([gh_comment(
+                11,
+                Some("alice"),
+                "first",
+                "2026-01-02T00:00:00Z"
+            )]),
             &[("link", &format!("<{comments_two}>; rel=\"next\""))],
         ),
     );

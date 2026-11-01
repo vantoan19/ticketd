@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
-    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    PublishRequest, SourceError,
+    ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, PublishRequest,
+    SourceError,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};

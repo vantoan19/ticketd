@@ -21,7 +21,7 @@ import "./source-conversation.css";
 type EventEntry = Extract<ConversationEntry, { type: "event" }>;
 
 /** What happened, in the words of the source's own timeline. */
-export function describeEvent(entry: EventEntry): {
+function describeEvent(entry: EventEntry): {
   text: string;
   icon: LucideIcon;
 } {
@@ -177,7 +177,9 @@ function EventRow({ entry }: { entry: EventEntry }) {
         <Icon size={14} />
       </span>
       <span className="source-event-text">{text}</span>
-      <time dateTime={entry.created_at}>{formatDateTime(entry.created_at)}</time>
+      <time dateTime={entry.created_at}>
+        {formatDateTime(entry.created_at)}
+      </time>
     </div>
   );
 }

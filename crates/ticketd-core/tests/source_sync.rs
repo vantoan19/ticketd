@@ -14,9 +14,9 @@ use ticketd_core::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
         ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
         DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
-        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport, SchemaField,
-        SourceError, SourceFilter, ValueFormat,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldKind,
+        OptionSource, Ownership, RefreshOptions, RefreshReport, SchemaField, SourceError,
+        SourceFilter, ValueFormat,
     },
 };
 
@@ -1000,7 +1000,12 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     f.converse(
         1,
         Conversation {
-            comments: vec![comment("c1", "alice", "please do X", "2026-01-02T00:00:00Z")],
+            comments: vec![comment(
+                "c1",
+                "alice",
+                "please do X",
+                "2026-01-02T00:00:00Z",
+            )],
             events: vec![],
         },
     );
@@ -1024,7 +1029,10 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     assert_eq!(item["author"], "alice");
     assert_eq!(item["body"]["text"], "please do X");
     assert!(item.get("editing_agent").is_none());
-    assert_eq!(value["notes"]["items"][0]["editing_agent"]["text"], "agent-x");
+    assert_eq!(
+        value["notes"]["items"][0]["editing_agent"]["text"],
+        "agent-x"
+    );
     let without = f
         .workspace
         .ticket_context("T-1", ContextOptions::default())
