@@ -48,11 +48,14 @@ export function CreateTicketDialog({
   onOpenChange,
   triggerRef,
   navigation,
+  initialStatus,
   projects,
   efforts,
   create,
 }: {
   open: boolean;
+  /** The status a status group's Add action starts the ticket with. */
+  initialStatus?: string;
   onOpenChange: (open: boolean) => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
   navigation: { project: string; effort: string };
@@ -88,11 +91,19 @@ export function CreateTicketDialog({
   const [announcement, setAnnouncement] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  // Opening from a status group's Add action sets that status, even on a
+  // draft kept from an earlier close.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && draft && initialStatus)
+      setDraft({ ...draft, status: initialStatus });
+  }
   if (open && !draft)
     setDraft({
       title: "",
       body: "",
-      status: "Todo",
+      status: initialStatus ?? "Todo",
       project:
         navigation.project === "all" || navigation.project === "unlinked"
           ? ""

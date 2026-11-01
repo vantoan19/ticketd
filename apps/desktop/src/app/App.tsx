@@ -69,6 +69,8 @@ export function App() {
     };
   }, []);
   const [creating, setCreating] = useState(false);
+  // The status a group's Add action asked for; the sidebar's New ticket has none.
+  const [createStatus, setCreateStatus] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
@@ -124,7 +126,10 @@ export function App() {
             efforts={efforts}
             scope={scope}
             navigation={navigation}
-            setCreating={setCreating}
+            setCreating={(value) => {
+              if (value) setCreateStatus(undefined);
+              setCreating(value);
+            }}
             createTriggerRef={createTriggerRef}
           />
         )}
@@ -151,6 +156,7 @@ export function App() {
             onOpenChange={setCreating}
             triggerRef={createTriggerRef}
             navigation={navigation}
+            {...(createStatus && { initialStatus: createStatus })}
             projects={projects}
             efforts={efforts}
             create={create}
@@ -200,8 +206,9 @@ export function App() {
             bulk={bulk}
             hidden={view !== "tickets"}
             inboxTarget={inboxTarget}
-            onCreate={(trigger) => {
+            onCreate={(trigger, status) => {
               createTriggerRef.current = trigger;
+              setCreateStatus(status);
               setCreating(true);
             }}
           />

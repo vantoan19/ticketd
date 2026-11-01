@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
+import { bridgeDefault } from "@/test/bridge-defaults";
 
 class ResizeObserverStub {
   observe() {}
@@ -105,6 +106,8 @@ beforeEach(() => {
       }
       case "list_projects":
         return [];
+      case "count_tickets":
+        return bridgeDefault(command);
       default:
         return [];
     }

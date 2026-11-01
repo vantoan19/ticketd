@@ -85,6 +85,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
       if (command === "list_projects" || command === "list_efforts") return [];
       if (command === "list_notes") return [];
       if (command === "find_tickets") return [saved];
+      if (command === "count_tickets") return bridgeDefault(command);
       if (command === "show_ticket") return saved;
       if (command === "ticket_history") return [];
       if (command === "change_ticket" && args?.patch?.title) {
@@ -340,7 +341,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockResolvedValue([]);
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -418,8 +421,9 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const first = screen.getByRole("button", { name: /A very long title/ });
-  const second = screen.getByRole("button", { name: /Second/ });
+  // The In progress group lists before the Todo group.
+  const first = screen.getByRole("button", { name: /Second/ });
+  const second = screen.getByRole("button", { name: /A very long title/ });
   first.focus();
   fireEvent.keyDown(first, { key: "ArrowDown" });
   expect(document.activeElement).toBe(second);
@@ -429,16 +433,18 @@ test("moves focus between ticket rows without opening them until Enter, and reta
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(second.getAttribute("aria-pressed")).toBe("true");
-  tickets = [tickets[0]!, { ...tickets[1]!, status: "Done" }];
+  tickets = [{ ...tickets[0]!, status: "Done" }, tickets[1]!];
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
   expect(
-    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+    screen
+      .getByRole("button", { name: /A very long title/ })
+      .getAttribute("aria-pressed"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
-    "Done",
-  );
+  // The row moved to the Done group; the group header names its status.
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
 });
 
 test("clears additional filters while preserving the selected Effort", async () => {
@@ -589,7 +595,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
       });
     }
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -632,7 +638,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -673,7 +679,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -723,6 +729,7 @@ async function renderBulk(handlers: Record<string, unknown>) {
   bridge.invoke.mockImplementation(async (command: string, args?: unknown) => {
     const handler = handlers[command];
     if (typeof handler === "function") return handler(args);
+    if (command === "count_tickets") return handler ?? bridgeDefault(command);
     return handler ?? [];
   });
   render(<App />);
@@ -758,9 +765,7 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   expect(
     screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
-    "Done",
-  );
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
   expect(screen.queryByText("2 selected")).toBeNull();
   expect(
     within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
@@ -962,7 +967,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   const { container } = render(<App />);
   await act(async () => {

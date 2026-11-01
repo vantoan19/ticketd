@@ -233,3 +233,37 @@
     opacity: 1;
   }
 }
+/* A status group's header is a 32px band on the canvas surface. Rows and
+   headers share one list, so a row that changes group is not remounted. */
+.ticket-rows li.ticket-group-header {
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin-top: 8px;
+  padding: 0 0 0 12px;
+  background: var(--background);
+}
+.ticket-rows li.ticket-group-header:hover {
+  background: var(--background);
+}
+.ticket-rows li.ticket-group-header:first-child {
+  margin-top: 0;
+}
+.ticket-group-header svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.ticket-group-header h2 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ticket-group-count {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.ticket-group-add {
+  margin-left: auto;
+}

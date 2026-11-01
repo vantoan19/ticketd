@@ -144,9 +144,21 @@ export type FindFilter = {
   tags: string[];
   availability: string | null;
   family: string | null;
+  /** "Workflow" pages through In progress, In review, Todo, Done, Canceled, Duplicate. */
+  order?: "Newest" | "Workflow";
   limit: number;
   offset: number;
 };
+const statusCountsSchema = z.object({
+  todo: z.number().int().nonnegative(),
+  in_progress: z.number().int().nonnegative(),
+  in_review: z.number().int().nonnegative(),
+  done: z.number().int().nonnegative(),
+  canceled: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+});
+/** Tickets of a whole filtered result, by status. */
+export type StatusCounts = z.infer<typeof statusCountsSchema>;
 export type BulkChange = {
   project_id?: string | null;
   effort_id?: string | null;
@@ -379,6 +391,10 @@ export const client = {
     return z
       .array(ticketSchema)
       .parse(await invoke("find_tickets", { filter }));
+  },
+  /** Counts the whole filtered result by status, ignoring its paging. */
+  async countTickets(filter: FindFilter) {
+    return statusCountsSchema.parse(await invoke("count_tickets", { filter }));
   },
   async searchTickets(query: string, filter: string, offset: number) {
     return z.array(ticketSchema).parse(

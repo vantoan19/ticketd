@@ -29,7 +29,7 @@ export function TicketWorkspaceView({
   bulk: BulkEdit;
   hidden: boolean;
   inboxTarget: { reference: string; id: string; key: number } | null;
-  onCreate: (trigger: HTMLButtonElement) => void;
+  onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
   const { selected, setSelected } = workspace;
   const { openTickets } = usePreferences();

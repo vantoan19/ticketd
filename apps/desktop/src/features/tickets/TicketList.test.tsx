@@ -129,3 +129,79 @@ test("names the status icon and toggles selection", () => {
   fireEvent.click(box);
   expect(onToggle).toHaveBeenCalledWith("T-1");
 });
+
+const counts = {
+  todo: 0,
+  in_progress: 0,
+  in_review: 0,
+  done: 0,
+  canceled: 0,
+  duplicate: 0,
+};
+const inStatus = (id: number, status: string) =>
+  ticket({
+    id: String(id),
+    reference: `T-${id}`,
+    title: `Ticket ${id}`,
+    status,
+    availability: null,
+  });
+
+test("groups rows in workflow order with whole-result counts and an Add action each", () => {
+  const onAdd = vi.fn();
+  renderList(
+    [inStatus(4, "In progress"), inStatus(3, "Todo"), inStatus(2, "Done")],
+    {
+      grouping: {
+        counts: { ...counts, in_progress: 1, todo: 9, done: 1 },
+        onAdd,
+      },
+    },
+  );
+  const headings = screen.getAllByRole("heading", { level: 2 });
+  expect(headings.map((item) => item.textContent)).toEqual([
+    "In progress",
+    "Todo",
+    "Done",
+  ]);
+  // The page holds one of nine Todo tickets; the header says so.
+  expect(screen.getByText("1 of 9")).toBeTruthy();
+  // A group header already names the status, so its rows do not repeat it.
+  expect(screen.queryByText("In progress", { selector: "span" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add Todo ticket" }));
+  expect(onAdd).toHaveBeenCalledWith("Todo", expect.any(HTMLButtonElement));
+});
+
+test("a Duplicate group adds through duplicate review, not a plain new ticket", () => {
+  renderList([inStatus(5, "Duplicate")], {
+    grouping: { counts: { ...counts, duplicate: 1 }, onAdd: vi.fn() },
+  });
+  expect(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Add Duplicate ticket" }),
+  ).toBeNull();
+});
+
+test("moves keyboard focus across group boundaries and omits empty groups", () => {
+  renderList([inStatus(4, "In progress"), inStatus(3, "Done")], {
+    grouping: {
+      counts: { ...counts, in_progress: 1, done: 1 },
+      onAdd: vi.fn(),
+    },
+  });
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  const first = screen.getByRole("button", { name: /Ticket 4/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Ticket 3/ }),
+  );
+});
+
+test("a flat list has no group headers and names each status", () => {
+  renderList([inStatus(4, "In progress")]);
+  expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  expect(screen.getByText("In progress", { selector: "span" })).toBeTruthy();
+});

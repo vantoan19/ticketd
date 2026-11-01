@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -6,14 +6,16 @@ import { EffortHeader } from "@/features/efforts/EffortHeader";
 import { useEffortView } from "@/features/efforts/useEffortView";
 import { effortsClient } from "@/lib/api/efforts";
 import { BulkControls } from "@/features/tickets/BulkControls";
+import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { Ticket } from "@/lib/api/client";
-import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
-
-const PAGE_SIZE = 50;
+import {
+  PAGE_SIZE,
+  type TicketWorkspace,
+} from "@/features/tickets/useTicketWorkspace";
 
 /** The list header, filters, bulk editing, result states, and pagination. */
 export function TicketListPane({
@@ -27,7 +29,7 @@ export function TicketListPane({
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
   onOpen: (reference: string) => void;
-  onCreate: (trigger: HTMLButtonElement) => void;
+  onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
   const {
     projects,
@@ -49,6 +51,9 @@ export function TicketListPane({
     setFamily,
     trash,
     tickets,
+    counts,
+    total,
+    grouped,
     selected,
     loading,
     refresh,
@@ -59,6 +64,7 @@ export function TicketListPane({
     revision,
   } = workspace;
   // An Effort scope shows the Effort's own header instead of a plain title.
+  const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const effortScope = !trash && navigation.effort ? navigation.effort : "";
   const scopedEffort = efforts.find((item) => item.id === effortScope);
   const effortState = useEffortView(effortScope, revision, refresh);
@@ -118,8 +124,7 @@ export function TicketListPane({
             {scopeName}
           </h1>
           <p>
-            {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
-            {tickets.length === PAGE_SIZE ? " shown" : ""}
+            {total} {total === 1 ? "ticket" : "tickets"}
           </p>
           <IconButton
             className="list-refresh"
@@ -237,6 +242,16 @@ export function TicketListPane({
               projects,
             }}
             selected={selected}
+            {...(grouped &&
+              counts && {
+                grouping: {
+                  counts,
+                  onAdd: (status: string, trigger: HTMLButtonElement) => {
+                    if (status === "Duplicate") setMarkingDuplicate(true);
+                    else onCreate(trigger, status);
+                  },
+                },
+              })}
             selectable={!trash}
             selectionDisabled={bulk.pending}
             bulkSelection={bulk.selection}
@@ -263,7 +278,7 @@ export function TicketListPane({
           />
         </>
       )}
-      {!trash && (offset > 0 || tickets.length === PAGE_SIZE) && (
+      {!trash && total > PAGE_SIZE && (
         <div className="pagination">
           <button
             type="button"
@@ -274,10 +289,13 @@ export function TicketListPane({
           >
             Previous
           </button>
-          <span> Page {Math.floor(offset / PAGE_SIZE) + 1} </span>
+          <span>
+            {" "}
+            Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
+          </span>
           <button
             type="button"
-            disabled={tickets.length < PAGE_SIZE}
+            disabled={offset + tickets.length >= total}
             onClick={() => {
               setOffset(offset + PAGE_SIZE);
             }}
@@ -286,6 +304,11 @@ export function TicketListPane({
           </button>
         </div>
       )}
+      <MarkDuplicateDialog
+        open={markingDuplicate}
+        onOpenChange={setMarkingDuplicate}
+        refresh={refresh}
+      />
       {showBulk && (
         <BulkControls
           bulk={bulk}
