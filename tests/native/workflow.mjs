@@ -263,7 +263,9 @@ try {
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('//*[@role="menuitem" and text()="Move to trash"]')).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Move to trash"]')
+  ).click();
   await (
     await (
       await browser.$('nav[aria-label="Trash and settings"]')
@@ -273,7 +275,7 @@ try {
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
-  await (await $('//*[@role="menuitem" and text()="Restore"]')).click();
+  await (await browser.$('//*[@role="menuitem" and text()="Restore"]')).click();
   assert.equal(run("show", evidence.reference).trashed, false);
   assert.equal(
     run("show", evidence.reference).parent.reference,
