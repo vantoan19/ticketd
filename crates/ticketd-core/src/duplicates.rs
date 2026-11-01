@@ -197,6 +197,7 @@ impl Workspace {
         let source_id = relationships::id(&tx, source)?;
         let canonical_id = relationships::id(&tx, canonical)?;
         crate::ensure_editable(&tx, &source_id)?;
+        crate::source::guard_duplicate(&tx, &source_id, source)?;
         crate::ensure_editable(&tx, &canonical_id)?;
         let destination: String = tx.query_row("SELECT COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| r.get(0))?;
         crate::ensure_editable(&tx, &destination)?;
@@ -263,6 +264,7 @@ impl Workspace {
         crate::transaction_write_lock(&tx)?;
         let id = relationships::id(&tx, source)?;
         crate::ensure_editable(&tx, &id)?;
+        crate::source::guard_duplicate(&tx, &id, source)?;
         let existing: Option<(Option<String>, String, String)> = tx.query_row("SELECT d.restore_status, 'T-' || c.number, s.status FROM duplicate_tickets d JOIN tickets c ON c.id = d.canonical_id JOIN tickets s ON s.id = d.source_id WHERE d.source_id = ?1", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
         if let Some((restore, canonical, status)) = existing {
             tx.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [&id])?;

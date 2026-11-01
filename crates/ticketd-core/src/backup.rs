@@ -54,7 +54,7 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 19] = [
+const TABLES: [(&str, i64); 23] = [
     ("tickets", 1),
     ("ticket_history", 3),
     ("tags", 4),
@@ -74,6 +74,10 @@ const TABLES: [(&str, i64); 19] = [
     ("ticket_reminders", 18),
     ("last_backup", 20),
     ("source_configurations", 22),
+    ("external_identities", 23),
+    ("external_ownership", 23),
+    ("source_sync", 23),
+    ("external_duplicate_targets", 23),
 ];
 
 pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {

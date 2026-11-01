@@ -138,6 +138,7 @@ fn issue(id: u64) -> ExternalIssue {
         labels: vec![],
         created_at: String::new(),
         updated_at: String::new(),
+        duplicate_of: None,
     }
 }
 
@@ -530,7 +531,7 @@ fn version_twentyone_workspaces_gain_the_source_table_on_open() {
     let ticket = workspace.create_ticket("Keep me").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE source_configurations; PRAGMA user_version = 21;")
+    db.execute_batch("DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; PRAGMA user_version = 21;")
         .unwrap();
     drop(db);
     let mut workspace = Workspace::open(&path).unwrap();

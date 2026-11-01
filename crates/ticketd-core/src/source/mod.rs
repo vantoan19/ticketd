@@ -14,6 +14,7 @@ pub mod contract;
 pub mod engine;
 pub mod github;
 pub mod schema;
+mod tracking;
 
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,10 @@ pub use contract::{
     PublishRequest, SourceError,
 };
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
+pub use tracking::{
+    DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport, SourceCounts,
+    SourceFailure, SourceFilter, TicketSource,
+};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
     ValueFormat,
@@ -58,6 +63,13 @@ pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), Error> {
     )?;
     Ok(())
 }
+
+/// Step 23: external identity, ownership and synchronization state.
+pub(crate) fn migrate_tracking(connection: &rusqlite::Connection) -> Result<(), Error> {
+    tracking::migrate(connection)
+}
+
+pub(crate) use tracking::{guard_change, guard_duplicate, populate};
 
 impl Workspace {
     /// The saved configuration for `provider`, if one was saved.

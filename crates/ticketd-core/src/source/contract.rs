@@ -93,6 +93,11 @@ pub struct ExternalIssue {
     pub labels: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// For an issue closed as a duplicate: the canonical issue, when the provider
+    /// names an accessible one. Absent means the target is unknown. Additive to
+    /// contract 1; connectors that cannot tell leave it `None`.
+    #[serde(default)]
+    pub duplicate_of: Option<ExternalRef>,
 }
 
 /// One request for a page of discovery results.

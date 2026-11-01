@@ -57,7 +57,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 22;
+pub const FORMAT_VERSION: i64 = 23;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -146,6 +146,16 @@ pub enum Error {
     EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
+    #[error("{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change")]
+    ExternalContent { reference: String, provider: String },
+    #[error("{}", external_status_message(.reference, .provider, *.open))]
+    ExternalStatus {
+        reference: String,
+        provider: String,
+        open: bool,
+    },
+    #[error("{0} is not owned by an external source, so there is nothing to refresh")]
+    NotSynchronized(String),
     #[error(transparent)]
     Source(#[from] source::SourceError),
     #[error("could not determine the application data directory")]
@@ -177,6 +187,9 @@ pub struct Ticket {
     pub duplicate_of: Option<String>,
     #[serde(default)]
     pub duplicates: Vec<String>,
+    /// The external issue this ticket is or was, with current ownership and freshness.
+    #[serde(default)]
+    pub source: Option<source::TicketSource>,
     pub parent: Option<hierarchy::RelatedTicket>,
     pub children: Vec<hierarchy::RelatedTicket>,
 }
@@ -205,6 +218,18 @@ fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
+}
+
+fn external_status_message(reference: &str, provider: &str, open: bool) -> String {
+    if open {
+        format!(
+            "{reference} is open on {provider}; locally choose Todo, In progress or In review. Closing is done on {provider}"
+        )
+    } else {
+        format!(
+            "{reference} is closed on {provider}, so its status follows the external issue; reopen it there to change it"
+        )
+    }
 }
 
 fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
@@ -371,6 +396,9 @@ impl Workspace {
         if version < 22 {
             source::migrate(&transaction)?;
         }
+        if version < 23 {
+            source::migrate_tracking(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -417,6 +445,7 @@ impl Workspace {
             prerequisites: Vec::new(),
             duplicate_of: None,
             duplicates: Vec::new(),
+            source: None,
             parent: None,
             children: Vec::new(),
         })
@@ -441,6 +470,13 @@ impl Workspace {
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
         ensure_editable(&transaction, &ticket.id)?;
+        source::guard_change(
+            &transaction,
+            &ticket,
+            title,
+            patch.body.as_deref(),
+            patch.status.unwrap_or(ticket.status),
+        )?;
         if let Some(ref effort_id) = patch.effort_id {
             if let Some(id) = effort_id {
                 efforts::get(&transaction, id)?;
@@ -508,6 +544,7 @@ impl Workspace {
         relationships::populate(&transaction, &mut updated)?;
         hierarchy::populate(&transaction, &mut updated)?;
         duplicates::populate(&transaction, &mut updated)?;
+        source::populate(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -616,6 +653,7 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             duplicates::populate(&self.connection, ticket)?;
+            source::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -637,6 +675,7 @@ impl Workspace {
         relationships::populate(&self.connection, &mut ticket)?;
         hierarchy::populate(&self.connection, &mut ticket)?;
         duplicates::populate(&self.connection, &mut ticket)?;
+        source::populate(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -662,6 +701,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         prerequisites: Vec::new(),
         duplicate_of: None,
         duplicates: Vec::new(),
+        source: None,
         parent: None,
         children: Vec::new(),
     })

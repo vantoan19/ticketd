@@ -31,6 +31,8 @@ pub struct TicketFilter {
     pub tags: Vec<String>,
     pub availability: Option<Availability>,
     pub family: Option<String>,
+    /// Only externally owned tickets of one provider, or only local ones.
+    pub source: Option<crate::source::SourceFilter>,
     pub order: TicketOrder,
     pub limit: u32,
     pub offset: u32,
@@ -46,6 +48,7 @@ impl Default for TicketFilter {
             tags: vec![],
             availability: None,
             family: None,
+            source: None,
             order: TicketOrder::Newest,
             limit: 50,
             offset: 0,
@@ -57,7 +60,7 @@ impl Workspace {
     /// The conditions a filter adds to `tickets t WHERE t.trashed = 0`, as `" AND ..."` clauses.
     /// Listing and counting share them, so a count always describes the tickets the list pages
     /// through.
-    fn filter_conditions(&self, filter: &TicketFilter) -> Result<(String, Vec<Value>), Error> {
+    pub(crate) fn filter_conditions(&self, filter: &TicketFilter) -> Result<(String, Vec<Value>), Error> {
         if let Some(project) = &filter.project {
             self.show_project(project)?;
         }
@@ -115,6 +118,16 @@ impl Workspace {
             values.push(family.clone().into());
             values.push(family.into());
         }
+        match &filter.source {
+            None => {}
+            Some(crate::source::SourceFilter::Local) => sql.push_str(
+                " AND NOT EXISTS (SELECT 1 FROM external_ownership o WHERE o.ticket_id = t.id AND o.authority = 'external')",
+            ),
+            Some(crate::source::SourceFilter::Provider(provider)) => {
+                sql.push_str(" AND EXISTS (SELECT 1 FROM external_ownership o JOIN external_identities i ON i.ticket_id = o.ticket_id WHERE o.ticket_id = t.id AND o.authority = 'external' AND i.provider = ?)");
+                values.push(provider.clone().into());
+            }
+        }
         Ok((sql, values))
     }
 
@@ -143,6 +156,7 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
+            crate::source::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -204,6 +218,7 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
+            crate::source::populate(&self.connection, ticket)?;
         }
         Ok(tickets)
     }

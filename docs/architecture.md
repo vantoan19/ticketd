@@ -120,6 +120,16 @@ The code lives in `ticketd_core::source`, from the inside out:
 Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
 
+An imported ticket stores three things apart, each keyed by the ticket:
+`external_identities` (provenance: which external issue it is or was, never
+deleted), `external_ownership` (authority: `external` means synchronized and
+read-only, `local` means ticketd owns it), and `source_sync` (the last observed
+external state and freshness). Imported title and description live in the
+ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
+with no transaction open and then applies the result in one short write that
+re-reads each ticket's ownership; the core rejects title, description and
+closure-owned status edits to externally owned tickets.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
