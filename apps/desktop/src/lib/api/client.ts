@@ -2,6 +2,43 @@ import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
 
+const externalStateSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("open") }),
+  z.object({
+    state: z.literal("closed"),
+    reason: z.enum(["completed", "not_planned", "duplicate", "unknown"]),
+  }),
+]);
+const duplicateTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("unknown") }),
+  z.object({
+    kind: z.literal("external"),
+    identity: z.object({ provider: z.string(), id: z.string() }),
+    locator: z.string(),
+    display: z.string(),
+  }),
+]);
+/** The external issue a ticket is or was, with who owns it now and how fresh it is. */
+const ticketSourceSchema = z.object({
+  provider: z.string(),
+  id: z.string(),
+  locator: z.string(),
+  display: z.string(),
+  url: z.string(),
+  origin: z.enum(["imported", "published"]),
+  /** Who may change the ticket's content now. Retained identity alone is not ownership. */
+  ownership: z.enum(["external", "local"]),
+  state: externalStateSchema,
+  /** The source closed the issue with a reason ticketd does not recognize. */
+  closure_unrecognized: z.boolean(),
+  last_refreshed_at: z.string().nullable(),
+  last_attempt_at: z.string().nullable(),
+  last_error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  content_locked: z.boolean(),
+  status_locked: z.boolean(),
+  duplicate_target: duplicateTargetSchema.nullable(),
+});
+export type TicketSource = z.infer<typeof ticketSourceSchema>;
 const ticketSchema = z.object({
   id: z.string(),
   trashed: z.boolean(),
@@ -25,6 +62,7 @@ const ticketSchema = z.object({
   ),
   duplicate_of: z.string().nullable().optional(),
   duplicates: z.array(z.string()).optional(),
+  source: ticketSourceSchema.nullish(),
   prerequisites: z.array(
     z.object({
       reference: z.string(),
@@ -181,6 +219,8 @@ export type FindFilter = {
   tags: string[];
   availability: string | null;
   family: string | null;
+  /** Only tickets a provider owns, or only local ones; null for all. */
+  source?: "Local" | { Provider: string } | null;
   /** "Workflow" pages through In progress, In review, Todo, Done, Canceled, Duplicate. */
   order?: "Newest" | "Workflow";
   limit: number;
@@ -194,6 +234,13 @@ const statusCountsSchema = z.object({
   canceled: z.number().int().nonnegative(),
   duplicate: z.number().int().nonnegative(),
 });
+const sourceCountsSchema = z.object({
+  all: z.number().int().nonnegative(),
+  local: z.number().int().nonnegative(),
+  providers: z.record(z.string(), z.number().int().nonnegative()),
+});
+/** How many tickets each source filter shows, with the other filters applied. */
+export type SourceCounts = z.infer<typeof sourceCountsSchema>;
 /** Tickets of a whole filtered result, by status. */
 export type StatusCounts = z.infer<typeof statusCountsSchema>;
 export type BulkChange = {
@@ -455,6 +502,12 @@ export const client = {
   /** Counts the whole filtered result by status, ignoring its paging. */
   async countTickets(filter: FindFilter) {
     return statusCountsSchema.parse(await invoke("count_tickets", { filter }));
+  },
+  /** Counts the tickets each source filter (All, a provider, Local) would show. */
+  async countBySource(filter: FindFilter) {
+    return sourceCountsSchema.parse(
+      await invoke("count_by_source", { filter }),
+    );
   },
   async searchTickets(query: string, filter: string, offset: number) {
     return z.array(ticketSchema).parse(

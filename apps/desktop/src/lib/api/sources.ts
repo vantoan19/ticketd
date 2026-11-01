@@ -95,6 +95,22 @@ const saveOutcomeSchema = z.object({
   preview: previewSchema,
 });
 
+const refreshReportSchema = z.object({
+  imported: z.array(z.string()),
+  updated: z.array(z.string()),
+  unchanged: z.number(),
+  failures: z.array(
+    z.object({
+      provider: z.string(),
+      reference: z.string().nullable(),
+      code: z.string(),
+      message: z.string(),
+    }),
+  ),
+  refreshed_at: z.string(),
+});
+export type RefreshReport = z.infer<typeof refreshReportSchema>;
+
 const connectionSchema = z.object({ account: z.string() });
 
 export type SourceFailureCode =
@@ -151,6 +167,16 @@ async function call<T>(promise: Promise<T>): Promise<T> {
 }
 
 export const sourcesClient = {
+  /**
+   * Imports matching issues and refreshes every externally owned ticket, or only
+   * `ticket`. Saved content stays in place when the source cannot be reached; the
+   * report names what failed.
+   */
+  async refresh(ticket?: string) {
+    return refreshReportSchema.parse(
+      await call(invoke("refresh_sources", { ticket: ticket ?? null })),
+    );
+  },
   /** The built-in sources and what is saved for each. */
   async list() {
     return z.array(sourceEntrySchema).parse(await call(invoke("list_sources")));

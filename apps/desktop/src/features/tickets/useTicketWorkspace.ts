@@ -3,9 +3,11 @@ import {
   client,
   type FindFilter,
   type Project,
+  type SourceCounts,
   type StatusCounts,
   type Ticket,
 } from "@/lib/api/client";
+import { sourcesClient, type RefreshReport } from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
@@ -57,6 +59,16 @@ export function useTicketWorkspace(
   const [tags, setTags] = useState("");
   const [availability, setAvailability] = useState("");
   const [family, setFamily] = useState("");
+  // "all", "local", or a provider id such as "github".
+  const [source, setSourceFilter] = useState("all");
+  // Providers with a saved configuration; the source filter appears once one exists.
+  const [configuredSources, setConfiguredSources] = useState<string[]>([]);
+  const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
+  const [sourceRefresh, setSourceRefresh] = useState<{
+    running: boolean;
+    report: RefreshReport | null;
+    error: string;
+  }>({ running: false, report: null, error: "" });
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   // The counts describe the whole filtered result; they are null in Trash,
@@ -104,6 +116,12 @@ export function useTicketWorkspace(
           .filter(Boolean),
         availability: availability || null,
         family: family || null,
+        source:
+          source === "all"
+            ? null
+            : source === "local"
+              ? "Local"
+              : { Provider: source },
         order: query ? "Newest" : "Workflow",
         limit: PAGE_SIZE,
         offset,
@@ -114,6 +132,10 @@ export function useTicketWorkspace(
           client.listProjects(),
           client.listEfforts(),
           trash ? Promise.resolve(null) : client.countTickets(filterArgs),
+          // Source counts only decorate the filter, so they never fail the list.
+          trash
+            ? Promise.resolve(null)
+            : client.countBySource(filterArgs).catch(() => null),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -127,6 +149,7 @@ export function useTicketWorkspace(
       setTickets(result[0]);
       setLoadedOffset(offset);
       setCounts(result[3]);
+      setSourceCounts(result[4]);
       setProjects(result[1]);
       setEfforts(result[2]);
       setRevision((value) => value + 1);
@@ -151,7 +174,25 @@ export function useTicketWorkspace(
     tags,
     availability,
     family,
+    source,
   ]);
+  useEffect(() => {
+    let active = true;
+    void sourcesClient.list().then(
+      (entries) => {
+        if (active)
+          setConfiguredSources(
+            entries
+              .filter((entry) => entry.saved)
+              .map((entry) => entry.connector.provider),
+          );
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [revision]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => {
@@ -208,6 +249,28 @@ export function useTicketWorkspace(
       setSeen({ reference: selected, trashed });
       if (seen?.reference === selected) setMention(null);
     }
+  }
+  /**
+   * Imports matching issues and refreshes tracked tickets now, optionally only
+   * one. Saved content stays visible while it runs and when it fails.
+   */
+  async function refreshSources(ticket?: string) {
+    setSourceRefresh({ running: true, report: null, error: "" });
+    try {
+      const report = await sourcesClient.refresh(ticket);
+      setSourceRefresh({ running: false, report, error: "" });
+    } catch (reason) {
+      setSourceRefresh({
+        running: false,
+        report: null,
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
+    await refresh();
+  }
+  function setSource(next: string) {
+    setSourceFilter(next);
+    setOffset(0);
   }
   async function create(
     title: string,
@@ -288,6 +351,7 @@ export function useTicketWorkspace(
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
+    setSourceFilter("all");
     setOffset(0);
   }
   function scope(
@@ -304,10 +368,17 @@ export function useTicketWorkspace(
     setAvailability(next === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
+    setSourceFilter("all");
     setQuery("");
     setOffset(0);
   }
   return {
+    source,
+    setSource,
+    sourceCounts,
+    configuredSources,
+    sourceRefresh,
+    refreshSources,
     projects,
     efforts,
     filter,

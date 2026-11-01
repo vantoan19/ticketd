@@ -1113,6 +1113,81 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(counted?.[1].filter.order).toBe("Workflow");
 });
 
+test("the source filter narrows list and counts together and Refresh GitHub imports on demand", async () => {
+  const github = bulkTicket(1, {
+    source: {
+      provider: "github",
+      id: "9",
+      locator: "acme/api#98",
+      display: "acme/api#98",
+      url: "https://github.com/acme/api/issues/98",
+      origin: "imported",
+      ownership: "external",
+      state: { state: "open" },
+      closure_unrecognized: false,
+      last_refreshed_at: null,
+      last_attempt_at: null,
+      last_error: null,
+      content_locked: true,
+      status_locked: false,
+      duplicate_target: null,
+    },
+  });
+  await renderBulk({
+    find_tickets: () => [github],
+    count_tickets: { ...zeroCounts, todo: 1 },
+    count_by_source: { all: 3, local: 2, providers: { github: 1 } },
+    list_sources: [
+      {
+        connector: {
+          provider: "github",
+          name: "GitHub",
+          contract_version: 1,
+          capabilities: ["discover", "fetch"],
+          schema: { fields: [] },
+        },
+        saved: {
+          provider: "github",
+          config: {},
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      },
+    ],
+    refresh_sources: {
+      imported: ["T-1"],
+      updated: [],
+      unchanged: 0,
+      failures: [],
+      refreshed_at: "2026-02-01T00:00:00Z",
+    },
+  });
+  const filter = screen.getByRole("group", { name: "Ticket source" });
+  expect(
+    within(filter)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["All3", "GitHub1", "Local2"]);
+  expect(screen.getByText("GitHub #98")).toBeTruthy();
+  fireEvent.click(within(filter).getByRole("button", { name: /GitHub/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const sourceOf = (command: string) =>
+    bridge.invoke.mock.calls
+      .filter(([name]) => name === command)
+      .map(([, args]) => args.filter.source)
+      .at(-1);
+  expect(sourceOf("find_tickets")).toEqual({ Provider: "github" });
+  expect(sourceOf("count_tickets")).toEqual({ Provider: "github" });
+  fireEvent.click(screen.getByRole("button", { name: /Refresh GitHub/ }));
+  await act(async () => {});
+  expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
+    ticket: null,
+  });
+  expect(screen.getByText("1 new, 0 updated")).toBeTruthy();
+});
+
 test("Previous and Next follow the visible list across groups and keep the selection", async () => {
   const tickets = [
     bulkTicket(2, { status: "In progress", availability: null }),

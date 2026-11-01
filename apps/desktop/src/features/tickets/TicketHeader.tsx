@@ -29,6 +29,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Duplicates } from "@/features/tickets/Duplicates";
+import { SourceLink } from "@/features/tickets/SourceLink";
+import {
+  externalSource,
+  providerName,
+  sourceLocation,
+} from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 
@@ -113,6 +119,18 @@ export function TicketHeader({
           >
             {copied === "Reference" ? <Check /> : <Copy />}
           </IconButton>
+        )}
+        {ticket && externalSource(ticket) && (
+          <SourceLink
+            url={externalSource(ticket)?.url ?? ""}
+            className="header-source-link"
+          >
+            <span className="sr-only">
+              Open on {providerName(externalSource(ticket)?.provider ?? "")}
+              :{" "}
+            </span>
+            {sourceLocation(externalSource(ticket)!)}
+          </SourceLink>
         )}
       </div>
       {ticket && (

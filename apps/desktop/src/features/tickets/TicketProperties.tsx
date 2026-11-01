@@ -7,7 +7,27 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, HardDrive, Layers, Tag, type LucideIcon } from "lucide-react";
+import {
+  Folder,
+  HardDrive,
+  Layers,
+  Link2,
+  RefreshCw,
+  Tag,
+  type LucideIcon,
+} from "lucide-react";
+import { StatusDot } from "@/components/ui/status-dot";
+import { sourcesClient } from "@/lib/api/sources";
+import { SourceLink } from "./SourceLink";
+import {
+  duplicateTargetText,
+  externalSource,
+  freshness,
+  localProgressStatuses,
+  providerName,
+  sourceLocation,
+  sourceState,
+} from "./ticket-source";
 import { Button } from "@/components/ui/button";
 import { RailSection } from "./RailSection";
 import { StatusIcon, ticketStatuses } from "./StatusIcon";
@@ -223,6 +243,37 @@ export function TicketProperties({
     }
   }
   const disabled = ticket.trashed || !!pending;
+  const owner = externalSource(ticket);
+  const ownerName = owner ? providerName(owner.provider) : "";
+  // While the issue is open its Todo, In progress and In review are local;
+  // closing states follow the source and cannot be chosen here.
+  const statusLocked = Boolean(owner?.status_locked);
+  const statusChoices = owner
+    ? owner.status_locked
+      ? [ticket.status]
+      : localProgressStatuses
+    : ticketStatuses;
+  async function refreshSource() {
+    setPending("Source");
+    setErrors((old) => ({ ...old, Source: "" }));
+    try {
+      const report = await sourcesClient.refresh(ticket.reference);
+      const failure = report.failures[0];
+      if (failure)
+        setErrors((old) => ({
+          ...old,
+          Source: `Could not refresh: ${failure.message} Saved content is unchanged.`,
+        }));
+      await refresh();
+    } catch (reason) {
+      setErrors((old) => ({
+        ...old,
+        Source: `Could not refresh: ${String(reason)} Saved content is unchanged.`,
+      }));
+    } finally {
+      setPending("");
+    }
+  }
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "Unlinked");
@@ -251,7 +302,7 @@ export function TicketProperties({
         <>
           <Select
             value={ticket.status}
-            disabled={disabled}
+            disabled={disabled || statusLocked}
             onValueChange={(status) => {
               if (status === ticket.status) return;
               // Duplicate needs a canonical ticket, so it opens the review.
@@ -276,7 +327,7 @@ export function TicketProperties({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {ticketStatuses.map((status) => (
+                {statusChoices.map((status) => (
                   <SelectItem key={status} value={status}>
                     {status}
                   </SelectItem>
@@ -294,6 +345,18 @@ export function TicketProperties({
             >
               Duplicate of {ticket.duplicate_of}
             </Button>
+          )}
+          {owner && ticket.status === "Duplicate" && !ticket.duplicate_of && (
+            <small>{duplicateTargetText(owner)}</small>
+          )}
+          {owner && (
+            <small className="rail-note">
+              {owner.status_locked
+                ? owner.closure_unrecognized
+                  ? `${ownerName} closed this issue with a reason ticketd does not recognize, so its status was not changed.`
+                  : `Closed on ${ownerName}. Reopen it there to return this ticket to Todo.`
+                : `Progress is kept in ticketd and never sent to ${ownerName}. Closing follows ${ownerName}.`}
+            </small>
           )}
         </>,
       )}
@@ -315,10 +378,72 @@ export function TicketProperties({
         </DialogContent>
       </Dialog>
       <RailSection label="Source">
-        <span className="rail-value" title="Created and edited in ticketd">
-          <HardDrive aria-hidden="true" />
-          Local
-        </span>
+        {owner ? (
+          <div className="rail-source">
+            <span className="rail-value">
+              <Link2 aria-hidden="true" />
+              <SourceLink url={owner.url}>{sourceLocation(owner)}</SourceLink>
+            </span>
+            <span className="rail-value">
+              {(() => {
+                const state = sourceState(owner);
+                return (
+                  <>
+                    {state.tone && <StatusDot tone={state.tone} size={8} />}
+                    {state.text}
+                  </>
+                );
+              })()}
+            </span>
+            <small className="rail-note">
+              {pending === "Source" ? (
+                <span role="status">Refreshing {ownerName}…</span>
+              ) : (
+                <>
+                  {!owner.last_error && owner.last_refreshed_at && (
+                    <StatusDot tone="positive" size={6} />
+                  )}{" "}
+                  {freshness(owner)}
+                </>
+              )}
+            </small>
+            {owner.last_error && (
+              <small className="rail-note rail-warning" role="status">
+                <StatusDot tone="attention" size={6} /> The last refresh failed:{" "}
+                {owner.last_error.message} Showing content synced earlier.
+              </small>
+            )}
+            <small className="rail-note">
+              {ownerName} owns the title and description. Edit them there.
+            </small>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!!pending}
+              onClick={() => void refreshSource()}
+            >
+              <RefreshCw data-icon="inline-start" />
+              Refresh
+            </Button>
+            {errors.Source && <small role="alert">{errors.Source}</small>}
+          </div>
+        ) : ticket.source ? (
+          <div className="rail-source">
+            <span
+              className="rail-value"
+              title="Owned in ticketd; the external issue is kept as provenance"
+            >
+              <HardDrive aria-hidden="true" />
+              Local
+            </span>
+            <small className="rail-note">was {ticket.source.display}</small>
+          </div>
+        ) : (
+          <span className="rail-value" title="Created and edited in ticketd">
+            <HardDrive aria-hidden="true" />
+            Local
+          </span>
+        )}
       </RailSection>
       {property(
         "Project",

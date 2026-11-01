@@ -188,6 +188,13 @@ fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, String> {
         .and_then(|w| w.count_tickets(&filter))
         .map_err(|e| e.to_string())
 }
+/// How many tickets each source filter (All, a provider, Local) would show.
+#[tauri::command]
+fn count_by_source(filter: TicketFilter) -> Result<ticketd_core::source::SourceCounts, String> {
+    Workspace::open_default()
+        .and_then(|w| w.count_by_source(&filter))
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 fn search_tickets(
     query: String,
@@ -803,6 +810,20 @@ fn save_source(
     Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
 }
 
+/// Imports matching issues and refreshes every externally owned ticket (or just `ticket`).
+/// Provider calls finish before the workspace is written; per-ticket failures come back
+/// in the report so the saved content stays visible beside the warning.
+#[tauri::command(async)]
+fn refresh_sources(
+    ticket: Option<String>,
+) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
+    let mut workspace = Workspace::open_default()?;
+    Ok(workspace.refresh_sources(
+        &ticketd_core::source::Engine::builtin(),
+        &ticketd_core::source::RefreshOptions { ticket, now: None },
+    )?)
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -811,6 +832,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             backup_workspace,
             list_sources,
+            refresh_sources,
+            count_by_source,
             source_check_connection,
             source_options,
             source_preview,

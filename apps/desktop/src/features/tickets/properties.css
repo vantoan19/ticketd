@@ -78,3 +78,19 @@
   width: 280px;
   padding: 8px;
 }
+
+.rail-source {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.rail-note {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.rail-warning {
+  color: var(--secondary-foreground);
+}
