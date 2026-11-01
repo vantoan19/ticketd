@@ -64,25 +64,7 @@
 .activity-history > span:first-child {
   color: var(--foreground);
 }
-.activity-mention {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 12px;
-  border-inline-start: 2px solid var(--ring);
-  overflow-wrap: anywhere;
-}
-.activity-mention-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.activity-mention mark {
-  background: transparent;
-  color: var(--foreground);
-  font-weight: 600;
-}
+
 .activity-compact-composer {
   align-self: stretch;
   min-height: 40px;

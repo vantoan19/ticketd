@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { useState } from "react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { TicketDetails } from "./TicketDetails";
 import type { Ticket } from "@/lib/api/client";
 
@@ -87,4 +95,76 @@ test("the full-width view marks the reading column and drops the repeated headin
   expect(
     screen.getByRole("button", { name: "Show beside the list" }),
   ).toBeTruthy();
+});
+
+test("the mentioned passage is highlighted after following a backlink and cleared on the next navigation", async () => {
+  Element.prototype.scrollIntoView = vi.fn();
+  const base: Ticket = {
+    id: "a",
+    reference: "T-1",
+    title: "Target",
+    status: "Todo",
+    trashed: false,
+    body: "Plain.",
+    project_id: null,
+    effort_id: null,
+    availability: null,
+    tags: [],
+    parent: null,
+    children: [],
+    prerequisites: [],
+  };
+  const source: Ticket = {
+    ...base,
+    id: "b",
+    reference: "T-2",
+    title: "Source",
+    body: "Intro.\n\nBlocked on T-1 today.",
+  };
+  vi.mocked(invoke).mockImplementation(async (command: string) =>
+    command === "ticket_backlinks"
+      ? [
+          {
+            source_reference: "T-2",
+            source_title: "Source",
+            note_id: null,
+            passage: "Blocked on T-1 today.",
+          },
+        ]
+      : [],
+  );
+  function Harness() {
+    const [selected, setSelected] = useState<string | null>("T-1");
+    return (
+      <>
+        <button type="button" onClick={() => setSelected("T-1")}>
+          Open target
+        </button>
+        <TicketDetails
+          selected={selected}
+          expanded={false}
+          onExpand={vi.fn()}
+          onReturn={vi.fn()}
+          setSelected={setSelected}
+          details={{ "T-1": base, "T-2": source }}
+          projects={[]}
+          efforts={[]}
+          revision={0}
+          refresh={vi.fn(async () => {})}
+          updateTicket={vi.fn()}
+        />
+      </>
+    );
+  }
+  render(<Harness />);
+  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  await waitFor(() =>
+    expect(document.querySelector("[data-mention-target]")?.textContent).toBe(
+      "Blocked on T-1 today.",
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open target" }));
+  await waitFor(() =>
+    expect(document.querySelector("[data-mention-target]")).toBeNull(),
+  );
 });

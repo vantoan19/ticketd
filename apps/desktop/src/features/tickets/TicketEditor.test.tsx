@@ -278,3 +278,60 @@ test("navigates references in Markdown text while leaving code and links alone",
     screen.getByRole("link", { name: "website" }).getAttribute("href"),
   ).toBe("https://example.com/T-4");
 });
+
+const mentioned: Ticket = {
+  ...initial,
+  id: "9",
+  reference: "T-9",
+  body: "Intro paragraph.\n\n- Blocked on **T-1** until Friday.\n- Unrelated item.",
+};
+const mention = {
+  passage: "- Blocked on **T-1** until Friday.",
+  mentioned: "T-1",
+  key: 1,
+};
+
+test("a description mention is scrolled to, highlighted and focused in place, then cleared", async () => {
+  const scroll = vi.fn();
+  Element.prototype.scrollIntoView = scroll;
+  const view = render(
+    <TicketEditor ticket={mentioned} onSaved={vi.fn()} mention={mention} />,
+  );
+  const item = (await screen.findByText(/Blocked on/)).closest("li");
+  expect(item?.hasAttribute("data-mention-target")).toBe(true);
+  expect(document.activeElement).toBe(item);
+  expect(scroll).toHaveBeenCalled();
+  expect(item?.getAttribute("tabindex")).toBe("-1");
+  expect(
+    document.getElementById(item?.getAttribute("aria-describedby") ?? "")
+      ?.textContent,
+  ).toBe("Mentions T-1");
+  expect(
+    screen
+      .getByText("Unrelated item.")
+      .closest("li")
+      ?.hasAttribute("data-mention-target"),
+  ).toBe(false);
+  view.rerender(
+    <TicketEditor ticket={mentioned} onSaved={vi.fn()} mention={null} />,
+  );
+  expect(item?.hasAttribute("data-mention-target")).toBe(false);
+  expect(item?.hasAttribute("aria-describedby")).toBe(false);
+});
+
+test("a mention whose passage was removed says so and lands on the description", async () => {
+  Element.prototype.scrollIntoView = vi.fn();
+  render(
+    <TicketEditor
+      ticket={{ ...mentioned, body: "Nothing relevant remains." }}
+      onSaved={vi.fn()}
+      mention={mention}
+    />,
+  );
+  const note = await screen.findByText(/no longer mentions T-1/);
+  expect(note.getAttribute("role")).toBe("status");
+  expect(document.activeElement).toBe(
+    screen.getByRole("group", { name: "Description" }),
+  );
+  expect(document.querySelector("[data-mention-target]")).toBeNull();
+});

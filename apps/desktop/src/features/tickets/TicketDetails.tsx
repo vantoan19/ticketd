@@ -68,6 +68,8 @@ export function TicketDetails({
   const [mention, setMention] = useState<
     (MentionTarget & { key: number }) | null
   >(null);
+  // The highlight belongs to the navigation that opened it; the next one clears it.
+  if (mention && mention.reference !== selected) setMention(null);
   const ticket = Object.values(details).find(
     (item) => item.reference === selected,
   );
@@ -152,6 +154,11 @@ export function TicketDetails({
               onSaved={updateTicket}
               select={setSelected}
               revision={revision}
+              mention={
+                mention?.reference === item.reference && !mention.noteId
+                  ? mention
+                  : null
+              }
             >
               <TicketProperties
                 ticket={item}
@@ -198,11 +205,6 @@ export function TicketDetails({
                 ? { id: mention.noteId, key: mention.key }
                 : null,
             )}
-            mention={
-              mention?.reference === item.reference && !mention.noteId
-                ? mention
-                : null
-            }
             projects={projects}
             efforts={efforts}
             status={item.status}

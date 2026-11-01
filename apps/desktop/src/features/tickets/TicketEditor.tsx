@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
+import { findMentionBlock } from "./mention-passage";
 
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
@@ -18,12 +19,15 @@ export function TicketEditor({
   children,
   select,
   revision,
+  mention = null,
 }: {
   ticket: Ticket;
   onSaved: (ticket: Ticket) => void;
   children?: ReactNode;
   select?: (reference: string) => void;
   revision?: number;
+  /** A description passage the person navigated here to read; null once they move on. */
+  mention?: { passage: string; mentioned: string; key: number } | null;
 }) {
   const [draft, setDraft] = useState<Content>({
     title: ticket.title,
@@ -72,6 +76,50 @@ export function TicketEditor({
   const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
+  const noteRef = useRef<HTMLParagraphElement>(null);
+  // The rendered description is hidden while editing; a mention returns to reading it.
+  const [handledMention, setHandledMention] = useState<number | null>(null);
+  if (mention && mention.key !== handledMention) {
+    setHandledMention(mention.key);
+    if (bodyMode === "editing") setBodyMode("reading");
+  }
+  // Reveal the mentioned passage in place: scroll to it, highlight it, and focus it.
+  // The status text is written here because only the rendered DOM shows whether the
+  // passage was found.
+  useEffect(() => {
+    if (!mention || editingBody) return;
+    const block = documentRef.current
+      ? findMentionBlock(
+          documentRef.current,
+          mention.passage,
+          mention.mentioned,
+        )
+      : null;
+    const target = block ?? bodyRef.current;
+    const note = noteRef.current;
+    if (note) {
+      note.textContent = block
+        ? `Mentions ${mention.mentioned}`
+        : `The description no longer mentions ${mention.mentioned} where it was found.`;
+      note.className = block ? "sr-only" : "mention-missing";
+    }
+    if (!target) return;
+    if (block) {
+      block.setAttribute("data-mention-target", "");
+      block.setAttribute("tabindex", "-1");
+      block.setAttribute("aria-describedby", `mention-note-${ticket.id}`);
+    }
+    target.scrollIntoView?.({ block: "center" });
+    (target as HTMLElement).focus({ preventScroll: true });
+    return () => {
+      if (!block) return;
+      block.removeAttribute("data-mention-target");
+      block.removeAttribute("tabindex");
+      block.removeAttribute("aria-describedby");
+    };
+  }, [mention, editingBody, ticket.id]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;
   const bodyDirty = draft.body !== saved.body;
@@ -181,7 +229,16 @@ export function TicketEditor({
         />
       </label>
       {children}
-      <div className="editor-body">
+      <div
+        className="editor-body"
+        ref={bodyRef}
+        tabIndex={-1}
+        role="group"
+        aria-labelledby={`body-${ticket.id}`}
+      >
+        {mention && !editingBody && (
+          <p ref={noteRef} id={`mention-note-${ticket.id}`} role="status" />
+        )}
         <div className="description-heading">
           <span id={`body-${ticket.id}`}>Description</span>
           {editingBody ? (
@@ -221,6 +278,7 @@ export function TicketEditor({
         {!editingBody &&
           (draft.body ? (
             <div
+              ref={documentRef}
               className="markdown-preview description-document"
               onClick={(event) => {
                 const target = event.target;
