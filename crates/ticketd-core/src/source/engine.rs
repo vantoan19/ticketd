@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     contract::{
-        CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor,
+        CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
         DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, SourceError,
     },
     github::GithubConnector,
@@ -293,6 +293,38 @@ impl Engine {
             ));
         }
         Ok(issue)
+    }
+
+    /// Reads an issue's conversation, sorted chronologically with comments
+    /// before events that share a timestamp and repeated ids dropped. `None`
+    /// when the connector does not declare [`Capability::Comments`].
+    pub fn conversation(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Option<Conversation>, SourceError> {
+        let connector = self.connector(provider)?;
+        if !connector
+            .descriptor()
+            .capabilities
+            .contains(&Capability::Comments)
+        {
+            return Ok(None);
+        }
+        let config = self.validate(provider, raw)?;
+        let mut conversation = connector.conversation(&config, reference)?;
+        let mut comments = HashSet::new();
+        conversation
+            .comments
+            .retain(|comment| comments.insert(comment.id.clone()));
+        let mut events = HashSet::new();
+        conversation
+            .events
+            .retain(|event| events.insert(event.id.clone()));
+        conversation.comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation.events.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        Ok(Some(conversation))
     }
 
     fn find(&self, provider: &str) -> Option<&dyn Connector> {

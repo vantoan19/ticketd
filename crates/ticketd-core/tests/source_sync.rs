@@ -9,11 +9,12 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    ContextOptions, Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
     source::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
-        DuplicateTarget, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
+        DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport, SchemaField,
         SourceError, SourceFilter, ValueFormat,
     },
@@ -28,6 +29,10 @@ struct Remote {
     outage: Option<String>,
     discover_calls: usize,
     fetch_calls: Vec<u64>,
+    conversations: BTreeMap<u64, Conversation>,
+    conversation_outage: Option<String>,
+    conversation_calls: Vec<u64>,
+    revision: u32,
 }
 
 #[derive(Clone, Default)]
@@ -39,7 +44,11 @@ impl Connector for Fake {
             provider: "fake".into(),
             name: "Fake".into(),
             contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
+            capabilities: vec![
+                Capability::Discover,
+                Capability::Fetch,
+                Capability::Comments,
+            ],
             schema: ConfigSchema {
                 fields: vec![SchemaField {
                     key: "repositories".into(),
@@ -111,6 +120,20 @@ impl Connector for Fake {
             .get(&id)
             .cloned()
             .ok_or_else(|| SourceError::NotFound("gone".into()))
+    }
+
+    fn conversation(
+        &self,
+        _: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Conversation, SourceError> {
+        let mut remote = self.0.lock().unwrap();
+        let id: u64 = reference.identity.id.parse().unwrap();
+        remote.conversation_calls.push(id);
+        if let Some(message) = remote.conversation_outage.clone() {
+            return Err(SourceError::Unavailable(message));
+        }
+        Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
     }
 }
 
@@ -739,4 +762,277 @@ fn concurrent_refreshes_create_one_ticket_per_issue() {
     assert_eq!(imported, 2);
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+fn comment(id: &str, author: &str, body: &str, at: &str) -> ExternalComment {
+    ExternalComment {
+        id: id.into(),
+        author: author.into(),
+        body: body.into(),
+        url: format!("https://example.test/o/r/issues/1#comment-{id}"),
+        created_at: at.into(),
+        updated_at: at.into(),
+    }
+}
+
+fn event(id: &str, kind: ExternalEventKind, actor: &str, at: &str) -> ExternalEvent {
+    ExternalEvent {
+        id: id.into(),
+        kind,
+        actor: Some(actor.into()),
+        subject: None,
+        created_at: at.into(),
+    }
+}
+
+impl Fixture {
+    /// Replaces an issue's conversation and moves its update time, as GitHub does
+    /// whenever a comment or event is added.
+    fn converse(&self, id: u64, conversation: Conversation) {
+        self.remote(|remote| {
+            remote.conversations.insert(id, conversation);
+            remote.revision += 1;
+            let revision = remote.revision;
+            remote.issues.get_mut(&id).unwrap().updated_at =
+                format!("2026-01-02T00:{:02}:00Z", revision);
+        });
+    }
+
+    fn conversation(&self, number: u32) -> Vec<ConversationEntry> {
+        self.workspace
+            .source_conversation(&format!("T-{number}"))
+            .unwrap()
+    }
+}
+
+fn labels(entries: &[ConversationEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            ConversationEntry::Comment { id, .. } => format!("comment {id}"),
+            ConversationEntry::Event { id, event, .. } => format!("event {id} {event}"),
+        })
+        .collect()
+}
+
+#[test]
+fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_nothing() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Talked about"), true);
+    f.converse(
+        1,
+        Conversation {
+            // Deliberately out of order and repeated: the source's paging is not trusted.
+            comments: vec![
+                comment("c2", "bob", "second", "2026-01-03T00:00:00Z"),
+                comment("c1", "alice", "first", "2026-01-02T00:00:00Z"),
+                comment("c1", "alice", "first", "2026-01-02T00:00:00Z"),
+            ],
+            events: vec![
+                event(
+                    "e2",
+                    ExternalEventKind::Closed(ClosureReason::Completed),
+                    "bob",
+                    "2026-01-03T00:00:00Z",
+                ),
+                event(
+                    "e1",
+                    ExternalEventKind::Reopened,
+                    "alice",
+                    "2026-01-01T12:00:00Z",
+                ),
+            ],
+        },
+    );
+    let report = f.refresh();
+    assert_eq!(report.imported, vec!["T-1".to_owned()]);
+    let entries = f.conversation(1);
+    assert_eq!(
+        labels(&entries),
+        vec![
+            "event e1 reopened",
+            "comment c1",
+            "comment c2",
+            "event e2 closed_completed"
+        ]
+    );
+    let ConversationEntry::Comment {
+        author, body, url, ..
+    } = &entries[1]
+    else {
+        panic!("expected a comment");
+    };
+    assert_eq!((author.as_str(), body.as_str()), ("alice", "first"));
+    assert_eq!(url, "https://example.test/o/r/issues/1#comment-c1");
+
+    let again = f.refresh();
+    assert_eq!(again.unchanged, 1);
+    assert_eq!(f.conversation(1), entries);
+}
+
+#[test]
+fn an_edited_comment_updates_a_deleted_one_disappears_and_unchanged_issues_are_not_re_read() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Edited"), true);
+    f.converse(
+        1,
+        Conversation {
+            comments: vec![
+                comment("c1", "alice", "typo", "2026-01-02T00:00:00Z"),
+                comment("c2", "bob", "doomed", "2026-01-03T00:00:00Z"),
+            ],
+            events: vec![],
+        },
+    );
+    f.refresh();
+    f.refresh();
+    assert_eq!(
+        f.fake.0.lock().unwrap().conversation_calls,
+        vec![1],
+        "an issue unchanged since its conversation was read is not asked again"
+    );
+
+    f.converse(
+        1,
+        Conversation {
+            comments: vec![comment("c1", "alice", "fixed", "2026-01-02T00:00:00Z")],
+            events: vec![],
+        },
+    );
+    let report = f.refresh();
+    assert_eq!(report.updated, vec!["T-1".to_owned()]);
+    let entries = f.conversation(1);
+    assert_eq!(labels(&entries), vec!["comment c1"]);
+    let ConversationEntry::Comment { body, .. } = &entries[0] else {
+        panic!("expected a comment");
+    };
+    assert_eq!(body, "fixed");
+}
+
+#[test]
+fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Kept"), true);
+    f.converse(
+        1,
+        Conversation {
+            comments: vec![comment("c1", "alice", "context", "2026-01-02T00:00:00Z")],
+            events: vec![],
+        },
+    );
+    f.refresh();
+    f.workspace
+        .add_note("T-1", "my own thought", Some("agent-x"))
+        .unwrap();
+    assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.conversation(1).len(), 1);
+
+    // The source stops answering about comments: what was retrieved stays.
+    f.remote(|r| {
+        r.conversation_outage = Some("down".into());
+        r.issues.get_mut(&1).unwrap().updated_at = "2026-03-01T00:00:00Z".into();
+    });
+    let report = f.refresh();
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
+
+    // Recovery reads it again, because the failed read did not count as synchronized.
+    f.remote(|r| r.conversation_outage = None);
+    let calls = f.fake.0.lock().unwrap().conversation_calls.len();
+    assert!(f.refresh().failures.is_empty());
+    assert_eq!(f.fake.0.lock().unwrap().conversation_calls.len(), calls + 1);
+
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute("UPDATE external_ownership SET authority = 'local'", [])
+        .unwrap();
+    drop(db);
+    assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
+    assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn local_tickets_have_no_conversation_and_unknown_tickets_are_rejected() {
+    let mut f = Fixture::new();
+    f.workspace.create_ticket("Plain").unwrap();
+    assert!(f.conversation(1).is_empty());
+    assert!(matches!(
+        f.workspace.source_conversation("T-99"),
+        Err(Error::NotFound(_))
+    ));
+}
+
+#[test]
+fn the_conversation_is_exported_and_survives_backup_and_restore() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Durable"), true);
+    f.converse(
+        1,
+        Conversation {
+            comments: vec![comment("c1", "alice", "kept", "2026-01-02T00:00:00Z")],
+            events: vec![event(
+                "e1",
+                ExternalEventKind::Assigned,
+                "alice",
+                "2026-01-02T01:00:00Z",
+            )],
+        },
+    );
+    f.refresh();
+    let before = f.conversation(1);
+    let exported = f.workspace.export().unwrap();
+    assert_eq!(exported["source_conversation"].as_array().unwrap().len(), 2);
+    assert_eq!(exported["source_conversation"][0]["actor"], "alice");
+    let path = f.path();
+    let backup = f.dir.path().join("backup.sqlite3");
+    f.workspace.backup(&backup).unwrap();
+    let Fixture { workspace, dir, .. } = f;
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.source_conversation("T-1").unwrap(), before);
+    drop(dir);
+}
+
+#[test]
+fn agent_context_carries_the_conversation_labelled_as_source_authored() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "For agents"), true);
+    f.converse(
+        1,
+        Conversation {
+            comments: vec![comment("c1", "alice", "please do X", "2026-01-02T00:00:00Z")],
+            events: vec![],
+        },
+    );
+    f.refresh();
+    f.workspace
+        .add_note("T-1", "note", Some("agent-x"))
+        .unwrap();
+    let context = f
+        .workspace
+        .ticket_context(
+            "T-1",
+            ContextOptions {
+                notes: true,
+                conversation: true,
+                ..ContextOptions::default()
+            },
+        )
+        .unwrap();
+    let value = serde_json::to_value(&context).unwrap();
+    let item = &value["source_conversation"]["items"][0];
+    assert_eq!(item["author"], "alice");
+    assert_eq!(item["body"]["text"], "please do X");
+    assert!(item.get("editing_agent").is_none());
+    assert_eq!(value["notes"]["items"][0]["editing_agent"]["text"], "agent-x");
+    let without = f
+        .workspace
+        .ticket_context("T-1", ContextOptions::default())
+        .unwrap();
+    assert!(
+        serde_json::to_value(&without)
+            .unwrap()
+            .get("source_conversation")
+            .is_none()
+    );
 }

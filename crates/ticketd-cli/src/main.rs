@@ -202,6 +202,9 @@ enum Command {
         evidence: bool,
         #[arg(long)]
         backlinks: bool,
+        /// The source's comments and events (read-only; authors are the source's, not editing agents)
+        #[arg(long)]
+        conversation: bool,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
@@ -863,6 +866,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             notes,
             evidence,
             backlinks,
+            conversation,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
             &reference,
@@ -873,6 +877,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 notes,
                 evidence,
                 backlinks,
+                conversation,
                 offset,
             },
         )?)?,

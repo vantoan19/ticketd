@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ClosureReason, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, SourceError,
+    ClosureReason, Conversation, Engine, conversation, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, SourceError,
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
 
@@ -456,6 +456,9 @@ pub(crate) fn status_for(
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
     issues: Vec<ExternalIssue>,
+    /// Conversations read this time, by (provider, external id). An issue absent
+    /// here keeps the conversation it already has.
+    conversations: HashMap<(String, String), Conversation>,
     failures: Vec<(Option<String>, String, SourceFailure)>,
 }
 
@@ -508,6 +511,7 @@ impl Workspace {
         let tracked = self.tracked(options.ticket.as_deref())?;
         let mut gathered = Gathered {
             issues: Vec::new(),
+            conversations: HashMap::new(),
             failures: Vec::new(),
         };
         let saved = self.saved_sources()?;
@@ -529,6 +533,7 @@ impl Workspace {
         };
         for provider in providers {
             let config = saved.iter().find(|s| s.provider == provider);
+            let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
             let mut blocked: Option<SourceFailure> = None;
             if options.ticket.is_none() {
@@ -596,8 +601,76 @@ impl Workspace {
                     }
                 }
             }
+            if let (Some(source), None) = (config, &blocked) {
+                self.gather_conversations(
+                    engine,
+                    &source.config,
+                    &tracked,
+                    first_issue,
+                    &mut gathered,
+                )?;
+            }
         }
         self.apply_refresh(gathered, options.now.as_deref(), &tracked)
+    }
+
+    /// Reads the conversation of each issue gathered since `first_issue` whose
+    /// stored conversation is older than the issue itself. A failure keeps what
+    /// was stored and leaves the issue due again next time; a failure that
+    /// affects the whole provider stops further reads.
+    fn gather_conversations(
+        &self,
+        engine: &Engine,
+        config: &super::ConfigValues,
+        tracked: &[Tracked],
+        first_issue: usize,
+        gathered: &mut Gathered,
+    ) -> Result<(), Error> {
+        let due: Vec<ExternalIssue> = gathered.issues[first_issue..].to_vec();
+        for issue in due {
+            let identity = &issue.reference.identity;
+            if !conversation::needs_reading(
+                &self.connection,
+                &identity.provider,
+                &identity.id,
+                &issue.updated_at,
+            )? {
+                continue;
+            }
+            match engine.conversation(&identity.provider, config, &issue.reference) {
+                Ok(Some(read)) => {
+                    gathered
+                        .conversations
+                        .insert((identity.provider.clone(), identity.id.clone()), read);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let failure = failure_of(&error);
+                    let known = tracked
+                        .iter()
+                        .find(|t| t.provider == identity.provider && t.external_id == identity.id);
+                    let failure = match known {
+                        Some(_) => failure,
+                        None => SourceFailure {
+                            code: failure.code,
+                            message: format!(
+                                "comments of {} could not be read: {}",
+                                issue.display, failure.message
+                            ),
+                        },
+                    };
+                    gathered.failures.push((
+                        known.map(|t| t.reference.clone()),
+                        identity.provider.clone(),
+                        failure,
+                    ));
+                    if provider_wide(&error) {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn tracked(&self, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
@@ -660,7 +733,17 @@ impl Workspace {
         };
         let mut applied = Applied::default();
         for issue in &gathered.issues {
-            apply_issue(&transaction, issue, &now, &mut applied)?;
+            let key = (
+                issue.reference.identity.provider.clone(),
+                issue.reference.identity.id.clone(),
+            );
+            apply_issue(
+                &transaction,
+                issue,
+                gathered.conversations.get(&key),
+                &now,
+                &mut applied,
+            )?;
         }
         let by_reference: HashMap<&str, &Tracked> =
             tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
@@ -713,6 +796,7 @@ struct Existing {
 fn apply_issue(
     connection: &Connection,
     issue: &ExternalIssue,
+    read: Option<&Conversation>,
     now: &str,
     applied: &mut Applied,
 ) -> Result<(), Error> {
@@ -767,6 +851,9 @@ fn apply_issue(
             link(connection, &id, issue, Origin::Imported, now)?;
             if status == Status::Duplicate {
                 set_duplicate_target(connection, &id, issue)?;
+            }
+            if let Some(read) = read {
+                conversation::store(connection, &id, read, &issue.updated_at)?;
             }
             applied.imported.push(format!("T-{number}"));
         }
@@ -839,6 +926,9 @@ fn apply_issue(
                  WHERE ticket_id = ?1",
                 params![id, state, reason, issue.updated_at, now],
             )?;
+            if let Some(read) = read {
+                changed |= conversation::store(connection, &id, read, &issue.updated_at)?;
+            }
             if changed {
                 applied.updated.push(format!("T-{number}"));
             } else {
