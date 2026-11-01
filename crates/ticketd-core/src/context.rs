@@ -16,6 +16,9 @@ pub struct ContextOptions {
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
+    /// The source's comments and events for an externally sourced ticket.
+    #[serde(default)]
+    pub conversation: bool,
     pub offset: u32,
 }
 #[derive(Debug, Serialize)]
@@ -86,6 +89,27 @@ pub struct ContextEvidence {
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
 }
+/// One entry of the source conversation. Authors here are the source's own
+/// identities; they are never the `editing_agent` of a note.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContextSourceEntry {
+    Comment {
+        id: String,
+        author: String,
+        body: BoundedText,
+        url: String,
+        created_at: String,
+        edited_at: Option<String>,
+    },
+    Event {
+        id: String,
+        event: String,
+        actor: Option<String>,
+        subject: Option<String>,
+        created_at: String,
+    },
+}
 #[derive(Debug, Serialize)]
 pub struct TicketContext {
     pub ticket: ContextTicket,
@@ -101,6 +125,8 @@ pub struct TicketContext {
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backlinks: Option<ContextPage<crate::Backlink>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_conversation: Option<ContextPage<ContextSourceEntry>>,
 }
 fn text(value: String, limit: usize) -> BoundedText {
     let mut chars = value.chars();
@@ -288,6 +314,46 @@ impl Workspace {
         } else {
             None
         };
+        let source_conversation = if options.conversation {
+            let entries = crate::source::conversation_entries(&tx, &id)?
+                .into_iter()
+                .skip(options.offset as usize)
+                .take(PAGE + 1)
+                .map(|entry| match entry {
+                    crate::source::ConversationEntry::Comment {
+                        id,
+                        author,
+                        body,
+                        url,
+                        created_at,
+                        edited_at,
+                    } => ContextSourceEntry::Comment {
+                        id,
+                        author: text(author, LABEL).text,
+                        body: text(body, TEXT),
+                        url,
+                        created_at,
+                        edited_at,
+                    },
+                    crate::source::ConversationEntry::Event {
+                        id,
+                        event,
+                        actor,
+                        subject,
+                        created_at,
+                    } => ContextSourceEntry::Event {
+                        id,
+                        event,
+                        actor,
+                        subject,
+                        created_at,
+                    },
+                })
+                .collect();
+            Some(page(entries, options.offset))
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -306,6 +372,7 @@ impl Workspace {
             notes,
             evidence,
             backlinks,
+            source_conversation,
         })
     }
 }

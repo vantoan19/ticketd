@@ -239,6 +239,27 @@ const statusCountsSchema = z.object({
   canceled: z.number().int().nonnegative(),
   duplicate: z.number().int().nonnegative(),
 });
+/** A source comment or timeline event, read-only. Authors are the source's own, never editing agents. */
+const conversationEntrySchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("comment"),
+    id: z.string(),
+    author: z.string(),
+    body: z.string(),
+    url: z.string(),
+    created_at: z.string(),
+    edited_at: z.string().nullable(),
+  }),
+  z.object({
+    type: z.literal("event"),
+    id: z.string(),
+    event: z.string(),
+    actor: z.string().nullable(),
+    subject: z.string().nullable(),
+    created_at: z.string(),
+  }),
+]);
+export type ConversationEntry = z.infer<typeof conversationEntrySchema>;
 const sourceCountsSchema = z.object({
   all: z.number().int().nonnegative(),
   local: z.number().int().nonnegative(),
@@ -507,6 +528,12 @@ export const client = {
   /** Counts the whole filtered result by status, ignoring its paging. */
   async countTickets(filter: FindFilter) {
     return statusCountsSchema.parse(await invoke("count_tickets", { filter }));
+  },
+  /** The source's comments and events retrieved for a ticket, oldest first. */
+  async sourceConversation(reference: string) {
+    return z
+      .array(conversationEntrySchema)
+      .parse(await invoke("source_conversation", { reference }));
   },
   /** Counts the tickets each source filter (All, a provider, Local) would show. */
   async countBySource(filter: FindFilter) {
