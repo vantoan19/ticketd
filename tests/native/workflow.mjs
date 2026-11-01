@@ -157,7 +157,11 @@ try {
   // The WebKit driver may drop a keystroke. Retype a bounded number of times,
   // but always require the exact literal text.
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    await browser.keys(sentence);
+    // Send doubled letters in separate calls: see issue #99.
+    for (const chunk of sentence
+      .replace(/(.)(?=\1)/g, "$1\u0000")
+      .split("\u0000"))
+      await browser.keys(chunk);
     const shown = (await noteEditor.getText()).trim();
     if (shown === sentence) break;
     console.log(
