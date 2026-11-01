@@ -61,6 +61,10 @@ export function useTicketWorkspace(
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  // Moves only when the core reports a workspace write, so sections that cost
+  // extra reads (Linked work, Backlinks) can skip an unchanged refresh.
+  const [changes, setChanges] = useState(0);
+  const changeToken = useRef<number | null>(null);
   const generation = useRef(0);
   const detailGeneration = useRef(0);
   const refresh = useCallback(async () => {
@@ -89,6 +93,8 @@ export function useTicketWorkspace(
               }),
           client.listProjects(),
           client.listEfforts(),
+          // A write landing after this read moves the token at the next refresh.
+          client.changeToken(),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -103,6 +109,10 @@ export function useTicketWorkspace(
       setProjects(result[1]);
       setEfforts(result[2]);
       setRevision((value) => value + 1);
+      if (changeToken.current !== result[3]) {
+        changeToken.current = result[3];
+        setChanges((value) => value + 1);
+      }
       setError("");
     } catch (reason) {
       if (request !== generation.current) return;
@@ -283,6 +293,7 @@ export function useTicketWorkspace(
     setError,
     loading,
     revision,
+    changes,
     refresh,
     create,
     updateTicket,

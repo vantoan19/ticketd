@@ -2,6 +2,7 @@
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
+mod change;
 pub use backup::BackupRecord;
 mod backup_review;
 pub use backup_review::{

@@ -25,6 +25,8 @@ export function bridgeDefault(
     case "safety_backups":
     case "search_tags":
       return [];
+    case "change_token":
+      return 1;
     case "sidebar_counts":
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":

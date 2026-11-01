@@ -402,6 +402,7 @@ export const client = {
           source_reference: z.string(),
           source_title: z.string(),
           note_id: z.string().nullable(),
+          created_at: z.string().nullable(),
           passage: z.string(),
           mention_start: z.number().int().nonnegative(),
           mention_end: z.number().int().nonnegative(),
@@ -410,6 +411,14 @@ export const client = {
       .parse(
         await invoke("ticket_backlinks", { reference, limit: 20, offset }),
       );
+  },
+  /** Differs after any write to the workspace, by any process. */
+  async changeToken() {
+    return z
+      .number()
+      .int()
+      .nonnegative()
+      .parse(await invoke("change_token"));
   },
   async notes(reference: string, offset: number) {
     return z

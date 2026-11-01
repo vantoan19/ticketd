@@ -102,6 +102,8 @@ beforeEach(() => {
         }
         return target;
       }
+      case "change_token":
+        return 1;
       case "list_projects":
         return [];
       default:

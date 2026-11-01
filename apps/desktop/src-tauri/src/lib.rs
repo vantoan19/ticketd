@@ -95,6 +95,12 @@ fn sidebar_counts() -> Result<SidebarCounts, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn change_token() -> Result<u32, String> {
+    Workspace::open_default()
+        .and_then(|w| w.change_token())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn is_following(reference: String) -> Result<bool, String> {
     Workspace::open_default()
         .and_then(|w| w.is_following(&reference))
@@ -754,6 +760,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_following,
             set_inbox_read,
             sidebar_counts,
+            change_token,
             list_evidence,
             add_evidence,
             edit_evidence,

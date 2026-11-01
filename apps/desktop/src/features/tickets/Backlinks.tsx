@@ -30,38 +30,16 @@ export function Backlinks({
   select: (target: MentionTarget) => void;
 }) {
   const [links, setLinks] = useState<Link[]>([]);
-  const [noteDates, setNoteDates] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     void client
       .backlinks(reference, offset)
-      .then(async (result) => {
+      .then((result) => {
         if (!active) return;
         setLinks(result);
         setError("");
-        // The mention itself carries no date, so read each note's.
-        const dated = await Promise.all(
-          result.flatMap((link) =>
-            link.note_id
-              ? [
-                  client
-                    .note(link.source_reference, link.note_id)
-                    .then((note) => [link.note_id, note?.created_at] as const)
-                    .catch(() => null),
-                ]
-              : [],
-          ),
-        );
-        if (!active) return;
-        setNoteDates(
-          Object.fromEntries(
-            dated.flatMap((entry) =>
-              entry?.[0] && entry[1] ? [[entry[0], entry[1]]] : [],
-            ),
-          ),
-        );
       })
       .catch((reason: unknown) => {
         if (active) setError(String(reason));
@@ -105,7 +83,7 @@ export function Backlinks({
               </span>
               <span className="backlink-where">
                 {link.note_id
-                  ? `Note${noteDates[link.note_id] ? ` · ${formatDateTime(noteDates[link.note_id] ?? "")}` : ""}`
+                  ? `Note${link.created_at ? ` · ${formatDateTime(link.created_at)}` : ""}`
                   : "Description"}
               </span>
               <span className="mention-passage">

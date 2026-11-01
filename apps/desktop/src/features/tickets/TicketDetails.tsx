@@ -36,6 +36,7 @@ export function TicketDetails({
   projects,
   efforts,
   revision,
+  changes,
   refresh,
   updateTicket,
 }: {
@@ -51,6 +52,8 @@ export function TicketDetails({
   projects: Project[];
   efforts: Effort[];
   revision: number;
+  /** Moves only when the workspace changed; see `useTicketWorkspace`. */
+  changes: number;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
@@ -176,7 +179,7 @@ export function TicketDetails({
           {item.reference === selected && !item.trashed && (
             <LinkedWork
               ticket={item}
-              revision={revision}
+              revision={changes}
               refresh={refresh}
               select={open}
               onOpenGraph={() => setGraphReference(item.reference)}
@@ -193,7 +196,7 @@ export function TicketDetails({
           {item.reference === selected && (
             <Backlinks
               reference={item.reference}
-              revision={revision}
+              revision={changes}
               select={(target) => setSelected(target.reference, target)}
             />
           )}

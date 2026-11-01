@@ -61,7 +61,7 @@ export function LinkedWork({
   const reference = ticket.reference;
 
   // One bounded read of the core's relationships feeds every row. It reruns
-  // whenever the workspace revision moves, so links made elsewhere appear.
+  // whenever the workspace changes, so links made elsewhere appear.
   useEffect(() => {
     let active = true;
     client.contextualRelationships(reference, 0).then(

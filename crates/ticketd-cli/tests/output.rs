@@ -181,6 +181,11 @@ fn backlinks_command_returns_source_and_passage() {
     assert_eq!(result[0]["passage"], "See T-1 for context");
     assert_eq!(result[0]["mention_start"], 4);
     assert_eq!(result[0]["mention_end"], 7);
+    // A description mention has no note, so no date.
+    assert!(result[0]["created_at"].is_null());
+    run(&["note", "add", "T-2", "--content", "Also T-1 here"]);
+    let result = run(&["backlinks", "T-1"]);
+    assert!(result[1]["created_at"].is_string());
 }
 
 #[test]

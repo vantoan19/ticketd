@@ -1584,12 +1584,30 @@ fn backlinks_follow_markdown_content_and_note_changes() {
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].source_reference, source.reference);
     assert_eq!(links[0].passage, "See T-1 here.");
+    assert_eq!(links[0].created_at, None);
     assert_eq!(links[1].note_id.as_deref(), Some(note.id.as_str()));
+    assert_eq!(
+        links[1].created_at.as_deref(),
+        Some(note.created_at.as_str())
+    );
     workspace.delete_note(&source.reference, &note.id).unwrap();
     assert_eq!(
         workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
         1
     );
+}
+
+#[test]
+fn change_token_moves_on_a_write_from_another_handle_and_holds_otherwise() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut writer = Workspace::open(&path).unwrap();
+    let reader = Workspace::open(&path).unwrap();
+    let before = reader.change_token().unwrap();
+    reader.list_tickets().unwrap();
+    assert_eq!(reader.change_token().unwrap(), before);
+    writer.create_ticket("Changed elsewhere").unwrap();
+    assert_ne!(reader.change_token().unwrap(), before);
 }
 
 #[test]

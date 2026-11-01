@@ -82,6 +82,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch?: { title?: string } }) => {
+      if (command === "change_token") return 1;
       if (command === "list_projects" || command === "list_efforts") return [];
       if (command === "list_notes") return [];
       if (command === "find_tickets") return [saved];
@@ -184,6 +185,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   ];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
+      if (command === "change_token") return 1;
       if (
         command === "list_projects" ||
         command === "list_efforts" ||
@@ -285,6 +287,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       if (command === "list_efforts")
         return [{ id: "e1", name: "Old effort", archived: true }];
       if (command === "list_projects" || command === "find_tickets") return [];
@@ -340,7 +343,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockResolvedValue([]);
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "change_token" ? 1 : [],
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -399,6 +404,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   ];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { reference?: string }) => {
+      if (command === "change_token") return 1;
       if (
         [
           "list_projects",
@@ -445,6 +451,7 @@ test("clears additional filters while preserving the selected Effort", async () 
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       if (command === "list_efforts")
         return [{ id: "e1", name: "Launch", archived: false }];
       if (command === "list_projects" || command === "find_tickets") return [];
@@ -474,6 +481,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       if (command === "list_efforts" || command === "list_projects") return [];
       if (command === "find_tickets") return [];
       return bridgeDefault(command, args);
@@ -509,6 +517,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       if (command === "list_projects")
         return [
           {
@@ -582,6 +591,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   let resolveRefresh: ((value: unknown) => void) | undefined;
   let calls = 0;
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_token") return 1;
     if (command === "find_tickets") {
       if (calls++ === 0) return [ticket];
       return new Promise((resolve) => {
@@ -630,6 +640,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
     children: [],
   };
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_token") return 1;
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
     return [];
@@ -671,6 +682,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
     children: [],
   };
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_token") return 1;
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
     return [];
@@ -721,6 +733,7 @@ function openSubmenu(name: string) {
 async function renderBulk(handlers: Record<string, unknown>) {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string, args?: unknown) => {
+    if (command === "change_token") return 1;
     const handler = handlers[command];
     if (typeof handler === "function") return handler(args);
     return handler ?? [];
@@ -901,6 +914,7 @@ test("shows attention for a reminder while another view is active and after reop
   let unread = 0;
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       if (command === "sidebar_counts")
         return { unread_inbox: unread, ready: 4, in_progress: 2 };
       if (
@@ -960,6 +974,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
     children: [],
   };
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_token") return 1;
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
     return [];
@@ -979,7 +994,9 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
 test("the narrow navigation trigger shows its label and gets focus back when the sheet closes", async () => {
   vi.useFakeTimers();
   narrowViewport = true;
-  bridge.invoke.mockImplementation(async () => []);
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "change_token" ? 1 : [],
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1005,6 +1022,7 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   const calls: string[] = [];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
+      if (command === "change_token") return 1;
       calls.push(command);
       if (command === "list_projects" || command === "list_efforts") return [];
       if (command === "find_tickets") return [];

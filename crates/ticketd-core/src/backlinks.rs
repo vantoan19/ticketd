@@ -9,6 +9,8 @@ pub struct Backlink {
     pub source_reference: String,
     pub source_title: String,
     pub note_id: Option<String>,
+    /// When the mentioning note was written; `None` for a ticket description.
+    pub created_at: Option<String>,
     pub passage: String,
     /// Where the mention sits in the Markdown body, counted in Unicode scalar values
     /// (chars), as `passage` is, with a leading U+FEFF not counted:
@@ -114,7 +116,7 @@ pub(crate) fn query(
     offset: u32,
 ) -> Result<Vec<Backlink>, Error> {
     let pattern = format!("%{reference}%");
-    let mut statement = tx.prepare("SELECT t.number,t.title,NULL,t.body,0 FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0) UNION ALL SELECT t.number,t.title,n.id,n.content,n.number FROM notes n JOIN tickets t ON t.id=n.ticket_id WHERE t.trashed=0 AND (n.content LIKE ?1 OR instr(n.content,'&')>0 OR instr(n.content,char(92))>0) ORDER BY 1,5")?;
+    let mut statement = tx.prepare("SELECT t.number,t.title,NULL,t.body,0,NULL FROM tickets t WHERE t.trashed=0 AND (t.body LIKE ?1 OR instr(t.body,'&')>0 OR instr(t.body,char(92))>0) UNION ALL SELECT t.number,t.title,n.id,n.content,n.number,n.created_at FROM notes n JOIN tickets t ON t.id=n.ticket_id WHERE t.trashed=0 AND (n.content LIKE ?1 OR instr(n.content,'&')>0 OR instr(n.content,char(92))>0) ORDER BY 1,5")?;
     let mut rows = statement.query([pattern])?;
     let mut links = Vec::new();
     let mut seen = 0u32;
@@ -124,6 +126,7 @@ pub(crate) fn query(
         let title: String = row.get(1)?;
         let note_id: Option<String> = row.get(2)?;
         let content: String = row.get(3)?;
+        let created_at: Option<String> = row.get(5)?;
         let mut last_line = None;
         for (text, range) in text_runs(&content) {
             if !contains_reference(&text, reference) {
@@ -143,6 +146,7 @@ pub(crate) fn query(
                     source_reference: format!("T-{number}"),
                     source_title: title.chars().take(256).collect(),
                     note_id: note_id.clone(),
+                    created_at: created_at.clone(),
                     mention_start: char_offset(&content, mention.start),
                     mention_end: char_offset(&content, mention.end),
                     passage: {

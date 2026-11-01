@@ -35,6 +35,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
       projects={[]}
       efforts={[]}
       revision={0}
+      changes={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}
     />,
@@ -78,6 +79,7 @@ test("the full-width view marks the reading column and drops the repeated headin
       projects={[]}
       efforts={[]}
       revision={0}
+      changes={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}
     />,

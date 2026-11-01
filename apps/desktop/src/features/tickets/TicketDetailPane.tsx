@@ -28,6 +28,7 @@ export function TicketDetailPane({
     projects,
     efforts,
     revision,
+    changes,
     refresh,
     updateTicket,
   } = workspace;
@@ -53,6 +54,7 @@ export function TicketDetailPane({
         projects={projects}
         efforts={efforts}
         revision={revision}
+        changes={changes}
         refresh={refresh}
         updateTicket={updateTicket}
       />
