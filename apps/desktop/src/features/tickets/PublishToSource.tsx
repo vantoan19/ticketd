@@ -24,6 +24,7 @@ import {
   toSourceFailure,
   type PublicationPreview,
 } from "@/lib/api/sources";
+import { AttemptReview } from "./ResolvePublication";
 import { providerName } from "./ticket-source";
 import "./publication.css";
 
@@ -83,6 +84,7 @@ export function LocalPublication({
           attempt={attempt}
           open={reviewing}
           onOpenChange={setReviewing}
+          refresh={refresh}
         />
       </>
     );
@@ -150,77 +152,6 @@ function UnresolvedPublication({
         Review details
       </Button>
     </div>
-  );
-}
-
-/**
- * What is saved about an unresolved attempt, and what is known and unknown. It
- * offers no way to retry: resolving an unknown outcome is a separate workflow.
- */
-function AttemptReview({
-  attempt,
-  open,
-  onOpenChange,
-}: {
-  attempt: PublicationAttempt;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const name = providerName(attempt.provider);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="publication-dialog">
-        <DialogHeader>
-          <DialogTitle>Publication unresolved</DialogTitle>
-          <DialogDescription>
-            {attempt.reference} stays a local ticket. Nothing was attached to
-            it.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="publication-facts">
-          <section aria-label="Known">
-            <h4>What is known</h4>
-            <ul>
-              <li>
-                ticketd asked {name} to create an issue in{" "}
-                <strong>{attempt.destination}</strong> titled “{attempt.title}”.
-              </li>
-              <li>The request was sent on {attempt.started_at}.</li>
-              {attempt.issue && (
-                <li>
-                  {name} created <strong>{attempt.issue.display}</strong>, but
-                  ticketd could not attach it to this ticket.
-                </li>
-              )}
-            </ul>
-          </section>
-          <section aria-label="Unknown">
-            <h4>What is not known</h4>
-            <ul>
-              {attempt.issue ? (
-                <li>
-                  Whether the issue was changed or closed since it was created.
-                </li>
-              ) : (
-                <li>
-                  Whether {name} created the issue. It may exist even though no
-                  answer arrived.
-                </li>
-              )}
-            </ul>
-            {attempt.failure && (
-              <p className="publication-detail">{attempt.failure.message}</p>
-            )}
-          </section>
-        </div>
-        <p className="publication-detail">
-          Creating the issue again is blocked, so a second issue cannot appear
-          by accident. Resolving an unknown outcome is not available yet; check{" "}
-          {attempt.destination} on {name} before doing anything by hand.
-        </p>
-        <DialogFooter showCloseButton />
-      </DialogContent>
-    </Dialog>
   );
 }
 

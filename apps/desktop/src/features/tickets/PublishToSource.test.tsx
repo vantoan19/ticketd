@@ -206,26 +206,177 @@ test("an unknown outcome blocks retrying and says the issue may exist", async ()
   await waitFor(() => expect(refresh).toHaveBeenCalled());
 });
 
-test("a ticket with an unresolved attempt shows the warning shell without any retry", async () => {
-  bridgeAnswers({ ...eligible, attempt: attempt() });
+const review = (overrides: Record<string, unknown> = {}) => ({
+  attempt: attempt(),
+  provider_name: "GitHub",
+  known: [
+    "ticketd asked GitHub to create “Escalate the cache bug” in acme/api.",
+    "The request was sent, but no usable answer came back.",
+    "T-1 is still a local ticket with all its progress and organization.",
+  ],
+  unknown: "whether GitHub created an issue for this attempt.",
+  note: "Publishing again is blocked: if the issue exists, creating another would duplicate it.",
+  actions: [
+    {
+      kind: "attach",
+      available: true,
+      label: "Attach the created issue",
+      detail: "Name the issue in acme/api.",
+    },
+    {
+      kind: "not_created",
+      available: true,
+      label: "Confirm nothing was created",
+      detail: "Only when GitHub's recent issues can be read completely.",
+    },
+  ],
+  candidates: [],
+  candidates_complete: true,
+  lookup_failure: null,
+  ...overrides,
+});
+
+function reviewAnswers(
+  value: unknown,
+  resolve?: { reject: { code: string; message: string } },
+) {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return { ...eligible, attempt: attempt() };
+    if (command === "review_publication") return value;
+    if (command === "resolve_publication") {
+      if (resolve) throw { ...resolve.reject, fields: [] };
+      return {
+        attempt: attempt({ state: "succeeded" }),
+        replayed: false,
+      };
+    }
+    return [];
+  });
+}
+
+async function openReview() {
+  fireEvent.click(screen.getByRole("button", { name: /Review details/ }));
+  return screen.findByRole("dialog", { name: "Publication unresolved" });
+}
+
+test("an unresolved attempt shows the warning and no way to publish blindly", async () => {
+  reviewAnswers(review());
   rail(ticket({ publication: attempt() }));
   expect(screen.getByText("Publication unresolved")).toBeTruthy();
   expect(
     screen.getByText(/It may already exist\. Publishing again is blocked/),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
-  expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
 
-  fireEvent.click(screen.getByRole("button", { name: /Review details/ }));
-  const dialog = await screen.findByRole("dialog", {
-    name: "Publication unresolved",
-  });
-  expect(
-    within(dialog).getByText(/titled “Escalate the cache bug”/),
-  ).toBeTruthy();
+  const dialog = await openReview();
+  await within(dialog).findByText("What is known");
   expect(within(dialog).getByText("What is not known")).toBeTruthy();
-  expect(within(dialog).getByText(/request timed out/)).toBeTruthy();
   expect(
-    within(dialog).queryByRole("button", { name: /Publish|Retry/ }),
+    within(dialog).getByText(/whether GitHub created an issue/),
+  ).toBeTruthy();
+  expect(
+    within(dialog).getByText(/creating another would duplicate/),
+  ).toBeTruthy();
+  expect(
+    within(dialog).queryByRole("button", { name: /Publish to|Retry/ }),
   ).toBeNull();
+});
+
+test("naming the created issue attaches it and refreshes the ticket", async () => {
+  reviewAnswers(review());
+  const refresh = rail(ticket({ publication: attempt() }));
+  const dialog = await openReview();
+  fireEvent.change(
+    await within(dialog).findByLabelText("Issue number or link"),
+    {
+      target: { value: "12" },
+    },
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Attach issue" }));
+
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
+      reference: "T-1",
+      resolution: { kind: "attach", issue: "12" },
+    }),
+  );
+  await waitFor(() => expect(refresh).toHaveBeenCalled());
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("evidence the source cannot give keeps the review open and unresolved", async () => {
+  reviewAnswers(review(), {
+    reject: {
+      code: "publication_unverified",
+      message:
+        "T-1: this could not be verified (provider unreachable). The attempt stays unresolved; nothing was changed",
+    },
+  });
+  const refresh = rail(ticket({ publication: attempt() }));
+  const dialog = await openReview();
+  fireEvent.click(
+    await within(dialog).findByRole("button", {
+      name: "Confirm nothing was created",
+    }),
+  );
+  const alert = await within(dialog).findByRole("alert");
+  expect(alert.textContent).toContain("stays unresolved");
+  expect(refresh).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+});
+
+test("possible matches can be confirmed, and not-created is withheld while they exist", async () => {
+  reviewAnswers(
+    review({
+      candidates: [
+        {
+          identity: { provider: "github", id: "60" },
+          locator: "acme/api#7",
+          display: "acme/api#7",
+          url: "https://github.example/acme/api/issues/7",
+        },
+      ],
+      actions: review().actions.map((action) =>
+        action.kind === "not_created"
+          ? {
+              ...action,
+              available: false,
+              detail:
+                "Not possible: issues that may be this publication already exist.",
+            }
+          : action,
+      ),
+    }),
+  );
+  rail(ticket({ publication: attempt() }));
+  const dialog = await openReview();
+  await within(dialog).findByText("acme/api#7");
+  expect(
+    (
+      within(dialog).getByRole("button", {
+        name: "Confirm nothing was created",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(within(dialog).getByRole("button", { name: "This is it" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
+      reference: "T-1",
+      resolution: { kind: "attach", issue: "acme/api#7" },
+    }),
+  );
+});
+
+test("a failed search is reported and never shown as nothing found", async () => {
+  reviewAnswers(
+    review({
+      candidates_complete: null,
+      lookup_failure: { code: "unavailable", message: "provider unreachable" },
+    }),
+  );
+  rail(ticket({ publication: attempt() }));
+  const dialog = await openReview();
+  const note = await within(dialog).findByText(/could not be searched/);
+  expect(note.textContent).toContain("does not mean nothing was created");
 });

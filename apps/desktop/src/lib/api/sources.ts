@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { publicationAttemptSchema } from "./publication";
+import {
+  publicationAttemptSchema,
+  publicationReviewSchema,
+  type PublicationResolution,
+} from "./publication";
 
 const choiceOptionSchema = z.object({
   value: z.string(),
@@ -173,6 +177,12 @@ export type SourceFailureCode =
   | "publication_ineligible"
   | "publication_failed"
   | "publication_unresolved"
+  | "publication_nothing_to_resolve"
+  | "publication_still_running"
+  | "publication_unverified"
+  | "publication_mismatch"
+  | "publication_candidates"
+  | "publication_settled"
   | "rejected"
   | "unauthenticated"
   | "forbidden"
@@ -271,6 +281,28 @@ export const sourcesClient = {
           destination: destination ?? null,
         }),
       ),
+    );
+  },
+  /**
+   * What is known and unknown about an unresolved publication and the safe next
+   * actions. With `search`, GitHub is asked for issues that may be the one created.
+   */
+  async reviewPublication(reference: string, search: boolean) {
+    return publicationReviewSchema.parse(
+      await call(invoke("review_publication", { reference, search })),
+    );
+  },
+  /**
+   * Settles an unresolved publication. Rejects, leaving it unresolved, with
+   * `publication_unverified` (the source could not give evidence),
+   * `publication_candidates`, `publication_mismatch` or `publication_settled`.
+   */
+  async resolvePublication(
+    reference: string,
+    resolution: PublicationResolution,
+  ) {
+    return publishOutcomeSchema.parse(
+      await call(invoke("resolve_publication", { reference, resolution })),
     );
   },
   /** The built-in sources and what is saved for each. */

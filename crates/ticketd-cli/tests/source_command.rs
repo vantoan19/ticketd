@@ -42,6 +42,17 @@ fn serve() -> String {
                     "403 Forbidden",
                     json!({"message": "Resource not accessible"}),
                 )
+            } else if path == "/repos/o/flaky/issues/7" {
+                // The issue the lost create may have made.
+                (
+                    "200 OK",
+                    json!({"id": 60, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
+                           "html_url": "https://github.example/o/flaky/issues/7", "assignees": [], "labels": [],
+                           "created_at": "2999-01-01T00:00:00Z", "updated_at": "2999-01-01T00:00:00Z"}),
+                )
+            } else if path.starts_with("/repos/o/flaky/issues?") {
+                // Nothing in the window matches.
+                ("200 OK", json!([]))
             } else if path == "/user" {
                 ("200 OK", json!({"login": "octo"}))
             } else if path.starts_with("/user/repos") {
@@ -417,6 +428,76 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     let preview = cli.run(&["source", "publish", &reference, "--preview"]);
     assert_eq!(preview["eligibility"]["reason"], "attempt_open");
     assert_eq!(preview["attempt"]["state"], "unresolved");
+}
+
+fn unresolved_ticket(cli: &Cli) -> String {
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(cli);
+    let args = ["source", "publish", &reference, "--destination", "o/flaky"];
+    assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));
+    reference
+}
+
+#[test]
+fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
+    let cli = Cli::new();
+    let reference = unresolved_ticket(&cli);
+
+    // The review changes nothing and states what is known and unknown.
+    let review = cli.run(&["source", "resolve", &reference]);
+    assert_eq!(review["attempt"]["state"], "unresolved");
+    assert!(review["unknown"].as_str().unwrap().contains("whether"));
+    assert_eq!(review["candidates_complete"], true);
+    assert_eq!(review["actions"][0]["kind"], "attach");
+    assert_eq!(review["actions"][1]["available"], true);
+    assert_eq!(cli.run(&["show", &reference])["source"], Value::Null);
+
+    // An issue that cannot be verified is refused and the attempt stays unresolved.
+    let wrong = cli.command(
+        &["source", "resolve", &reference, "--issue", "other/repo#7"],
+        Some(TOKEN),
+    );
+    assert_eq!(wrong.status.code(), Some(1));
+    let stderr = String::from_utf8(wrong.stderr).unwrap();
+    assert!(stderr.contains("could not be verified"), "{stderr}");
+    let no_credential = cli.command(&["source", "resolve", &reference, "--issue", "7"], None);
+    assert_eq!(no_credential.status.code(), Some(1));
+    assert_eq!(
+        cli.run(&["show", &reference])["publication"]["state"],
+        "unresolved"
+    );
+
+    let outcome = cli.run(&["source", "resolve", &reference, "--issue", "7"]);
+    assert_eq!(outcome["replayed"], false);
+    assert_eq!(outcome["attempt"]["state"], "succeeded");
+    assert_eq!(outcome["ticket"]["source"]["display"], "o/flaky#7");
+    assert_eq!(outcome["ticket"]["source"]["origin"], "published");
+
+    let again = cli.run(&["source", "resolve", &reference, "--issue", "7"]);
+    assert_eq!(again["replayed"], true);
+}
+
+#[test]
+fn resolve_not_created_needs_evidence_and_then_allows_publishing_again() {
+    let cli = Cli::new();
+    let reference = unresolved_ticket(&cli);
+
+    // Without a credential nothing can be proven: still unresolved, still blocked.
+    let output = cli.command(&["source", "resolve", &reference, "--not-created"], None);
+    assert_eq!(output.status.code(), Some(1));
+    let attempt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(attempt["state"], "unresolved");
+    assert_eq!(
+        cli.run(&["show", &reference])["publication"]["state"],
+        "unresolved"
+    );
+
+    let outcome = cli.run(&["source", "resolve", &reference, "--not-created"]);
+    assert_eq!(outcome["attempt"]["state"], "failed");
+    assert_eq!(outcome["attempt"]["failure"]["code"], "ruled_out");
+    assert_eq!(outcome["ticket"]["publication"], Value::Null);
+    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    assert_eq!(preview["eligibility"]["kind"], "eligible");
 }
 
 #[test]

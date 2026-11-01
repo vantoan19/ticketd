@@ -298,6 +298,27 @@ enum SourceCommand {
         #[arg(long)]
         preview: bool,
     },
+    /// Settle a publication whose outcome is unknown, without risking a second issue.
+    /// With no flag it prints what is known and unknown and searches the destination
+    /// for the issue that may have been created; it changes nothing
+    Resolve {
+        /// The ticket with the unresolved publication, for example T-12
+        ticket: String,
+        /// The issue that was created: a number, owner/name#number or a link in the
+        /// destination. GitHub verifies it before it is attached
+        #[arg(long, conflicts_with = "not_created")]
+        issue: Option<String>,
+        /// Attach the issue the attempt already recorded, when it recorded one
+        #[arg(long, conflicts_with = "not_created")]
+        attach: bool,
+        /// Confirm nothing was created. Accepted only when GitHub's recent issues in the
+        /// destination are read completely and none matches; otherwise it stays unresolved
+        #[arg(long)]
+        not_created: bool,
+        /// With no other flag, skip the search of the destination (no network)
+        #[arg(long)]
+        no_search: bool,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -971,13 +992,67 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     return Err(match error {
                         ticketd_core::source::PublicationError::Unresolved { .. } => format!(
-                            "{error}. Do not publish {ticket} again by hand; run `ticketd source publish {ticket} --preview` to see the open attempt"
+                            "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
                         ),
                         _ => error.to_string(),
                     }
                     .into());
                 }
                 serde_json::to_string(&result?)?
+            }
+        }
+        Command::Source {
+            command:
+                SourceCommand::Resolve {
+                    ticket,
+                    issue,
+                    attach,
+                    not_created,
+                    no_search,
+                },
+        } => {
+            use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
+            let engine = ticketd_core::source::Engine::builtin();
+            let resolution = if not_created {
+                Some(Resolution::NotCreated)
+            } else if attach || issue.is_some() {
+                Some(Resolution::Attach { issue })
+            } else {
+                None
+            };
+            match resolution {
+                None => serde_json::to_string(
+                    &workspace.review_publication(&engine, &ticket, !no_search)?,
+                )?,
+                Some(resolution) => {
+                    let result = workspace.resolve_publication(
+                        &engine,
+                        &ticket,
+                        &ResolveOptions {
+                            resolution,
+                            now: None,
+                        },
+                    );
+                    if let Err(ticketd_core::Error::Publication(error)) = &result {
+                        // Whatever happened, print the attempt as it stands so a script
+                        // or agent sees that it is still unresolved (or was settled).
+                        if !matches!(error, PublicationError::NothingToResolve { .. })
+                            && let Some(attempt) = workspace.publication_attempts(&ticket)?.first()
+                        {
+                            writeln!(output, "{}", serde_json::to_string(attempt)?)?;
+                        }
+                        return Err(match error {
+                            PublicationError::Unverified { .. }
+                            | PublicationError::Candidates { .. }
+                            | PublicationError::Mismatch { .. } => format!(
+                                "{error}. Run `ticketd source resolve {ticket}` to review what is known"
+                            ),
+                            _ => error.to_string(),
+                        }
+                        .into());
+                    }
+                    serde_json::to_string(&result?)?
+                }
             }
         }
         Command::Source { command } => source_command(&mut workspace, command)?,
@@ -1060,7 +1135,9 @@ fn source_command(
         SourceCommand::TakeOwnership { reference, agent } => {
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }
-        SourceCommand::Refresh { .. } | SourceCommand::Publish { .. } => unreachable_refresh()?,
+        SourceCommand::Refresh { .. }
+        | SourceCommand::Publish { .. }
+        | SourceCommand::Resolve { .. } => unreachable_refresh()?,
     })
 }
 
