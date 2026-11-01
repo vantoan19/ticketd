@@ -17,6 +17,7 @@ mod freshness;
 pub mod github;
 mod schedule;
 pub mod schema;
+mod takeover;
 mod tracking;
 
 use rusqlite::{OptionalExtension, params};

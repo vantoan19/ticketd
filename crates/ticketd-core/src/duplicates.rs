@@ -158,6 +158,12 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
 /// Remove the canonical designation of a ticket that is leaving Duplicate by choosing
 /// another status. The chosen status stays.
 pub(crate) fn clear(conn: &Connection, id: &str, agent: Option<&str>) -> Result<(), Error> {
+    // A taken-over ticket keeps the source's last canonical as provenance only
+    // while it stays Duplicate.
+    conn.execute(
+        "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
+        [id],
+    )?;
     let canonical: Option<String> = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [id], |r| r.get(0)).optional()?;
     if let Some(canonical) = canonical {
         conn.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [id])?;
