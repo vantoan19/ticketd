@@ -38,7 +38,10 @@ fn serve() -> String {
             } else if request.starts_with("POST ") && path == "/repos/o/flaky/issues" {
                 ("502 Bad Gateway", json!({"message": "upstream"}))
             } else if request.starts_with("POST ") {
-                ("403 Forbidden", json!({"message": "Resource not accessible"}))
+                (
+                    "403 Forbidden",
+                    json!({"message": "Resource not accessible"}),
+                )
             } else if path == "/user" {
                 ("200 OK", json!({"login": "octo"}))
             } else if path.starts_with("/user/repos") {
@@ -375,7 +378,10 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     assert_eq!(shown["publication"]["state"], "unresolved");
     assert_eq!(shown["source"], Value::Null);
     let stderr = cli.fail(&args, Some(TOKEN));
-    assert!(stderr.contains("resolve it before creating another"), "{stderr}");
+    assert!(
+        stderr.contains("resolve it before creating another"),
+        "{stderr}"
+    );
     let preview = cli.run(&["source", "publish", &reference, "--preview"]);
     assert_eq!(preview["eligibility"]["reason"], "attempt_open");
     assert_eq!(preview["attempt"]["state"], "unresolved");

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-import { publicationAttemptSchema } from "./client";
+import { publicationAttemptSchema } from "./publication";
 
 const choiceOptionSchema = z.object({
   value: z.string(),

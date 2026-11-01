@@ -219,10 +219,12 @@ impl GithubConnector {
         match response.status {
             // The request was understood and declined (validation, issues
             // disabled, gone): the shared classification would call these protocol errors.
-            400 | 405 | 410 | 422 => Err(SourceError::Rejected(match response_message(&response) {
-                Some(message) => format!("GitHub refused {subject}: {message}"),
-                None => format!("GitHub refused {subject} (status {})", response.status),
-            })),
+            400 | 405 | 410 | 422 => {
+                Err(SourceError::Rejected(match response_message(&response) {
+                    Some(message) => format!("GitHub refused {subject}: {message}"),
+                    None => format!("GitHub refused {subject} (status {})", response.status),
+                }))
+            }
             // Redirects, other 2xx and server errors prove nothing.
             _ => match classify(response, &subject) {
                 Ok(_) => Err(SourceError::Protocol(

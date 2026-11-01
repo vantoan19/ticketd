@@ -110,12 +110,6 @@ export function LocalPublication({
         Done, Canceled and Duplicate tickets are not published. {message}
       </small>
     );
-  if (reason === "source_not_connected")
-    return (
-      <small className="rail-note">
-        Connect {preview.provider_name} in Settings to publish this ticket.
-      </small>
-    );
   return null;
 }
 

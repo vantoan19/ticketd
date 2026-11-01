@@ -2,7 +2,8 @@
 //! controllable fake connector. The failure scenarios are the point: every one
 //! of them must leave the ticket local, and every one that might have created an
 //! issue must block another create.
-#![allow(clippy::unwrap_used)]
+// Fake connector helpers panic to simulate a crash and to fail loudly on a wrong error.
+#![allow(clippy::unwrap_used, clippy::panic)]
 
 use std::{
     collections::BTreeMap,
@@ -16,10 +17,10 @@ use ticketd_core::{
     Error, Status, Ticket, TicketPatch, Workspace,
     source::{
         AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest, Eligibility,
-        Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldKind,
-        IneligibleReason, OptionSource, Origin, Ownership, PublicationError, PublishOptions,
-        PublishRequest, RefreshOptions, SchemaField, SourceError, ValueFormat,
+        ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
+        Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        FieldKind, IneligibleReason, OptionSource, Origin, Ownership, PublicationError,
+        PublishOptions, PublishRequest, RefreshOptions, SchemaField, SourceError, ValueFormat,
     },
 };
 
@@ -90,7 +91,12 @@ impl Connector for Fake {
         })
     }
 
-    fn options(&self, _: &str, _: &str, _: &ConfigValues) -> Result<Vec<ChoiceOption>, SourceError> {
+    fn options(
+        &self,
+        _: &str,
+        _: &str,
+        _: &ConfigValues,
+    ) -> Result<Vec<ChoiceOption>, SourceError> {
         Ok(Vec::new())
     }
 
@@ -102,7 +108,11 @@ impl Connector for Fake {
         })
     }
 
-    fn fetch(&self, _: &ConfigValues, reference: &ExternalRef) -> Result<ExternalIssue, SourceError> {
+    fn fetch(
+        &self,
+        _: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<ExternalIssue, SourceError> {
         let remote = self.0.lock().unwrap();
         let id: u64 = reference.identity.id.parse().unwrap();
         remote
@@ -121,11 +131,17 @@ impl Connector for Fake {
             .collect()
     }
 
-    fn publish(&self, _: &ConfigValues, request: &PublishRequest) -> Result<ExternalIssue, SourceError> {
+    fn publish(
+        &self,
+        _: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError> {
         let (mode, hook) = {
             let mut remote = self.0.lock().unwrap();
             if remote.mode == Mode::Refuse {
-                return Err(SourceError::Forbidden("no permission to create issues".into()));
+                return Err(SourceError::Forbidden(
+                    "no permission to create issues".into(),
+                ));
             }
             remote.created.push(request.clone());
             let id = 100 + remote.created.len() as u64;
@@ -211,7 +227,8 @@ impl Fixture {
     }
 
     fn publish(&mut self, reference: &str) -> Result<ticketd_core::source::PublishOutcome, Error> {
-        self.workspace.publish_ticket(&self.engine, reference, &options())
+        self.workspace
+            .publish_ticket(&self.engine, reference, &options())
     }
 
     fn ticket(&self, reference: &str) -> Ticket {
@@ -279,8 +296,14 @@ fn publication_error(error: Error) -> PublicationError {
 #[test]
 fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
     let mut f = Fixture::new();
-    let ticket = describe(&mut f, "Escalate the cache bug", "Cache entries never expire.");
-    f.workspace.add_note(&ticket.reference, "private note", None).unwrap();
+    let ticket = describe(
+        &mut f,
+        "Escalate the cache bug",
+        "Cache entries never expire.",
+    );
+    f.workspace
+        .add_note(&ticket.reference, "private note", None)
+        .unwrap();
 
     let preview = f
         .workspace
@@ -315,7 +338,10 @@ fn done_canceled_duplicate_trashed_and_unconnected_tickets_are_ineligible_with_a
         let error = f.publish(&ticket.reference).unwrap_err();
         assert!(matches!(
             publication_error(error),
-            PublicationError::Ineligible { reason: IneligibleReason::Status, .. }
+            PublicationError::Ineligible {
+                reason: IneligibleReason::Status,
+                ..
+            }
         ));
     }
     let duplicate = f.workspace.create_ticket("Copy").unwrap();
@@ -324,13 +350,21 @@ fn done_canceled_duplicate_trashed_and_unconnected_tickets_are_ineligible_with_a
         .unwrap();
     assert!(matches!(
         publication_error(f.publish(&duplicate.reference).unwrap_err()),
-        PublicationError::Ineligible { reason: IneligibleReason::Status, .. }
+        PublicationError::Ineligible {
+            reason: IneligibleReason::Status,
+            ..
+        }
     ));
     let trashed = f.workspace.create_ticket("Gone").unwrap();
-    f.workspace.set_trashed(&trashed.reference, true, None).unwrap();
+    f.workspace
+        .set_trashed(&trashed.reference, true, None)
+        .unwrap();
     assert!(matches!(
         publication_error(f.publish(&trashed.reference).unwrap_err()),
-        PublicationError::Ineligible { reason: IneligibleReason::Trashed, .. }
+        PublicationError::Ineligible {
+            reason: IneligibleReason::Trashed,
+            ..
+        }
     ));
     assert_eq!(f.created(), 0);
 
@@ -343,7 +377,10 @@ fn done_canceled_duplicate_trashed_and_unconnected_tickets_are_ineligible_with_a
         .unwrap_err();
     assert!(matches!(
         publication_error(error),
-        PublicationError::Ineligible { reason: IneligibleReason::SourceNotConnected, .. }
+        PublicationError::Ineligible {
+            reason: IneligibleReason::SourceNotConnected,
+            ..
+        }
     ));
 }
 
@@ -353,13 +390,21 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     let ticket = describe(&mut f, "Escalate", "Body text");
     set_status(&mut f, &ticket.reference, Status::InProgress);
     let effort = f.workspace.create_effort("Launch").unwrap();
-    f.workspace.set_effort(&ticket.reference, Some(&effort.id), None).unwrap();
+    f.workspace
+        .set_effort(&ticket.reference, Some(&effort.id), None)
+        .unwrap();
     f.workspace.add_tag(&ticket.reference, "backend").unwrap();
-    f.workspace.add_note(&ticket.reference, "local note", None).unwrap();
+    f.workspace
+        .add_note(&ticket.reference, "local note", None)
+        .unwrap();
     let blocker = f.workspace.create_ticket("Prerequisite").unwrap();
-    f.workspace.add_dependency(&blocker.reference, &ticket.reference, None).unwrap();
+    f.workspace
+        .add_dependency(&blocker.reference, &ticket.reference, None)
+        .unwrap();
     let child = f.workspace.create_ticket("Detail").unwrap();
-    f.workspace.set_parent(&child.reference, Some(&ticket.reference), None).unwrap();
+    f.workspace
+        .set_parent(&child.reference, Some(&ticket.reference), None)
+        .unwrap();
 
     let outcome = f.publish(&ticket.reference).unwrap();
 
@@ -374,7 +419,10 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     assert_eq!(published.tags, vec!["backend".to_owned()]);
     assert_eq!(published.prerequisites.len(), 1);
     assert_eq!(published.children.len(), 1);
-    assert_eq!(f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(
+        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        1
+    );
     let source = published.source.unwrap();
     assert_eq!(source.ownership, Ownership::External);
     assert_eq!(source.origin, Origin::Published);
@@ -416,7 +464,10 @@ fn inbound_refresh_after_publication_keeps_active_status_and_never_republishes()
             .refresh_sources(&f.engine, &RefreshOptions::default())
             .unwrap();
         assert!(report.failures.is_empty());
-        assert!(report.imported.is_empty(), "discovery must reuse the published ticket");
+        assert!(
+            report.imported.is_empty(),
+            "discovery must reuse the published ticket"
+        );
     }
     assert_eq!(f.ticket(&ticket.reference).status, Status::InReview);
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
@@ -445,7 +496,13 @@ fn a_definite_failure_leaves_the_ticket_local_and_allows_a_later_attempt() {
     f.mode(Mode::Create);
     assert!(f.publish(&ticket.reference).is_ok());
     assert_eq!(f.created(), 1);
-    assert_eq!(f.workspace.publication_attempts(&ticket.reference).unwrap().len(), 2);
+    assert_eq!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -462,7 +519,9 @@ fn a_lost_response_is_unresolved_durably_and_blocks_another_create() {
     let check = |f: &Fixture| {
         let after = f.ticket(&ticket.reference);
         assert!(after.source.is_none(), "ownership must not transfer");
-        let attempt = after.publication.expect("the unresolved attempt is visible");
+        let attempt = after
+            .publication
+            .expect("the unresolved attempt is visible");
         assert_eq!(attempt.state, AttemptState::Unresolved);
         assert_eq!(attempt.destination, "o/r");
         assert_eq!(attempt.title, "Escalate");
@@ -478,7 +537,10 @@ fn a_lost_response_is_unresolved_durably_and_blocks_another_create() {
     let blocked = publication_error(f.publish(&ticket.reference).unwrap_err());
     assert!(matches!(
         blocked,
-        PublicationError::Ineligible { reason: IneligibleReason::AttemptOpen, .. }
+        PublicationError::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
     ));
     let preview = f
         .workspace
@@ -486,7 +548,10 @@ fn a_lost_response_is_unresolved_durably_and_blocks_another_create() {
         .unwrap();
     assert!(matches!(
         preview.eligibility,
-        Eligibility::Ineligible { reason: IneligibleReason::AttemptOpen, .. }
+        Eligibility::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
     ));
     assert_eq!(preview.attempt.unwrap().state, AttemptState::Unresolved);
     assert_eq!(f.created(), 1, "no second create was sent");
@@ -498,7 +563,10 @@ fn a_crash_after_the_attempt_was_saved_reads_as_unresolved_and_blocks_after_rest
     let live = describe(&mut f, "Live", "Body");
     let dead = describe(&mut f, "Dead", "Body");
     f.mode(Mode::Crash);
-    for (ticket, now) in [(&live, "2999-01-01T00:00:00Z"), (&dead, "2000-01-01T00:00:00Z")] {
+    for (ticket, now) in [
+        (&live, "2999-01-01T00:00:00Z"),
+        (&dead, "2000-01-01T00:00:00Z"),
+    ] {
         let mut o = options();
         o.now = Some(now.into());
         let engine = f.engine.clone();
@@ -512,14 +580,20 @@ fn a_crash_after_the_attempt_was_saved_reads_as_unresolved_and_blocks_after_rest
 
     let mut f = f.reopen();
     // Within its lease an attempt may still be running; past it, it is unresolved.
-    assert_eq!(f.ticket(&live.reference).publication.unwrap().state, AttemptState::InFlight);
+    assert_eq!(
+        f.ticket(&live.reference).publication.unwrap().state,
+        AttemptState::InFlight
+    );
     let attempt = f.ticket(&dead.reference).publication.unwrap();
     assert_eq!(attempt.state, AttemptState::Unresolved);
     assert_eq!(attempt.failure.unwrap().code, "interrupted");
     for ticket in [&live, &dead] {
         assert!(matches!(
             publication_error(f.publish(&ticket.reference).unwrap_err()),
-            PublicationError::Ineligible { reason: IneligibleReason::AttemptOpen, .. }
+            PublicationError::Ineligible {
+                reason: IneligibleReason::AttemptOpen,
+                ..
+            }
         ));
         assert!(f.ticket(&ticket.reference).source.is_none());
     }
@@ -550,14 +624,20 @@ fn remote_success_that_cannot_be_recorded_keeps_the_created_issue_and_stays_unre
     assert!(after.source.is_none());
     let attempt = after.publication.unwrap();
     assert_eq!(attempt.state, AttemptState::Unresolved);
-    assert_eq!(attempt.failure.as_ref().unwrap().code, "local_persistence_failed");
+    assert_eq!(
+        attempt.failure.as_ref().unwrap().code,
+        "local_persistence_failed"
+    );
     // What was learned is kept, so resolving never has to guess an identity.
     let issue = attempt.issue.unwrap();
     assert_eq!(issue.identity.id, "101");
     assert_eq!(issue.display, "o/r#101");
     assert!(matches!(
         publication_error(f.publish(&ticket.reference).unwrap_err()),
-        PublicationError::Ineligible { reason: IneligibleReason::AttemptOpen, .. }
+        PublicationError::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
     ));
     assert_eq!(f.created(), 1);
 }
@@ -574,7 +654,9 @@ fn concurrent_submission_is_refused_and_the_workspace_stays_writable_during_the_
     f.hook(move || {
         let mut other = Workspace::open(&path).unwrap();
         // No write lock is held across the network call.
-        other.add_note(&reference, "written during the remote call", None).unwrap();
+        other
+            .add_note(&reference, "written during the remote call", None)
+            .unwrap();
         let attempt = other.show_ticket(&reference).unwrap().publication.unwrap();
         sink.lock().unwrap().push(format!("{:?}", attempt.state));
         let error = other
@@ -592,7 +674,10 @@ fn concurrent_submission_is_refused_and_the_workspace_stays_writable_during_the_
 
     assert_eq!(*observed.lock().unwrap(), vec!["InFlight", "AttemptOpen"]);
     assert_eq!(f.created(), 1);
-    assert_eq!(f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(
+        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        1
+    );
 }
 
 #[test]
@@ -606,7 +691,13 @@ fn replaying_a_published_request_returns_it_without_another_create() {
     assert_eq!(again.attempt.id, first.attempt.id);
     assert_eq!(again.ticket.source.unwrap().id, "101");
     assert_eq!(f.created(), 1);
-    assert_eq!(f.workspace.publication_attempts(&ticket.reference).unwrap().len(), 1);
+    assert_eq!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -646,7 +737,9 @@ fn discovery_importing_the_created_issue_first_does_not_attach_it_twice() {
     let engine = f.engine.clone();
     f.hook(move || {
         let mut other = Workspace::open(&path).unwrap();
-        other.refresh_sources(&engine, &RefreshOptions::default()).unwrap();
+        other
+            .refresh_sources(&engine, &RefreshOptions::default())
+            .unwrap();
     });
 
     let error = publication_error(f.publish(&ticket.reference).unwrap_err());
@@ -679,7 +772,12 @@ fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
     Workspace::restore(&path, &backup).unwrap();
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.show_ticket(&ticket.reference).unwrap().publication.unwrap().state,
+        workspace
+            .show_ticket(&ticket.reference)
+            .unwrap()
+            .publication
+            .unwrap()
+            .state,
         AttemptState::Unresolved
     );
     drop(workspace);

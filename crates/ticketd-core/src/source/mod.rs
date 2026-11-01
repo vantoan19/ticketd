@@ -13,8 +13,8 @@
 pub mod contract;
 pub mod engine;
 pub mod github;
-pub mod schema;
 mod publication;
+pub mod schema;
 mod tracking;
 
 use rusqlite::{OptionalExtension, params};
@@ -26,13 +26,13 @@ pub use contract::{
     PublishRequest, SourceError,
 };
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use schema::{
-    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
-    ValueFormat,
-};
 pub use publication::{
     AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
+};
+pub use schema::{
+    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
+    ValueFormat,
 };
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{

@@ -260,7 +260,9 @@ fn attempt_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationAtte
         "in_flight" if expired => {
             failure = Some(SourceFailure {
                 code: "interrupted".into(),
-                message: "ticketd stopped or lost contact before learning whether the issue was created".into(),
+                message:
+                    "ticketd stopped or lost contact before learning whether the issue was created"
+                        .into(),
             });
             AttemptState::Unresolved
         }
@@ -272,15 +274,17 @@ fn attempt_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationAtte
     Ok(PublicationAttempt {
         id: row.get(0)?,
         reference: format!("T-{}", row.get::<_, i64>(1)?),
-        issue: external_id.zip(locator).map(|(id, locator)| PublishedIssue {
-            identity: ExternalIdentity {
-                provider: provider.clone(),
-                id,
-            },
-            locator,
-            display: display.unwrap_or_default(),
-            url: url.unwrap_or_default(),
-        }),
+        issue: external_id
+            .zip(locator)
+            .map(|(id, locator)| PublishedIssue {
+                identity: ExternalIdentity {
+                    provider: provider.clone(),
+                    id,
+                },
+                locator,
+                display: display.unwrap_or_default(),
+                url: url.unwrap_or_default(),
+            }),
         provider,
         destination: row.get(3)?,
         title: row.get(4)?,
@@ -292,7 +296,10 @@ fn attempt_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationAtte
     })
 }
 
-fn open_attempt(connection: &Connection, ticket_id: &str) -> Result<Option<PublicationAttempt>, Error> {
+fn open_attempt(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<PublicationAttempt>, Error> {
     Ok(connection
         .query_row(
             &format!(
@@ -305,7 +312,10 @@ fn open_attempt(connection: &Connection, ticket_id: &str) -> Result<Option<Publi
         .optional()?)
 }
 
-fn latest_succeeded(connection: &Connection, ticket_id: &str) -> Result<Option<PublicationAttempt>, Error> {
+fn latest_succeeded(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<PublicationAttempt>, Error> {
     Ok(connection
         .query_row(
             &format!(
@@ -393,13 +403,17 @@ fn eligibility(
         Some((authority, _, display)) if authority == "external" => {
             return Ok(ineligible(
                 IneligibleReason::ExternallyOwned,
-                format!("{reference} is already {display} on {provider_name} and is owned there; it is published only once"),
+                format!(
+                    "{reference} is already {display} on {provider_name} and is owned there; it is published only once"
+                ),
             ));
         }
         Some((_, _, display)) => {
             return Ok(ineligible(
                 IneligibleReason::ProvenanceRetained,
-                format!("{reference} was {display} on {provider_name} before ownership was taken over, so it is not published again"),
+                format!(
+                    "{reference} was {display} on {provider_name} before ownership was taken over, so it is not published again"
+                ),
             ));
         }
         None => {}
@@ -419,7 +433,10 @@ fn eligibility(
     if let Some(attempt) = open_attempt(connection, &ticket.id)? {
         let message = match attempt.state {
             AttemptState::InFlight => {
-                format!("{reference} is already being published to {}", attempt.destination)
+                format!(
+                    "{reference} is already being published to {}",
+                    attempt.destination
+                )
             }
             _ => format!(
                 "an earlier attempt to publish {reference} to {} may have created an issue on {provider_name}; resolve it before creating another",
@@ -445,11 +462,7 @@ struct Target {
 }
 
 impl Workspace {
-    fn publication_target(
-        &self,
-        engine: &Engine,
-        provider: &str,
-    ) -> Result<Option<Target>, Error> {
+    fn publication_target(&self, engine: &Engine, provider: &str) -> Result<Option<Target>, Error> {
         let Some(saved) = self.saved_source(provider)? else {
             return Ok(None);
         };
@@ -677,6 +690,7 @@ impl Workspace {
         let linked = self.link_created(started, provider, issue, options.now.as_deref());
         let (code, message) = match linked {
             Ok(Linked::Done(attempt)) => {
+                let attempt = *attempt;
                 return Ok(PublishOutcome {
                     ticket: self.show_ticket(&started.reference)?,
                     attempt,
@@ -767,10 +781,20 @@ impl Workspace {
             notes::add(&transaction, &started.ticket_id, &note, Some(provider))?;
             transaction.execute(
                 "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
-                params![started.ticket_id, started.request.title, started.request.body],
+                params![
+                    started.ticket_id,
+                    started.request.title,
+                    started.request.body
+                ],
             )?;
         }
-        tracking::link(&transaction, &started.ticket_id, issue, Origin::Published, &now)?;
+        tracking::link(
+            &transaction,
+            &started.ticket_id,
+            issue,
+            Origin::Published,
+            &now,
+        )?;
         transaction.execute(
             "UPDATE publication_attempts SET status = 'succeeded', updated_at = ?2, failure_code = NULL, failure_message = NULL, \
              external_id = ?3, locator = ?4, display = ?5, url = ?6 WHERE id = ?1",
@@ -799,7 +823,7 @@ impl Workspace {
             attempt_from_row,
         )?;
         transaction.commit()?;
-        Ok(Linked::Done(attempt))
+        Ok(Linked::Done(Box::new(attempt)))
     }
 
     /// Moves an attempt that is still open to `failed` or `unresolved`, keeping
@@ -846,7 +870,7 @@ struct Started {
 }
 
 enum Linked {
-    Done(PublicationAttempt),
+    Done(Box<PublicationAttempt>),
     /// Discovery imported the created issue as a different ticket first.
     Conflict,
     /// Another process settled the attempt (for example after its lease ran out).
