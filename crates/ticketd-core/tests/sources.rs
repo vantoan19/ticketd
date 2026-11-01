@@ -1,5 +1,6 @@
 //! Source configuration through the workspace workflow boundary, using a
 //! controllable fake connector instead of any provider transport.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::VecDeque,
