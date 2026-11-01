@@ -204,29 +204,20 @@
   display: grid;
   gap: 16px;
 }
-.bulk-tag-suggestions {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 4px;
-  max-height: 160px;
-  overflow-y: auto;
+.bulk-tag-combobox {
+  height: auto;
   border-radius: 8px;
   box-shadow: var(--shadow-border);
 }
-.bulk-tag-suggestions li {
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
+.bulk-tag-combobox [cmdk-list][hidden] {
+  display: none;
 }
-.bulk-tag-suggestions li:hover,
-.bulk-tag-suggestions li[data-active="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
+.bulk-tag-combobox [data-slot="command-input-wrapper"] {
+  border-bottom: 0;
 }
-.bulk-tag-suggestions li[data-active="true"] {
+.bulk-tag-combobox:focus-within {
   outline: 2px solid var(--ring);
-  outline-offset: -2px;
+  outline-offset: 1px;
 }
 .bulk-tag-note {
   color: var(--muted-foreground);

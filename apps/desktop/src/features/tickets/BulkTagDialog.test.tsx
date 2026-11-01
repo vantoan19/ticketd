@@ -12,6 +12,14 @@ import { BulkTagDialog } from "./BulkTagDialog";
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 
+// cmdk needs these, which jsdom lacks.
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+Element.prototype.scrollIntoView = () => {};
+
 const onApply = vi.fn();
 const onOpenChange = vi.fn();
 
@@ -51,34 +59,79 @@ async function renderDialog() {
   return screen.getByRole("combobox", { name: "Tag name" });
 }
 
+const listbox = () => screen.getByRole("listbox", { hidden: true });
+const options = () => screen.getAllByRole("option").map((o) => o.textContent);
+
+async function type(input: HTMLElement, value: string) {
+  fireEvent.change(input, { target: { value } });
+  await settle();
+}
+
 test("suggests existing tags as you type and picks one with the keyboard alone", async () => {
   const input = await renderDialog();
-  fireEvent.change(input, { target: { value: "needs" } });
-  await settle();
-  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
-    "needs-review",
-    "needs-design",
-  ]);
-  expect(input.getAttribute("aria-expanded")).toBe("true");
+  await type(input, "needs");
+  expect(options()).toEqual(["needs-review", "needs-design"]);
+  expect(listbox().hidden).toBe(false);
 
   fireEvent.keyDown(input, { key: "ArrowDown" });
   fireEvent.keyDown(input, { key: "ArrowDown" });
   const second = screen.getByRole("option", { name: "needs-design" });
   expect(input.getAttribute("aria-activedescendant")).toBe(second.id);
-  expect(second.getAttribute("aria-selected")).toBe("true");
 
-  // Enter picks the suggestion without adding the tag yet.
+  // Enter picks the suggestion without adding the tag yet; a second adds it.
   fireEvent.keyDown(input, { key: "Enter" });
   expect((input as HTMLInputElement).value).toBe("needs-design");
   expect(onApply).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onApply).toHaveBeenCalledWith("add", "needs-design");
+});
+
+test("ArrowUp from no highlight goes to the last suggestion", async () => {
+  const input = await renderDialog();
+  await type(input, "needs");
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  await settle();
+  const last = screen.getByRole("option", { name: "needs-design" });
+  expect(input.getAttribute("aria-activedescendant")).toBe(last.id);
+});
+
+test("a stale highlight is dropped when the text changes", async () => {
+  const input = await renderDialog();
+  await type(input, "needs");
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  fireEvent.change(input, { target: { value: "needs-d" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onApply).toHaveBeenCalledWith("add", "needs-d");
+});
+
+test("a blank query shows no list until ArrowDown", async () => {
+  const input = await renderDialog();
+  await type(input, " ");
+  expect(listbox().hidden).toBe(true);
+  fireEvent.keyDown(input, { key: "ArrowDown" });
+  expect(listbox().hidden).toBe(false);
+});
+
+test("moving focus away closes the list", async () => {
+  const input = await renderDialog();
+  await type(input, "needs");
+  fireEvent.blur(input);
+  expect(listbox().hidden).toBe(true);
+});
+
+test("picks a suggestion with the mouse", async () => {
+  const input = await renderDialog();
+  await type(input, "needs");
+  fireEvent.click(screen.getByRole("option", { name: "needs-review" }));
+  expect((input as HTMLInputElement).value).toBe("needs-review");
+  expect(listbox().hidden).toBe(true);
 });
 
 test("Escape closes the suggestions first, then the dialog", async () => {
   const input = await renderDialog();
-  fireEvent.keyDown(input, { key: "ArrowDown" });
-  expect(input.getAttribute("aria-expanded")).toBe("true");
+  await type(input, "needs");
   fireEvent.keyDown(input, { key: "Escape" });
-  expect(input.getAttribute("aria-expanded")).toBe("false");
+  expect(listbox().hidden).toBe(true);
   expect(onOpenChange).not.toHaveBeenCalled();
   fireEvent.keyDown(input, { key: "Escape" });
   expect(onOpenChange).toHaveBeenCalledWith(false);
