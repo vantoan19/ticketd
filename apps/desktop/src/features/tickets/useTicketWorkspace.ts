@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { loadPreferences } from "@/lib/preferences";
+import type { MentionTarget } from "./Backlinks";
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
+/**
+ * A mention being followed. It is not `ready` until the selected ticket has been
+ * fetched after the selection, so it is judged against the stored text rather than
+ * a cached copy.
+ */
+export type FollowedMention = MentionTarget & { key: number; ready: boolean };
 export type TicketWorkspace = ReturnType<typeof useTicketWorkspace>;
+function markReady(
+  mention: FollowedMention | null,
+  reference: string | null,
+): FollowedMention | null {
+  return mention && !mention.ready && mention.reference === reference
+    ? { ...mention, ready: true }
+    : mention;
+}
 export function useTicketWorkspace(
   setView: (view: View) => void,
   setCreating: (value: boolean) => void,
@@ -28,13 +43,20 @@ export function useTicketWorkspace(
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selected, selectTicket] = useState<string | null>(null);
-  // Counts every selection, including of the ticket already open, so a view that
-  // belongs to one navigation (a revealed mention) can tell the next has begun.
+  const [mention, setMention] = useState<FollowedMention | null>(null);
+  // Counts every selection, including of the ticket already open, so each one
+  // fetches the ticket afresh.
   const [selections, setSelections] = useState(0);
-  const setSelected = useCallback((reference: string | null) => {
-    selectTicket(reference);
-    setSelections((count) => count + 1);
-  }, []);
+  // Every selection ends the previous mention; following a backlink starts one.
+  const setSelected = useCallback(
+    (reference: string | null, target?: MentionTarget) => {
+      selectTicket(reference);
+      setMention(target ? { ...target, key: Date.now(), ready: false } : null);
+      setSelections((count) => count + 1);
+    },
+    [],
+  );
+  const clearMention = useCallback(() => setMention(null), []);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -122,20 +144,37 @@ export function useTicketWorkspace(
     const request = ++detailGeneration.current;
     void client.showTicket(selected).then(
       (ticket) => {
-        if (active && request === detailGeneration.current)
+        if (active && request === detailGeneration.current) {
           setDetails((previous) => ({
             ...previous,
             [ticket.reference]: ticket,
           }));
+          setMention((current) => markReady(current, ticket.reference));
+        }
       },
       (reason: unknown) => {
-        if (active) setError(`Ticket refresh failed: ${String(reason)}`);
+        if (!active) return;
+        setError(`Ticket refresh failed: ${String(reason)}`);
+        // Reveal against what is cached rather than never.
+        setMention((current) => markReady(current, selected));
       },
     );
     return () => {
       active = false;
     };
-  }, [selected, revision]);
+  }, [selected, revision, selections]);
+  // Trashing or restoring swaps the ticket's view; a mention does not outlive that.
+  const trashed = selected ? details[selected]?.trashed : undefined;
+  const [seen, setSeen] = useState<{
+    reference: string;
+    trashed: boolean;
+  } | null>(null);
+  if (selected && trashed !== undefined) {
+    if (seen?.reference !== selected || seen.trashed !== trashed) {
+      setSeen({ reference: selected, trashed });
+      if (seen?.reference === selected) setMention(null);
+    }
+  }
   async function create(
     title: string,
     body: string,
@@ -235,7 +274,8 @@ export function useTicketWorkspace(
     setTrash,
     tickets,
     selected,
-    selections,
+    mention,
+    clearMention,
     setSelected,
     details,
     setDetails,

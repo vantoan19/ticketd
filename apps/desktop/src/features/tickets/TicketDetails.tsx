@@ -3,6 +3,7 @@ import { Evidence } from "@/features/tickets/Evidence";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
+import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
 import { LinkedWork } from "@/features/tickets/LinkedWork";
@@ -25,7 +26,7 @@ const DependencyGraph = lazy(
 );
 export function TicketDetails({
   selected,
-  selections,
+  mention,
   inboxTarget,
   expanded,
   onExpand,
@@ -39,13 +40,13 @@ export function TicketDetails({
   updateTicket,
 }: {
   selected: string | null;
-  /** How many selection events have happened, including repeats of the same ticket. */
-  selections: number;
+  /** The mention being followed, if any; the workspace clears it on navigation. */
+  mention: FollowedMention | null;
   inboxTarget?: { reference: string; id: string; key: number } | null;
   expanded: boolean;
   onExpand: () => void;
   onReturn: () => void;
-  setSelected: (value: string | null) => void;
+  setSelected: (value: string | null, mention?: MentionTarget) => void;
   details: Record<string, Ticket>;
   projects: Project[];
   efforts: Effort[];
@@ -68,16 +69,8 @@ export function TicketDetails({
     returnFromGraph.current = true;
     setGraphReference(null);
   };
-  const [mention, setMention] = useState<
-    (MentionTarget & { key: number; selections: number }) | null
-  >(null);
-  // The highlight belongs to the navigation that opened it; the next one clears it.
-  // Any selection event, even of the ticket already open, counts as navigating.
-  if (
-    mention &&
-    (mention.reference !== selected || mention.selections !== selections)
-  )
-    setMention(null);
+  // Plain selection: it ends any mention being followed.
+  const open = (reference: string | null) => setSelected(reference);
   const ticket = Object.values(details).find(
     (item) => item.reference === selected,
   );
@@ -105,7 +98,7 @@ export function TicketDetails({
             onBack={closeGraph}
             onOpen={(reference) => {
               closeGraph();
-              setSelected(reference);
+              open(reference);
             }}
           />
         </Suspense>
@@ -117,7 +110,7 @@ export function TicketDetails({
         revision={revision}
         onExpand={onExpand}
         onReturn={onReturn}
-        onClose={() => setSelected(null)}
+        onClose={() => open(null)}
         onOpenGraph={() => setGraphReference(selected)}
         refresh={refresh}
         updateTicket={updateTicket}
@@ -143,14 +136,14 @@ export function TicketDetails({
                 efforts={efforts}
                 onSaved={updateTicket}
                 refresh={refresh}
-                onOpenTicket={setSelected}
+                onOpenTicket={open}
               />
               <div className="editor-body">
                 <p className="description-heading">Description</p>
                 <div className="markdown-preview description-document">
                   <MarkdownDocument
                     source={item.body}
-                    select={setSelected}
+                    select={open}
                     revision={revision}
                   />
                 </div>
@@ -160,10 +153,12 @@ export function TicketDetails({
             <TicketEditor
               ticket={item}
               onSaved={updateTicket}
-              select={setSelected}
+              select={open}
               revision={revision}
               mention={
-                mention?.reference === item.reference && !mention.noteId
+                mention?.reference === item.reference &&
+                !mention.noteId &&
+                mention.ready
                   ? mention
                   : null
               }
@@ -174,7 +169,7 @@ export function TicketDetails({
                 efforts={efforts}
                 onSaved={updateTicket}
                 refresh={refresh}
-                onOpenTicket={setSelected}
+                onOpenTicket={open}
               />
             </TicketEditor>
           )}
@@ -183,7 +178,7 @@ export function TicketDetails({
               ticket={item}
               revision={revision}
               refresh={refresh}
-              select={setSelected}
+              select={open}
               onOpenGraph={() => setGraphReference(item.reference)}
             />
           )}
@@ -199,15 +194,7 @@ export function TicketDetails({
             <Backlinks
               reference={item.reference}
               revision={revision}
-              select={(target) => {
-                // This selection is itself counted; the mention survives only it.
-                setMention({
-                  ...target,
-                  key: Date.now(),
-                  selections: selections + 1,
-                });
-                setSelected(target.reference);
-              }}
+              select={(target) => setSelected(target.reference, target)}
             />
           )}
           <Activity
@@ -224,7 +211,7 @@ export function TicketDetails({
             revision={revision}
             active={item.reference === selected}
             trashed={item.trashed}
-            select={setSelected}
+            select={open}
           />
         </div>
       ))}

@@ -1,5 +1,34 @@
-/** Where a mention sits in the Markdown source, in UTF-16 code units (JavaScript string offsets). */
+/** A mention's place in the Markdown source, in UTF-16 code units (JavaScript string offsets). */
 export type MentionSpan = { start: number; end: number };
+
+/** The text a Markdown renderer sees: the parser drops a leading byte order mark. */
+export function withoutBom(source: string): string {
+  return source.startsWith("\uFEFF") ? source.slice(1) : source;
+}
+
+/**
+ * Convert the core's span, counted in Unicode scalar values (chars) of the
+ * BOM-less body, to UTF-16 offsets into that same text. Null when it lies
+ * outside the text.
+ */
+export function charSpanToUtf16(
+  text: string,
+  span: MentionSpan,
+): MentionSpan | null {
+  let units = 0;
+  let chars = 0;
+  let start: number | null = null;
+  let end: number | null = null;
+  for (const char of text) {
+    if (chars === span.start) start = units;
+    if (chars === span.end) end = units;
+    units += char.length;
+    chars++;
+  }
+  if (chars === span.start) start = units;
+  if (chars === span.end) end = units;
+  return start === null || end === null || start > end ? null : { start, end };
+}
 
 /** The part of a hast node this module reads. */
 export type PositionedNode = {

@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  charSpanToUtf16,
   isMentionBlock,
   mentionStillAt,
+  withoutBom,
   type PositionedNode,
 } from "./mention-passage";
 
@@ -58,4 +60,23 @@ test("the passage must still sit around the span in the current source", () => {
     }),
   ).toBe(false);
   expect(mentionStillAt("short", passage, { start: 19, end: 22 })).toBe(false);
+});
+
+test("the core's char span becomes UTF-16 offsets, astral characters counting twice", () => {
+  const text = "😀 é 𝒳 T-1 ok";
+  const start = [...text].indexOf("T");
+  const span = charSpanToUtf16(text, { start, end: start + 3 });
+  expect(span).not.toBeNull();
+  expect(text.slice(span?.start, span?.end)).toBe("T-1");
+  // A span that ends the text, and one past it.
+  expect(charSpanToUtf16("a😀", { start: 1, end: 2 })).toEqual({
+    start: 1,
+    end: 3,
+  });
+  expect(charSpanToUtf16("ab", { start: 1, end: 5 })).toBeNull();
+});
+
+test("a leading byte order mark is dropped before offsets apply", () => {
+  expect(withoutBom("\uFEFFSee T-1")).toBe("See T-1");
+  expect(withoutBom("See \uFEFFT-1")).toBe("See \uFEFFT-1");
 });

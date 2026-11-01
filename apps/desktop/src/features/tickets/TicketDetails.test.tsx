@@ -1,14 +1,6 @@
 // @vitest-environment jsdom
-import { useState } from "react";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
 import { TicketDetails } from "./TicketDetails";
 import type { Ticket } from "@/lib/api/client";
 
@@ -34,7 +26,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
   render(
     <TicketDetails
       selected="T-2"
-      selections={0}
+      mention={null}
       expanded={false}
       onExpand={vi.fn()}
       onReturn={vi.fn()}
@@ -77,7 +69,7 @@ test("the full-width view marks the reading column and drops the repeated headin
   const { container } = render(
     <TicketDetails
       selected="T-3"
-      selections={0}
+      mention={null}
       expanded
       onExpand={vi.fn()}
       onReturn={vi.fn()}
@@ -97,104 +89,4 @@ test("the full-width view marks the reading column and drops the repeated headin
   expect(
     screen.getByRole("button", { name: "Show beside the list" }),
   ).toBeTruthy();
-});
-
-const scrollIntoView = Element.prototype.scrollIntoView;
-afterEach(() => {
-  Element.prototype.scrollIntoView = scrollIntoView;
-});
-
-function followBacklinkHarness() {
-  Element.prototype.scrollIntoView = vi.fn();
-  const base: Ticket = {
-    id: "a",
-    reference: "T-1",
-    title: "Target",
-    status: "Todo",
-    trashed: false,
-    body: "Plain.",
-    project_id: null,
-    effort_id: null,
-    availability: null,
-    tags: [],
-    parent: null,
-    children: [],
-    prerequisites: [],
-  };
-  const source: Ticket = {
-    ...base,
-    id: "b",
-    reference: "T-2",
-    title: "Source",
-    body: "Intro.\n\nBlocked on T-1 today.",
-  };
-  vi.mocked(invoke).mockImplementation(async (command: string) =>
-    command === "ticket_backlinks"
-      ? [
-          {
-            source_reference: "T-2",
-            source_title: "Source",
-            note_id: null,
-            passage: "Blocked on T-1 today.",
-            mention_start: 18,
-            mention_end: 21,
-          },
-        ]
-      : [],
-  );
-  // Like the workspace, count every selection, repeats included.
-  function Harness() {
-    const [selected, select] = useState<string | null>("T-1");
-    const [selections, setSelections] = useState(0);
-    const setSelected = (reference: string | null) => {
-      select(reference);
-      setSelections((count) => count + 1);
-    };
-    return (
-      <>
-        <button type="button" onClick={() => setSelected("T-1")}>
-          Open target
-        </button>
-        <button type="button" onClick={() => setSelected("T-2")}>
-          Open source again
-        </button>
-        <TicketDetails
-          selected={selected}
-          selections={selections}
-          expanded={false}
-          onExpand={vi.fn()}
-          onReturn={vi.fn()}
-          setSelected={setSelected}
-          details={{ "T-1": base, "T-2": source }}
-          projects={[]}
-          efforts={[]}
-          revision={0}
-          refresh={vi.fn(async () => {})}
-          updateTicket={vi.fn()}
-        />
-      </>
-    );
-  }
-  return Harness;
-}
-const marked = () => document.querySelector("[data-mention-target]");
-
-test("following a backlink marks the mentioned passage; the next navigation clears it", async () => {
-  const Harness = followBacklinkHarness();
-  render(<Harness />);
-  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
-  await waitFor(() =>
-    expect(marked()?.textContent).toBe("Blocked on T-1 today."),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Open target" }));
-  await waitFor(() => expect(marked()).toBeNull());
-});
-
-test("selecting the ticket that is already open also clears the highlight", async () => {
-  const Harness = followBacklinkHarness();
-  render(<Harness />);
-  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
-  await waitFor(() => expect(marked()).not.toBeNull());
-  fireEvent.click(screen.getByRole("button", { name: "Open source again" }));
-  await waitFor(() => expect(marked()).toBeNull());
 });

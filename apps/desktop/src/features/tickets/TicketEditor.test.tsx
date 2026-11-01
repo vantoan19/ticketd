@@ -408,6 +408,27 @@ test("an external change to the description drops the highlight", () => {
   expect(marked()).toBeNull();
 });
 
+test("spans count chars from a body without its byte order mark, past astral characters", () => {
+  const body = "\uFEFF😀 Émoji first.\n\nSee T-1 here.\n\nAlso T-1 there.";
+  const text = [...body.slice(1)];
+  const start = text.indexOf("S") + "See ".length;
+  Element.prototype.scrollIntoView = vi.fn();
+  render(
+    <TicketEditor
+      ticket={{ ...initial, id: "9", body }}
+      onSaved={vi.fn()}
+      mention={{
+        passage: "See T-1 here.",
+        mentioned: "T-1",
+        start,
+        end: start + 3,
+        key: 1,
+      }}
+    />,
+  );
+  expect(marked()?.textContent).toBe("See T-1 here.");
+});
+
 test("a passage that is gone says so and lands on the description without guessing", async () => {
   Element.prototype.scrollIntoView = vi.fn();
   const stale = at("Blocked on T-1 today.", "Blocked on T-1 today.");
@@ -418,8 +439,8 @@ test("a passage that is gone says so and lands on the description without guessi
       mention={stale}
     />,
   );
-  const note = await screen.findByText(/no longer mentions T-1/);
-  expect(note.getAttribute("role")).toBe("status");
+  const note = await screen.findByText(/Couldn't find the mention of T-1/);
+  expect(note.getAttribute("aria-live")).toBe("polite");
   expect(document.activeElement).toBe(
     screen.getByRole("group", { name: "Description" }),
   );
