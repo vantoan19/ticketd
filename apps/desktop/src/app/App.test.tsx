@@ -1077,3 +1077,192 @@ test("a selection ends when the search or filters change, and the bar can be ski
     screen.queryByRole("link", { name: "Skip to selection actions" }),
   ).toBeNull();
 });
+
+const zeroCounts = {
+  todo: 0,
+  in_progress: 0,
+  in_review: 0,
+  done: 0,
+  canceled: 0,
+  duplicate: 0,
+};
+
+test("totals and group counts describe the whole result, not the loaded page", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "In progress", availability: null }),
+      bulkTicket(2),
+    ],
+    count_tickets: { ...zeroCounts, in_progress: 1, todo: 119 },
+  });
+  expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
+  expect(screen.getByText("120 tickets")).toBeTruthy();
+  // One Todo ticket is on this page of the 119 in the result.
+  expect(screen.getByText("1 of 119")).toBeTruthy();
+  expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
+  const next = screen.getByRole("button", { name: "Next" });
+  expect((next as HTMLButtonElement).disabled).toBe(false);
+  // The list is requested in workflow order and counted with the same filter.
+  const asked = bridge.invoke.mock.calls
+    .filter(([command]) => command === "find_tickets")
+    .map(([, args]) => args.filter.order);
+  expect(new Set(asked)).toEqual(new Set(["Workflow"]));
+  const counted = bridge.invoke.mock.calls.find(
+    ([command]) => command === "count_tickets",
+  );
+  expect(counted?.[1].filter.order).toBe("Workflow");
+});
+
+test("Previous and Next follow the visible list across groups and keep the selection", async () => {
+  const tickets = [
+    bulkTicket(2, { status: "In progress", availability: null }),
+    bulkTicket(1),
+    bulkTicket(3),
+  ];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: (args: { reference: string }) =>
+      tickets.find((item) => item.reference === args.reference),
+    count_tickets: { ...zeroCounts, in_progress: 1, todo: 2 },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  expect(screen.getByText("2 of 3")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  await act(async () => {});
+  expect(screen.getByText("3 of 3")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next ticket" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  await act(async () => {});
+  expect(screen.getByText("1 of 3")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+});
+
+test("a status move between groups keeps the selected ticket, its draft, and focus", async () => {
+  let tickets: (Omit<ReturnType<typeof bulkTicket>, "availability"> & {
+    availability: string | null;
+  })[] = [bulkTicket(1)];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: () => tickets[0],
+    count_tickets: () => ({
+      ...zeroCounts,
+      [tickets[0]?.status === "Done" ? "done" : "todo"]: 1,
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  const title = screen.getByRole("textbox", { name: "Title" });
+  title.focus();
+  fireEvent.change(title, { target: { value: "My unsaved title" } });
+  tickets = [{ ...bulkTicket(1), status: "Done", availability: null }];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Title" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My unsaved title",
+  );
+});
+
+test("a group's Add action starts a ticket in that status", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "In review", availability: null }),
+    ],
+    count_tickets: { ...zeroCounts, in_review: 1 },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add In review ticket" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", { name: "New ticket" });
+  expect(
+    within(dialog).getByRole("combobox", { name: "Status" }).textContent,
+  ).toContain("In review");
+});
+
+test("the Duplicate group's Add action chooses a ticket and then reviews its canonical ticket", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "Duplicate", availability: null }),
+    ],
+    count_tickets: { ...zeroCounts, duplicate: 1 },
+    search_tickets: () => [bulkTicket(2)],
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
+  );
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", {
+    name: "Mark a ticket as duplicate",
+  });
+  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
+    target: { value: "second" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  expect(
+    within(dialog).getByText(/Choose the canonical ticket for T-2/),
+  ).toBeTruthy();
+  // Nothing is marked until the review names a canonical ticket.
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+});
+
+test("Next at the end of a page opens the first ticket of the next page", async () => {
+  const page = (offset: number, size: number) =>
+    Array.from({ length: size }, (_, index) => ({
+      ...bulkTicket(1),
+      id: String(offset + index + 1),
+      reference: `T-${offset + index + 1}`,
+      title: `Ticket ${offset + index + 1}`,
+    }));
+  const rows = (offset: number) => page(offset, offset === 0 ? 50 : 10);
+  const position = () =>
+    document.querySelector(".list-position-text")?.textContent;
+  let offset = 0;
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) => {
+      offset = args.filter.offset;
+      return rows(offset);
+    },
+    show_ticket: (args: { reference: string }) => ({
+      ...bulkTicket(1),
+      id: args.reference,
+      reference: args.reference,
+      title: args.reference,
+    }),
+    count_tickets: { ...zeroCounts, todo: 60 },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Ticket 50/ }));
+  await act(async () => {});
+  expect(position()).toBe("50 of 60");
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offset).toBe(50);
+  expect(position()).toBe("51 of 60");
+  expect(
+    screen
+      .getByRole("button", { name: /Ticket 51/ })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+});

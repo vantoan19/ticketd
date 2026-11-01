@@ -31,8 +31,11 @@ export function LinkTicketDialog({
   open,
   onOpenChange,
   onLinked,
+  initialKind,
 }: {
   ticket: Ticket;
+  /** The relationship the dialog opens on, such as Add subticket's. */
+  initialKind?: AddableKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onLinked: () => Promise<void>;
@@ -44,6 +47,11 @@ export function LinkTicketDialog({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const attempt = useRef<{ key: string; id: string } | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setKind(initialKind ?? "blocked_by");
+  }
 
   // A ticket has one parent, so a link that gives it a new parent moves it.
   const replacedParent =

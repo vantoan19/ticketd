@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Check,
   Copy,
   Maximize2,
@@ -27,8 +29,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Duplicates } from "@/features/tickets/Duplicates";
-import { Follow } from "@/features/tickets/Inbox";
-import { Reminder } from "@/features/tickets/Reminder";
 import { client, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 
@@ -42,18 +42,22 @@ export function TicketHeader({
   selected,
   ticket,
   expanded,
-  revision,
   onExpand,
   onReturn,
   onClose,
   onOpenGraph,
   refresh,
   updateTicket,
+  position = null,
+  onAdjacent,
 }: {
+  /** The selected ticket's place in the visible list, across pages. */
+  position?: { index: number; total: number } | null;
+  /** Opens the ticket before (-1) or after (1) this one in the list. */
+  onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
   ticket: Ticket | undefined;
   expanded: boolean;
-  revision: number;
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
@@ -113,16 +117,31 @@ export function TicketHeader({
       </div>
       {ticket && (
         <div className="ticket-personal-actions">
-          <Follow
-            key={`follow-${ticket.reference}`}
-            reference={ticket.reference}
-            revision={revision}
-          />
-          <Reminder
-            key={`reminder-${ticket.reference}`}
-            reference={ticket.reference}
-            revision={revision}
-          />
+          {position && onAdjacent && (
+            <div
+              className="list-position"
+              role="group"
+              aria-label="Position in the list"
+            >
+              <span className="list-position-text">
+                {position.index} of {position.total}
+              </span>
+              <IconButton
+                label="Previous ticket"
+                disabled={position.index <= 1}
+                onClick={() => onAdjacent(-1)}
+              >
+                <ChevronUp />
+              </IconButton>
+              <IconButton
+                label="Next ticket"
+                disabled={position.index >= position.total}
+                onClick={() => onAdjacent(1)}
+              >
+                <ChevronDown />
+              </IconButton>
+            </div>
+          )}
           {ticket.trashed && (
             <Button
               variant="outline"

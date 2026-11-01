@@ -777,10 +777,24 @@
   align-items: center;
   gap: 4px;
 }
+/* The reading column and the property rail. The rail moves below the column
+   when the detail pane is narrower than 652px; see properties.css. */
 .detail-content {
-  max-width: 800px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+.detail-content[hidden] {
+  display: none;
+}
+.detail-document {
+  min-width: 0;
   padding: 20px 32px 48px;
-  margin: 0 auto;
+}
+@container ticket-detail (min-width: 652px) {
+  .detail-content {
+    grid-template-columns: minmax(420px, 800px) minmax(232px, 1fr);
+  }
 }
 .detail-empty {
   display: flex;
@@ -846,8 +860,8 @@
 .detail-content [role="status"]:empty {
   display: none;
 }
-.detail-content > h3 {
-  margin-bottom: 24px;
+.detail-document > .detail-title {
+  margin-bottom: 8px;
   font-size: 24px;
   font-weight: 600;
   line-height: 32px;
@@ -1186,7 +1200,8 @@
     padding-inline: 16px;
   }
   .detail-header,
-  .detail-content {
+  .detail-document,
+  .ticket-properties {
     padding-inline: 16px;
   }
   .detail-header {

@@ -138,12 +138,11 @@ export function useTicketWorkspace(
   }, [refresh]);
   // Previous or Next at the edge of a page moves to the neighboring page and
   // opens the ticket at its near edge once that page has loaded.
-  useEffect(() => {
-    if (!pendingEdge || loadedOffset !== offset) return;
+  if (pendingEdge && loadedOffset === offset) {
     const target = pendingEdge === "first" ? tickets[0] : tickets.at(-1);
     setPendingEdge(null);
     if (target) setSelected(target.reference);
-  }, [pendingEdge, loadedOffset, offset, tickets]);
+  }
   useEffect(() => {
     if (!selected) return;
     let active = true;

@@ -45,6 +45,11 @@ const detail = () =>
   );
 const header = () =>
   browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
+// Follow, the reminder, and relationships live in the property rail.
+const rail = () =>
+  browser.$(
+    'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden]) > aside[aria-label="Ticket properties"]',
+  );
 async function click(element) {
   await element.waitForDisplayed({ timeout: 15000 });
   await element.waitForEnabled({ timeout: 15000 });
@@ -96,7 +101,7 @@ async function chooseFromSubmenu(submenu, item) {
 try {
   // Follow in desktop, observe external CLI changes and navigate to the note.
   await open(source.title);
-  await click(await (await header()).$("button=Follow"));
+  await click(await (await rail()).$("button=Follow"));
   run("change", source.reference, "--status", "In progress");
   run(
     "note",
@@ -139,7 +144,7 @@ try {
     .toISOString()
     .slice(0, 16);
   await click(
-    await (await header()).$('button[aria-label^="Manage reminder"]'),
+    await (await rail()).$('button[aria-label^="Manage reminder"]'),
   );
   const input = await browser.$('input[type="datetime-local"]');
   await input.scrollIntoView();
@@ -212,7 +217,7 @@ try {
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
   await click(
-    await (await header()).$('button[aria-label^="Manage reminder"]'),
+    await (await rail()).$('button[aria-label^="Manage reminder"]'),
   );
   await click(await browser.$("button=Snooze 1 hour"));
   await waitFor(() => {
@@ -266,10 +271,7 @@ try {
   ).waitForDisplayed({ timeout: 10000 });
   // WebdriverIO's text selector only works at the start of a selector, so find
   // the section first.
-  const linkedWork = await (
-    await detail()
-  ).$('section[aria-label="Linked work"]');
-  await click(await linkedWork.$("button=Link ticket"));
+  await click(await (await rail()).$("button=Add relationship"));
   const dialog = await browser.$('[role="dialog"]');
   // The dialog starts on "is blocked by"; this check is about a related link.
   await (
@@ -444,7 +446,7 @@ try {
     "Narrow viewport not applied",
   );
   await click(
-    await (await header()).$('button[aria-label^="Manage reminder"]'),
+    await (await rail()).$('button[aria-label^="Manage reminder"]'),
   );
   const reminderRect = await browser.execute(() => {
     const field = document.querySelector(

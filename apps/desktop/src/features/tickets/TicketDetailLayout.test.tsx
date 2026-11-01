@@ -1,0 +1,191 @@
+// @vitest-environment jsdom
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { TicketDetails } from "./TicketDetails";
+import type { Ticket } from "@/lib/api/client";
+import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
+
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => bridge);
+vi.mock("@uiw/react-codemirror", () => ({ default: () => null }));
+window.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+Element.prototype.scrollIntoView = () => {};
+
+const page = (items: object[] = []) => ({ items, next_offset: null });
+let following = false;
+let reminder: string | null = null;
+let children: object[] = [];
+beforeEach(() => {
+  following = false;
+  reminder = null;
+  children = [];
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "is_following") return following;
+    if (command === "set_following")
+      following = (args as { following: boolean }).following;
+    if (command === "reminder") return reminder;
+    if (command === "contextual_relationships") {
+      const base = bridgeDefault(command) as {
+        relationships: Record<string, unknown>;
+      };
+      return {
+        relationships: { ...base.relationships, children: page(children) },
+      };
+    }
+    if (command === "set_following") return null;
+    return bridgeDefault(command, args as { reference?: string });
+  });
+});
+afterEach(() => {
+  cleanup();
+  bridge.invoke.mockReset();
+  expect(unknownCommands.splice(0)).toEqual([]);
+});
+
+const ticket: Ticket = {
+  id: "1",
+  reference: "T-1",
+  title: "Ship the rail",
+  body: "A description to read.",
+  status: "Todo",
+  trashed: false,
+  tags: [],
+  project_id: null,
+  effort_id: null,
+  availability: "Ready",
+  parent: null,
+  children: [],
+  prerequisites: [],
+};
+function renderDetails(item: Ticket = ticket) {
+  render(
+    <TicketDetails
+      selected={item.reference}
+      expanded={false}
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      setSelected={vi.fn()}
+      details={{ [item.reference]: item }}
+      projects={[]}
+      efforts={[]}
+      revision={0}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+      position={{ index: 2, total: 11 }}
+      onAdjacent={vi.fn()}
+    />,
+  );
+}
+
+test("the property rail holds Status, Source, Project, Effort, Tags, Relationships, and Attention in order", async () => {
+  renderDetails();
+  const rail = await screen.findByRole("complementary", {
+    name: "Ticket properties",
+  });
+  await within(rail).findByRole("button", { name: "Add relationship" });
+  expect(
+    within(rail)
+      .getAllByRole("heading", { level: 3 })
+      .map((heading) => heading.textContent),
+  ).toEqual([
+    "Status",
+    "Source",
+    "Project",
+    "Effort",
+    "Tags",
+    "Relationships",
+    "Attention",
+  ]);
+  // A local ticket reads Local, with no GitHub mark, in the rail and the state line.
+  expect(within(rail).getByText("Local")).toBeTruthy();
+  expect(screen.queryByText(/GitHub/)).toBeNull();
+  expect(screen.getByText("Local ticket")).toBeTruthy();
+  expect(
+    within(rail).getByRole("combobox", { name: "Status: Todo" }),
+  ).toBeTruthy();
+  expect(
+    within(rail).getByRole("button", { name: "Project: Unlinked" }),
+  ).toBeTruthy();
+});
+
+test("the reading column runs title, state, description, then subtickets, and keeps the rail apart", async () => {
+  children = [
+    {
+      reference: "T-5",
+      title: { text: "Part one" },
+      status: "Done",
+      trashed: false,
+      unresolved: false,
+    },
+  ];
+  renderDetails();
+  const subtickets = await screen.findByRole("heading", { name: "Subtickets" });
+  const title = screen.getByRole("textbox", { name: "Title" });
+  const state = screen.getByText("Local ticket");
+  const description = screen.getByText("Description");
+  const rail = screen.getByRole("complementary", {
+    name: "Ticket properties",
+  });
+  const before = (first: Node, second: Node) =>
+    Boolean(
+      first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  expect(before(title, state)).toBe(true);
+  expect(before(state, description)).toBe(true);
+  expect(before(description, subtickets)).toBe(true);
+  expect(rail.contains(subtickets)).toBe(false);
+  expect(rail.contains(title)).toBe(false);
+});
+
+test("Follow, the reminder, and the properties live in the rail, not the header", async () => {
+  renderDetails();
+  const rail = await screen.findByRole("complementary", {
+    name: "Ticket properties",
+  });
+  const follow = await within(rail).findByRole("button", { name: "Follow" });
+  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(follow);
+  expect(
+    (
+      await within(rail).findByRole("button", { name: "Following" })
+    ).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(
+    within(rail).getByRole("button", { name: "Manage reminder" }),
+  ).toBeTruthy();
+  const header = document.querySelector(".detail-header") as HTMLElement;
+  expect(within(header).queryByRole("button", { name: /Follow/ })).toBeNull();
+  expect(
+    within(header).queryByRole("button", { name: /Manage reminder/ }),
+  ).toBeNull();
+});
+
+test("the header shows the list position with Previous and Next", async () => {
+  renderDetails();
+  const header = document.querySelector(".detail-header") as HTMLElement;
+  expect(within(header).getByText("2 of 11")).toBeTruthy();
+  expect(
+    (
+      within(header).getByRole("button", {
+        name: "Previous ticket",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+  expect(
+    (
+      within(header).getByRole("button", {
+        name: "Next ticket",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+});

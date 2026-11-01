@@ -278,7 +278,8 @@ export function Inbox({
       )}
       <p className="inbox-footer">
         <Bell aria-hidden="true" />
-        Follow or unfollow a ticket from its header; reminders live there too.
+        Follow or unfollow a ticket from its Attention section; reminders live
+        there too.
       </p>
     </div>
   );

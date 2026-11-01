@@ -36,12 +36,37 @@
 .ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
   display: none;
 }
-.ticket-detail[data-expanded] .detail-content {
-  max-width: 864px;
+/* Expanded: the document column stays at most 800px and centered, and the
+   rail keeps its place beside it. */
+@container ticket-detail (min-width: 652px) {
+  .ticket-detail[data-expanded] .detail-content {
+    grid-template-columns: minmax(420px, 800px) 264px;
+    justify-content: center;
+  }
 }
 .ticket-detail[data-expanded] .description-document,
 .ticket-detail[data-expanded] .description-document :is(p, li),
 .ticket-detail[data-expanded] .editor-body [role="textbox"] {
   font-size: 16px;
   line-height: 24px;
+}
+.ticket-state-line {
+  margin: 0 0 24px;
+  color: var(--secondary-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.editor-title {
+  margin-bottom: 8px;
+}
+.list-position {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.list-position-text {
+  padding-inline: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
 }
