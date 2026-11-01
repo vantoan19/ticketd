@@ -242,23 +242,28 @@ export function CreateTicketDialog({
                 </span>
               </FieldLabel>
               <div
-                // The editor owns its keys (Enter, slash menu, IME, Escape), so
-                // they stop here. Only a non-composing Cmd/Ctrl+Enter creates the
-                // ticket. The editor swallows it before it bubbles to the form,
-                // so it is taken in the capture phase.
-                onKeyDownCapture={(event) => {
+                // The editor owns its keys (Enter, slash menu, IME, Escape,
+                // CodeMirror bindings), so they stop here. The one exception is
+                // a Cmd/Ctrl+Enter that the rich editor left unhandled: it
+                // creates the ticket. Nested UI (slash menu, link field, source
+                // editors) handles or ignores it first, so it never reaches here
+                // as an unhandled rich-editor event.
+                onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
-                    (event.ctrlKey || event.metaKey) &&
+                    event.ctrlKey !== event.metaKey &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.defaultPrevented &&
                     !event.nativeEvent.isComposing &&
-                    event.keyCode !== 229
+                    event.keyCode !== 229 &&
+                    (event.target as HTMLElement).closest(".rich-document")
                   ) {
                     event.preventDefault();
-                    event.stopPropagation();
                     event.currentTarget.closest("form")?.requestSubmit();
                   }
+                  event.stopPropagation();
                 }}
-                onKeyDown={(event) => event.stopPropagation()}
               >
                 <LazyMarkdownEditor
                   label="Description"

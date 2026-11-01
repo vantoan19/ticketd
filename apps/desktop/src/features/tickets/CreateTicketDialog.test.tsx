@@ -36,6 +36,11 @@ vi.mock("@uiw/react-codemirror", () => ({
       readOnly={readOnly}
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      // CodeMirror binds Mod-Enter (insert blank line) and handles the event.
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey))
+          event.preventDefault();
+      }}
     />
   ),
 }));
@@ -85,7 +90,7 @@ function Harness({
   );
 }
 
-test("editor modes and keyboard operations never create a ticket; explicit submission retains a failed description draft", async () => {
+test("editor modes and toolbar actions never create a ticket; explicit submission retains a failed description draft", async () => {
   const create = vi.fn().mockRejectedValue(new Error("Disk full"));
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
@@ -97,7 +102,9 @@ test("editor modes and keyboard operations never create a ticket; explicit submi
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   const source = screen.getByRole("textbox", { name: "Description source" });
   fireEvent.change(source, { target: { value: "# Draft\n\n- [ ] Keep this" } });
-  fireEvent.keyDown(source, { key: "Enter" });
+  // Source mode keeps CodeMirror's own Mod-Enter binding; it does not create.
+  fireEvent.keyDown(source, { key: "Enter", ctrlKey: true });
+  fireEvent.keyDown(source, { key: "Enter", metaKey: true });
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
@@ -157,20 +164,68 @@ test("Ctrl+Enter in the title creates the ticket", async () => {
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
 });
 
-test("Ctrl+Enter in the Description editor creates the ticket; plain Enter does not", async () => {
+async function focusedEditor() {
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  // jsdom does not implement the contenteditable property Slate checks.
+  Object.defineProperty(editor, "isContentEditable", { value: true });
+  editor.focus();
+  return editor;
+}
+
+test("Ctrl or Cmd+Enter in the focused Description editor creates the ticket; other keys do not", async () => {
   const create = vi.fn().mockResolvedValue("T-1");
   render(<Harness create={create} />);
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "From editor" },
   });
-  const editor = await screen.findByRole("textbox", {
-    name: "Description rich text",
-  });
+  const editor = await focusedEditor();
   fireEvent.keyDown(editor, { key: "Enter" });
   fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true, isComposing: true });
+  fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true, shiftKey: true });
+  fireEvent.keyDown(editor, { key: "Enter", metaKey: true, altKey: true });
   expect(create).not.toHaveBeenCalled();
-  fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+  fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+});
+
+test("Ctrl+Enter in the Description editor creates the ticket", async () => {
+  const create = vi.fn().mockResolvedValue("T-1");
+  render(<Harness create={create} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "From editor" },
+  });
+  fireEvent.keyDown(await focusedEditor(), { key: "Enter", ctrlKey: true });
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+});
+
+test("Ctrl+Enter chooses the highlighted slash menu block instead of creating", async () => {
+  const create = vi.fn().mockResolvedValue("T-1");
+  render(<Harness create={create} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Slash" },
+  });
+  const editor = await focusedEditor();
+  fireEvent.keyDown(editor, { key: "/" });
+  const combo = screen.getByRole("combobox", { name: "Description rich text" });
+  fireEvent.keyDown(combo, { key: "Enter", ctrlKey: true });
+  expect(screen.queryByRole("listbox", { name: "Insert block" })).toBeNull();
+  expect(create).not.toHaveBeenCalled();
+});
+
+test("Ctrl+Enter in the Link URL field does not create", async () => {
+  const create = vi.fn().mockResolvedValue("T-1");
+  render(<Harness create={create} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Link" },
+  });
+  await focusedEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Link" }));
+  const url = await screen.findByLabelText("Link URL");
+  fireEvent.keyDown(url, { key: "Enter", ctrlKey: true });
+  fireEvent.keyDown(url, { key: "Enter", metaKey: true });
+  expect(create).not.toHaveBeenCalled();
 });
 
 test("Create more keeps the dialog open, clears text, keeps properties, refocuses Title, and announces the reference", async () => {
