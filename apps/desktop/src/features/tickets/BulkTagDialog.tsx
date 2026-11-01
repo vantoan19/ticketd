@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,6 +16,9 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { client } from "@/lib/api/client";
+
+// A cmdk value that matches no suggestion, so nothing is highlighted.
+const NONE = "\u0000";
 
 /**
  * Adds or removes one tag on every selected ticket. The field is a combobox
@@ -40,9 +43,16 @@ export function BulkTagDialog({
   // Whether the list may show: after typing a non-blank query or an arrow key,
   // until Escape, a pick, or focus leaving the field.
   const [listOpen, setListOpen] = useState(false);
-  // cmdk always highlights an item, so only a highlight the person moved to
-  // with the arrow keys counts; Enter otherwise adds the typed text.
-  const [navigated, setNavigated] = useState(false);
+  // The highlighted suggestion, or "" for none. cmdk highlights the first
+  // match by itself, so Command's value is controlled and only a move the
+  // person makes (arrow keys, pointer) is kept; that is what Enter picks.
+  const [highlight, setHighlight] = useState("");
+  // cmdk keeps its own highlight and only follows `value` when the prop
+  // changes, so each time it highlights by itself the placeholder changes to
+  // pull it back.
+  const [reset, setReset] = useState(0);
+  const moving = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const shown = listOpen && suggestions.length > 0;
 
   // A closed dialog keeps no list, highlight or stale suggestions for the
@@ -53,8 +63,14 @@ export function BulkTagDialog({
     setSuggestions([]);
     setUnavailable(false);
     setListOpen(false);
-    setNavigated(false);
+    setHighlight("");
   }
+
+  // cmdk always renders aria-expanded="true"; say when the list is hidden.
+  // Runs every render because the dialog portal mounts after the first one.
+  useEffect(() => {
+    inputRef.current?.setAttribute("aria-expanded", String(shown));
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -89,23 +105,28 @@ export function BulkTagDialog({
   function choose(suggestion: string) {
     setTag(suggestion);
     setListOpen(false);
-    setNavigated(false);
+    setHighlight("");
+  }
+  // cmdk reports the person's move synchronously inside the same event, so
+  // the flag only has to outlive that dispatch.
+  function expectMove() {
+    moving.current = true;
+    queueMicrotask(() => {
+      moving.current = false;
+    });
   }
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (suggestions.length === 0) return;
-      // cmdk highlights the first item by itself, so the first Down only has
-      // to mark it as chosen; the first Up wraps to the last (see `loop`).
-      // cmdk moves the highlight and scrolls it into view.
-      if (!shown || !navigated) {
-        setListOpen(true);
-        setNavigated(true);
-        if (event.key === "ArrowDown") event.preventDefault();
-      }
+      setListOpen(true);
+      expectMove();
+    } else if (event.key === "Home" || event.key === "End") {
+      // Keep them as text-caret keys; cmdk would jump through the list.
+      event.stopPropagation();
     } else if (event.key === "Enter") {
       // cmdk prevents default on every Enter, so adding is explicit.
-      if (shown && navigated) return;
+      if (shown && suggestions.includes(highlight)) return;
       event.preventDefault();
       apply("add");
     }
@@ -116,10 +137,15 @@ export function BulkTagDialog({
       <DialogContent
         className="sm:max-w-sm"
         onEscapeKeyDown={(event) => {
+          // Escape cancels an IME composition, not the dialog.
+          if (event.isComposing) {
+            event.preventDefault();
+            return;
+          }
           if (!shown) return;
           event.preventDefault();
           setListOpen(false);
-          setNavigated(false);
+          setHighlight("");
         }}
       >
         <DialogHeader>
@@ -136,37 +162,55 @@ export function BulkTagDialog({
           }}
         >
           <Field>
-            {/* cmdk owns the input's id and name, so the visible label is a heading
-                for the group and Command's label names the combobox. */}
-            <FieldLabel>Tag name</FieldLabel>
+            {/* cmdk sets the input's id and aria-labelledby itself, so htmlFor
+                cannot link this label; Command's label names the combobox and
+                a click here focuses the field. */}
+            <FieldLabel aria-hidden onClick={() => inputRef.current?.focus()}>
+              Tag name
+            </FieldLabel>
             <Command
               label="Tag name"
               shouldFilter={false}
+              vimBindings={false}
               loop
+              value={highlight || NONE + reset}
+              onValueChange={(next) => {
+                if (moving.current) setHighlight(next);
+                else if (!next.startsWith(NONE)) setReset((n) => n + 1);
+              }}
               className="bulk-tag-combobox"
+              // Keep focus in the field for any press that is not on the
+              // field itself: options, the scrollbar, the search icon.
+              onMouseDown={(event) => {
+                if (event.target !== inputRef.current) event.preventDefault();
+              }}
             >
               <CommandInput
+                ref={inputRef}
                 placeholder="For example, needs-review"
                 autoComplete="off"
                 value={tag}
                 onValueChange={(next) => {
+                  moving.current = false;
                   setTag(next);
                   setListOpen(next.trim() !== "");
-                  setNavigated(false);
+                  setHighlight("");
                 }}
                 onKeyDown={onKeyDown}
                 onBlur={() => {
                   setListOpen(false);
-                  setNavigated(false);
+                  setHighlight("");
                 }}
               />
-              <CommandList label="Existing tags" hidden={!shown}>
+              <CommandList
+                label="Existing tags"
+                hidden={!shown}
+                onPointerMoveCapture={expectMove}
+              >
                 {suggestions.map((suggestion) => (
                   <CommandItem
                     key={suggestion}
                     value={suggestion}
-                    // Keep focus in the field while picking with the pointer.
-                    onMouseDown={(event) => event.preventDefault()}
                     onSelect={() => choose(suggestion)}
                   >
                     {suggestion}
@@ -174,16 +218,16 @@ export function BulkTagDialog({
                 ))}
               </CommandList>
             </Command>
-            <p className="sr-only" role="status">
-              {shown
-                ? `${suggestions.length} existing ${suggestions.length === 1 ? "tag" : "tags"} suggested. Use the arrow keys to choose.`
-                : ""}
+            <p
+              role="status"
+              className={unavailable ? "bulk-tag-note" : "sr-only"}
+            >
+              {unavailable
+                ? "Tag suggestions unavailable. You can still enter a tag."
+                : shown
+                  ? `${suggestions.length} existing ${suggestions.length === 1 ? "tag" : "tags"} suggested. Use the arrow keys to choose.`
+                  : ""}
             </p>
-            {unavailable && (
-              <p className="bulk-tag-note" role="status">
-                Tag suggestions unavailable. You can still enter a tag.
-              </p>
-            )}
           </Field>
           {/* Removing sits at the far end from the submit button, which adds. */}
           <DialogFooter className="sm:justify-between">
