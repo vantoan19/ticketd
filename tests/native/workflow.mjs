@@ -87,10 +87,16 @@ const detail = () =>
   browser.$(
     'section[aria-labelledby="detail-heading"] > .detail-content:not([hidden])',
   );
+// A ticket row is a button in the list. Its status icon is named by the status,
+// and its text carries the status, or Ready/Blocked for a Todo ticket.
+const ticketRow = async (title) =>
+  (await browser.$(".ticket-rows")).$(`button*=${title}`);
+const rowReports = (title, text) => async () =>
+  (await (await ticketRow(title)).getText()).includes(text);
 const header = () =>
   browser.$('section[aria-labelledby="detail-heading"] > .detail-header');
 try {
-  const newTicket = await browser.$("button=New ticket");
+  const newTicket = await browser.$('button[aria-label="New ticket"]');
   await newTicket.waitForDisplayed({ timeout: 15000 });
   await newTicket.click();
   const creation = await browser.$('.create-panel[role="dialog"]');
@@ -170,7 +176,12 @@ try {
       ).length === 0,
   );
   await search.clearValue();
-  await (await (await detail()).$("button=Graph")).click();
+  await (
+    await (await header()).$('button[aria-label="Ticket actions"]')
+  ).click();
+  await (
+    await browser.$('//*[@role="menuitem" and text()="Open dependency graph"]')
+  ).click();
   const graphView = await browser.$('section[aria-label="Dependency graph"]');
   await graphView.waitForDisplayed({ timeout: 10000 });
   const graphNode = await graphView.$(`button*=${evidence.reference}`);
@@ -212,13 +223,17 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Blocked");
+  await browser.waitUntil(rowReports(harness.title, "In review"), {
+    timeout: 10000,
+    timeoutMsg: "External status change did not refresh the ticket row",
+  });
+  await (
+    await (
+      await ticketRow(harness.title)
+    ).$('[role="img"][aria-label="In review"]')
+  ).waitForExist({ timeout: 10000 });
   await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$("button*=Record native workflow evidence")
-        ).getText()
-      ).includes(`Blocked by ${harness.reference}`),
+    rowReports(evidence.title, `Blocked by ${harness.reference}`),
     {
       timeout: 10000,
       timeoutMsg: "External blocked state did not refresh in the ticket row",
@@ -233,15 +248,10 @@ try {
     "workflow-validation",
   );
   assert.equal(run("show", evidence.reference).availability, "Ready");
-  await browser.waitUntil(
-    async () =>
-      (
-        await (
-          await browser.$("button*=Record native workflow evidence")
-        ).getText()
-      ).includes("Ready"),
-    { timeout: 10000, timeoutMsg: "External readiness change did not refresh" },
-  );
+  await browser.waitUntil(rowReports(evidence.title, "Ready"), {
+    timeout: 10000,
+    timeoutMsg: "External readiness change did not refresh",
+  });
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
@@ -251,7 +261,7 @@ try {
       await browser.$('nav[aria-label="Trash and settings"]')
     ).$("button=Trash")
   ).click();
-  await (await browser.$("button*=Record native workflow evidence")).click();
+  await (await ticketRow(evidence.title)).click();
   await (
     await (await header()).$('button[aria-label="Ticket actions"]')
   ).click();
