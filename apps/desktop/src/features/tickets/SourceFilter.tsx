@@ -2,7 +2,8 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { SourceCounts } from "@/lib/api/client";
 import type { RefreshReport } from "@/lib/api/sources";
-import { providerName } from "./ticket-source";
+import { useSourceActivity } from "./source-activity";
+import { ago, providerName } from "./ticket-source";
 import "./ticket-list.css";
 
 /**
@@ -62,6 +63,13 @@ export function SourceRefresh({
   state: { running: boolean; report: RefreshReport | null; error: string };
   onRefresh: () => void;
 }) {
+  const activity = useSourceActivity();
+  const running = state.running || activity.refreshing;
+  const synced = activity.sources
+    .map((status) => status.last_refreshed_at)
+    .filter((time): time is string => Boolean(time))
+    .sort()
+    .at(-1);
   const name = providers.map(providerName).join(", ");
   const failures = state.report?.failures ?? [];
   return (
@@ -69,26 +77,29 @@ export function SourceRefresh({
       <Button
         variant="outline"
         size="sm"
-        disabled={state.running}
+        disabled={running}
         onClick={onRefresh}
       >
         <RefreshCw data-icon="inline-start" />
         Refresh {name}
       </Button>
-      {state.running && <span role="status">Refreshing {name}…</span>}
-      {!state.running && state.report && failures.length === 0 && (
+      {running && <span role="status">Refreshing {name}…</span>}
+      {!running && !state.report && !state.error && synced && (
+        <span>Synced {ago(synced)}</span>
+      )}
+      {!running && state.report && failures.length === 0 && (
         <span role="status">
           {state.report.imported.length} new, {state.report.updated.length}{" "}
           updated
         </span>
       )}
-      {!state.running && failures.length > 0 && (
+      {!running && failures.length > 0 && (
         <span role="alert">
           Could not refresh {name}: {failures[0]?.message} Saved content is
           unchanged.
         </span>
       )}
-      {!state.running && state.error && (
+      {!running && state.error && (
         <span role="alert">
           Could not refresh {name}: {state.error} Saved content is unchanged.
         </span>

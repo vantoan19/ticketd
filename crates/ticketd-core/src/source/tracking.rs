@@ -34,6 +34,7 @@ use uuid::Uuid;
 use super::{
     ClosureReason, Conversation, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
     ExternalState, SourceError, conversation,
+    freshness::{self, ProviderRun, SourceUnavailable},
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
 
@@ -114,6 +115,10 @@ pub struct TicketSource {
     pub last_attempt_at: Option<String>,
     /// Set when the most recent attempt failed; cleared by the next success.
     pub last_error: Option<SourceFailure>,
+    /// Set while the ticket reads Source unavailable (see the `freshness` module for
+    /// the exact rule): its latest attempt failed in a way that says the source
+    /// cannot be read. Clients show a warning and never hide or complete the ticket.
+    pub unavailable: Option<SourceUnavailable>,
     /// Title and description follow the source and cannot be edited here.
     pub content_locked: bool,
     /// Status follows the source's closure and cannot be changed here. While an
@@ -155,6 +160,9 @@ pub struct RefreshFailure {
     pub reference: Option<String>,
     pub code: String,
     pub message: String,
+    /// For a rate limit, how long the source asked to wait, when it said.
+    #[serde(default)]
+    pub retry_after_secs: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,12 +339,13 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
     );
     let row: Option<Row> = connection
         .query_row(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.external_updated_at, s.last_refreshed_at, \
-                    s.last_attempt_at, s.last_error_code, s.last_error_message \
+                    s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
@@ -358,6 +367,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     row.get(11)?,
                     row.get(12)?,
                     row.get(13)?,
+                    row.get(14)?,
                 ))
             },
         )
@@ -377,6 +387,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         attempted,
         error_code,
         error_message,
+        failing_since,
     )) = row
     else {
         ticket.source = None;
@@ -390,6 +401,16 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     };
     let external = ownership == Ownership::External;
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
+    let unavailable = match (&error_code, failing_since) {
+        (Some(code), since) if external && freshness::is_unavailable_code(code) => {
+            Some(SourceUnavailable {
+                code: code.clone(),
+                message: error_message.clone().unwrap_or_default(),
+                since: since.or_else(|| attempted.clone()).unwrap_or_default(),
+            })
+        }
+        _ => None,
+    };
     ticket.source = Some(TicketSource {
         provider,
         id,
@@ -412,6 +433,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         state,
         last_refreshed_at: refreshed,
         last_attempt_at: attempted,
+        unavailable,
         last_error: error_code.map(|code| SourceFailure {
             code,
             message: error_message.unwrap_or_default(),
@@ -565,6 +587,8 @@ struct Gathered {
     /// here keeps the conversation it already has.
     conversations: HashMap<(String, String), Conversation>,
     failures: Vec<(Option<String>, String, SourceFailure)>,
+    /// How each fully refreshed provider fared, for its persisted status.
+    runs: Vec<ProviderRun>,
 }
 
 struct Tracked {
@@ -584,6 +608,13 @@ fn failure_of(error: &SourceError) -> SourceFailure {
 
 /// Failures that say the provider as a whole cannot be read right now, so
 /// asking again for every other ticket would only repeat them.
+fn retry_secs(error: &SourceError) -> Option<u64> {
+    match error {
+        SourceError::RateLimited { retry_after_secs } => *retry_after_secs,
+        _ => None,
+    }
+}
+
 fn provider_wide(error: &SourceError) -> bool {
     !matches!(
         error,
@@ -618,6 +649,7 @@ impl Workspace {
             issues: Vec::new(),
             conversations: HashMap::new(),
             failures: Vec::new(),
+            runs: Vec::new(),
         };
         let saved = self.saved_sources()?;
         let providers: Vec<String> = if options.ticket.is_some() {
@@ -641,6 +673,8 @@ impl Workspace {
             let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
             let mut blocked: Option<SourceFailure> = None;
+            let mut retry_after_secs: Option<u64> = None;
+            let mut discovery_failed: Option<SourceFailure> = None;
             if options.ticket.is_none() {
                 match config {
                     None => {}
@@ -655,6 +689,8 @@ impl Workspace {
                             gathered
                                 .failures
                                 .push((None, provider.clone(), failure.clone()));
+                            retry_after_secs = retry_secs(&error);
+                            discovery_failed = Some(failure.clone());
                             if provider_wide(&error) {
                                 blocked = Some(failure);
                             }
@@ -698,6 +734,7 @@ impl Workspace {
                     Err(error) => {
                         let failure = failure_of(&error);
                         if provider_wide(&error) {
+                            retry_after_secs = retry_secs(&error);
                             blocked = Some(failure.clone());
                         }
                         gathered
@@ -714,6 +751,13 @@ impl Workspace {
                     first_issue,
                     &mut gathered,
                 )?;
+            }
+            if options.ticket.is_none() && config.is_some() {
+                gathered.runs.push(ProviderRun {
+                    provider: provider.clone(),
+                    failure: discovery_failed.or(blocked),
+                    retry_after_secs,
+                });
             }
         }
         self.apply_refresh(gathered, options.now.as_deref(), &tracked)
@@ -859,7 +903,8 @@ impl Workspace {
                     // Truthful freshness: the attempt and its error are recorded,
                     // the last successful refresh and saved content are not touched.
                     transaction.execute(
-                        "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4 WHERE ticket_id = ?1",
+                        "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
+                         failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1",
                         params![ticket.ticket_id, now, failure.code, failure.message],
                     )?;
                 }
@@ -869,7 +914,15 @@ impl Workspace {
                 reference: reference.clone(),
                 code: failure.code.clone(),
                 message: failure.message.clone(),
+                retry_after_secs: gathered
+                    .runs
+                    .iter()
+                    .find(|run| run.provider == *provider && failure.code == "rate_limited")
+                    .and_then(|run| run.retry_after_secs),
             });
+        }
+        for run in &gathered.runs {
+            freshness::record_run(&transaction, run, &now)?;
         }
         transaction.commit()?;
         Ok(RefreshReport {
@@ -895,6 +948,8 @@ struct Existing {
     url: String,
     /// `external_state:closure_reason` as last observed.
     state: String,
+    /// The source's own update time of the issue last applied.
+    updated_at: String,
 }
 
 /// Applies one observed issue inside the refresh write transaction.
@@ -909,7 +964,8 @@ fn apply_issue(
     let existing: Option<Existing> = connection
         .query_row(
             "SELECT t.id, t.number, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
-                    COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), '') \
+                    COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), ''), \
+                    COALESCE(s.external_updated_at, '') \
              FROM external_identities i \
              JOIN tickets t ON t.id = i.ticket_id \
              LEFT JOIN external_ownership o ON o.ticket_id = i.ticket_id \
@@ -935,6 +991,7 @@ fn apply_issue(
                     display: row.get(7)?,
                     url: row.get(8)?,
                     state: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             },
         )
@@ -975,8 +1032,15 @@ fn apply_issue(
             display,
             url,
             state: old_state,
+            updated_at,
             ..
         }) => {
+            // An overlapping run can deliver an observation older than one already
+            // applied (the slower of two refreshes). Confirmed source state never
+            // moves backwards, and an old observation confirms nothing now.
+            if !updated_at.is_empty() && issue.updated_at.as_str() < updated_at.as_str() {
+                return Ok(());
+            }
             let previous = old_state
                 .split_once(':')
                 .map(|(s, r)| state_from_parts(s, (!r.is_empty()).then_some(r)));
@@ -1029,7 +1093,7 @@ fn apply_issue(
             }
             connection.execute(
                 "UPDATE source_sync SET external_state = ?2, closure_reason = ?3, external_updated_at = ?4, \
-                 last_refreshed_at = ?5, last_attempt_at = ?5, last_error_code = NULL, last_error_message = NULL \
+                 last_refreshed_at = ?5, last_attempt_at = ?5, last_error_code = NULL, last_error_message = NULL, failing_since = NULL \
                  WHERE ticket_id = ?1",
                 params![id, state, reason, issue.updated_at, now],
             )?;

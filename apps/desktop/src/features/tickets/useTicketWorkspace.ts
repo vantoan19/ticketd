@@ -7,7 +7,11 @@ import {
   type StatusCounts,
   type Ticket,
 } from "@/lib/api/client";
-import { sourcesClient, type RefreshReport } from "@/lib/api/sources";
+import {
+  sourcesClient,
+  type RefreshReport,
+  type SourceHealth,
+} from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
@@ -64,6 +68,13 @@ export function useTicketWorkspace(
   // Providers with a saved configuration; the source filter appears once one exists.
   const [configuredSources, setConfiguredSources] = useState<string[]>([]);
   const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
+  // What the core persisted about each source's freshness, and whether a refresh
+  // (startup, periodic or explicit) is running. Kept when a read fails, so a
+  // transient error never blanks the footer or claims a refresh succeeded.
+  const [sourceHealth, setSourceHealth] = useState<SourceHealth>({
+    refreshing: false,
+    sources: [],
+  });
   const [sourceRefresh, setSourceRefresh] = useState<{
     running: boolean;
     report: RefreshReport | null;
@@ -186,6 +197,18 @@ export function useTicketWorkspace(
               .filter((entry) => entry.saved)
               .map((entry) => entry.connector.provider),
           );
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [revision]);
+  useEffect(() => {
+    let active = true;
+    void sourcesClient.health().then(
+      (health) => {
+        if (active) setSourceHealth(health);
       },
       () => {},
     );
@@ -378,6 +401,7 @@ export function useTicketWorkspace(
     sourceCounts,
     configuredSources,
     sourceRefresh,
+    sourceHealth,
     refreshSources,
     projects,
     efforts,

@@ -204,14 +204,28 @@ function RowDetails({
 }) {
   const state = readiness(ticket);
   const context = rowContext(ticket, scope);
+  const unavailable = Boolean(externalSource(ticket)?.unavailable);
   return (
     <span className="ticket-row-meta">
       {/* A group header already names the status. */}
-      {(state.kind !== "status" || !grouped) && (
+      {unavailable ? (
+        // The source cannot be read: say so in place of Ready or Blocked, which
+        // would describe content that may no longer be current.
         <span className="ticket-row-state">
-          {state.kind !== "status" && <StatusDot tone={state.kind} size={8} />}
-          {readinessLabel(state)}
+          <StatusDot tone="attention" size={8} />
+          {state.kind === "status" && !grouped
+            ? `${state.status} · Source unavailable`
+            : "Source unavailable"}
         </span>
+      ) : (
+        (state.kind !== "status" || !grouped) && (
+          <span className="ticket-row-state">
+            {state.kind !== "status" && (
+              <StatusDot tone={state.kind} size={8} />
+            )}
+            {readinessLabel(state)}
+          </span>
+        )
       )}
       {context && <span className="ticket-row-context">{context}</span>}
       {ticket.tags.length > 0 && (

@@ -138,6 +138,19 @@ failed read keeps what was retrieved. Authors are the source's identities, never
 an editing agent, and the rows survive takeover as provenance. Agents read it
 with `ticketd context T-n --conversation`.
 
+Freshness and availability are persisted, not inferred: `source_sync` records the
+start of each ticket's failure streak and `source_status` records each source's
+last run, current error and any rate-limit hold. A ticket reads _Source
+unavailable_ exactly when its latest recorded attempt failed with an unreachable,
+unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
+limit is delayed, not unavailable. Neither changes content, status or ownership.
+A refresh ignores an observation older than the one it holds, so a slower
+overlapping run cannot move confirmed state backwards. The desktop starts
+refreshing on launch and periodically through one in-process
+`RefreshCoordinator` (one run at a time, exponential backoff on failure, rate
+limits honored across restarts); there is no daemon, and `ticketd source refresh`
+and `ticketd source status` work without the desktop.
+
 Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility and saves the attempt as `in_flight` with the exact title,

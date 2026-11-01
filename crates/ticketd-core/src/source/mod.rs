@@ -13,8 +13,10 @@
 pub mod contract;
 mod conversation;
 pub mod engine;
+mod freshness;
 pub mod github;
 mod publication;
+mod schedule;
 pub mod schema;
 mod tracking;
 
@@ -29,10 +31,14 @@ pub use contract::{
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
+pub use freshness::{
+    DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
+};
 pub use publication::{
     AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublishOptions, PublishOutcome, PublishedIssue,
 };
+pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
     ValueFormat,
@@ -83,12 +89,18 @@ pub(crate) fn migrate_conversation(connection: &rusqlite::Connection) -> Result<
     conversation::migrate(connection)
 }
 
-/// Step 25: publication attempts.
+pub(crate) use conversation::load as conversation_entries;
+
+/// Step 25: failure streaks and per-source status.
+pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(), Error> {
+    freshness::migrate(connection)
+}
+
+/// Step 26: publication attempts.
 pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
     publication::migrate(connection)
 }
 
-pub(crate) use conversation::load as conversation_entries;
 pub(crate) use tracking::{guard_change, guard_duplicate};
 
 /// Fills the ticket's external side and any blocking publication attempt.

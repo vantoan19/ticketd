@@ -782,9 +782,9 @@ fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
     );
     drop(workspace);
 
-    // A version 24 workspace gains the table on open and keeps its tickets.
+    // A version 25 workspace gains the table on open and keeps its tickets.
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; PRAGMA user_version = 24;")
+    db.execute_batch("DROP TABLE publication_attempts; PRAGMA user_version = 25;")
         .unwrap();
     drop(db);
     let workspace = Workspace::open(&path).unwrap();

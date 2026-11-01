@@ -57,7 +57,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 25;
+pub const FORMAT_VERSION: i64 = 26;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -411,6 +411,9 @@ impl Workspace {
             source::migrate_conversation(&transaction)?;
         }
         if version < 25 {
+            source::migrate_freshness(&transaction)?;
+        }
+        if version < 26 {
             source::migrate_publication(&transaction)?;
         }
         transaction.commit()?;

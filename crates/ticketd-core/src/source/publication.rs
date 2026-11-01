@@ -210,7 +210,7 @@ impl PublicationError {
     }
 }
 
-/// Step 25: publication attempts.
+/// Step 26: publication attempts.
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE publication_attempts (\
@@ -233,7 +233,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
             CHECK ((external_id IS NULL) = (locator IS NULL))); \
          CREATE UNIQUE INDEX publication_attempts_open ON publication_attempts(ticket_id) WHERE status IN ('in_flight', 'unresolved'); \
          CREATE INDEX publication_attempts_ticket ON publication_attempts(ticket_id, started_at); \
-         PRAGMA user_version = 25;",
+         PRAGMA user_version = 26;",
     )?;
     Ok(())
 }
