@@ -1007,7 +1007,10 @@ impl Workspace {
             attempt.title, attempt.destination
         )];
         if let Some(issue) = &attempt.issue {
-            known.push(format!("{} ({}) was created for it.", issue.display, issue.url));
+            known.push(format!(
+                "{} ({}) was created for it.",
+                issue.display, issue.url
+            ));
         }
         known.push(match attempt.failure.as_ref().map(|f| f.code.as_str()) {
             _ if running => "The request is still in progress.".to_owned(),
@@ -1045,19 +1048,17 @@ impl Workspace {
         let mut candidates = Vec::new();
         let mut candidates_complete = None;
         let mut lookup_failure = None;
-        if search && !running && attempt.issue.is_none() {
-            if let Some(saved) = self.saved_source(&attempt.provider)? {
-                match engine.find_published(
-                    &attempt.provider,
-                    &saved.config,
-                    &search_for(&attempt),
-                ) {
-                    Ok(found) => {
-                        candidates = found.matches.iter().map(published).collect();
-                        candidates_complete = Some(found.complete);
-                    }
-                    Err(error) => lookup_failure = Some(failure(&error)),
+        if search
+            && !running
+            && attempt.issue.is_none()
+            && let Some(saved) = self.saved_source(&attempt.provider)?
+        {
+            match engine.find_published(&attempt.provider, &saved.config, &search_for(&attempt)) {
+                Ok(found) => {
+                    candidates = found.matches.iter().map(published).collect();
+                    candidates_complete = Some(found.complete);
                 }
+                Err(error) => lookup_failure = Some(failure(&error)),
             }
         }
 
@@ -1072,7 +1073,11 @@ impl Workspace {
                 } else if attempt.issue.is_some() {
                     format!(
                         "Confirm {} and finish publishing. {name} is asked to verify it first.",
-                        attempt.issue.as_ref().map(|i| i.display.as_str()).unwrap_or_default()
+                        attempt
+                            .issue
+                            .as_ref()
+                            .map(|i| i.display.as_str())
+                            .unwrap_or_default()
                     )
                 } else {
                     format!(
@@ -1155,10 +1160,13 @@ impl Workspace {
         };
         match &options.resolution {
             Resolution::Attach { issue } => {
-                let found = match (issue.as_deref().map(str::trim).filter(|t| !t.is_empty()), &attempt.issue) {
+                let found = match (
+                    issue.as_deref().map(str::trim).filter(|t| !t.is_empty()),
+                    &attempt.issue,
+                ) {
                     (Some(text), _) => engine
                         .locate(&attempt.provider, &saved.config, &attempt.destination, text)
-                        .map_err(&unverified)?,
+                        .map_err(unverified)?,
                     (None, Some(known)) => engine
                         .fetch(
                             &attempt.provider,
@@ -1168,7 +1176,7 @@ impl Workspace {
                                 locator: known.locator.clone(),
                             },
                         )
-                        .map_err(&unverified)?,
+                        .map_err(unverified)?,
                     (None, None) => {
                         return Err(PublicationError::Mismatch {
                             reference: ticket.reference,
@@ -1183,9 +1191,13 @@ impl Workspace {
                 };
                 self.attach_verified(&ticket, &attempt, &found, options.now.as_deref())
             }
-            Resolution::NotCreated => {
-                self.rule_out(engine, &ticket, &attempt, &saved.config, options.now.as_deref())
-            }
+            Resolution::NotCreated => self.rule_out(
+                engine,
+                &ticket,
+                &attempt,
+                &saved.config,
+                options.now.as_deref(),
+            ),
         }
     }
 
@@ -1220,7 +1232,10 @@ impl Workspace {
         match (resolution, latest.state) {
             (Resolution::Attach { .. }, AttemptState::Succeeded) => {
                 let same = identity.is_none_or(|id| {
-                    latest.issue.as_ref().is_some_and(|issue| &issue.identity == id)
+                    latest
+                        .issue
+                        .as_ref()
+                        .is_some_and(|issue| &issue.identity == id)
                 });
                 if same {
                     replay(latest)
@@ -1292,7 +1307,11 @@ impl Workspace {
             .is_some_and(|open| open.id == attempt.id && open.state != AttemptState::InFlight);
         if !still_open {
             drop(transaction);
-            return self.settled_instead(ticket, &Resolution::Attach { issue: None }, Some(identity));
+            return self.settled_instead(
+                ticket,
+                &Resolution::Attach { issue: None },
+                Some(identity),
+            );
         }
         let owned: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?2)",
@@ -1385,7 +1404,7 @@ impl Workspace {
         };
         let found = engine
             .find_published(&attempt.provider, config, &search_for(attempt))
-            .map_err(&unverified)?;
+            .map_err(unverified)?;
         if !found.matches.is_empty() {
             return Err(publication(PublicationError::Candidates {
                 reference: ticket.reference.clone(),

@@ -462,7 +462,10 @@ fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     assert!(stderr.contains("could not be verified"), "{stderr}");
     let no_credential = cli.command(&["source", "resolve", &reference, "--issue", "7"], None);
     assert_eq!(no_credential.status.code(), Some(1));
-    assert_eq!(cli.run(&["show", &reference])["publication"]["state"], "unresolved");
+    assert_eq!(
+        cli.run(&["show", &reference])["publication"]["state"],
+        "unresolved"
+    );
 
     let outcome = cli.run(&["source", "resolve", &reference, "--issue", "7"]);
     assert_eq!(outcome["replayed"], false);
@@ -484,7 +487,10 @@ fn resolve_not_created_needs_evidence_and_then_allows_publishing_again() {
     assert_eq!(output.status.code(), Some(1));
     let attempt: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(attempt["state"], "unresolved");
-    assert_eq!(cli.run(&["show", &reference])["publication"]["state"], "unresolved");
+    assert_eq!(
+        cli.run(&["show", &reference])["publication"]["state"],
+        "unresolved"
+    );
 
     let outcome = cli.run(&["source", "resolve", &reference, "--not-created"]);
     assert_eq!(outcome["attempt"]["state"], "failed");

@@ -1045,7 +1045,10 @@ fn a_search_that_cannot_finish_is_incomplete_or_an_error_never_empty_and_complet
     let again = format!("{API}/repos/o/r/issues?page=2");
     let link = format!("<{again}>; rel=\"next\"");
     let recent = created(issue(1, 1, "o/r"), "2026-03-02T00:00:00Z");
-    fixture.respond(SEARCH_URL, ok_with(json!([recent.clone()]), &[("link", &link)]));
+    fixture.respond(
+        SEARCH_URL,
+        ok_with(json!([recent.clone()]), &[("link", &link)]),
+    );
     for _ in 1..SEARCH_PAGES {
         fixture.respond(&again, ok_with(json!([recent.clone()]), &[("link", &link)]));
     }

@@ -1021,11 +1021,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 None
             };
             match resolution {
-                None => serde_json::to_string(&workspace.review_publication(
-                    &engine,
-                    &ticket,
-                    !no_search,
-                )?)?,
+                None => serde_json::to_string(
+                    &workspace.review_publication(&engine, &ticket, !no_search)?,
+                )?,
                 Some(resolution) => {
                     let result = workspace.resolve_publication(
                         &engine,

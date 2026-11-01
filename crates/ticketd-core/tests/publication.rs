@@ -16,11 +16,12 @@ use serde_json::json;
 use ticketd_core::{
     Error, Status, Ticket, TicketPatch, Workspace,
     source::{
-        AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
-        Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FieldKind, IneligibleReason, OptionSource, Origin, Ownership, PublicationCandidates,
-        PublicationError, PublicationSearch, Resolution, ResolveOptions, ActionKind, PublishOptions, PublishRequest, RefreshOptions, SchemaField, SourceError, ValueFormat,
+        ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
+        ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
+        DiscoveryRequest, Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
+        ExternalState, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
+        PublicationCandidates, PublicationError, PublicationSearch, PublishOptions, PublishRequest,
+        RefreshOptions, Resolution, ResolveOptions, SchemaField, SourceError, ValueFormat,
     },
 };
 
@@ -80,7 +81,10 @@ fn now_rfc3339() -> String {
 }
 
 impl Fake {
-    fn answer<T>(&self, compute: impl FnOnce(&Remote) -> Result<T, SourceError>) -> Result<T, SourceError> {
+    fn answer<T>(
+        &self,
+        compute: impl FnOnce(&Remote) -> Result<T, SourceError>,
+    ) -> Result<T, SourceError> {
         let (result, hook) = {
             let remote = self.0.lock().unwrap();
             if remote.lookup_down {
@@ -916,10 +920,7 @@ impl Fixture {
     fn still_unresolved(&self, reference: &str) {
         let after = self.ticket(reference);
         assert!(after.source.is_none(), "ownership must not transfer");
-        assert_eq!(
-            after.publication.expect("still blocked").state,
-            AttemptState::Unresolved
-        );
+        assert_eq!(after.publication.unwrap().state, AttemptState::Unresolved);
     }
 }
 
@@ -1153,9 +1154,15 @@ fn a_resolver_that_loses_a_race_to_the_same_attach_reports_a_replay() {
             .unwrap();
     }));
     let racing = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
-    assert!(racing.replayed, "same issue, already attached by the winner");
+    assert!(
+        racing.replayed,
+        "same issue, already attached by the winner"
+    );
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
-    assert_eq!(f.ticket(&ticket.reference).source.unwrap().display, "o/r#101");
+    assert_eq!(
+        f.ticket(&ticket.reference).source.unwrap().display,
+        "o/r#101"
+    );
 }
 
 #[test]
@@ -1180,7 +1187,10 @@ fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
 
     let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
     assert!(matches!(error, PublicationError::Settled { .. }), "{error}");
-    assert_eq!(f.ticket(&ticket.reference).source.unwrap().display, "o/r#101");
+    assert_eq!(
+        f.ticket(&ticket.reference).source.unwrap().display,
+        "o/r#101"
+    );
     assert_eq!(
         f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
         AttemptState::Succeeded

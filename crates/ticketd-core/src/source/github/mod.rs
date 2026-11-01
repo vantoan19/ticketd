@@ -518,7 +518,9 @@ impl Connector for GithubConnector {
         );
         let (value, _) = self.json(&url, &format!("issue {destination}#{number}"))?;
         let issue = translate_issue(&value, destination)?.ok_or_else(|| {
-            SourceError::NotFound(format!("{destination}#{number} is a pull request, not an issue"))
+            SourceError::NotFound(format!(
+                "{destination}#{number} is a pull request, not an issue"
+            ))
         })?;
         // An issue transferred elsewhere still answers here; it is not in the destination.
         let repository = issue.display.rsplit_once('#').map_or("", |(repo, _)| repo);
