@@ -269,7 +269,13 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
     assert!(stderr.contains("owned by github"), "{stderr}");
     cli.run(&["change", "T-1", "--status", "In progress"]);
-    assert_eq!(cli.run(&["list", "--source", "github"]).as_array().unwrap().len(), 1);
+    assert_eq!(
+        cli.run(&["list", "--source", "github"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(cli.run(&["list", "--source", "local"]), json!([]));
     // Refreshing the single ticket observes that the issue closed.
     let report = cli.run(&["source", "refresh", "--ticket", "T-1"]);

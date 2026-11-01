@@ -25,13 +25,13 @@ pub use contract::{
     PublishRequest, SourceError,
 };
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use tracking::{
-    DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport, SourceCounts,
-    SourceFailure, SourceFilter, TicketSource,
-};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
     ValueFormat,
+};
+pub use tracking::{
+    DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport,
+    SourceCounts, SourceFailure, SourceFilter, TicketSource,
 };
 
 use crate::{Error, Workspace, transaction_write_lock};

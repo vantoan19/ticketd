@@ -146,7 +146,9 @@ pub enum Error {
     EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
-    #[error("{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change")]
+    #[error(
+        "{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change"
+    )]
     ExternalContent { reference: String, provider: String },
     #[error("{}", external_status_message(.reference, .provider, *.open))]
     ExternalStatus {

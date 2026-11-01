@@ -592,7 +592,10 @@ fn one_ticket_can_be_refreshed_alone_and_local_tickets_cannot() {
     assert_eq!(f.ticket(1).title, "One edited");
     assert_eq!(f.ticket(2).title, "Two");
     let calls = f.fake.0.lock().unwrap().discover_calls;
-    assert_eq!(calls, before, "a single-ticket refresh does not run discovery");
+    assert_eq!(
+        calls, before,
+        "a single-ticket refresh does not run discovery"
+    );
     let local = f.workspace.create_ticket("Local").unwrap();
     let refused = f.workspace.refresh_sources(
         &f.engine,
@@ -706,9 +709,7 @@ fn a_ticket_whose_ownership_was_taken_is_never_resynchronized_or_recreated() {
         .count_by_source(&TicketFilter::default())
         .unwrap();
     assert_eq!((counts.local, counts.providers.len()), (1, 0));
-    f.workspace
-        .change_ticket("T-1", retitle("Edited"))
-        .unwrap();
+    f.workspace.change_ticket("T-1", retitle("Edited")).unwrap();
 }
 
 #[test]

@@ -60,7 +60,10 @@ impl Workspace {
     /// The conditions a filter adds to `tickets t WHERE t.trashed = 0`, as `" AND ..."` clauses.
     /// Listing and counting share them, so a count always describes the tickets the list pages
     /// through.
-    pub(crate) fn filter_conditions(&self, filter: &TicketFilter) -> Result<(String, Vec<Value>), Error> {
+    pub(crate) fn filter_conditions(
+        &self,
+        filter: &TicketFilter,
+    ) -> Result<(String, Vec<Value>), Error> {
         if let Some(project) = &filter.project {
             self.show_project(project)?;
         }

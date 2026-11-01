@@ -32,8 +32,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ClosureReason, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    SourceError,
+    ClosureReason, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, SourceError,
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
 
@@ -263,13 +262,13 @@ pub(crate) fn guard_change(
     if title.is_some_and(|title| title != ticket.title)
         || body.is_some_and(|body| body != ticket.body)
     {
-        return Err(Error::ExternalContent { reference, provider });
+        return Err(Error::ExternalContent {
+            reference,
+            provider,
+        });
     }
     if status != ticket.status {
-        let local_progress = matches!(
-            status,
-            Status::Todo | Status::InProgress | Status::InReview
-        );
+        let local_progress = matches!(status, Status::Todo | Status::InProgress | Status::InReview);
         if !(open && local_progress) {
             return Err(Error::ExternalStatus {
                 reference,
@@ -283,7 +282,11 @@ pub(crate) fn guard_change(
 
 /// Rejects marking an externally owned ticket as a duplicate (or undoing one):
 /// its duplicate status is the source's closure.
-pub(crate) fn guard_duplicate(connection: &Connection, id: &str, reference: &str) -> Result<(), Error> {
+pub(crate) fn guard_duplicate(
+    connection: &Connection,
+    id: &str,
+    reference: &str,
+) -> Result<(), Error> {
     match authority(connection, id)? {
         Authority::Local => Ok(()),
         Authority::External { provider, open } => Err(Error::ExternalStatus {
@@ -539,7 +542,9 @@ impl Workspace {
                         });
                         if let Err(error) = result {
                             let failure = failure_of(&error);
-                            gathered.failures.push((None, provider.clone(), failure.clone()));
+                            gathered
+                                .failures
+                                .push((None, provider.clone(), failure.clone()));
                             if provider_wide(&error) {
                                 blocked = Some(failure);
                             }
@@ -585,7 +590,9 @@ impl Workspace {
                         if provider_wide(&error) {
                             blocked = Some(failure.clone());
                         }
-                        gathered.failures.push((reference, provider.clone(), failure));
+                        gathered
+                            .failures
+                            .push((reference, provider.clone(), failure));
                     }
                 }
             }
@@ -645,11 +652,11 @@ impl Workspace {
         transaction_write_lock(&transaction)?;
         let now = match now {
             Some(now) => now.to_owned(),
-            None => transaction.query_row(
-                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-                [],
-                |row| row.get(0),
-            )?,
+            None => {
+                transaction.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
+                    row.get(0)
+                })?
+            }
         };
         let mut applied = Applied::default();
         for issue in &gathered.issues {
@@ -687,6 +694,21 @@ impl Workspace {
     }
 }
 
+/// A tracked ticket as the refresh write reads it back.
+struct Existing {
+    id: String,
+    number: i64,
+    title: String,
+    body: String,
+    status: Status,
+    authority: Option<String>,
+    locator: String,
+    display: String,
+    url: String,
+    /// `external_state:closure_reason` as last observed.
+    state: String,
+}
+
 /// Applies one observed issue inside the refresh write transaction.
 fn apply_issue(
     connection: &Connection,
@@ -695,7 +717,7 @@ fn apply_issue(
     applied: &mut Applied,
 ) -> Result<(), Error> {
     let identity = &issue.reference.identity;
-    let existing: Option<(String, i64, String, String, Status, Option<String>, String, String, String, String)> = connection
+    let existing: Option<Existing> = connection
         .query_row(
             "SELECT t.id, t.number, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
                     COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), '') \
@@ -707,24 +729,24 @@ fn apply_issue(
             params![identity.provider, identity.id],
             |row| {
                 let status: String = row.get(4)?;
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    status.parse().map_err(|e| {
+                Ok(Existing {
+                    id: row.get(0)?,
+                    number: row.get(1)?,
+                    title: row.get(2)?,
+                    body: row.get(3)?,
+                    status: status.parse().map_err(|e| {
                         rusqlite::Error::FromSqlConversionFailure(
                             4,
                             rusqlite::types::Type::Text,
                             Box::new(e),
                         )
                     })?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                ))
+                    authority: row.get(5)?,
+                    locator: row.get(6)?,
+                    display: row.get(7)?,
+                    url: row.get(8)?,
+                    state: row.get(9)?,
+                })
             },
         )
         .optional()?;
@@ -750,11 +772,22 @@ fn apply_issue(
         }
         // Taken over (or otherwise local): the identity is remembered so discovery
         // neither creates another ticket nor resumes synchronization.
-        Some((_, _, _, _, _, authority, ..)) if authority.as_deref() != Some("external") => {}
-        Some((id, number, old_title, old_body, status, _, locator, display, url, old_state)) => {
-            let previous = old_state.split_once(':').map(|(s, r)| {
-                state_from_parts(s, (!r.is_empty()).then_some(r))
-            });
+        Some(Existing { authority, .. }) if authority.as_deref() != Some("external") => {}
+        Some(Existing {
+            id,
+            number,
+            title: old_title,
+            body: old_body,
+            status,
+            locator,
+            display,
+            url,
+            state: old_state,
+            ..
+        }) => {
+            let previous = old_state
+                .split_once(':')
+                .map(|(s, r)| state_from_parts(s, (!r.is_empty()).then_some(r)));
             let next = status_for(previous, issue.state, status);
             let mut changed = false;
             if old_title != title || old_body != issue.body {
@@ -883,10 +916,7 @@ pub(crate) fn link(
 impl Workspace {
     /// How many non-trashed tickets each source filter would show, with every
     /// other condition of `filter` applied and its own `source` ignored.
-    pub fn count_by_source(
-        &self,
-        filter: &crate::TicketFilter,
-    ) -> Result<SourceCounts, Error> {
+    pub fn count_by_source(&self, filter: &crate::TicketFilter) -> Result<SourceCounts, Error> {
         let mut unscoped = filter.clone();
         unscoped.source = None;
         let (conditions, values) = self.filter_conditions(&unscoped)?;
