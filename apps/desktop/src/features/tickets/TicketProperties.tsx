@@ -10,6 +10,14 @@ import {
 import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusIcon, ticketStatuses } from "./StatusIcon";
+import { Duplicates } from "./Duplicates";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Popover,
   PopoverContent,
@@ -138,6 +146,7 @@ export function TicketProperties({
 }) {
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [vocabularyError, setVocabularyError] = useState("");
@@ -236,11 +245,17 @@ export function TicketProperties({
         <Select
           value={ticket.status}
           disabled={disabled}
-          onValueChange={(status) =>
+          onValueChange={(status) => {
+            if (status === ticket.status) return;
+            // Duplicate needs a canonical ticket, so it opens the review.
+            if (status === "Duplicate") {
+              setDuplicateOpen(true);
+              return;
+            }
             void save("Status", () =>
               client.changeTicket(ticket.reference, { status }),
-            )
-          }
+            );
+          }}
         >
           <SelectTrigger
             size="sm"
@@ -263,6 +278,23 @@ export function TicketProperties({
           </SelectContent>
         </Select>,
       )}
+      <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
+        <DialogContent className="duplicate-dialog">
+          <DialogHeader>
+            <DialogTitle>Mark as duplicate</DialogTitle>
+            <DialogDescription>
+              Choose the canonical ticket for {ticket.reference} and review its
+              dependencies.
+            </DialogDescription>
+          </DialogHeader>
+          <Duplicates
+            ticket={ticket}
+            refresh={refresh}
+            onDone={() => setDuplicateOpen(false)}
+            onCancel={() => setDuplicateOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
       {/* The canonical link belongs beside the status, trashed or not. */}
       {ticket.duplicate_of && (
         <Button

@@ -86,19 +86,19 @@ Normal text must meet 4.5:1 contrast against its actual surface; large text and 
 
 Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
-| Meaning     | Icon treatment                               | Visible label     |
-| ----------- | -------------------------------------------- | ----------------- |
-| Todo        | Empty circle                                 | Todo              |
-| In progress | Circle with center mark                      | In progress       |
-| In review   | Dashed circle                                | In review         |
-| Done        | Circle with check                            | Done              |
-| Canceled    | Circle with slash                            | Canceled          |
-| Ready       | Status dot beside the word, on Todo tickets  | Ready             |
-| Blocked     | Status dot beside the word, with the reason  | Blocked by T-18   |
-| Duplicate   | Canceled status plus a canonical-ticket link | Duplicate of T-10 |
-| Unread      | Status dot plus accessible unread state      | Unread            |
+| Meaning     | Icon treatment                                          | Visible label     |
+| ----------- | ------------------------------------------------------- | ----------------- |
+| Todo        | Empty circle                                            | Todo              |
+| In progress | Circle with center mark                                 | In progress       |
+| In review   | Dashed circle                                           | In review         |
+| Done        | Circle with check                                       | Done              |
+| Canceled    | Circle with slash                                       | Canceled          |
+| Ready       | Status dot beside the word, on Todo tickets             | Ready             |
+| Blocked     | Status dot beside the word, with the reason             | Blocked by T-18   |
+| Duplicate   | Circle with equals sign, beside a canonical-ticket link | Duplicate of T-10 |
+| Unread      | Status dot plus accessible unread state                 | Unread            |
 
-Ready and Blocked are availability indicators, not extra statuses. Canceled must never look completed. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
+Ready and Blocked are availability indicators, not extra statuses. Canceled and Duplicate must never look completed. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
 
 ## 3. Typography
 
@@ -351,7 +351,7 @@ Provide an appropriate explicit open action where supported; always retain Copy 
 
 ### Duplicate dependency review
 
-Use a dialog or expanded review pane, not a small popover. Show the duplicate and canonical ticket by reference and title, the resulting Canceled state, and each affected dependency with its current and proposed endpoints.
+Use a dialog or expanded review pane, not a small popover. Show the duplicate and canonical ticket by reference and title, the resulting Duplicate state, and each affected dependency with its current and proposed endpoints.
 
 Each edge has an explicit retain, remove, or replace choice where valid. The final action states what will be applied. A stale preview or cycle error keeps the review visible and requests a fresh preview; no partial success presentation is allowed. Removing a duplicate designation must explain that dependency replacements are reviewed separately. Preserve access to the duplicate's description and history.
 

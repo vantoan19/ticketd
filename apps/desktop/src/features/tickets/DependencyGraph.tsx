@@ -170,7 +170,7 @@ function Legend() {
       <li>
         A Todo ticket is Ready once every ticket with an arrow into it is Done.
       </li>
-      <li>In review and Canceled tickets still block.</li>
+      <li>In review, Canceled and Duplicate tickets still block.</li>
       <li>
         <StatusDot tone="ready" /> Ready
       </li>

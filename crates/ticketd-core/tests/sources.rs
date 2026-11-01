@@ -523,14 +523,14 @@ fn saved_configuration_is_exported_and_survives_backup_and_restore() {
 }
 
 #[test]
-fn version_twenty_workspaces_gain_the_source_table_on_open() {
+fn version_twentyone_workspaces_gain_the_source_table_on_open() {
     let (_, engine) = setup();
     let (dir, mut workspace) = workspace();
     let path = dir.path().join("workspace.sqlite3");
     let ticket = workspace.create_ticket("Keep me").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE source_configurations; PRAGMA user_version = 20;")
+    db.execute_batch("DROP TABLE source_configurations; PRAGMA user_version = 21;")
         .unwrap();
     drop(db);
     let mut workspace = Workspace::open(&path).unwrap();

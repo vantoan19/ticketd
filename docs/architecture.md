@@ -155,7 +155,7 @@ optional agent. If the affected edges or resolved canonical change, preview agai
 For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived
-edges; a retained canceled prerequisite remains unresolved.
+edges; a retained duplicate prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
 `ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
 Set and snooze take an RFC 3339 instant with an explicit offset; show displays

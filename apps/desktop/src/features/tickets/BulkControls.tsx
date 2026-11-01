@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
-import { StatusIcon, ticketStatuses } from "@/features/tickets/StatusIcon";
+import { StatusIcon, directStatuses } from "@/features/tickets/StatusIcon";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
@@ -102,7 +102,7 @@ export function BulkControls({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top">
-              {ticketStatuses.map((status) => (
+              {directStatuses.map((status) => (
                 <DropdownMenuItem
                   key={status}
                   onSelect={() =>

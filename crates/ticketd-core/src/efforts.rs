@@ -16,6 +16,8 @@ pub struct EffortCounts {
     pub in_review: u64,
     pub done: u64,
     pub canceled: u64,
+    #[serde(default)]
+    pub duplicate: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffortView {
@@ -105,6 +107,7 @@ impl Workspace {
                 Status::InReview => counts.in_review += 1,
                 Status::Done => counts.done += 1,
                 Status::Canceled => counts.canceled += 1,
+                Status::Duplicate => counts.duplicate += 1,
             };
             members.push(ticket);
         }

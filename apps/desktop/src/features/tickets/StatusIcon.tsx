@@ -3,6 +3,7 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
+  CircleEqual,
   CircleSlash,
   type LucideIcon,
 } from "lucide-react";
@@ -15,7 +16,17 @@ export const ticketStatuses = [
   "In review",
   "Done",
   "Canceled",
+  "Duplicate",
 ] as const;
+
+/**
+ * Statuses a person or agent can choose directly. Duplicate is not among them: marking one
+ * needs a canonical ticket, so it goes through the duplicate review instead.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const directStatuses = ticketStatuses.filter(
+  (status) => status !== "Duplicate",
+);
 
 const statusIcons: Record<string, LucideIcon> = {
   Todo: Circle,
@@ -23,6 +34,7 @@ const statusIcons: Record<string, LucideIcon> = {
   "In review": CircleDashed,
   Done: CircleCheck,
   Canceled: CircleSlash,
+  Duplicate: CircleEqual,
 };
 
 /** The icon for a ticket status. Named by the status unless it sits beside the status word. */

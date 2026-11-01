@@ -14,10 +14,12 @@ pub enum Status {
     InReview,
     Done,
     Canceled,
+    /// Work that another ticket already covers; always paired with a canonical ticket.
+    Duplicate,
 }
 
 impl Status {
-    /// Only Done satisfies a dependency on a ticket; In review and Canceled still block.
+    /// Only Done satisfies a dependency on a ticket; In review, Canceled and Duplicate still block.
     pub fn satisfies_dependency(self) -> bool {
         self == Self::Done
     }
@@ -38,6 +40,7 @@ impl fmt::Display for Status {
             Self::InReview => "In review",
             Self::Done => "Done",
             Self::Canceled => "Canceled",
+            Self::Duplicate => "Duplicate",
         })
     }
 }
@@ -51,6 +54,7 @@ impl FromStr for Status {
             "In review" => Ok(Self::InReview),
             "Done" => Ok(Self::Done),
             "Canceled" => Ok(Self::Canceled),
+            "Duplicate" => Ok(Self::Duplicate),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("invalid status: {value}"),

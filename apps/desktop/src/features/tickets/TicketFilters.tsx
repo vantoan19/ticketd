@@ -21,6 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Search, SlidersHorizontal, X } from "lucide-react";
+import { ticketStatuses } from "./StatusIcon";
 import "./ticket-filters.css";
 
 type Props = {
@@ -140,13 +141,10 @@ export function TicketFilters(p: Props) {
                     value={p.status}
                     onChange={(value) => update(p.setStatus, value)}
                     all="All statuses"
-                    options={[
-                      "Todo",
-                      "In progress",
-                      "In review",
-                      "Done",
-                      "Canceled",
-                    ].map((value) => ({ value, label: value }))}
+                    options={ticketStatuses.map((value) => ({
+                      value,
+                      label: value,
+                    }))}
                   />
                 )}
                 <Field>

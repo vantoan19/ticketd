@@ -73,7 +73,7 @@ const TABLES: [(&str, i64); 19] = [
     ("evidence", 16),
     ("ticket_reminders", 18),
     ("last_backup", 20),
-    ("source_configurations", 21),
+    ("source_configurations", 22),
 ];
 
 pub(crate) fn table_exists(connection: &Connection, table: &str) -> Result<bool, Error> {
