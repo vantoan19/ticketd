@@ -204,6 +204,34 @@
   display: grid;
   gap: 16px;
 }
+.bulk-tag-suggestions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border);
+}
+.bulk-tag-suggestions li {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.bulk-tag-suggestions li:hover,
+.bulk-tag-suggestions li[data-active="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.bulk-tag-suggestions li[data-active="true"] {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.bulk-tag-note {
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
 
 .ticket-row-action {
   display: flex;

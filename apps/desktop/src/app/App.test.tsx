@@ -888,7 +888,7 @@ test("removes an Effort and adds or removes a tag from the Organize menu", async
   const dialog = screen.getByRole("dialog", {
     name: "Add or remove tag",
   });
-  fireEvent.change(within(dialog).getByRole("textbox", { name: "Tag name" }), {
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
