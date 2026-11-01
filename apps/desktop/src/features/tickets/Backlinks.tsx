@@ -15,6 +15,9 @@ export type MentionTarget = {
   mentioned: string;
   noteId: string | null;
   passage: string;
+  /** Source span of the mention, in UTF-16 code units of the Markdown. */
+  start: number;
+  end: number;
 };
 
 export function Backlinks({
@@ -91,6 +94,8 @@ export function Backlinks({
                   mentioned: reference,
                   noteId: link.note_id,
                   passage: link.passage,
+                  start: link.mention_start,
+                  end: link.mention_end,
                 })
               }
             >

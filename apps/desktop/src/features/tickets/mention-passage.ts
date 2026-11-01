@@ -1,50 +1,80 @@
-const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th, pre";
+/** Where a mention sits in the Markdown source, in UTF-16 code units (JavaScript string offsets). */
+export type MentionSpan = { start: number; end: number };
 
-/** Compare text by its letters and digits only: Markdown syntax drops out of the passage. */
-function key(text: string): string {
-  return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
-}
+/** The part of a hast node this module reads. */
+export type PositionedNode = {
+  type: string;
+  tagName?: string;
+  position?: {
+    start: { offset?: number | undefined };
+    end: { offset?: number | undefined };
+  };
+  children?: PositionedNode[];
+};
 
-function mentions(text: string, reference: string): boolean {
-  const word = /[\p{L}\p{N}_-]/u;
-  for (let at = text.indexOf(reference); at !== -1;) {
-    const end = at + reference.length;
-    if (!word.test(text[at - 1] ?? "") && !word.test(text[end] ?? ""))
-      return true;
-    at = text.indexOf(reference, end);
-  }
-  return false;
-}
+/**
+ * Blocks that may carry a mention. Code blocks are left out on purpose: the
+ * backend never reports mentions inside code, and their tab stops are not ours.
+ */
+export const MENTION_BLOCKS: ReadonlySet<string> = new Set([
+  "p",
+  "li",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "td",
+  "th",
+]);
 
-/** The innermost block, so a list item wins over its list and a paragraph over its quote. */
-function innermost(blocks: Element[]): Element | null {
+function contains(node: PositionedNode, span: MentionSpan): boolean {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
   return (
-    blocks.find(
-      (block) =>
-        !blocks.some((other) => other !== block && block.contains(other)),
-    ) ?? null
+    start !== undefined &&
+    end !== undefined &&
+    start <= span.start &&
+    span.end <= end
+  );
+}
+
+function hasInnerBlock(node: PositionedNode, span: MentionSpan): boolean {
+  return (node.children ?? []).some(
+    (child) =>
+      (child.type === "element" &&
+        MENTION_BLOCKS.has(child.tagName ?? "") &&
+        contains(child, span)) ||
+      hasInnerBlock(child, span),
+  );
+}
+
+/** Whether this block is the innermost one whose source contains the mention. */
+export function isMentionBlock(
+  node: PositionedNode | undefined,
+  span: MentionSpan,
+): boolean {
+  return (
+    node !== undefined &&
+    node.type === "element" &&
+    MENTION_BLOCKS.has(node.tagName ?? "") &&
+    contains(node, span) &&
+    !hasInnerBlock(node, span)
   );
 }
 
 /**
- * Find the rendered block that holds a backlink passage. The passage is a source line
- * of the Markdown, so it is matched by its words first; when the description has
- * changed or the line carries link syntax, the first block mentioning the reference
- * stands in. Null means the description no longer mentions it.
+ * Whether the source still has the passage where the backlink found it. A
+ * description edited since then moves or removes the passage, and its span would
+ * point at something else.
  */
-export function findMentionBlock(
-  root: Element,
+export function mentionStillAt(
+  source: string,
   passage: string,
-  reference: string,
-): Element | null {
-  const blocks = [...root.querySelectorAll(BLOCKS)];
-  const wanted = key(passage);
-  const exact = wanted
-    ? blocks.filter((block) => key(block.textContent ?? "").includes(wanted))
-    : [];
-  const byPassage = innermost(exact);
-  if (byPassage) return byPassage;
-  return innermost(
-    blocks.filter((block) => mentions(block.textContent ?? "", reference)),
-  );
+  span: MentionSpan,
+): boolean {
+  if (span.end > source.length || span.start > span.end) return false;
+  const from = Math.max(0, span.start - passage.length);
+  return source.slice(from, span.end + passage.length).includes(passage);
 }

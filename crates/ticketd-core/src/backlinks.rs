@@ -10,15 +10,26 @@ pub struct Backlink {
     pub source_title: String,
     pub note_id: Option<String>,
     pub passage: String,
+    /// Source span of the text holding the reference, in UTF-16 code units of the
+    /// Markdown (the unit JavaScript string offsets use), so a renderer can locate it.
+    pub mention_start: usize,
+    pub mention_end: usize,
+}
+
+/// Byte offset of the first occurrence of `reference` that is not part of a longer word.
+fn find_reference(text: &str, reference: &str) -> Option<usize> {
+    text.match_indices(reference)
+        .find(|(start, _)| {
+            let before = text[..*start].chars().next_back();
+            let after = text[start + reference.len()..].chars().next();
+            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
+            before.is_none_or(boundary) && after.is_none_or(boundary)
+        })
+        .map(|(start, _)| start)
 }
 
 fn contains_reference(text: &str, reference: &str) -> bool {
-    text.match_indices(reference).any(|(start, _)| {
-        let before = text[..start].chars().next_back();
-        let after = text[start + reference.len()..].chars().next();
-        let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
-        before.is_none_or(boundary) && after.is_none_or(boundary)
-    })
+    find_reference(text, reference).is_some()
 }
 
 // Markdown escapes and entities can split one visible text node into several events.
@@ -100,10 +111,20 @@ pub(crate) fn query(
                 .find('\n')
                 .map_or(content.len(), |i| range.end + i);
             if seen >= offset {
+                // Narrow the run to the reference when the source spells it out; a run
+                // whose source uses escapes or entities keeps its whole span.
+                let mention = find_reference(&content[range.clone()], reference)
+                    .map_or(range.clone(), |at| {
+                        range.start + at..range.start + at + reference.len()
+                    });
+                let mention = content[..mention.start].encode_utf16().count()
+                    ..content[..mention.end].encode_utf16().count();
                 links.push(Backlink {
                     source_reference: format!("T-{number}"),
                     source_title: title.chars().take(256).collect(),
                     note_id: note_id.clone(),
+                    mention_start: mention.start,
+                    mention_end: mention.end,
                     passage: {
                         let line = &content[start..end];
                         let reference_offset = line.find(reference).unwrap_or(range.start - start);

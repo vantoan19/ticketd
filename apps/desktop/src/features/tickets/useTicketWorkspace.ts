@@ -27,7 +27,14 @@ export function useTicketWorkspace(
   const [family, setFamily] = useState("");
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, selectTicket] = useState<string | null>(null);
+  // Counts every selection, including of the ticket already open, so a view that
+  // belongs to one navigation (a revealed mention) can tell the next has begun.
+  const [selections, setSelections] = useState(0);
+  const setSelected = useCallback((reference: string | null) => {
+    selectTicket(reference);
+    setSelections((count) => count + 1);
+  }, []);
   const [details, setDetails] = useState<Record<string, Ticket>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -228,6 +235,7 @@ export function useTicketWorkspace(
     setTrash,
     tickets,
     selected,
+    selections,
     setSelected,
     details,
     setDetails,

@@ -1508,6 +1508,35 @@ fn backup_restore_preserves_personal_inbox_and_follows() {
 }
 
 #[test]
+fn backlink_reports_where_the_mention_sits_in_the_source_in_utf16_units() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let body = format!(
+        "Émoji 😀 first.\n\n| {r} | Done |\n|---|---|\n\nSee {r} here.",
+        r = target.reference
+    );
+    workspace
+        .change_ticket(
+            &source.reference,
+            TicketPatch {
+                body: Some(body.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let units: Vec<u16> = body.encode_utf16().collect();
+    let links = workspace.backlinks(&target.reference, 20, 0).unwrap();
+    assert_eq!(links.len(), 2);
+    let slice = |link: &ticketd_core::Backlink| {
+        String::from_utf16(&units[link.mention_start..link.mention_end]).unwrap()
+    };
+    assert_eq!(slice(&links[0]), target.reference);
+    assert_eq!(slice(&links[1]), target.reference);
+}
+
+#[test]
 fn backlinks_follow_markdown_content_and_note_changes() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

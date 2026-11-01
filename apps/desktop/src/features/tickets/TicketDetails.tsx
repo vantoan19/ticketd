@@ -25,6 +25,7 @@ const DependencyGraph = lazy(
 );
 export function TicketDetails({
   selected,
+  selections,
   inboxTarget,
   expanded,
   onExpand,
@@ -38,6 +39,8 @@ export function TicketDetails({
   updateTicket,
 }: {
   selected: string | null;
+  /** How many selection events have happened, including repeats of the same ticket. */
+  selections: number;
   inboxTarget?: { reference: string; id: string; key: number } | null;
   expanded: boolean;
   onExpand: () => void;
@@ -66,10 +69,15 @@ export function TicketDetails({
     setGraphReference(null);
   };
   const [mention, setMention] = useState<
-    (MentionTarget & { key: number }) | null
+    (MentionTarget & { key: number; selections: number }) | null
   >(null);
   // The highlight belongs to the navigation that opened it; the next one clears it.
-  if (mention && mention.reference !== selected) setMention(null);
+  // Any selection event, even of the ticket already open, counts as navigating.
+  if (
+    mention &&
+    (mention.reference !== selected || mention.selections !== selections)
+  )
+    setMention(null);
   const ticket = Object.values(details).find(
     (item) => item.reference === selected,
   );
@@ -192,7 +200,12 @@ export function TicketDetails({
               reference={item.reference}
               revision={revision}
               select={(target) => {
-                setMention({ ...target, key: Date.now() });
+                // This selection is itself counted; the mention survives only it.
+                setMention({
+                  ...target,
+                  key: Date.now(),
+                  selections: selections + 1,
+                });
                 setSelected(target.reference);
               }}
             />

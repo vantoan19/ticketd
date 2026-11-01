@@ -10,8 +10,16 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
-import { findMentionBlock } from "./mention-passage";
+import { mentionStillAt } from "./mention-passage";
 
+/** A backlink's passage and where its mention sits in the description source. */
+export type Mention = {
+  passage: string;
+  mentioned: string;
+  start: number;
+  end: number;
+  key: number;
+};
 type Content = Pick<Ticket, "title" | "body">;
 export function TicketEditor({
   ticket,
@@ -27,7 +35,7 @@ export function TicketEditor({
   select?: (reference: string) => void;
   revision?: number;
   /** A description passage the person navigated here to read; null once they move on. */
-  mention?: { passage: string; mentioned: string; key: number } | null;
+  mention?: Mention | null;
 }) {
   const [draft, setDraft] = useState<Content>({
     title: ticket.title,
@@ -79,47 +87,53 @@ export function TicketEditor({
   const bodyRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
-  // The rendered description is hidden while editing; a mention returns to reading it.
+  // A mention is revealed once. It is dropped when the person starts editing, when
+  // the saved text changes under it, or when the next navigation clears it, so
+  // none of those can bring the highlight back.
   const [handledMention, setHandledMention] = useState<number | null>(null);
+  const [shown, setShown] = useState<{ mention: Mention; body: string } | null>(
+    null,
+  );
   if (mention && mention.key !== handledMention) {
     setHandledMention(mention.key);
+    setShown({ mention, body: draft.body });
+    // The rendered description is hidden while editing; a mention returns to it.
     if (bodyMode === "editing") setBodyMode("reading");
+  } else if (shown && (!mention || editingBody || shown.body !== draft.body)) {
+    setShown(null);
   }
-  // Reveal the mentioned passage in place: scroll to it, highlight it, and focus it.
-  // The status text is written here because only the rendered DOM shows whether the
-  // passage was found.
+  const mark =
+    shown &&
+    mentionStillAt(draft.body, shown.mention.passage, {
+      start: shown.mention.start,
+      end: shown.mention.end,
+    })
+      ? {
+          start: shown.mention.start,
+          end: shown.mention.end,
+          describedBy: `mention-note-${ticket.id}`,
+        }
+      : undefined;
+  // Scroll to the marked passage and focus it, once per mention. React renders the
+  // mark; this only reads the DOM and writes the status text it points to. When no
+  // block carries the mark, say so and land on the description instead.
   useEffect(() => {
-    if (!mention || editingBody) return;
-    const block = documentRef.current
-      ? findMentionBlock(
-          documentRef.current,
-          mention.passage,
-          mention.mentioned,
-        )
-      : null;
+    if (!shown) return;
+    const block =
+      documentRef.current?.querySelector<HTMLElement>(
+        "[data-mention-target]",
+      ) ?? null;
     const target = block ?? bodyRef.current;
     const note = noteRef.current;
     if (note) {
       note.textContent = block
-        ? `Mentions ${mention.mentioned}`
-        : `The description no longer mentions ${mention.mentioned} where it was found.`;
+        ? `Mentions ${shown.mention.mentioned}`
+        : `The description no longer mentions ${shown.mention.mentioned} where it was found.`;
       note.className = block ? "sr-only" : "mention-missing";
     }
-    if (!target) return;
-    if (block) {
-      block.setAttribute("data-mention-target", "");
-      block.setAttribute("tabindex", "-1");
-      block.setAttribute("aria-describedby", `mention-note-${ticket.id}`);
-    }
-    target.scrollIntoView?.({ block: "center" });
-    (target as HTMLElement).focus({ preventScroll: true });
-    return () => {
-      if (!block) return;
-      block.removeAttribute("data-mention-target");
-      block.removeAttribute("tabindex");
-      block.removeAttribute("aria-describedby");
-    };
-  }, [mention, editingBody, ticket.id]);
+    target?.scrollIntoView?.({ block: "center" });
+    target?.focus({ preventScroll: true });
+  }, [shown]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;
   const bodyDirty = draft.body !== saved.body;
@@ -236,7 +250,7 @@ export function TicketEditor({
         role="group"
         aria-labelledby={`body-${ticket.id}`}
       >
-        {mention && !editingBody && (
+        {shown && !editingBody && (
           <p ref={noteRef} id={`mention-note-${ticket.id}`} role="status" />
         )}
         <div className="description-heading">
@@ -297,6 +311,7 @@ export function TicketEditor({
                 source={draft.body}
                 select={select}
                 revision={revision}
+                mention={mark}
               />
             </div>
           ) : (

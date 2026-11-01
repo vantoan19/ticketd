@@ -34,6 +34,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
   render(
     <TicketDetails
       selected="T-2"
+      selections={0}
       expanded={false}
       onExpand={vi.fn()}
       onReturn={vi.fn()}
@@ -76,6 +77,7 @@ test("the full-width view marks the reading column and drops the repeated headin
   const { container } = render(
     <TicketDetails
       selected="T-3"
+      selections={0}
       expanded
       onExpand={vi.fn()}
       onReturn={vi.fn()}
@@ -97,7 +99,12 @@ test("the full-width view marks the reading column and drops the repeated headin
   ).toBeTruthy();
 });
 
-test("the mentioned passage is highlighted after following a backlink and cleared on the next navigation", async () => {
+const scrollIntoView = Element.prototype.scrollIntoView;
+afterEach(() => {
+  Element.prototype.scrollIntoView = scrollIntoView;
+});
+
+function followBacklinkHarness() {
   Element.prototype.scrollIntoView = vi.fn();
   const base: Ticket = {
     id: "a",
@@ -129,19 +136,31 @@ test("the mentioned passage is highlighted after following a backlink and cleare
             source_title: "Source",
             note_id: null,
             passage: "Blocked on T-1 today.",
+            mention_start: 18,
+            mention_end: 21,
           },
         ]
       : [],
   );
+  // Like the workspace, count every selection, repeats included.
   function Harness() {
-    const [selected, setSelected] = useState<string | null>("T-1");
+    const [selected, select] = useState<string | null>("T-1");
+    const [selections, setSelections] = useState(0);
+    const setSelected = (reference: string | null) => {
+      select(reference);
+      setSelections((count) => count + 1);
+    };
     return (
       <>
         <button type="button" onClick={() => setSelected("T-1")}>
           Open target
         </button>
+        <button type="button" onClick={() => setSelected("T-2")}>
+          Open source again
+        </button>
         <TicketDetails
           selected={selected}
+          selections={selections}
           expanded={false}
           onExpand={vi.fn()}
           onReturn={vi.fn()}
@@ -156,15 +175,26 @@ test("the mentioned passage is highlighted after following a backlink and cleare
       </>
     );
   }
+  return Harness;
+}
+const marked = () => document.querySelector("[data-mention-target]");
+
+test("following a backlink marks the mentioned passage; the next navigation clears it", async () => {
+  const Harness = followBacklinkHarness();
   render(<Harness />);
   fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
   await waitFor(() =>
-    expect(document.querySelector("[data-mention-target]")?.textContent).toBe(
-      "Blocked on T-1 today.",
-    ),
+    expect(marked()?.textContent).toBe("Blocked on T-1 today."),
   );
   fireEvent.click(screen.getByRole("button", { name: "Open target" }));
-  await waitFor(() =>
-    expect(document.querySelector("[data-mention-target]")).toBeNull(),
-  );
+  await waitFor(() => expect(marked()).toBeNull());
+});
+
+test("selecting the ticket that is already open also clears the highlight", async () => {
+  const Harness = followBacklinkHarness();
+  render(<Harness />);
+  fireEvent.click(await screen.findByRole("button", { name: /Source/ }));
+  await waitFor(() => expect(marked()).not.toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Open source again" }));
+  await waitFor(() => expect(marked()).toBeNull());
 });

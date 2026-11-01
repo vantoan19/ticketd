@@ -179,6 +179,8 @@ fn backlinks_command_returns_source_and_passage() {
     let result = run(&["backlinks", "T-1"]);
     assert_eq!(result[0]["source_reference"], "T-2");
     assert_eq!(result[0]["passage"], "See T-1 for context");
+    assert_eq!(result[0]["mention_start"], 4);
+    assert_eq!(result[0]["mention_end"], 7);
 }
 
 #[test]

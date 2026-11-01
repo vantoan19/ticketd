@@ -19,6 +19,7 @@ export function TicketDetailPane({
 }) {
   const {
     selected,
+    selections,
     loading,
     queryError,
     tickets,
@@ -44,6 +45,7 @@ export function TicketDetailPane({
         onExpand={onExpand}
         onReturn={onReturn}
         selected={selected}
+        selections={selections}
         inboxTarget={inboxTarget}
         setSelected={onSelect}
         details={details}
