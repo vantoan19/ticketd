@@ -43,6 +43,60 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Step 21: a duplicate is the dedicated Duplicate status, not Canceled plus a link.
+///
+/// Rows still Canceled become Duplicate; a row with no remembered status (its status was
+/// changed on its own earlier) keeps Canceled as the status undo returns to. Rows whose
+/// status moved on keep that chosen status and lose the relationship, as leaving
+/// Duplicate does now. Every change is recorded in history.
+pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
+    let mut stmt = conn.prepare("SELECT d.source_id, d.canonical_id, t.status FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id")?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for (source, canonical, status) in rows {
+        if status == "Canceled" {
+            conn.execute(
+                "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
+                [&source],
+            )?;
+            conn.execute("UPDATE duplicate_tickets SET restore_status = COALESCE(restore_status, 'Canceled') WHERE source_id = ?1", [&source])?;
+            conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'status', 'Canceled', 'Duplicate')", [&source])?;
+        } else {
+            let reference: String = conn.query_row(
+                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+                [&canonical],
+                |r| r.get(0),
+            )?;
+            conn.execute(
+                "DELETE FROM duplicate_tickets WHERE source_id = ?1",
+                [&source],
+            )?;
+            conn.execute("INSERT INTO ticket_history (ticket_id, kind, from_value, to_value) VALUES (?1, 'relationship:duplicate', ?2, '')", params![source, reference])?;
+        }
+    }
+    conn.execute_batch("PRAGMA user_version = 21;")?;
+    Ok(())
+}
+
+/// Remove the canonical designation of a ticket that is leaving Duplicate by choosing
+/// another status. The chosen status stays.
+pub(crate) fn clear(conn: &Connection, id: &str, agent: Option<&str>) -> Result<(), Error> {
+    let canonical: Option<String> = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [id], |r| r.get(0)).optional()?;
+    if let Some(canonical) = canonical {
+        conn.execute("DELETE FROM duplicate_tickets WHERE source_id = ?1", [id])?;
+        history::record(conn, id, "relationship:duplicate", &canonical, "", agent)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn populate(conn: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
     ticket.duplicate_of = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&ticket.id], |r| r.get(0)).optional()?;
     let mut stmt = conn.prepare("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
@@ -124,12 +178,12 @@ impl Workspace {
                 agent,
             )?;
         }
-        if status != "Canceled" {
+        if status != "Duplicate" {
             tx.execute(
-                "UPDATE tickets SET status = 'Canceled' WHERE id = ?1",
+                "UPDATE tickets SET status = 'Duplicate' WHERE id = ?1",
                 [&source_id],
             )?;
-            history::record(&tx, &source_id, "status", &status, "Canceled", agent)?;
+            history::record(&tx, &source_id, "status", &status, "Duplicate", agent)?;
         }
         tx.commit()?;
         self.show_ticket(source)

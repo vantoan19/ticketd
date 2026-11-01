@@ -2138,7 +2138,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 20);
+    assert_eq!(version, 21);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2454,7 +2454,7 @@ fn retained_duplicate_blocker_stays_unresolved_and_review_notifies_followers() {
     .unwrap();
     let kept = ws.show_ticket(&kept.reference).unwrap();
     assert_eq!(kept.availability.as_deref(), Some("Blocked"));
-    assert_eq!(kept.prerequisites[0].status, Status::Canceled);
+    assert_eq!(kept.prerequisites[0].status, Status::Duplicate);
     assert!(
         ws.inbox(100, 0)
             .unwrap()
@@ -2716,7 +2716,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 20);
+    assert_eq!(version, 21);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
 
@@ -2944,7 +2944,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, 20);
+    assert_eq!(info.format_version, 21);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }
@@ -3189,5 +3189,323 @@ fn a_prerequisite_is_unresolved_until_it_is_done() {
             (blockers[1].clone(), true),
             (blockers[2].clone(), false)
         ]
+    );
+}
+
+fn set_status(workspace: &mut Workspace, reference: &str, status: Status) {
+    workspace
+        .change_ticket(
+            reference,
+            TicketPatch {
+                status: Some(status),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn marking_duplicate_sets_the_duplicate_status_and_link_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let marked = workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    assert_eq!(marked.status, Status::Duplicate);
+    assert_eq!(
+        marked.duplicate_of.as_deref(),
+        Some(target.reference.as_str())
+    );
+    let history = workspace.ticket_history(&source.reference).unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|e| e.kind == "status" && e.from_value == "Todo" && e.to_value == "Duplicate")
+    );
+    assert!(!history.iter().any(|e| e.to_value == "Canceled"));
+    assert_eq!("Duplicate".parse::<Status>().unwrap(), Status::Duplicate);
+}
+
+#[test]
+fn choosing_duplicate_without_a_canonical_is_rejected_and_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Lonely").unwrap();
+    let error = workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::Duplicate),
+                title: Some("Renamed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("canonical ticket"));
+    let unchanged = workspace.show_ticket(&ticket.reference).unwrap();
+    assert_eq!(unchanged.status, Status::Todo);
+    assert_eq!(unchanged.title, "Lonely");
+}
+
+#[test]
+fn leaving_duplicate_removes_the_link_and_keeps_the_chosen_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    set_status(&mut workspace, &source.reference, Status::InReview);
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    set_status(&mut workspace, &source.reference, Status::InProgress);
+    let left = workspace.show_ticket(&source.reference).unwrap();
+    assert_eq!(left.status, Status::InProgress);
+    assert_eq!(left.duplicate_of, None);
+    assert!(
+        workspace
+            .show_ticket(&target.reference)
+            .unwrap()
+            .duplicates
+            .is_empty()
+    );
+    assert!(
+        workspace
+            .ticket_history(&source.reference)
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "relationship:duplicate"
+                && e.from_value == target.reference
+                && e.to_value.is_empty())
+    );
+    // Undo after leaving has nothing to remove and keeps the chosen status.
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::InProgress
+    );
+    // Choosing Duplicate again while already Duplicate keeps the designation.
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    set_status(&mut workspace, &source.reference, Status::Duplicate);
+    assert_eq!(
+        workspace
+            .show_ticket(&source.reference)
+            .unwrap()
+            .duplicate_of
+            .as_deref(),
+        Some(target.reference.as_str())
+    );
+    workspace.remove_duplicate(&source.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&source.reference).unwrap().status,
+        Status::InProgress
+    );
+}
+
+#[test]
+fn a_duplicate_blocker_stays_unresolved_and_is_neither_ready_nor_blocked() {
+    use ticketd_core::{Availability, DependencyChoice, DependencyDecision, TicketFilter};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_ticket("Duplicate").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let preview = workspace
+        .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+        .unwrap();
+    let decisions = preview
+        .edges
+        .iter()
+        .map(|edge| DependencyDecision {
+            edge: edge.clone(),
+            choice: DependencyChoice::Retain,
+        })
+        .collect();
+    workspace
+        .mark_duplicate_reviewed(
+            &source.reference,
+            &canonical.reference,
+            &preview.canonical,
+            decisions,
+            None,
+        )
+        .unwrap();
+    assert!(!Status::Duplicate.satisfies_dependency());
+    let find = |availability| {
+        workspace
+            .find_tickets(&TicketFilter {
+                availability: Some(availability),
+                ..Default::default()
+            })
+            .unwrap()
+            .into_iter()
+            .map(|t| t.reference)
+            .collect::<Vec<_>>()
+    };
+    assert!(!find(Availability::Ready).contains(&source.reference));
+    assert!(!find(Availability::Blocked).contains(&source.reference));
+    assert!(!find(Availability::Ready).contains(&dependent.reference));
+    assert!(find(Availability::Blocked).contains(&dependent.reference));
+}
+
+#[test]
+fn effort_progress_counts_duplicates_separately() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let effort = workspace.create_effort("Launch").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let canceled = workspace.create_ticket("Canceled").unwrap();
+    for ticket in [&source, &target, &canceled] {
+        workspace
+            .set_effort(&ticket.reference, Some(&effort.id), None)
+            .unwrap();
+    }
+    set_status(&mut workspace, &canceled.reference, Status::Canceled);
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    let counts = workspace.show_effort(&effort.id).unwrap().counts;
+    assert_eq!((counts.duplicate, counts.canceled, counts.todo), (1, 1, 1));
+}
+
+#[test]
+fn duplicate_status_survives_export_and_backup_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let backup = dir.path().join("backup.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &target.reference, None)
+        .unwrap();
+    let export = workspace.export().unwrap();
+    let exported = export["tickets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == source.id)
+        .unwrap();
+    assert_eq!(exported["status"], "Duplicate");
+    workspace.backup(&backup).unwrap();
+    set_status(&mut workspace, &source.reference, Status::Done);
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    let restored = workspace.show_ticket(&source.reference).unwrap();
+    assert_eq!(restored.status, Status::Duplicate);
+    assert_eq!(restored.duplicate_of, Some(target.reference));
+}
+
+/// Build a version-20 workspace holding every legacy duplicate shape, then open it so
+/// migration step 21 runs.
+#[test]
+fn legacy_canceled_duplicates_migrate_deliberately() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let ordinary = workspace.create_ticket("Ordinary canceled").unwrap();
+    let plain = workspace.create_ticket("Marked from in progress").unwrap();
+    let independent = workspace.create_ticket("Canceled again later").unwrap();
+    let moved_on = workspace.create_ticket("Moved on").unwrap();
+    for t in [&ordinary, &plain, &independent, &moved_on] {
+        set_status(&mut workspace, &t.reference, Status::InProgress);
+    }
+    set_status(&mut workspace, &ordinary.reference, Status::Canceled);
+    for t in [&plain, &independent, &moved_on] {
+        workspace
+            .mark_duplicate(&t.reference, &canonical.reference, None)
+            .unwrap();
+    }
+    drop(workspace);
+    // Rewrite to the legacy shape: duplicates were Canceled plus a link.
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "UPDATE tickets SET status = 'Canceled' WHERE id IN (?1, ?2, ?3)",
+        [&plain.id, &independent.id, &moved_on.id],
+    )
+    .unwrap();
+    // Independent later status changes cleared the remembered status.
+    db.execute(
+        "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id IN (?1, ?2)",
+        [&independent.id, &moved_on.id],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE tickets SET status = 'Done' WHERE id = ?1",
+        [&moved_on.id],
+    )
+    .unwrap();
+    db.execute_batch("PRAGMA user_version = 20;").unwrap();
+    drop(db);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&ordinary.reference).unwrap().status,
+        Status::Canceled
+    );
+    let plain_now = workspace.show_ticket(&plain.reference).unwrap();
+    assert_eq!(plain_now.status, Status::Duplicate);
+    assert_eq!(
+        plain_now.duplicate_of.as_deref(),
+        Some(canonical.reference.as_str())
+    );
+    assert_eq!(
+        workspace
+            .show_ticket(&independent.reference)
+            .unwrap()
+            .status,
+        Status::Duplicate
+    );
+    let moved_now = workspace.show_ticket(&moved_on.reference).unwrap();
+    assert_eq!(moved_now.status, Status::Done);
+    assert_eq!(moved_now.duplicate_of, None);
+    assert_eq!(
+        workspace
+            .show_ticket(&canonical.reference)
+            .unwrap()
+            .duplicates,
+        vec![plain.reference.clone(), independent.reference.clone()]
+    );
+    // History survives and records what the migration did.
+    let history = workspace.ticket_history(&plain.reference).unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|e| e.kind == "relationship:duplicate" && e.to_value == canonical.reference)
+    );
+    assert!(
+        history
+            .iter()
+            .any(|e| e.kind == "status" && e.from_value == "Canceled" && e.to_value == "Duplicate")
+    );
+    let history = workspace.ticket_history(&moved_on.reference).unwrap();
+    assert!(history.iter().any(|e| e.kind == "relationship:duplicate"
+        && e.from_value == canonical.reference
+        && e.to_value.is_empty()));
+    // Undo returns to the status before marking, or to Canceled when that had been chosen
+    // independently.
+    workspace.remove_duplicate(&plain.reference, None).unwrap();
+    assert_eq!(
+        workspace.show_ticket(&plain.reference).unwrap().status,
+        Status::InProgress
+    );
+    workspace
+        .remove_duplicate(&independent.reference, None)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(&independent.reference)
+            .unwrap()
+            .status,
+        Status::Canceled
     );
 }
