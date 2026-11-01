@@ -2935,8 +2935,10 @@ fn workspace_info_reports_location_counts_size_and_format() {
         .unwrap();
 
     let info = workspace.workspace_info().unwrap();
+    // Compare files, not spellings: Windows reports the path as opened (which may
+    // use 8.3 short names), while canonicalize returns a `\\?\` long-name path.
     assert_eq!(
-        std::path::Path::new(&info.path),
+        std::path::Path::new(&info.path).canonicalize().unwrap(),
         path.canonicalize().unwrap()
     );
     assert_eq!(info.tickets, 1);
