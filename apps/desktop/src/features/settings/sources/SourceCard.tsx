@@ -251,9 +251,11 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
       </div>
       {!preview && !working && (
         <p className="settings-hint">
-          {stale
-            ? "The rules changed. Preview matches again before saving."
-            : "Preview the matching issues before saving."}
+          {saved && !dirty
+            ? "These rules are the saved configuration."
+            : stale
+              ? "The rules changed. Preview matches again before saving."
+              : "Preview the matching issues before saving."}
         </p>
       )}
       {connection && (

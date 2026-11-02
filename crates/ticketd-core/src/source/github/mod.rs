@@ -512,7 +512,13 @@ impl Connector for GithubConnector {
                     next_cursor,
                     skipped: vec![SkippedPartition {
                         code: error.code().to_owned(),
-                        message: format!("{repository}: {error}"),
+                        message: match error {
+                            SourceError::NotFound(_) => format!(
+                                "{repository} was not found, or your account cannot see it"
+                            ),
+                            other => other.to_string(),
+                        },
+                        field: Some("repositories".to_owned()),
                     }],
                 });
             }

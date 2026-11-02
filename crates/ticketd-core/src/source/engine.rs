@@ -272,6 +272,13 @@ impl Engine {
         // Saving rules that name a repository nobody can read is a mistake the
         // person should hear about now; a refresh tolerates it later.
         if let Some(part) = summary.skipped.first() {
+            // Name the setting, once, so the person is pointed at the field.
+            if let Some(field) = &part.field {
+                return Err(SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
+                    field: field.clone(),
+                    message: format!("cannot be used: {}", part.message),
+                }]));
+            }
             return Err(if part.code == "forbidden" {
                 SourceError::Forbidden(part.message.clone())
             } else {

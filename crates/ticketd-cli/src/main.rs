@@ -1199,12 +1199,15 @@ const TOKEN_HINT: &str = " From a script, set TICKETD_GITHUB_TOKEN to a token th
 
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
-        let hint = match error.downcast_ref::<ticketd_core::Error>() {
-            Some(ticketd_core::Error::Source(ticketd_core::source::SourceError::Unauthenticated(
-                _,
-            ))) => TOKEN_HINT,
-            _ => "",
+        use ticketd_core::source::SourceError;
+        let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
+            Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
+            _ => matches!(
+                error.downcast_ref::<SourceError>(),
+                Some(SourceError::Unauthenticated(_))
+            ),
         };
+        let hint = if unauthenticated { TOKEN_HINT } else { "" };
         eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }

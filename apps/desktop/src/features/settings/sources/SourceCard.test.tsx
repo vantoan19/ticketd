@@ -325,6 +325,30 @@ test("a saved source says how often it refreshes and when it last did", () => {
   expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
 });
 
+test("rules equal to the saved configuration are not described as changed", async () => {
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove o/r" }));
+  await addRepository("o/r");
+  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(screen.queryByText(/The rules changed/)).toBeNull();
+  expect(
+    screen.getByText(/These rules are the saved configuration/),
+  ).toBeTruthy();
+});
+
 test("an unavailable source never claims a fresh sync or a green configuration", () => {
   const { container } = render(
     <SourceActivityContext.Provider

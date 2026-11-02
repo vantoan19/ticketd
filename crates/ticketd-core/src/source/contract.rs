@@ -204,6 +204,9 @@ pub struct SkippedPartition {
     /// The failure code of the part (`not_found` or `forbidden`).
     pub code: String,
     pub message: String,
+    /// The setting that named the part, so a preview can point at it.
+    #[serde(default)]
+    pub field: Option<String>,
 }
 
 /// A request to create an ordinary issue. Connectors that do not declare

@@ -378,7 +378,10 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
     assert_eq!(found, ["o/live#1"]);
     assert_eq!(summary.skipped.len(), 1);
     assert_eq!(summary.skipped[0].code, "not_found");
-    assert!(summary.skipped[0].message.contains("o/gone"));
+    assert_eq!(
+        summary.skipped[0].message,
+        "o/gone was not found, or your account cannot see it"
+    );
     // A repository closed to the account is skipped the same way, with its own code.
     fixture.respond(
         &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
@@ -393,6 +396,7 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
         .unwrap();
     assert_eq!(summary.skipped[0].code, "forbidden");
     // Saving rules that name an unreadable repository is still refused.
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
     fixture.respond(
         &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
         status(404, json!({"message": "Not Found"}), &[]),
@@ -401,7 +405,14 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
         &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
         ok(json!([])),
     );
-    assert!(engine.preview("github", &values).is_err());
+    // The refusal points at the repositories field and names the repository once.
+    let error = engine.preview("github", &values).unwrap_err();
+    assert_eq!(error.issues().len(), 1);
+    assert_eq!(error.issues()[0].field, "repositories");
+    assert_eq!(
+        error.issues()[0].message,
+        "cannot be used: o/gone was not found, or your account cannot see it"
+    );
 }
 
 #[test]

@@ -184,7 +184,7 @@ fn schema_validation_reports_every_problem_and_normalizes_values() {
     let missing = schema
         .validate(&values(json!({"assignee": "octo"})))
         .unwrap_err();
-    assert_eq!(missing[0].message, "is required");
+    assert_eq!(missing[0].message, "are required");
 
     let too_many = schema
         .validate(&values(

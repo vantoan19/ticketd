@@ -248,7 +248,7 @@ fn invalid_settings_and_provider_failures_do_not_save() {
     );
     assert!(stderr.contains("bogus"), "{stderr}");
     let stderr = cli.fail(&["source", "save", "github"], Some(TOKEN));
-    assert!(stderr.contains("is required"), "{stderr}");
+    assert!(stderr.contains("are required"), "{stderr}");
     let stderr = cli.fail(
         &[
             "source",
