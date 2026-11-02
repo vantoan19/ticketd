@@ -173,6 +173,20 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
+test("a trashed ticket's rail says why it cannot be published", async () => {
+  bridgeAnswers({
+    ...eligible,
+    eligibility: {
+      kind: "ineligible",
+      reason: "trashed",
+      message: "T-1 is in the trash; restore it to publish it",
+    },
+  });
+  rail(ticket({ trashed: true }));
+  await screen.findByText("T-1 is in the trash; restore it to publish it");
+  expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
+});
+
 test("a ticket that changed since the preview sends nothing and is previewed again", async () => {
   bridgeAnswers(eligible, {
     reject: {

@@ -740,20 +740,24 @@ fn eligibility(
     }
     let owned: Option<(String, String, String)> = connection
         .query_row(
-            "SELECT o.authority, i.provider, i.display FROM external_identities i \
+            "SELECT o.authority, i.origin, i.display FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.ticket_id = ?1",
             [&ticket.id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     match owned {
-        Some((authority, _, display)) if authority == "external" => {
-            return Ok(ineligible(
-                IneligibleReason::ExternallyOwned,
+        Some((authority, origin, display)) if authority == "external" => {
+            let message = if origin == "imported" {
+                format!(
+                    "{reference} was imported from {display} on {provider_name}; only local tickets are published"
+                )
+            } else {
                 format!(
                     "{reference} is already {display} on {provider_name} and is owned there; it is published only once"
-                ),
-            ));
+                )
+            };
+            return Ok(ineligible(IneligibleReason::ExternallyOwned, message));
         }
         Some((_, _, display)) => {
             return Ok(ineligible(
@@ -809,9 +813,7 @@ fn require_target<'a>(
     target.ok_or_else(|| {
         (
             IneligibleReason::SourceNotConnected,
-            format!(
-                "connect {provider_name} in Settings (or `ticketd source save {provider}`) before publishing"
-            ),
+            format!("connect {provider_name} in Settings before publishing"),
         )
     })
 }

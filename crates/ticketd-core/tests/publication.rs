@@ -1700,3 +1700,38 @@ fn nothing_created_is_not_concluded_before_a_just_created_issue_could_be_listed(
 
     f.resolve(&ticket.reference, &not_created()).unwrap();
 }
+
+#[test]
+fn an_imported_ticket_says_only_local_tickets_are_published() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    // Discovery imports an issue nobody here published.
+    let mut stranger = unrelated_issue(&f, 30, "Someone else's", "Their text");
+    stranger.created_at = "2030-01-01T00:00:00Z".into();
+    f.fake.0.lock().unwrap().issues.insert(30, stranger);
+    f.fake.0.lock().unwrap().issues.remove(&101);
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    let imported = f
+        .workspace
+        .list_tickets()
+        .unwrap()
+        .into_iter()
+        .find(|t| t.reference != ticket.reference)
+        .unwrap();
+
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &imported.reference, "fake", None)
+        .unwrap();
+    let Eligibility::Ineligible { reason, message } = preview.eligibility else {
+        panic!("an imported ticket is not publishable");
+    };
+    assert_eq!(reason, IneligibleReason::ExternallyOwned);
+    assert!(message.contains("imported from o/r#30"), "{message}");
+    assert!(
+        message.contains("only local tickets are published"),
+        "{message}"
+    );
+}

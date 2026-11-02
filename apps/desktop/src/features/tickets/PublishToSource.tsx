@@ -120,7 +120,7 @@ export function LocalPublication({
         />
       </>
     );
-  if (!preview || ticket.trashed) return null;
+  if (!preview) return null;
   if (preview.eligibility.kind === "eligible")
     return (
       <>

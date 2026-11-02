@@ -1004,7 +1004,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     &engine,
                     &ticket,
                     &ticketd_core::source::PublishOptions {
-                        provider,
+                        provider: provider.clone(),
                         destination,
                         now: None,
                         expected_fingerprint: expect,
@@ -1022,6 +1022,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         writeln!(output, "{}", serde_json::to_string(attempt)?)?;
                     }
                     return Err(match error {
+                        ticketd_core::source::PublicationError::Ineligible {
+                            reason: ticketd_core::source::IneligibleReason::SourceNotConnected,
+                            ..
+                        } => format!(
+                            "{error}; from the command line, run `ticketd source save {provider} --set repositories=owner/name`"
+                        ),
                         ticketd_core::source::PublicationError::Unresolved { .. } => format!(
                             "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
                         ),
