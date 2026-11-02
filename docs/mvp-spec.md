@@ -553,6 +553,10 @@ The agreed authority model is:
   the desktop is open. Manual refresh is available through both the UI and CLI.
   Retain the last synchronized content offline and show when it was refreshed.
   An always-running background synchronization service is deferred.
+- Saving changed discovery rules makes prior match membership unknown until a
+  complete refresh under the new rules. A run using replaced rules cannot import
+  new tickets or advance discovery membership and source health; successful reads
+  of already tracked tickets still refresh their content.
 - Tickets that stop matching a discovery rule remain in ticketd and continue
   synchronizing while access remains available. Stopping synchronization is a
   separate action, not a consequence of leaving discovery scope.

@@ -17,7 +17,7 @@
 //! [`FailureCode::is_unavailable`] is true, and it stays so until a later attempt confirms the ticket. The state
 //! is derived from `source_sync.last_error_code` and is never stored as its own
 //! flag, so it cannot drift from the error that caused it. It never changes the
-//! ticket's content, status, ownership or history, and it has no grace period.
+//! ticket's content, status or ownership, and it has no grace period.
 //! A rate limit is *delayed*, not unavailable.
 
 use rusqlite::{Connection, params};

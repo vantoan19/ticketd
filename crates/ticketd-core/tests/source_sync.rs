@@ -6,7 +6,7 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
 };
 
 use serde_json::json;
@@ -27,6 +27,8 @@ struct Remote {
     issues: BTreeMap<u64, ExternalIssue>,
     /// Ids the discovery rules match (only open ones are listed, like GitHub).
     matching: Vec<u64>,
+    matching_by_repository: BTreeMap<String, Vec<u64>>,
+    pause_next_discovery: Option<DiscoveryPause>,
     page_size: usize,
     outage: Option<String>,
     discover_calls: usize,
@@ -35,6 +37,23 @@ struct Remote {
     conversation_outage: Option<String>,
     conversation_calls: Vec<u64>,
     revision: u32,
+}
+
+#[derive(Clone)]
+struct DiscoveryPause {
+    entered: mpsc::SyncSender<()>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl DiscoveryPause {
+    fn wait(self) {
+        self.entered.send(()).unwrap();
+        let (released, changed) = &*self.release;
+        let mut released = released.lock().unwrap();
+        while !*released {
+            released = changed.wait(released).unwrap();
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -90,14 +109,24 @@ impl Connector for Fake {
         if let Some(message) = remote.outage.clone() {
             return Err(SourceError::Unavailable(message));
         }
-        let listed: Vec<ExternalIssue> = remote
-            .matching
+        let repositories = request.config["repositories"].as_array().unwrap();
+        let matching = repositories
+            .first()
+            .and_then(|repository| repository.as_str())
+            .and_then(|repository| remote.matching_by_repository.get(repository))
+            .unwrap_or(&remote.matching);
+        let listed: Vec<ExternalIssue> = matching
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
             .cloned()
             .collect();
         let size = remote.page_size.max(1);
+        let pause = remote.pause_next_discovery.take();
+        drop(remote);
+        if let Some(pause) = pause {
+            pause.wait();
+        }
         let start: usize = request.cursor.map_or(0, |c| c.parse().unwrap());
         let end = (start + size).min(listed.len());
         Ok(DiscoveryPage {
@@ -1487,6 +1516,94 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
             .filter(|entry| entry.kind == "source_import")
             .count(),
         1
+    );
+}
+
+#[test]
+fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Tracked in A"), false);
+    f.publish(issue(2, "Only in A"), false);
+    f.publish(issue(3, "Only in B"), false);
+    f.remote(|remote| {
+        remote.matching_by_repository.insert("o/a".into(), vec![1]);
+        remote.matching_by_repository.insert("o/b".into(), vec![3]);
+    });
+    let config_a = json!({"repositories": ["o/a"]});
+    f.workspace
+        .save_source(&f.engine, "fake", config_a.as_object().unwrap())
+        .unwrap();
+    assert_eq!(f.refresh().imported, ["T-1"]);
+    f.remote(|remote| {
+        remote
+            .matching_by_repository
+            .insert("o/a".into(), vec![1, 2]);
+    });
+
+    let (entered_tx, entered_rx) = mpsc::sync_channel(0);
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    f.remote(|remote| {
+        remote.pause_next_discovery = Some(DiscoveryPause {
+            entered: entered_tx,
+            release: release.clone(),
+        });
+    });
+    let path = f.path();
+    let fake = f.fake.clone();
+    let refresh = std::thread::spawn(move || {
+        let mut engine = Engine::new();
+        engine.register(Box::new(fake)).unwrap();
+        let mut workspace = Workspace::open(path).unwrap();
+        workspace
+            .refresh_sources(
+                &engine,
+                &RefreshOptions {
+                    ticket: None,
+                    now: Some("2026-02-02T00:00:00Z".into()),
+                },
+            )
+            .unwrap()
+    });
+    entered_rx.recv().unwrap();
+
+    let config_b = json!({"repositories": ["o/b"]});
+    let mut second_workspace = Workspace::open(f.path()).unwrap();
+    second_workspace
+        .save_source(&f.engine, "fake", config_b.as_object().unwrap())
+        .unwrap();
+    drop(second_workspace);
+    {
+        let (released, changed) = &*release;
+        *released.lock().unwrap() = true;
+        changed.notify_all();
+    }
+
+    let stale_report = refresh.join().unwrap();
+    let stale_membership = f.ticket(1).source.as_ref().unwrap().discovery_matches;
+    let stale_status = f.workspace.source_statuses().unwrap();
+    assert_eq!(
+        stale_membership, None,
+        "membership must be unknown until a complete refresh under config B; stale run={stale_report:?}; source status={stale_status:?}"
+    );
+    assert!(
+        stale_report.imported.is_empty(),
+        "the in-flight run used config A after config B was saved: {stale_report:?}"
+    );
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(
+        stale_status[0].last_refreshed_at.as_deref(),
+        Some("2026-02-01T00:00:00Z"),
+        "the rejected A discovery must not advance accepted provider health"
+    );
+
+    f.publish(issue(1, "Still syncing outside B"), false);
+    let b_report = f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(b_report.imported, ["T-2"]);
+    assert_eq!(f.ticket(2).title, "Only in B");
+    assert_eq!(f.ticket(1).title, "Still syncing outside B");
+    assert_eq!(
+        f.ticket(1).source.as_ref().unwrap().discovery_matches,
+        Some(false)
     );
 }
 

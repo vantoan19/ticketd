@@ -703,6 +703,7 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
+    configurations: HashMap<String, super::ConfigValues>,
     discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
@@ -768,6 +769,7 @@ impl Workspace {
             failures: Vec::new(),
             runs: Vec::new(),
             discovery: Vec::new(),
+            configurations: HashMap::new(),
         };
         let saved = self.saved_sources()?;
         let providers: Vec<String> = if options.ticket.is_some() {
@@ -788,6 +790,11 @@ impl Workspace {
         };
         for provider in providers {
             let config = saved.iter().find(|s| s.provider == provider);
+            if let Some(source) = config {
+                gathered
+                    .configurations
+                    .insert(provider.clone(), source.config.clone());
+            }
             let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
             // Set when the source as a whole cannot be read, so asking for more
@@ -1053,8 +1060,32 @@ impl Workspace {
     ) -> Result<RefreshReport, Error> {
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
+        // Configuration can change while the connector is on the network.
+        // Re-read it under the same write lock as the results: old discovery
+        // cannot import new tickets or describe the rules saved afterwards.
+        let mut replaced = HashSet::new();
+        for (provider, used) in &gathered.configurations {
+            let stored: Option<String> = transaction
+                .query_row(
+                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
+                    [provider],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let current = stored
+                .map(|raw| serde_json::from_str::<super::ConfigValues>(&raw))
+                .transpose()?;
+            if current.as_ref() != Some(used) {
+                replaced.insert(provider.clone());
+            }
+        }
         let mut applied = Applied::default();
         for issue in &gathered.issues {
+            if replaced.contains(&issue.reference.identity.provider)
+                && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
+            {
+                continue;
+            }
             let key = (
                 issue.reference.identity.provider.clone(),
                 issue.reference.identity.id.clone(),
@@ -1068,6 +1099,9 @@ impl Workspace {
             )?;
         }
         for (provider, seen) in &gathered.discovery {
+            if replaced.contains(provider) {
+                continue;
+            }
             let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
             let identities = statement
                 .query_map([provider], |row| {
@@ -1082,6 +1116,9 @@ impl Workspace {
             tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
         let mut failures = Vec::new();
         for found in &gathered.failures {
+            if replaced.contains(&found.provider) {
+                continue;
+            }
             let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
             if let Some(ticket) = ticket {
                 match found.scope {
@@ -1141,6 +1178,9 @@ impl Workspace {
             });
         }
         for run in &gathered.runs {
+            if replaced.contains(&run.provider) {
+                continue;
+            }
             freshness::record_run(&transaction, run, now)?;
         }
         transaction.commit()?;
