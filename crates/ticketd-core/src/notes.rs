@@ -124,7 +124,7 @@ pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
             UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
         END;
         CREATE TRIGGER IF NOT EXISTS ticket_history_time AFTER INSERT ON ticket_history WHEN NEW.kind NOT IN ('source_unavailable', 'publication_unresolved') BEGIN
-            UPDATE tickets SET updated_at = NEW.timestamp WHERE id = NEW.ticket_id;
+            UPDATE tickets SET updated_at = CASE WHEN updated_at IS NULL OR updated_at < NEW.timestamp THEN NEW.timestamp ELSE updated_at END WHERE id = NEW.ticket_id;
         END;
         CREATE TRIGGER IF NOT EXISTS note_created_time AFTER INSERT ON notes BEGIN
             UPDATE tickets SET updated_at = NEW.created_at WHERE id = NEW.ticket_id;

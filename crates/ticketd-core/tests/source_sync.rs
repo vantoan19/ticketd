@@ -1462,6 +1462,32 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
         source.last_refreshed_at.as_deref(),
         Some("2026-02-02T00:00:00Z")
     );
+    let updated_before = reopened.show_ticket(&imported).unwrap().updated_at;
+    drop(reopened);
+    let path = f.dir.path().join("workspace.sqlite3");
+    let legacy = rusqlite::Connection::open(&path).unwrap();
+    legacy
+        .execute(
+            "DELETE FROM ticket_history WHERE kind = 'source_import'",
+            [],
+        )
+        .unwrap();
+    legacy.pragma_update(None, "user_version", 27).unwrap();
+    drop(legacy);
+    let migrated = Workspace::open(path).unwrap();
+    assert_eq!(
+        migrated.show_ticket(&imported).unwrap().updated_at,
+        updated_before
+    );
+    assert_eq!(
+        migrated
+            .ticket_history(&imported)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.kind == "source_import")
+            .count(),
+        1
+    );
 }
 
 #[test]

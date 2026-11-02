@@ -52,7 +52,7 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     else {
         panic!("expected a valid backup, got {:?}", inspection.check);
     };
-    assert_eq!(format_version, FORMAT_VERSION);
+    assert_eq!(i64::from(format_version), FORMAT_VERSION);
     assert_eq!(
         (
             summary.tickets,
@@ -90,7 +90,7 @@ fn an_empty_workspace_has_no_last_change() {
     assert_eq!(
         inspection.check,
         BackupCheck::Valid {
-            format_version: FORMAT_VERSION,
+            format_version: FORMAT_VERSION as u32,
             summary: expected
         }
     );
@@ -112,8 +112,8 @@ fn a_newer_format_names_both_versions() {
     assert_eq!(
         workspace.inspect_backup(&newer).unwrap().check,
         BackupCheck::NewerFormat {
-            backup_version: FORMAT_VERSION + 1,
-            supported_version: FORMAT_VERSION
+            backup_version: (FORMAT_VERSION + 1) as u32,
+            supported_version: FORMAT_VERSION as u32
         }
     );
 }

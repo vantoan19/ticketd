@@ -2993,7 +2993,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, FORMAT_VERSION);
+    assert_eq!(i64::from(info.format_version), FORMAT_VERSION);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }

@@ -26,7 +26,6 @@
 .publication-dialog [data-slot="dialog-header"] {
   position: sticky;
   top: -24px;
-  z-index: 1;
   margin-top: -24px;
   padding-top: 24px;
   padding-bottom: 8px;
