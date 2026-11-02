@@ -217,21 +217,12 @@ pub enum PublicationError {
     /// the issue's, which only a person who has seen the difference may accept
     /// ([`ResolveOptions::accept_different_content`]). Nothing was changed.
     #[error(
-        "{reference}: {} does not hold what ticketd sent: {}. Attaching it would replace this ticket's text with the issue's; confirm only if it is the issue this publication created",
-        issue.display,
-        difference(*title_differs, *body_differs, issue_title, sent_title)
+        "{}: {} does not hold what ticketd sent: {}. Attaching it would replace this ticket's text with the issue's; confirm only if it is the issue this publication created",
+        .0.reference,
+        .0.issue.display,
+        difference(.0.title_differs, .0.body_differs, &.0.issue_title, &.0.sent_title)
     )]
-    DifferentContent {
-        reference: String,
-        attempt_id: String,
-        issue: PublishedIssue,
-        title_differs: bool,
-        body_differs: bool,
-        /// What the issue holds now, and the title that was sent.
-        issue_title: String,
-        sent_title: String,
-        issue_body: String,
-    },
+    DifferentContent(Box<ContentDifference>),
     /// Resolution was asked for a ticket with no uncertain attempt.
     #[error("{reference} has no uncertain publication to resolve")]
     NothingToResolve { reference: String },
@@ -279,6 +270,19 @@ pub enum PublicationError {
         attempt_id: String,
         message: String,
     },
+}
+
+/// How an issue named for attaching differs from what an attempt sent.
+#[derive(Debug)]
+pub struct ContentDifference {
+    pub reference: String,
+    pub attempt_id: String,
+    pub issue: PublishedIssue,
+    pub title_differs: bool,
+    pub body_differs: bool,
+    /// What the issue holds now, and the title that was sent.
+    pub issue_title: String,
+    pub sent_title: String,
 }
 
 /// What differs between an issue and the sent text, for a person to read.
@@ -442,7 +446,10 @@ fn ready_text(started_at: &str) -> String {
 }
 
 fn search_settled(started_at: &str, now: &str) -> bool {
-    match (search_ready_at(started_at).as_deref().and_then(parse_time), parse_time(now)) {
+    match (
+        search_ready_at(started_at).as_deref().and_then(parse_time),
+        parse_time(now),
+    ) {
         (Some(ready), Some(now)) => now >= ready,
         _ => true,
     }
@@ -1063,7 +1070,11 @@ impl Workspace {
                 format!(
                     "{provider_name} created {}, but that issue was already {} as another ticket, so it was not attached here.",
                     issue.display,
-                    if origin == "published" { "published" } else { "imported" }
+                    if origin == "published" {
+                        "published"
+                    } else {
+                        "imported"
+                    }
                 ),
             ),
             Ok(Linked::SettledElsewhere) => (
@@ -1124,7 +1135,11 @@ impl Workspace {
         let adopt = match identity_owner(&transaction, identity)? {
             None => None,
             Some(owner) if adoptable(&owner, &started_at) => Some(owner.ticket_id),
-            Some(owner) => return Ok(Linked::Conflict { origin: owner.origin }),
+            Some(owner) => {
+                return Ok(Linked::Conflict {
+                    origin: owner.origin,
+                });
+            }
         };
         let now = clock(&transaction, now)?;
         let attempt = complete_attempt(
@@ -1628,17 +1643,18 @@ impl Workspace {
         let body_differs = plain(&issue.body) != plain(&attempt.body);
         let different = attempt.issue.is_none() && (title_differs || body_differs);
         if different && !accept_different_content {
-            return Err(PublicationError::DifferentContent {
-                reference: ticket.reference.clone(),
-                attempt_id: attempt.id.clone(),
-                issue: published(issue),
-                title_differs,
-                body_differs,
-                issue_title: issue.title.clone(),
-                sent_title: attempt.title.clone(),
-                issue_body: issue.body.clone(),
-            }
-            .into());
+            return Err(
+                PublicationError::DifferentContent(Box::new(ContentDifference {
+                    reference: ticket.reference.clone(),
+                    attempt_id: attempt.id.clone(),
+                    issue: published(issue),
+                    title_differs,
+                    body_differs,
+                    issue_title: issue.title.clone(),
+                    sent_title: attempt.title.clone(),
+                }))
+                .into(),
+            );
         }
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
@@ -1688,7 +1704,11 @@ impl Workspace {
                 Some(owner) => format!(
                     "{} is already linked to another ticket (it was {} there), so it cannot be attached here",
                     issue.display,
-                    if owner.origin == "published" { "published" } else { "imported" }
+                    if owner.origin == "published" {
+                        "published"
+                    } else {
+                        "imported"
+                    }
                 ),
                 None => format!(
                     "{} is already linked to an issue of its own, so it cannot be attached here",
@@ -2030,7 +2050,11 @@ fn complete_attempt(
         transaction,
         sent.ticket_id,
         "source",
-        if sent.attached.is_some() { "attached" } else { "" },
+        if sent.attached.is_some() {
+            "attached"
+        } else {
+            ""
+        },
         &issue.display,
         sent.agent,
     )?;

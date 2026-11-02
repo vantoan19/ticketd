@@ -1577,18 +1577,15 @@ fn attaching_an_issue_with_other_text_needs_confirmation_and_keeps_the_local_tex
     f.fake.0.lock().unwrap().issues.remove(&101);
 
     // Refused, and nothing about the attempt or the ticket changes.
-    let error = publication_error(f.resolve(&ticket.reference, &attach(Some("22"))).unwrap_err());
-    let PublicationError::DifferentContent {
-        issue,
-        title_differs,
-        body_differs,
-        ..
-    } = error
-    else {
+    let error = publication_error(
+        f.resolve(&ticket.reference, &attach(Some("22")))
+            .unwrap_err(),
+    );
+    let PublicationError::DifferentContent(difference) = error else {
         panic!("expected a content difference");
     };
-    assert_eq!(issue.display, "o/r#22");
-    assert!(title_differs && body_differs);
+    assert_eq!(difference.issue.display, "o/r#22");
+    assert!(difference.title_differs && difference.body_differs);
     f.still_unresolved(&ticket.reference);
     assert_eq!(f.ticket(&ticket.reference).title, "Escalate");
 
@@ -1658,11 +1655,17 @@ fn a_refused_attach_of_an_issue_owned_elsewhere_leaves_the_attempt_untouched() {
         f.resolve(&ticket.reference, &accept_different("102"))
             .unwrap_err(),
     );
-    assert!(matches!(error, PublicationError::Mismatch { .. }), "{error}");
+    assert!(
+        matches!(error, PublicationError::Mismatch { .. }),
+        "{error}"
+    );
     assert!(error.to_string().contains("published"), "{error}");
     let attempt = f.ticket(&ticket.reference).publication.unwrap();
     assert!(attempt.issue.is_none(), "no issue may be recorded");
-    assert_ne!(attempt.failure.map(|x| x.code), Some("identity_conflict".into()));
+    assert_ne!(
+        attempt.failure.map(|x| x.code),
+        Some("identity_conflict".into())
+    );
     let review = f
         .workspace
         .review_publication_at(&f.engine, &ticket.reference, false, Some(&later()))
@@ -1685,7 +1688,10 @@ fn nothing_created_is_not_concluded_before_a_just_created_issue_could_be_listed(
     let mut early = not_created();
     early.now = None;
     let error = publication_error(f.resolve(&ticket.reference, &early).unwrap_err());
-    assert!(matches!(error, PublicationError::Unverified { .. }), "{error}");
+    assert!(
+        matches!(error, PublicationError::Unverified { .. }),
+        "{error}"
+    );
     assert!(error.to_string().contains("look again"), "{error}");
     f.still_unresolved(&ticket.reference);
     let review = f
@@ -1744,8 +1750,16 @@ fn an_unresolved_publication_never_advises_retrying_later() {
     let ticket = f.lost_response("Escalate");
     let attempt = f.ticket(&ticket.reference).publication.unwrap();
     let failure = attempt.failure.unwrap();
-    assert!(failure.message.contains("status 502"), "{}", failure.message);
-    assert!(!failure.message.contains("retry later"), "{}", failure.message);
+    assert!(
+        failure.message.contains("status 502"),
+        "{}",
+        failure.message
+    );
+    assert!(
+        !failure.message.contains("retry later"),
+        "{}",
+        failure.message
+    );
 }
 
 #[test]
@@ -1756,7 +1770,10 @@ fn an_issue_in_another_repository_is_a_plain_mistake_not_an_internal_error() {
         f.resolve(&ticket.reference, &attach(Some("elsewhere/repo#101")))
             .unwrap_err(),
     );
-    assert!(matches!(error, PublicationError::Mismatch { .. }), "{error}");
+    assert!(
+        matches!(error, PublicationError::Mismatch { .. }),
+        "{error}"
+    );
     let text = error.to_string();
     assert!(text.contains("the issue is not in o/r"), "{text}");
     assert!(!text.contains("invalid source configuration"), "{text}");

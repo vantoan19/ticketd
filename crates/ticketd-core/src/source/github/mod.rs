@@ -311,7 +311,8 @@ impl GithubConnector {
             // closed event; the marked event then appears only on the canonical's
             // timeline. A closure that names no issue leaves an earlier mark standing.
             if node.get("__typename").and_then(Value::as_str) == Some("ClosedEvent") {
-                if let Some((reference, url)) = node.get("duplicateOf").and_then(canonical_reference)
+                if let Some((reference, url)) =
+                    node.get("duplicateOf").and_then(canonical_reference)
                 {
                     target = Canonical::Named { reference, url };
                 }
@@ -513,9 +514,9 @@ impl Connector for GithubConnector {
                     skipped: vec![SkippedPartition {
                         code: error.code().to_owned(),
                         message: match error {
-                            SourceError::NotFound(_) => format!(
-                                "{repository} was not found, or your account cannot see it"
-                            ),
+                            SourceError::NotFound(_) => {
+                                format!("{repository} was not found, or your account cannot see it")
+                            }
                             other => other.to_string(),
                         },
                         field: Some("repositories".to_owned()),

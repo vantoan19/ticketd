@@ -1195,7 +1195,8 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
 }
 
 /// The command line's own way to sign in; the desktop app's guidance leaves it out.
-const TOKEN_HINT: &str = " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+const TOKEN_HINT: &str =
+    " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
 
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {

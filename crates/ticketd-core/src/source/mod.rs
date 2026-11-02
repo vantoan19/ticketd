@@ -34,9 +34,10 @@ pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
-    ActionKind, AttemptState, CandidateReason, Eligibility, IneligibleReason, PublicationAttempt,
-    PublicationCandidate, PublicationError, PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
-    Resolution, ResolutionAction, ResolveOptions,
+    ActionKind, AttemptState, CandidateReason, ContentDifference, Eligibility, IneligibleReason,
+    PublicationAttempt, PublicationCandidate, PublicationError, PublicationPreview,
+    PublicationReview, PublishOptions, PublishOutcome, PublishedIssue, Resolution,
+    ResolutionAction, ResolveOptions,
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
