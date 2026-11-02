@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
+import { revealInDetail } from "./detail-scroll";
 
 /**
  * A backlink's passage, and the span of its mention as the core reports it: chars
@@ -142,8 +143,10 @@ export function TicketEditor({
         : `Couldn't find the mention of ${shown.mention.mentioned} in the rendered description.`;
       note.className = block ? "sr-only" : "mention-missing";
     }
-    target?.scrollIntoView?.({ block: "center" });
-    target?.focus({ preventScroll: true });
+    if (target) {
+      revealInDetail(target);
+      target.focus({ preventScroll: true });
+    }
   }, [shown]);
   const dirty = draft.title !== saved.title || draft.body !== saved.body;
   const titleDirty = draft.title !== saved.title;

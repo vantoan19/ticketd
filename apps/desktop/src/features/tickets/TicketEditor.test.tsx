@@ -18,8 +18,12 @@ vi.mock("@tauri-apps/api/core", () => bridge);
 
 afterEach(() => {
   cleanup();
+  document
+    .querySelectorAll("[data-test-workspace]")
+    .forEach((node) => node.remove());
   vi.useRealTimers();
   vi.resetAllMocks();
+  vi.restoreAllMocks();
 });
 
 const initial: Ticket = {
@@ -288,12 +292,23 @@ function at(body: string, line: string, nth = 0, key = 1) {
   return { passage: line, mentioned: "T-1", start, end: start + 3, key };
 }
 const marked = () => document.querySelector("[data-mention-target]");
-const scrollIntoView = Element.prototype.scrollIntoView;
-afterEach(() => {
-  Element.prototype.scrollIntoView = scrollIntoView;
-});
 function renderMention(body: string, line: string, nth = 0) {
-  Element.prototype.scrollIntoView = vi.fn();
+  const workspace = document.createElement("div");
+  const scroller = document.createElement("div");
+  workspace.dataset.testWorkspace = "";
+  workspace.scrollTop = 17;
+  scroller.className = "detail-scroll";
+  workspace.append(scroller);
+  document.body.append(workspace);
+  Object.defineProperty(scroller, "clientHeight", { value: 300 });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      if (this === scroller) return new DOMRect(0, 100, 500, 300);
+      if (this.hasAttribute("data-mention-target"))
+        return new DOMRect(0, 500, 500, 100);
+      return new DOMRect();
+    },
+  );
   const ticket = { ...initial, id: "9", reference: "T-9", body };
   const view = render(
     <TicketEditor
@@ -301,14 +316,15 @@ function renderMention(body: string, line: string, nth = 0) {
       onSaved={vi.fn()}
       mention={at(body, line, nth)}
     />,
+    { container: scroller },
   );
-  return { ticket, view };
+  return { ticket, view, scroller, workspace };
 }
 
 test("a description mention is scrolled to, highlighted and focused in place, then cleared", async () => {
   const body =
     "Intro paragraph.\n\n- Blocked on **T-1** until Friday.\n- Unrelated.";
-  const { ticket, view } = renderMention(
+  const { ticket, view, scroller, workspace } = renderMention(
     body,
     "- Blocked on **T-1** until Friday.",
   );
@@ -317,7 +333,8 @@ test("a description mention is scrolled to, highlighted and focused in place, th
   expect(item?.textContent).toBe("Blocked on T-1 until Friday.");
   expect(document.activeElement).toBe(item);
   expect(item?.getAttribute("tabindex")).toBe("-1");
-  expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+  expect(scroller.scrollTop).toBe(300);
+  expect(workspace.scrollTop).toBe(17);
   expect(
     document.getElementById(item?.getAttribute("aria-describedby") ?? "")
       ?.textContent,
@@ -379,15 +396,20 @@ test("a code block above the mention keeps its tab stop and is never marked", ()
 });
 
 test("leaving edit mode does not bring the highlight back or scroll again", async () => {
-  renderMention("Intro.\n\nBlocked on T-1 today.", "Blocked on T-1 today.");
+  const { scroller } = renderMention(
+    "Intro.\n\nBlocked on T-1 today.",
+    "Blocked on T-1 today.",
+  );
   expect(marked()).not.toBeNull();
+  expect(scroller.scrollTop).toBe(300);
+  scroller.scrollTop = 12;
   fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
   await act(async () => {
     await import("@/features/markdown/MarkdownEditor");
   });
   fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
   expect(marked()).toBeNull();
-  expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+  expect(scroller.scrollTop).toBe(12);
 });
 
 test("an external change to the description drops the highlight", () => {
@@ -413,7 +435,6 @@ test("spans count chars from a body without its byte order mark, past astral cha
   const body = "\uFEFF😀 Émoji first.\n\nSee T-1 here.\n\nAlso T-1 there.";
   const text = [...body.slice(1)];
   const start = text.indexOf("S") + "See ".length;
-  Element.prototype.scrollIntoView = vi.fn();
   render(
     <TicketEditor
       ticket={{ ...initial, id: "9", body }}
@@ -431,7 +452,6 @@ test("spans count chars from a body without its byte order mark, past astral cha
 });
 
 test("a passage that is gone says so and lands on the description without guessing", async () => {
-  Element.prototype.scrollIntoView = vi.fn();
   const stale = at("Blocked on T-1 today.", "Blocked on T-1 today.");
   render(
     <TicketEditor
