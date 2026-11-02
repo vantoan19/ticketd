@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { SourceStatus } from "@/lib/api/sources";
+import type { SourceHealthState, SourceStatus } from "@/lib/api/sources";
 
 /**
  * How the configured sources are doing right now, for every place that shows it:
@@ -25,17 +25,12 @@ export function useSourceActivity(): SourceActivity {
   return useContext(SourceActivityContext);
 }
 
-export type SourceLineState =
-  "refreshing" | "unavailable" | "delayed" | "synced" | "waiting";
+export type SourceLineState = "refreshing" | SourceHealthState;
 
-/** What one source's status line says. A rate limit is delayed, never unavailable. */
+/** What one source's status line says. The core decides the health; this only picks wording. */
 export function sourceLine(
   status: SourceStatus,
   refreshing: boolean,
 ): SourceLineState {
-  if (refreshing) return "refreshing";
-  const code = status.error?.code;
-  if (code === "rate_limited") return "delayed";
-  if (code || status.unavailable_tickets > 0) return "unavailable";
-  return status.last_refreshed_at ? "synced" : "waiting";
+  return refreshing ? "refreshing" : status.health;
 }

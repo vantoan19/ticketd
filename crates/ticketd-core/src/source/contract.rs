@@ -161,6 +161,17 @@ pub struct DiscoveryPage {
     /// `Some` while more results remain. A page may be empty and still have a
     /// continuation, so an empty page is never proof that discovery is done.
     pub next_cursor: Option<String>,
+    /// Parts of the discovery rules the connector could not read (a repository
+    /// that is gone or inaccessible) and skipped, so the rest still ran.
+    pub skipped: Vec<SkippedPartition>,
+}
+
+/// One part of the discovery rules that could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedPartition {
+    /// The failure code of the part (`not_found` or `forbidden`).
+    pub code: String,
+    pub message: String,
 }
 
 /// A request to create an ordinary issue. Connectors that do not declare
@@ -224,23 +235,136 @@ pub enum SourceError {
     IncompatibleContract { provider: String, found: u32 },
 }
 
+/// The kinds of failure ticketd records for a source or a ticket, with the one
+/// definition of what each means for availability and scheduling. Stored codes
+/// are these names; the SQL that counts unavailable tickets is generated from
+/// [`Self::is_unavailable`], so Rust and SQL cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureCode {
+    Unauthenticated,
+    Forbidden,
+    NotFound,
+    RateLimited,
+    Unavailable,
+    Rejected,
+    Protocol,
+    Unsupported,
+    InvalidConfiguration,
+    UnknownProvider,
+    IncompatibleContract,
+    NotConfigured,
+}
+
+impl FailureCode {
+    pub(crate) const ALL: [Self; 12] = [
+        Self::Unauthenticated,
+        Self::Forbidden,
+        Self::NotFound,
+        Self::RateLimited,
+        Self::Unavailable,
+        Self::Rejected,
+        Self::Protocol,
+        Self::Unsupported,
+        Self::InvalidConfiguration,
+        Self::UnknownProvider,
+        Self::IncompatibleContract,
+        Self::NotConfigured,
+    ];
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Unauthenticated => "unauthenticated",
+            Self::Forbidden => "forbidden",
+            Self::NotFound => "not_found",
+            Self::RateLimited => "rate_limited",
+            Self::Unavailable => "unavailable",
+            Self::Rejected => "rejected",
+            Self::Protocol => "protocol",
+            Self::Unsupported => "unsupported",
+            Self::InvalidConfiguration => "invalid_configuration",
+            Self::UnknownProvider => "unknown_provider",
+            Self::IncompatibleContract => "incompatible_contract",
+            Self::NotConfigured => "not_configured",
+        }
+    }
+
+    pub(crate) fn parse(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|known| known.as_str() == code)
+    }
+
+    /// After this failure an externally owned ticket reads Source unavailable:
+    /// the source cannot be reached, rejected the credential, denied access, no
+    /// longer has the issue, answered with something unusable, or is not
+    /// configured. A rate limit is delayed, not unavailable.
+    pub(crate) fn is_unavailable(self) -> bool {
+        match self {
+            Self::Unavailable
+            | Self::Unauthenticated
+            | Self::Forbidden
+            | Self::NotFound
+            | Self::Protocol
+            | Self::NotConfigured => true,
+            Self::RateLimited
+            | Self::Rejected
+            | Self::Unsupported
+            | Self::InvalidConfiguration
+            | Self::UnknownProvider
+            | Self::IncompatibleContract => false,
+        }
+    }
+
+    /// The failure says the source as a whole cannot be read right now, so asking
+    /// again for other tickets would only repeat it, and a scheduler should back
+    /// off. A single issue that is gone, denied or unreadable says nothing about
+    /// the others.
+    pub(crate) fn interrupts_source(self) -> bool {
+        match self {
+            Self::Unavailable | Self::RateLimited | Self::Unauthenticated => true,
+            Self::Forbidden
+            | Self::NotFound
+            | Self::Rejected
+            | Self::Protocol
+            | Self::Unsupported
+            | Self::InvalidConfiguration
+            | Self::UnknownProvider
+            | Self::IncompatibleContract
+            | Self::NotConfigured => false,
+        }
+    }
+
+    /// A quoted, comma-separated SQL list of the codes for which
+    /// [`Self::is_unavailable`] holds.
+    pub(crate) fn unavailable_sql_list() -> String {
+        Self::ALL
+            .into_iter()
+            .filter(|code| code.is_unavailable())
+            .map(|code| format!("'{}'", code.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 impl SourceError {
+    pub(crate) fn failure_code(&self) -> FailureCode {
+        match self {
+            Self::Unauthenticated(_) => FailureCode::Unauthenticated,
+            Self::Forbidden(_) => FailureCode::Forbidden,
+            Self::NotFound(_) => FailureCode::NotFound,
+            Self::RateLimited { .. } => FailureCode::RateLimited,
+            Self::Unavailable(_) => FailureCode::Unavailable,
+            Self::Rejected(_) => FailureCode::Rejected,
+            Self::Protocol(_) => FailureCode::Protocol,
+            Self::Unsupported(_) => FailureCode::Unsupported,
+            Self::InvalidConfiguration(_) => FailureCode::InvalidConfiguration,
+            Self::UnknownProvider(_) => FailureCode::UnknownProvider,
+            Self::IncompatibleContract { .. } => FailureCode::IncompatibleContract,
+        }
+    }
+
     /// A stable machine-readable kind, so clients can branch without parsing
     /// messages.
     pub fn code(&self) -> &'static str {
-        match self {
-            Self::Unauthenticated(_) => "unauthenticated",
-            Self::Forbidden(_) => "forbidden",
-            Self::NotFound(_) => "not_found",
-            Self::RateLimited { .. } => "rate_limited",
-            Self::Unavailable(_) => "unavailable",
-            Self::Rejected(_) => "rejected",
-            Self::Protocol(_) => "protocol",
-            Self::Unsupported(_) => "unsupported",
-            Self::InvalidConfiguration(_) => "invalid_configuration",
-            Self::UnknownProvider(_) => "unknown_provider",
-            Self::IncompatibleContract { .. } => "incompatible_contract",
-        }
+        self.failure_code().as_str()
     }
 
     /// Whether a failed `publish` proves the provider created nothing.

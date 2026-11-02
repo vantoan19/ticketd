@@ -19,8 +19,9 @@ use ticketd_core::{
         CONTRACT_VERSION, Capability, ChoiceOption, Clock, ClosureReason, ConfigSchema,
         ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
         DiscoveryRequest, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FieldKind, OptionSource, RefreshCoordinator, RefreshOptions, RefreshPolicy, RefreshReport,
-        Run, SchemaField, Skip, SourceError, TicketSource, ValueFormat,
+        FailureScope, FieldKind, OptionSource, RefreshCoordinator, RefreshOptions, RefreshPolicy,
+        RefreshReport, Run, SchemaField, Skip, SkippedPartition, SourceError, SourceHealth,
+        TicketSource, ValueFormat,
     },
 };
 
@@ -39,6 +40,10 @@ struct Remote {
     outage: Option<Failure>,
     /// Fails the fetch of these issues with NotFound.
     deleted: Vec<u64>,
+    /// Fails the fetch of these issues with an unusable answer.
+    broken: Vec<u64>,
+    /// A repository discovery had to skip because nobody can read it.
+    skipped: Option<String>,
     discover_calls: usize,
     fetch_calls: Vec<u64>,
 }
@@ -109,6 +114,14 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues,
             next_cursor: None,
+            skipped: remote
+                .skipped
+                .iter()
+                .map(|name| SkippedPartition {
+                    code: "not_found".into(),
+                    message: format!("{name}: was not found"),
+                })
+                .collect(),
         })
     }
     fn fetch(
@@ -121,6 +134,9 @@ impl Connector for Fake {
         remote.fetch_calls.push(id);
         if let Some(failure) = &remote.outage {
             return Err(fail(failure));
+        }
+        if remote.broken.contains(&id) {
+            return Err(SourceError::Protocol("answered with status 500".into()));
         }
         if remote.deleted.contains(&id) {
             return Err(SourceError::NotFound("the issue was deleted".into()));
@@ -388,6 +404,128 @@ fn a_rate_limit_persists_a_hold_that_survives_a_restart() {
         f.fake.0.lock().unwrap().discover_calls,
         calls,
         "no new attempt"
+    );
+}
+
+#[test]
+fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
+    let mut f = Fixture::new();
+    for id in 1..=3 {
+        f.publish(issue(id, T0));
+    }
+    f.refresh_at(T0);
+    // All three leave the discovery rules. Issue 1 now answers unusably; issue 2 was closed.
+    f.remote(|r| {
+        r.matching.clear();
+        r.broken.push(1);
+        let closed = r.issues.get_mut(&2).unwrap();
+        closed.state = ExternalState::Closed {
+            reason: ClosureReason::Completed,
+        };
+        closed.updated_at = T1.into();
+    });
+    let report = f.refresh_at(T1);
+    assert_eq!(f.workspace.show_ticket("T-2").unwrap().status, Status::Done);
+    assert!(f.source(2).unavailable.is_none() && f.source(3).unavailable.is_none());
+    let own = f.source(1).unavailable.unwrap();
+    assert_eq!(own.code, "protocol");
+    assert!(!own.message.contains("not refreshed"), "{}", own.message);
+    assert!(!report.interrupted_by_source());
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert!(status.error.is_none());
+    assert_eq!(status.health, SourceHealth::Partial);
+    assert_eq!(status.unavailable_tickets, 1);
+}
+
+#[test]
+fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.remote(|r| r.skipped = Some("o/gone".into()));
+    let report = f.refresh_at(T0);
+    assert_eq!(report.imported, vec!["T-1".to_owned()]);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].scope, FailureScope::Partition);
+    assert!(!report.interrupted_by_source());
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.health, SourceHealth::Partial);
+    assert!(status.partial_message.unwrap().contains("o/gone"));
+    assert!(status.error.is_none());
+
+    f.remote(|r| r.skipped = None);
+    f.refresh_at(T1);
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.health, SourceHealth::Synced);
+    assert!(status.partial_message.is_none());
+}
+
+#[test]
+fn a_failure_from_a_run_that_started_earlier_never_overwrites_a_newer_confirmation() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    // The run that started at T2 confirms the ticket and commits first.
+    f.refresh_at(T2);
+    // The slower run, which started at T1 and failed, commits last.
+    f.remote(|r| r.outage = Some(Failure::Unavailable));
+    f.refresh_at(T1);
+    let source = f.source(1);
+    assert!(source.unavailable.is_none() && source.last_error.is_none());
+    assert_eq!(source.last_refreshed_at.as_deref(), Some(T2));
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert!(status.error.is_none() && status.failing_since.is_none());
+    assert_eq!(status.last_attempt_at.as_deref(), Some(T2));
+    assert_eq!(status.health, SourceHealth::Synced);
+}
+
+#[test]
+fn the_core_states_how_each_source_is_doing() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    let health = |f: &Fixture| f.workspace.source_statuses().unwrap().remove(0).health;
+    assert_eq!(health(&f), SourceHealth::Waiting);
+    f.refresh_at(T0);
+    assert_eq!(health(&f), SourceHealth::Synced);
+    f.remote(|r| r.outage = Some(Failure::RateLimited(Some(60))));
+    f.refresh_at(T1);
+    assert_eq!(health(&f), SourceHealth::Delayed);
+    f.remote(|r| r.outage = Some(Failure::Unavailable));
+    f.refresh_at(T2);
+    assert_eq!(health(&f), SourceHealth::Unavailable);
+    f.remote(|r| r.outage = None);
+    f.refresh_at(T3);
+    assert_eq!(health(&f), SourceHealth::Synced);
+    // One deleted issue is a partial result, never an unavailable source.
+    f.remote(|r| {
+        r.matching.clear();
+        r.deleted.push(1);
+    });
+    f.refresh_at("2026-02-01T00:40:00Z");
+    assert_eq!(health(&f), SourceHealth::Partial);
+}
+
+#[test]
+fn retrying_one_ticket_does_not_reset_the_schedule_of_the_full_refresh() {
+    let f = Fixture::new();
+    f.publish(issue(1, T0));
+    let clock = ManualClock::default();
+    let coordinator = coordinator(&clock);
+    let open = || f.open_workspace();
+    ran(coordinator.tick(&f.engine, &open).unwrap());
+    f.remote(|r| r.outage = Some(Failure::Unavailable));
+    clock.advance(300);
+    ran(coordinator.tick(&f.engine, &open).unwrap());
+    assert_eq!(not_due_in(coordinator.tick(&f.engine, &open).unwrap()), 600);
+
+    // The source recovers and the person retries one ticket.
+    f.remote(|r| r.outage = None);
+    coordinator
+        .refresh_now(&f.engine, &open, Some("T-1"))
+        .unwrap();
+    assert_eq!(
+        not_due_in(coordinator.tick(&f.engine, &open).unwrap()),
+        600,
+        "the full refresh keeps its own schedule"
     );
 }
 

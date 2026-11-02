@@ -89,6 +89,7 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues,
             next_cursor: None,
+            skipped: Vec::new(),
         })
     }
     fn fetch(

@@ -144,6 +144,7 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues: remote.issues.values().cloned().collect(),
             next_cursor: None,
+            skipped: Vec::new(),
         })
     }
 

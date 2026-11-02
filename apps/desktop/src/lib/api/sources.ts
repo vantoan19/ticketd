@@ -110,14 +110,27 @@ const refreshReportSchema = z.object({
       reference: z.string().nullable(),
       code: z.string(),
       message: z.string(),
+      /** What the failure is about: the source, one ticket, one repository or one thread. */
+      scope: z.enum(["source", "ticket", "partition", "conversation"]).catch("source"),
     }),
   ),
   refreshed_at: z.string(),
 });
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
+/** How a source is doing, as the core decides it. Clients only word it. */
+export const sourceHealthValues = [
+  "waiting",
+  "synced",
+  "delayed",
+  "unavailable",
+  "partial",
+] as const;
+export type SourceHealthState = (typeof sourceHealthValues)[number];
+
 const sourceStatusSchema = z.object({
   provider: z.string(),
+  health: z.enum(sourceHealthValues),
   last_attempt_at: z.string().nullable(),
   /** The last run in which the source could be read. */
   last_refreshed_at: z.string().nullable(),
@@ -127,6 +140,8 @@ const sourceStatusSchema = z.object({
   /** The earliest time the source asked to be contacted again. */
   retry_after: z.string().nullable(),
   unavailable_tickets: z.number(),
+  /** The discovery rules the last run skipped because they could not be read. */
+  partial_message: z.string().nullable(),
 });
 export type SourceStatus = z.infer<typeof sourceStatusSchema>;
 

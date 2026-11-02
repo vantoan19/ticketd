@@ -28,13 +28,11 @@ pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
     ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
+    PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use freshness::{
-    DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
-};
+pub use freshness::{DEFAULT_RATE_LIMIT_SECS, SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
     ActionKind, AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
@@ -47,8 +45,8 @@ pub use schema::{
 };
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{
-    DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport,
-    SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
+    DuplicateTarget, FailureScope, Origin, Ownership, RefreshFailure, RefreshOptions,
+    RefreshReport, SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
 };
 
 use crate::{Error, Workspace, transaction_write_lock};
@@ -101,6 +99,37 @@ pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(),
 /// Step 26: publication attempts.
 pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
     publication::migrate(connection)
+}
+
+/// Step 27: conversation read failures kept apart from refresh failures, the
+/// skipped-repository note of a source run, and the link and certainty of an
+/// external duplicate target. Each column is added only when missing, so a
+/// workspace reopened after its tables were rebuilt still migrates.
+pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), Error> {
+    for (table, column, definition) in [
+        ("source_sync", "conversation_error_code", "TEXT"),
+        ("source_sync", "conversation_error_message", "TEXT"),
+        ("source_status", "partial_message", "TEXT"),
+        ("external_duplicate_targets", "url", "TEXT"),
+        (
+            "external_duplicate_targets",
+            "last_known",
+            "INTEGER NOT NULL DEFAULT 0",
+        ),
+    ] {
+        let present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |row| row.get(0),
+        )?;
+        if !present {
+            connection.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            ))?;
+        }
+    }
+    connection.execute_batch("PRAGMA user_version = 27;")?;
+    Ok(())
 }
 
 pub(crate) use tracking::{guard_change, guard_duplicate};

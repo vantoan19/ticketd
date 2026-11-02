@@ -42,6 +42,10 @@ const ticketSourceSchema = z.object({
   last_refreshed_at: z.string().nullable(),
   last_attempt_at: z.string().nullable(),
   last_error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** The latest read of the issue's comments failed; the ticket itself is fine. */
+  conversation_error: z
+    .object({ code: z.string(), message: z.string() })
+    .nullish(),
   /**
    * Set while the source cannot be read: the latest refresh failed with an
    * unreachable, unauthorized, forbidden, missing or unusable answer. Saved content

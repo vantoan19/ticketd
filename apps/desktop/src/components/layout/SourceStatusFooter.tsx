@@ -24,25 +24,28 @@ export function SourceStatusFooter() {
           : null;
         return (
           <div key={status.provider} className="sidebar-source">
-            {state === "refreshing" && (
-              <span role="status">Refreshing {name}…</span>
-            )}
+            {state === "refreshing" && <span>Refreshing {name}…</span>}
             {state === "synced" && (
               <span>
                 <StatusDot tone="positive" size={6} /> {name} synced {synced}
               </span>
             )}
             {state === "waiting" && <span>{name} not synced yet</span>}
-            {(state === "unavailable" || state === "delayed") && (
+            {(state === "unavailable" ||
+              state === "delayed" ||
+              state === "partial") && (
               <>
-                <span role="status">
+                <span>
                   <StatusDot tone="attention" size={6} />{" "}
                   {state === "unavailable"
                     ? `${name} unavailable`
-                    : `${name} refresh delayed`}
+                    : state === "delayed"
+                      ? `${name} refresh delayed`
+                      : `${name} partly refreshed`}
                 </span>
                 <small>
                   {status.error?.message ??
+                    status.partial_message ??
                     "Some tickets could not be refreshed."}{" "}
                   {synced
                     ? `Showing content synced ${synced}.`

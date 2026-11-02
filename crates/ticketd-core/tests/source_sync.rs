@@ -14,9 +14,9 @@ use ticketd_core::{
         CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
         ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
         DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
-        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldKind,
-        OptionSource, Ownership, RefreshOptions, RefreshReport, SchemaField, SourceError,
-        SourceFilter, TargetProblem, ValueFormat,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        FailureScope, FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport,
+        SchemaField, SourceError, SourceFilter, SourceHealth, TargetProblem, ValueFormat,
     },
 };
 
@@ -101,6 +101,7 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues: listed[start..end].to_vec(),
             next_cursor: (end < listed.len()).then(|| end.to_string()),
+            skipped: Vec::new(),
         })
     }
 
@@ -1206,4 +1207,55 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
             .get("source_conversation")
             .is_none()
     );
+}
+
+#[test]
+fn a_failed_comment_read_is_recorded_apart_and_never_makes_a_confirmed_ticket_unavailable() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Talked about"), true);
+    f.refresh();
+    // The issue changed upstream, so its comments are due; reading them fails.
+    f.converse(1, Conversation::default());
+    f.remote(|r| {
+        r.issues.get_mut(&1).unwrap().title = "Renamed upstream".into();
+        r.conversation_outage = Some("comments timed out".into());
+    });
+    f.publish(issue(2, "New and talked about"), true);
+    let report = f.refresh_at("2026-02-01T00:10:00Z");
+
+    let ticket = f.ticket(1);
+    assert_eq!(ticket.title, "Renamed upstream");
+    let source = ticket.source.unwrap();
+    assert_eq!(
+        source.last_refreshed_at.as_deref(),
+        Some("2026-02-01T00:10:00Z")
+    );
+    assert!(source.unavailable.is_none() && source.last_error.is_none());
+    assert!(
+        source
+            .conversation_error
+            .unwrap()
+            .message
+            .contains("comments timed out")
+    );
+    // Taking ownership is for an unreadable source, not an unreadable thread.
+    assert!(f.workspace.take_ownership("T-1", None).is_err());
+
+    // The new issue was imported; its failed thread is reported, not a source failure.
+    assert_eq!(report.imported, vec!["T-2".to_owned()]);
+    assert!(
+        report
+            .failures
+            .iter()
+            .all(|failure| failure.scope == FailureScope::Conversation)
+    );
+    assert!(!report.interrupted_by_source());
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert!(status.error.is_none());
+    assert_eq!(status.health, SourceHealth::Synced);
+
+    // The next run that can read the thread clears the note.
+    f.remote(|r| r.conversation_outage = None);
+    f.refresh_at("2026-02-01T00:20:00Z");
+    assert!(f.ticket(1).source.unwrap().conversation_error.is_none());
 }

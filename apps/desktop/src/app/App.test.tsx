@@ -1200,6 +1200,8 @@ test("the sidebar footer follows persisted source health and keeps the list", as
         failing_since: "2026-02-01T00:10:00Z",
         retry_after: null,
         unavailable_tickets: 1,
+        health: "unavailable",
+        partial_message: null,
       },
     ],
   };
@@ -1229,6 +1231,8 @@ test("the sidebar footer follows persisted source health and keeps the list", as
         failing_since: null,
         retry_after: null,
         unavailable_tickets: 0,
+        health: "synced",
+        partial_message: null,
       },
     ],
   };

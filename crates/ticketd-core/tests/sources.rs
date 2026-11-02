@@ -99,6 +99,7 @@ impl Connector for Fake {
             None => Ok(DiscoveryPage {
                 issues: Vec::new(),
                 next_cursor: None,
+                skipped: Vec::new(),
             }),
             Some(Err(message)) => Err(SourceError::Unavailable(message)),
             Some(Ok((issues, more))) => {
@@ -106,6 +107,7 @@ impl Connector for Fake {
                 Ok(DiscoveryPage {
                     issues,
                     next_cursor: more.then_some(next),
+                    skipped: Vec::new(),
                 })
             }
         }
@@ -325,6 +327,7 @@ fn provider_failures_surface_and_a_looping_connector_is_stopped() {
             Ok(DiscoveryPage {
                 issues: vec![],
                 next_cursor: Some("same".into()),
+                skipped: Vec::new(),
             })
         }
         fn fetch(&self, c: &ConfigValues, r: &ExternalRef) -> Result<ExternalIssue, SourceError> {

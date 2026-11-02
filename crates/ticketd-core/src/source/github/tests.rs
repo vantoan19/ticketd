@@ -288,10 +288,6 @@ fn failures_are_classified_and_never_contain_the_token() {
             "unauthenticated",
         ),
         (
-            status(403, json!({"message": "Resource not accessible"}), &[]),
-            "forbidden",
-        ),
-        (
             status(
                 403,
                 json!({"message": "x"}),
@@ -302,10 +298,6 @@ fn failures_are_classified_and_never_contain_the_token() {
         (
             status(429, json!({}), &[("retry-after", "30")]),
             "rate_limited",
-        ),
-        (
-            status(404, json!({"message": "Not Found"}), &[]),
-            "not_found",
         ),
         (status(503, json!({}), &[]), "unavailable"),
         (Err("connection refused".into()), "unavailable"),
@@ -326,6 +318,75 @@ fn failures_are_classified_and_never_contain_the_token() {
         assert!(!error.to_string().contains(TOKEN));
         assert!(!format!("{error:?}").contains(TOKEN));
     }
+}
+
+#[test]
+fn a_gone_issue_is_not_found_not_an_unusable_answer() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let values = config(json!({"repositories": ["o/one"]}));
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "7".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    for code in [404, 410] {
+        fixture.respond(
+            &format!("{API}/repos/o/one/issues/7"),
+            status(code, json!({"message": "This issue was deleted"}), &[]),
+        );
+        let error = engine.fetch("github", &values, &reference).unwrap_err();
+        assert_eq!(error.code(), "not_found", "status {code}");
+    }
+}
+
+#[test]
+fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([issue(1, 1, "o/live")])),
+    );
+    let values = config(json!({"repositories": ["o/gone", "o/live"]}));
+    let mut found = Vec::new();
+    let summary = engine
+        .discover("github", &values, |issue| {
+            found.push(issue.display);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(found, ["o/live#1"]);
+    assert_eq!(summary.skipped.len(), 1);
+    assert_eq!(summary.skipped[0].code, "not_found");
+    assert!(summary.skipped[0].message.contains("o/gone"));
+    // A repository closed to the account is skipped the same way, with its own code.
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(403, json!({"message": "Resource not accessible"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    let summary = engine
+        .discover("github", &values, |_| ControlFlow::Continue(()))
+        .unwrap();
+    assert_eq!(summary.skipped[0].code, "forbidden");
+    // Saving rules that name an unreadable repository is still refused.
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    assert!(engine.preview("github", &values).is_err());
 }
 
 #[test]

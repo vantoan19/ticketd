@@ -47,6 +47,8 @@ const status = (overrides: Partial<SourceStatus> = {}): SourceStatus => ({
   failing_since: null,
   retry_after: null,
   unavailable_tickets: 0,
+  health: "synced",
+  partial_message: null,
   ...overrides,
 });
 
@@ -144,6 +146,7 @@ test("an unavailable source shows the failure, the last good sync and a working 
         refreshAll,
         sources: [
           status({
+            health: "unavailable",
             error: { code: "unavailable", message: "Network is down." },
             failing_since: minutesAgo(12),
             unavailable_tickets: 3,
@@ -170,6 +173,7 @@ test("a rate limit reads as delayed, not unavailable", () => {
       {
         sources: [
           status({
+            health: "delayed",
             error: { code: "rate_limited", message: "Retry in 600 seconds." },
           }),
         ],
@@ -178,6 +182,17 @@ test("a rate limit reads as delayed, not unavailable", () => {
     ),
   );
   expect(screen.getByText("GitHub refresh delayed")).toBeTruthy();
+  expect(screen.queryByText("GitHub unavailable")).toBeNull();
+});
+
+test("one deleted issue reads partly refreshed, never GitHub unavailable", () => {
+  render(
+    withActivity(
+      { sources: [status({ health: "partial", unavailable_tickets: 1 })] },
+      <SourceStatusFooter />,
+    ),
+  );
+  expect(screen.getByText("GitHub partly refreshed")).toBeTruthy();
   expect(screen.queryByText("GitHub unavailable")).toBeNull();
 });
 

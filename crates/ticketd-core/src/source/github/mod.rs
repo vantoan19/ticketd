@@ -17,7 +17,8 @@ use super::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
         ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
+        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
+        SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -422,6 +423,7 @@ impl Connector for GithubConnector {
             return Ok(DiscoveryPage {
                 issues: Vec::new(),
                 next_cursor: None,
+                skipped: Vec::new(),
             });
         };
         let url = match cursor.next {
@@ -451,7 +453,29 @@ impl Connector for GithubConnector {
                 url
             }
         };
-        let (page, next) = self.json(&url, &format!("repository {repository}"))?;
+        let (page, next) = match self.json(&url, &format!("repository {repository}")) {
+            Ok(found) => found,
+            // One repository that is gone or closed to this account says nothing
+            // about the others: skip it, say so, and carry on with the next.
+            Err(error @ (SourceError::NotFound(_) | SourceError::Forbidden(_))) => {
+                let next_cursor = (cursor.repository + 1 < repositories.len()).then(|| {
+                    Cursor {
+                        repository: cursor.repository + 1,
+                        next: None,
+                    }
+                    .encode()
+                });
+                return Ok(DiscoveryPage {
+                    issues: Vec::new(),
+                    next_cursor,
+                    skipped: vec![SkippedPartition {
+                        code: error.code().to_owned(),
+                        message: format!("{repository}: {error}"),
+                    }],
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let items = page
             .as_array()
             .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
@@ -481,6 +505,7 @@ impl Connector for GithubConnector {
         Ok(DiscoveryPage {
             issues,
             next_cursor,
+            skipped: Vec::new(),
         })
     }
 
@@ -882,7 +907,9 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
                 ))))
             }
         }
-        404 => Err(SourceError::NotFound(format!(
+        // 410 Gone (a deleted issue, or a repository with issues disabled) is an
+        // answer about that one resource, the same as not found.
+        404 | 410 => Err(SourceError::NotFound(format!(
             "{subject} was not found, or the credential cannot see it"
         ))),
         500..=599 => Err(SourceError::Unavailable(format!(
