@@ -385,7 +385,7 @@
 .source-settings-column {
   max-width: 760px;
 }
-.settings-page:has(.source-settings-column) {
+.settings-page[data-source-active] {
   padding: 40px 24px 64px;
 }
 .source-settings > .settings-card:first-child {
@@ -405,9 +405,14 @@
   grid-row: 1 / 3;
   align-self: center;
 }
-.source-settings > .settings-card:first-child > p {
+.source-settings > .settings-card:first-child > .source-connection-health {
   grid-column: 1;
   grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.source-connection-health > p {
   font-weight: 400;
   display: inline-flex;
   align-items: center;

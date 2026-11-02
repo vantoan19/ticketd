@@ -60,6 +60,15 @@ export function SettingsNav({
                         onSelect?.(section.id);
                         const keyboard = event.detail === 0;
                         requestAnimationFrame(() => {
+                          if (section.id.startsWith("source-")) {
+                            const heading =
+                              document.getElementById("settings-heading");
+                            const page = heading?.closest(".settings-page");
+                            if (page) page.scrollTop = 0;
+                            if (keyboard)
+                              heading?.focus({ preventScroll: true });
+                            return;
+                          }
                           const card = document.getElementById(
                             settingsCardId(section.id),
                           );

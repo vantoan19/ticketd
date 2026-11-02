@@ -1,5 +1,5 @@
 import type { SettingsCardKey } from "./settings-sections";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Copy,
   ExternalLink,
@@ -38,6 +38,7 @@ import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { useSources } from "@/features/settings/sources/use-sources";
+import type { SourceEntry } from "@/lib/api/sources";
 import "@/features/settings/sources/sources.css";
 import "@/features/settings/settings.css";
 
@@ -612,6 +613,45 @@ function AboutCard() {
   );
 }
 
+function SourceSettingsPage({
+  entry,
+  active,
+  visible,
+  heading,
+}: {
+  entry: SourceEntry;
+  active: boolean;
+  visible: boolean;
+  heading: RefObject<HTMLHeadingElement | null>;
+}) {
+  // Mount on first visit with the latest configuration, then keep its draft and
+  // preview alive while other sections are open. A restore remounts this page.
+  const [visited, setVisited] = useState(visible);
+  if (visible && !visited) setVisited(true);
+  return (
+    <div
+      className={
+        active ? "settings-column source-settings-column" : "settings-column"
+      }
+      hidden={!visible}
+    >
+      {active && (
+        <>
+          <h1 id="settings-heading" ref={heading} tabIndex={-1}>
+            {entry.connector.name}
+          </h1>
+          <p>
+            Bring matching GitHub issues into this workspace. Their title,
+            description, state and comments sync inward; GitHub stays the place
+            to edit them.
+          </p>
+        </>
+      )}
+      {(visible || visited) && <SourceCard entry={entry} />}
+    </div>
+  );
+}
+
 /** The Settings page: one centered column of cards. */
 export function SettingsView({
   onRestore,
@@ -628,52 +668,56 @@ export function SettingsView({
   const [restores, setRestores] = useState(0);
   const { entries: sources } = useSources();
   const heading = useRef<HTMLHeadingElement>(null);
-  // Opening Settings replaces the sidebar, which held focus; land on the title.
-  useEffect(() => heading.current?.focus(), [selected]);
   const source = sources.find(
     (entry) => selected === `source-${entry.connector.provider}`,
   );
-  if (source)
-    return (
-      <div className="management settings-page">
-        <div className="settings-column source-settings-column">
-          <h1 ref={heading} tabIndex={-1}>
-            {source.connector.name}
-          </h1>
-          <p>
-            Bring matching GitHub issues into this workspace. Their title,
-            description, state and comments sync inward; GitHub stays the place
-            to edit them.
-          </p>
-          <SourceCard key={source.connector.provider} entry={source} />
-        </div>
-      </div>
-    );
+  // Opening Settings replaces the sidebar, which held focus; land on the title.
+  useEffect(
+    () => heading.current?.focus({ preventScroll: true }),
+    [selected, source?.connector.provider],
+  );
   return (
-    <div className="management settings-page">
-      <div className="settings-column">
-        <h1 ref={heading} tabIndex={-1}>
-          Settings
-        </h1>
-        <p>Changes apply right away, except source rules, which you save.</p>
-        <AppearanceCard />
-        <AttentionCard onOpenInbox={onOpenInbox} />
-        <LocationCard refreshKey={restores} />
-        <BackupsCard
-          onRestore={async () => {
-            setRestores((count) => count + 1);
-            await onRestore();
-          }}
-        />
-        <ExportCard />
-        <CommandLineCard />
-        {!selected &&
-          sources.map((entry) => (
-            <SourceCard key={entry.connector.provider} entry={entry} />
-          ))}
-        <KeyboardShortcutsCard />
-        <AboutCard />
-      </div>
+    <div
+      className="management settings-page"
+      data-source-active={source ? "true" : undefined}
+    >
+      {!source && (
+        <div className="settings-column">
+          <h1 id="settings-heading" ref={heading} tabIndex={-1}>
+            Settings
+          </h1>
+          <p>Changes apply right away, except source rules, which you save.</p>
+          <AppearanceCard />
+          <AttentionCard onOpenInbox={onOpenInbox} />
+          <LocationCard refreshKey={restores} />
+          <BackupsCard
+            onRestore={async () => {
+              setRestores((count) => count + 1);
+              await onRestore();
+            }}
+          />
+          <ExportCard />
+          <CommandLineCard />
+        </div>
+      )}
+      {sources.map((entry) => {
+        const active = source?.connector.provider === entry.connector.provider;
+        return (
+          <SourceSettingsPage
+            key={`${restores}:${entry.connector.provider}`}
+            entry={entry}
+            active={active}
+            visible={active || selected === undefined}
+            heading={heading}
+          />
+        );
+      })}
+      {!source && (
+        <div className="settings-column">
+          <KeyboardShortcutsCard />
+          <AboutCard />
+        </div>
+      )}
     </div>
   );
 }

@@ -232,31 +232,33 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
           </p>
         }
       >
-        {connection ? (
-          <p role="status">{connection}</p>
-        ) : (
-          <p className="settings-label source-health">
-            <StatusDot
-              tone={saved && syncing ? "positive" : "neutral"}
-              size={10}
-            />
-            {saved ? `Connected as ${saved.account}` : "Not connected"}
-          </p>
-        )}
-        {saved && health && !syncing && (
-          <p
-            className="settings-label source-health"
-            data-health={health.health}
-          >
-            <StatusDot tone="attention" size={10} />
-            {health.health === "unavailable"
-              ? `${connector.name} is unavailable`
-              : health.health === "delayed"
-                ? `${connector.name} refresh is delayed`
-                : `${connector.name} is partly refreshed`}
-            {health.error ? `: ${health.error.message}` : ""}
-          </p>
-        )}
+        <div className="source-connection-health">
+          {connection ? (
+            <p role="status">{connection}</p>
+          ) : (
+            <p className="settings-label source-health">
+              <StatusDot
+                tone={saved && syncing ? "positive" : "neutral"}
+                size={10}
+              />
+              {saved ? `Connected as ${saved.account}` : "Not connected"}
+            </p>
+          )}
+          {saved && health && !syncing && (
+            <p
+              className="settings-label source-health"
+              data-health={health.health}
+            >
+              <StatusDot tone="attention" size={10} />
+              {health.health === "unavailable"
+                ? `${connector.name} is unavailable`
+                : health.health === "delayed"
+                  ? `${connector.name} refresh is delayed`
+                  : `${connector.name} is partly refreshed`}
+              {health.error ? `: ${health.error.message}` : ""}
+            </p>
+          )}
+        </div>
       </SettingsCard>
       <SettingsCard
         id={`source-${connector.provider}-discovery`}
