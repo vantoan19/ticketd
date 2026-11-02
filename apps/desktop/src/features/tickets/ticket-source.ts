@@ -66,9 +66,18 @@ export function unavailableNotice(
   if (!unavailable || source.ownership !== "external") return null;
   const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
+  // Worded by what failed, once: the provider's own text is not chained on.
+  const cause =
+    unavailable.code === "not_found"
+      ? `${name} says ${source.display} was deleted or is not visible to your account.`
+      : unavailable.code === "unauthenticated"
+        ? `${name} rejected the sign-in, so ${source.display} could not be refreshed.`
+        : unavailable.code === "forbidden"
+          ? `${name} refused access to ${source.display}.`
+          : `${name} could not be reached for ${source.display}.`;
   return {
     title: "Source unavailable",
-    detail: `${name} could not be reached for ${source.display}: ${unavailable.message} Nothing was deleted or completed.`,
+    detail: `${cause} Nothing was deleted or completed.`,
     since: `Since ${since}`,
   };
 }

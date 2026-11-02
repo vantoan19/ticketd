@@ -245,8 +245,11 @@ test("the unavailable notice says what failed, since when, that nothing was lost
     within(notice).getByText(/Source unavailable · Since 12 min ago/),
   ).toBeTruthy();
   expect(
-    within(notice).getByText(/Nothing was deleted or completed/),
+    within(notice).getByText(
+      /GitHub could not be reached for .*\. Nothing was deleted or completed\./,
+    ),
   ).toBeTruthy();
+  expect(within(notice).queryByText(/Network is down/)).toBeNull();
   expect(within(notice).getByText(/Synced 30 min ago/)).toBeTruthy();
   expect(
     within(notice).getByRole("button", { name: /Take ownership/ }),
@@ -387,6 +390,30 @@ test("the list header says Last synced, never Synced, while the source is unavai
   );
   expect(screen.getByText("Last synced 4 min ago")).toBeTruthy();
   expect(screen.queryByText(/^Synced/)).toBeNull();
+});
+
+test("the unavailable notice is worded by the failure, not by the provider's text", () => {
+  const worded = (code: string) =>
+    unavailableNotice(
+      source({
+        unavailable: {
+          code,
+          message: "raw provider text",
+          since: minutesAgo(1),
+        },
+      }),
+    )?.detail ?? "";
+  expect(worded("not_found")).toMatch(
+    /deleted or is not visible to your account/,
+  );
+  expect(worded("unauthenticated")).toMatch(/GitHub rejected the sign-in/);
+  for (const code of [
+    "not_found",
+    "unauthenticated",
+    "forbidden",
+    "unavailable",
+  ])
+    expect(worded(code)).not.toContain("raw provider text");
 });
 
 test("relative times degrade to the raw value only when unreadable", () => {
