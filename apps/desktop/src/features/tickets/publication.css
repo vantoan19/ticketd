@@ -281,3 +281,9 @@
   text-decoration: none;
   padding-inline: 0;
 }
+
+/* A fixed repository is still essential preview content, so keep it readable. */
+.publication-repository[data-readonly]:disabled {
+  color: var(--foreground);
+  background: var(--surface);
+}

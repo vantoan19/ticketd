@@ -172,7 +172,7 @@ function UnresolvedPublication({ onReview }: { onReview: () => void }) {
 }
 
 type Phase =
-  | { kind: "loading" }
+  | { kind: "loading"; preview?: PublicationPreview }
   | { kind: "ready"; preview: PublicationPreview }
   | { kind: "publishing"; preview: PublicationPreview }
   | { kind: "unresolved"; message: string }
@@ -225,15 +225,12 @@ export function PublishDialog({
     };
   }, [ticket.reference, provider, destination, reloads]);
 
-  const preview =
-    phase.kind === "ready" || phase.kind === "publishing"
-      ? phase.preview
-      : null;
+  const preview = "preview" in phase ? (phase.preview ?? null) : null;
   const publishing = phase.kind === "publishing";
   const chosen = destination ?? preview?.destination ?? "";
 
   async function publish() {
-    if (!preview || !chosen) return;
+    if (phase.kind !== "ready" || !preview || !chosen) return;
     setError("");
     setPhase({ kind: "publishing", preview });
     try {
@@ -313,11 +310,16 @@ export function PublishDialog({
               {preview.destinations.length > 0 ? (
                 <Select
                   value={chosen}
-                  onValueChange={setDestination}
+                  onValueChange={(value) => {
+                    setDestination(value);
+                    setPhase({ kind: "loading", preview });
+                    setError("");
+                  }}
                   disabled={publishing || preview.destinations.length === 1}
                 >
                   <SelectTrigger
                     className="publication-repository"
+                    readOnly={preview.destinations.length === 1}
                     aria-labelledby="publication-destination"
                   >
                     <SelectValue placeholder="Choose a repository" />
@@ -414,7 +416,9 @@ export function PublishDialog({
           {phase.kind !== "unresolved" && (
             <Button
               size="sm"
-              disabled={!preview || publishing || !chosen}
+              disabled={
+                phase.kind !== "ready" || !preview || publishing || !chosen
+              }
               onClick={() => void publish()}
             >
               {publishing ? "Publishing…" : "Publish issue"}

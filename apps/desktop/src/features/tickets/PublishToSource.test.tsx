@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -141,6 +142,11 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   ).toBe("Cache entries never expire.");
   expect(within(dialog).getByText("acme/api")).toBeTruthy();
   expect(
+    within(dialog)
+      .getByRole("combobox", { name: "Repository" })
+      .getAttribute("data-readonly"),
+  ).toBe("true");
+  expect(
     within(dialog).getByText(/No ticketd labels, fields or comments are added/),
   ).toBeTruthy();
 
@@ -158,6 +164,75 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("changing repositories waits for that destination's preview before publishing", async () => {
+  const apiPreview = {
+    ...eligible,
+    destinations: ["acme/api", "acme/web"],
+    fingerprint: "fingerprint-api",
+  };
+  const webPreview = {
+    ...eligible,
+    destination: "acme/web",
+    destinations: ["acme/api", "acme/web"],
+    fingerprint: "fingerprint-web",
+  };
+  let resolveWebPreview!: (preview: typeof webPreview) => void;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { destination?: string }) => {
+      if (command === "list_sources") return [githubEntry];
+      if (command === "preview_publication") {
+        if (args?.destination === "acme/web")
+          return new Promise<typeof webPreview>((resolve) => {
+            resolveWebPreview = resolve;
+          });
+        return apiPreview;
+      }
+      if (command === "publish_ticket")
+        return { attempt: attempt({ state: "succeeded" }), replayed: false };
+      return [];
+    },
+  );
+
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to GitHub/ }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: /Publish T-1 to GitHub/,
+  });
+  const repository = await within(dialog).findByRole("combobox", {
+    name: "Repository",
+  });
+  fireEvent.click(repository);
+  fireEvent.click(await screen.findByRole("option", { name: "acme/web" }));
+
+  const publish = within(dialog).getByRole("button", {
+    name: "Publish issue",
+  }) as HTMLButtonElement;
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "preview_publication",
+      expect.objectContaining({ destination: "acme/web" }),
+    ),
+  );
+  expect(publish.disabled).toBe(true);
+
+  await act(async () => {
+    resolveWebPreview(webPreview);
+  });
+  await waitFor(() => expect(publish.disabled).toBe(false));
+  fireEvent.click(publish);
+
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
+      reference: "T-1",
+      provider: "github",
+      destination: "acme/web",
+      expectedFingerprint: "fingerprint-web",
+    }),
+  );
 });
 
 test("an ineligible ticket says why and offers no Publish action", async () => {
