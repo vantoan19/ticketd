@@ -23,6 +23,44 @@ impl Status {
     pub fn satisfies_dependency(self) -> bool {
         self == Self::Done
     }
+
+    /// Todo, In progress and In review are the statuses a person may set while an
+    /// issue is open at its source, and the only ones that can be published.
+    /// Written as an exhaustive match so a new status cannot fall into either side.
+    pub fn is_local_progress(self) -> bool {
+        match self {
+            Self::Todo | Self::InProgress | Self::InReview => true,
+            Self::Done | Self::Canceled | Self::Duplicate => false,
+        }
+    }
+
+    /// Position in workflow order: the order work is listed in.
+    pub(crate) fn workflow_rank(self) -> u8 {
+        match self {
+            Self::InProgress => 0,
+            Self::InReview => 1,
+            Self::Todo => 2,
+            Self::Done => 3,
+            Self::Canceled => 4,
+            Self::Duplicate => 5,
+        }
+    }
+
+    /// SQL `CASE` ordering a `status` column by [`Self::workflow_rank`].
+    pub(crate) fn workflow_order_sql(column: &str) -> String {
+        let arms: String = [
+            Self::InProgress,
+            Self::InReview,
+            Self::Todo,
+            Self::Done,
+            Self::Canceled,
+            Self::Duplicate,
+        ]
+        .into_iter()
+        .map(|status| format!(" WHEN '{status}' THEN {}", status.workflow_rank()))
+        .collect();
+        format!("CASE {column}{arms} END")
+    }
 }
 
 /// SQL for a blocker, named by its table alias, that does not yet satisfy a

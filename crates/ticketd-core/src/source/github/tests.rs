@@ -19,12 +19,12 @@ const TOKEN: &str = "ghp_secret_token_value";
 
 #[derive(Default)]
 struct Fixture {
-    routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, String>>>>,
+    routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, TransportError>>>>,
     requests: Mutex<Vec<HttpRequest>>,
 }
 
 impl Fixture {
-    fn respond(&self, url: &str, response: Result<HttpResponse, String>) {
+    fn respond(&self, url: &str, response: Result<HttpResponse, TransportError>) {
         self.routes
             .lock()
             .unwrap()
@@ -46,7 +46,7 @@ impl Fixture {
 struct Shared(Arc<Fixture>);
 
 impl HttpTransport for Shared {
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, String> {
+    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
         self.0.requests.lock().unwrap().push(request.clone());
         self.0
             .routes
@@ -54,7 +54,7 @@ impl HttpTransport for Shared {
             .unwrap()
             .get_mut(&request.url)
             .and_then(VecDeque::pop_front)
-            .unwrap_or_else(|| Err(format!("no fixture for {}", request.url)))
+            .unwrap_or_else(|| Err(format!("no fixture for {}", request.url).into()))
     }
 }
 
@@ -78,11 +78,11 @@ fn setup(token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     (fixture, engine)
 }
 
-fn ok(body: Value) -> Result<HttpResponse, String> {
+fn ok(body: Value) -> Result<HttpResponse, TransportError> {
     ok_with(body, &[])
 }
 
-fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String> {
+fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, TransportError> {
     Ok(HttpResponse {
         status: 200,
         headers: headers
@@ -93,7 +93,11 @@ fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String
     })
 }
 
-fn status(code: u16, body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String> {
+fn status(
+    code: u16,
+    body: Value,
+    headers: &[(&str, &str)],
+) -> Result<HttpResponse, TransportError> {
     let mut response = ok_with(body, headers)?;
     response.status = code;
     Ok(response)
@@ -282,7 +286,7 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
 fn failures_are_classified_and_never_contain_the_token() {
     let url = format!("{API}/repos/o/one/issues?state=open&per_page=100");
     let values = config(json!({"repositories": ["o/one"]}));
-    let cases: Vec<(Result<HttpResponse, String>, &str)> = vec![
+    let cases: Vec<(Result<HttpResponse, TransportError>, &str)> = vec![
         (
             status(401, json!({"message": "Bad credentials"}), &[]),
             "unauthenticated",
@@ -612,7 +616,7 @@ fn closed_duplicate(id: u64, number: u64) -> Value {
 fn fetch_duplicate(
     fixture: &Fixture,
     engine: &Engine,
-    timeline: Result<HttpResponse, String>,
+    timeline: Result<HttpResponse, TransportError>,
 ) -> ExternalIssue {
     fixture.respond(
         &format!("{API}/repos/o/one/issues/7"),
@@ -635,7 +639,7 @@ fn fetch_duplicate(
         .unwrap()
 }
 
-fn timeline(nodes: Value) -> Result<HttpResponse, String> {
+fn timeline(nodes: Value) -> Result<HttpResponse, TransportError> {
     ok(json!({"data": {"repository": {"issue": {"timelineItems": {"nodes": nodes}}}}}))
 }
 
@@ -1053,6 +1057,7 @@ fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceErro
         "github",
         &config(json!({"repositories": ["o/r"]})),
         &PublicationSearch {
+            account: None,
             request: publish_request(),
             since: "2026-03-01T00:00:00Z".into(),
         },
@@ -1097,6 +1102,85 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
         .map(|i| i.reference.identity.id.as_str())
         .collect();
     assert_eq!(ids, ["9", "6"], "title and normalized body match only");
+}
+
+#[test]
+fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_its_text() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
+    rewritten["title"] = json!("Renamed by a teammate");
+    rewritten["body"] = json!("Rewritten by an automation");
+    rewritten["user"] = json!({"login": "Octo"});
+    let mut someone_else = created(issue(8, 8, "o/r"), "2026-03-02T00:00:00Z");
+    someone_else["user"] = json!({"login": "other"});
+    someone_else["title"] = json!("Unrelated");
+    someone_else["body"] = json!("Unrelated");
+    fixture.respond(SEARCH_URL, ok(json!([rewritten, someone_else])));
+    let found = engine
+        .find_published(
+            "github",
+            &config(json!({"repositories": ["o/r"]})),
+            &PublicationSearch {
+                account: Some("octo".into()),
+                request: publish_request(),
+                since: "2026-03-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+    let ids: Vec<_> = found
+        .matches
+        .iter()
+        .map(|i| i.reference.identity.id.as_str())
+        .collect();
+    assert_eq!(ids, ["9"]);
+}
+
+#[test]
+fn a_local_clock_ahead_of_githubs_moves_the_search_window_back() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // GitHub says it is an hour earlier than this machine thinks.
+    let github_now = chrono::DateTime::from_timestamp(i64::try_from(now).unwrap() - 3600, 0)
+        .unwrap()
+        .to_rfc2822();
+    fixture.respond(
+        &format!("{API}/rate_limit"),
+        ok_with(json!({}), &[("date", &github_now)]),
+    );
+    // Whether the search itself is answered does not matter; its window does.
+    let _ = search_for_title(&engine);
+    let urls = fixture.urls();
+    let search = urls.iter().find(|url| url.contains("since=")).unwrap();
+    let since = search.split("since=").nth(1).unwrap().replace("%3A", ":");
+    let since = chrono::DateTime::parse_from_rfc3339(&since).unwrap();
+    let expected = chrono::DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z").unwrap()
+        - chrono::Duration::seconds(3600);
+    assert!((since - expected).num_seconds().abs() <= 5, "{since}");
+}
+
+#[test]
+fn a_request_that_never_left_is_not_sent_but_a_lost_answer_is_not_proof() {
+    let url = format!("{API}/repos/o/r/issues");
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &url,
+        Err(TransportError {
+            message: "dns error".into(),
+            before_send: true,
+        }),
+    );
+    let error = publish_to(&engine).unwrap_err();
+    assert!(matches!(error, SourceError::NotSent(_)), "{error}");
+    assert!(error.ruled_out_creation());
+    // The same failure after the request went out proves nothing.
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(&url, Err("operation timed out".into()));
+    let error = publish_to(&engine).unwrap_err();
+    assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
+    assert!(!error.ruled_out_creation());
 }
 
 #[test]

@@ -141,12 +141,13 @@ impl Workspace {
         let mut sql = format!(
             "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.effort_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
         );
-        sql.push_str(match filter.order {
-            TicketOrder::Newest => " ORDER BY t.number DESC",
-            TicketOrder::Workflow => {
-                " ORDER BY CASE t.status WHEN 'In progress' THEN 0 WHEN 'In review' THEN 1 WHEN 'Todo' THEN 2 WHEN 'Done' THEN 3 WHEN 'Canceled' THEN 4 ELSE 5 END, t.number DESC"
-            }
-        });
+        match filter.order {
+            TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+            TicketOrder::Workflow => sql.push_str(&format!(
+                " ORDER BY {}, t.number DESC",
+                Status::workflow_order_sql("t.status")
+            )),
+        }
         sql.push_str(" LIMIT ? OFFSET ?");
         values.push(i64::from(filter.limit.clamp(1, 100)).into());
         values.push(i64::from(filter.offset).into());

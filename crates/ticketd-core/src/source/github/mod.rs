@@ -8,7 +8,9 @@ mod credentials;
 mod transport;
 
 pub use credentials::{AmbientCredentials, CredentialSource, Secret};
-pub use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
+pub use transport::{
+    HttpRequest, HttpResponse, HttpTransport, Method, TransportError, UreqTransport,
+};
 
 use serde_json::Value;
 
@@ -209,10 +211,17 @@ impl GithubConnector {
             body: Some(body.to_string().into_bytes()),
         };
         let response = self.transport.send(&http).map_err(|error| {
-            // No answer: the request may or may not have been processed.
-            SourceError::Unavailable(format!(
-                "GitHub did not answer, so the issue may or may not have been created: {error}"
-            ))
+            if error.before_send {
+                // The request never left: nothing can have been created.
+                SourceError::NotSent(format!(
+                    "could not reach GitHub, so nothing was sent: {error}"
+                ))
+            } else {
+                // No answer: the request may or may not have been processed.
+                SourceError::Unavailable(format!(
+                    "GitHub did not answer, so the issue may or may not have been created: {error}"
+                ))
+            }
         })?;
         if response.status == 201 {
             let value: Value = serde_json::from_slice(&response.body).map_err(|_| {
@@ -239,6 +248,24 @@ impl GithubConnector {
                 Err(error) => Err(error),
             },
         }
+    }
+
+    /// How far GitHub's clock is ahead of this machine's (negative when this
+    /// machine is ahead), from the `Date` header of a request that costs nothing.
+    /// Zero when it cannot be measured.
+    fn clock_skew(&self) -> chrono::Duration {
+        let measured = (|| {
+            let response = self
+                .get(&format!("{}/rate_limit", self.api_url), "the rate limit")
+                .ok()?;
+            let server = chrono::DateTime::parse_from_rfc2822(response.header("date")?).ok()?;
+            let local = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?;
+            let local = chrono::DateTime::from_timestamp(i64::try_from(local.as_secs()).ok()?, 0)?;
+            Some(server.with_timezone(&chrono::Utc) - local)
+        })();
+        measured.unwrap_or_else(chrono::Duration::zero)
     }
 
     /// GitHub Enterprise Server serves GraphQL beside, not under, its REST root.
@@ -569,12 +596,25 @@ impl Connector for GithubConnector {
                 },
             ]));
         }
-        let since = chrono::DateTime::parse_from_rfc3339(&search.since).ok();
+        // The window was written with this machine's clock. When that clock runs
+        // ahead of GitHub's, the window would start after the real creation and
+        // miss it, so it is moved back by the measured difference.
+        let since = chrono::DateTime::parse_from_rfc3339(&search.since)
+            .ok()
+            .map(|since| since + self.clock_skew().min(chrono::Duration::zero()));
+        let since_text = since.map_or_else(
+            || search.since.clone(),
+            |since| {
+                since
+                    .with_timezone(&chrono::Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            },
+        );
         let mut url = Some(format!(
             "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100&since={}",
             self.api_url,
             encode_path(destination),
-            encode_component(&search.since)
+            encode_component(&since_text)
         ));
         let subject = format!("repository {destination}");
         let mut matches = Vec::new();
@@ -600,7 +640,15 @@ impl Connector for GithubConnector {
                         complete: true,
                     });
                 }
-                if could_be_published(&issue, &search.request) {
+                // Anything the connected account created in the window is a candidate
+                // whatever its text says now: a teammate or an automation may have
+                // rewritten both the title and the description.
+                let by_account = search.account.as_deref().is_some_and(|account| {
+                    item.pointer("/user/login")
+                        .and_then(Value::as_str)
+                        .is_some_and(|login| login.eq_ignore_ascii_case(account))
+                });
+                if by_account || could_be_published(&issue, &search.request) {
                     matches.push(issue);
                 }
             }

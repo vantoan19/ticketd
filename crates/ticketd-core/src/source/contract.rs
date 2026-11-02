@@ -192,6 +192,11 @@ pub struct PublicationSearch {
     pub request: PublishRequest,
     /// RFC 3339 instant before which the attempt cannot have created anything.
     pub since: String,
+    /// The account the source was connected as. Whatever that account created in
+    /// the window is a candidate, whatever its text now says: a teammate or an
+    /// automation may have edited the title and description since.
+    #[serde(default)]
+    pub account: Option<String>,
 }
 
 /// What a search found. `matches` holds every issue the connector saw that could
@@ -216,6 +221,11 @@ pub enum SourceError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("{0}")]
     Unavailable(String),
+    /// The request never left this machine (no DNS answer, connection refused),
+    /// so the provider certainly did not act on it. Reads as unavailable
+    /// everywhere else, but a failed `publish` with it proves nothing was created.
+    #[error("{0}")]
+    NotSent(String),
     /// The provider answered and refused the request itself (for GitHub, a
     /// validation failure or a repository with issues disabled). Unlike
     /// [`Self::Unavailable`] and [`Self::Protocol`], nothing was created.
@@ -351,7 +361,7 @@ impl SourceError {
             Self::Forbidden(_) => FailureCode::Forbidden,
             Self::NotFound(_) => FailureCode::NotFound,
             Self::RateLimited { .. } => FailureCode::RateLimited,
-            Self::Unavailable(_) => FailureCode::Unavailable,
+            Self::Unavailable(_) | Self::NotSent(_) => FailureCode::Unavailable,
             Self::Rejected(_) => FailureCode::Rejected,
             Self::Protocol(_) => FailureCode::Protocol,
             Self::Unsupported(_) => FailureCode::Unsupported,
@@ -380,6 +390,7 @@ impl SourceError {
             | Self::NotFound(_)
             | Self::RateLimited { .. }
             | Self::Rejected(_)
+            | Self::NotSent(_)
             | Self::Unsupported(_)
             | Self::InvalidConfiguration(_)
             | Self::UnknownProvider(_)

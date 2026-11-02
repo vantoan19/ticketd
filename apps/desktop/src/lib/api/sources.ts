@@ -179,6 +179,8 @@ const publicationPreviewSchema = z.object({
   destinations: z.array(z.string()),
   title: z.string(),
   body: z.string(),
+  /** Identifies this title, description and destination; handed back to publish exactly this. */
+  fingerprint: z.string(),
   eligibility: eligibilitySchema,
   attempt: publicationAttemptSchema.nullable(),
 });
@@ -198,6 +200,7 @@ export type SourceFailureCode =
   | "publication_mismatch"
   | "publication_candidates"
   | "publication_settled"
+  | "publication_changed"
   | "rejected"
   | "unauthenticated"
   | "forbidden"
@@ -287,13 +290,19 @@ export const sourcesClient = {
    * `publication_failed` (nothing was created), `publication_unresolved` (the
    * issue may exist; publishing again is blocked), or `publication_ineligible`.
    */
-  async publish(reference: string, provider: string, destination?: string) {
+  async publish(
+    reference: string,
+    provider: string,
+    destination: string | undefined,
+    expectedFingerprint: string,
+  ) {
     return publishOutcomeSchema.parse(
       await call(
         invoke("publish_ticket", {
           reference,
           provider,
           destination: destination ?? null,
+          expectedFingerprint,
         }),
       ),
     );

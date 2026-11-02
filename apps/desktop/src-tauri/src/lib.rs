@@ -892,6 +892,7 @@ fn publish_ticket(
     reference: String,
     provider: String,
     destination: Option<String>,
+    expected_fingerprint: Option<String>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
     let mut workspace = Workspace::open_default()?;
     Ok(workspace.publish_ticket(
@@ -901,6 +902,8 @@ fn publish_ticket(
             provider,
             destination,
             now: None,
+            expected_fingerprint,
+            agent: None,
         },
     )?)
 }
@@ -935,6 +938,7 @@ fn resolve_publication(
         &ticketd_core::source::ResolveOptions {
             resolution,
             now: None,
+            agent: None,
         },
     )?)
 }

@@ -148,6 +148,12 @@ function ReviewBody({
           ). That does not mean nothing was created.
         </p>
       )}
+      {review.candidates_complete === false && (
+        <p className="publication-detail" role="status">
+          Only part of the recent issues in {attempt.destination} could be read,
+          so nothing can be ruled out yet.
+        </p>
+      )}
       {review.candidates.length > 0 && (
         <section aria-label="Possible matches" className="publication-field">
           <span className="publication-label">
@@ -210,6 +216,9 @@ function ReviewBody({
           )}
           <p className="publication-detail">{attach.detail}</p>
         </section>
+      )}
+      {attach && !attach.available && (
+        <p className="publication-detail">{attach.detail}</p>
       )}
       {notCreated && (
         <section aria-label="Nothing was created" className="publication-field">

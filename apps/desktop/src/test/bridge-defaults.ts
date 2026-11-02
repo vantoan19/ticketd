@@ -48,6 +48,7 @@ export function bridgeDefault(
         destinations: [],
         title: "",
         body: "",
+        fingerprint: "0000000000000000",
         eligibility: {
           kind: "ineligible",
           reason: "source_not_connected",

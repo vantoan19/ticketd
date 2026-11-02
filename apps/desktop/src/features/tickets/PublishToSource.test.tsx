@@ -72,6 +72,7 @@ const eligible = {
   destinations: ["acme/api"],
   title: "Escalate the cache bug",
   body: "Cache entries never expire.",
+  fingerprint: "00000000000000a1",
   eligibility: { kind: "eligible" },
   attempt: null,
 };
@@ -131,6 +132,7 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
       reference: "T-1",
       provider: "github",
       destination: "acme/api",
+      expectedFingerprint: "00000000000000a1",
     }),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -151,6 +153,33 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
     /Done, Canceled and Duplicate tickets are not published/,
   );
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
+});
+
+test("a ticket that changed since the preview sends nothing and is previewed again", async () => {
+  bridgeAnswers(eligible, {
+    reject: {
+      code: "publication_changed",
+      message: "T-1 changed since it was previewed, so nothing was sent",
+    },
+  });
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to GitHub/ }),
+  );
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(
+    await within(dialog).findByRole("button", { name: "Publish to acme/api" }),
+  );
+  const alert = await within(dialog).findByRole("alert");
+  expect(alert.textContent).toContain("nothing was sent");
+  // The dialog reloads the preview so the person reviews what is there now.
+  await waitFor(() =>
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "preview_publication",
+      ).length,
+    ).toBeGreaterThan(2),
+  );
 });
 
 test("a refusal says nothing was created and allows another try", async () => {

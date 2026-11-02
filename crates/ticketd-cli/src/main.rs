@@ -297,6 +297,12 @@ enum SourceCommand {
         /// Print the title, description, destination and eligibility; create nothing
         #[arg(long)]
         preview: bool,
+        /// The `fingerprint` printed by --preview. When given, nothing is sent if the
+        /// title, description or destination changed since
+        #[arg(long)]
+        expect: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Settle a publication whose outcome is unknown, without risking a second issue.
     /// With no flag it prints what is known and unknown and searches the destination
@@ -318,6 +324,8 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        #[arg(long)]
+        agent: Option<String>,
     },
 }
 
@@ -960,6 +968,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     provider,
                     destination,
                     preview,
+                    expect,
+                    agent,
                 },
         } => {
             let engine = ticketd_core::source::Engine::builtin();
@@ -978,6 +988,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         provider,
                         destination,
                         now: None,
+                        expected_fingerprint: expect,
+                        agent,
                     },
                 );
                 if let Err(ticketd_core::Error::Publication(error)) = &result {
@@ -1009,6 +1021,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     attach,
                     not_created,
                     no_search,
+                    agent,
                 },
         } => {
             use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
@@ -1031,6 +1044,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         &ResolveOptions {
                             resolution,
                             now: None,
+                            agent,
                         },
                     );
                     if let Err(ticketd_core::Error::Publication(error)) = &result {

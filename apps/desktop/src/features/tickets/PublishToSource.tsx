@@ -178,6 +178,7 @@ export function PublishDialog({
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState("");
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -204,7 +205,7 @@ export function PublishDialog({
     return () => {
       active = false;
     };
-  }, [ticket.reference, destination]);
+  }, [ticket.reference, destination, reloads]);
 
   const preview =
     phase.kind === "ready" || phase.kind === "publishing"
@@ -218,7 +219,12 @@ export function PublishDialog({
     setError("");
     setPhase({ kind: "publishing", preview });
     try {
-      await sourcesClient.publish(ticket.reference, PROVIDER, chosen);
+      await sourcesClient.publish(
+        ticket.reference,
+        PROVIDER,
+        chosen,
+        preview.fingerprint,
+      );
       await refresh();
       onOpenChange(false);
     } catch (reason) {
@@ -228,9 +234,13 @@ export function PublishDialog({
         await refresh().catch(() => {});
         return;
       }
-      // A refusal proves nothing was created, so trying again is safe.
+      // A refusal proves nothing was created, so trying again is safe. A ticket
+      // that changed since the preview sent nothing: show what it holds now.
       setError(failure.message);
-      setPhase({ kind: "ready", preview });
+      if (failure.code === "publication_changed") {
+        setPhase({ kind: "loading" });
+        setReloads((count) => count + 1);
+      } else setPhase({ kind: "ready", preview });
     }
   }
 

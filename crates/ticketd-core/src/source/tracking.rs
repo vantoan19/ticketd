@@ -317,15 +317,12 @@ pub(crate) fn guard_change(
             provider,
         });
     }
-    if status != ticket.status {
-        let local_progress = matches!(status, Status::Todo | Status::InProgress | Status::InReview);
-        if !(open && local_progress) {
-            return Err(Error::ExternalStatus {
-                reference,
-                provider,
-                open,
-            });
-        }
+    if status != ticket.status && !(open && status.is_local_progress()) {
+        return Err(Error::ExternalStatus {
+            reference,
+            provider,
+            open,
+        });
     }
     Ok(())
 }
@@ -1082,6 +1079,9 @@ fn apply_issue(
     let (state, reason) = state_parts(issue.state);
     match existing {
         None => {
+            if super::publication::awaited_by_open_attempt(connection, issue)? {
+                return Ok(());
+            }
             let status = status_for(None, issue.state, Status::Todo);
             let id = Uuid::new_v4().to_string();
             connection.execute(
@@ -1244,6 +1244,48 @@ fn set_duplicate_target(
         )?,
     };
     Ok(true)
+}
+
+/// Applies the closure of an issue that was already closed when it was linked
+/// (a resolved publication attached after the fact): the status it implies, and
+/// the canonical target of a duplicate, with the same history a refresh writes.
+pub(crate) fn map_closure(
+    connection: &Connection,
+    ticket_id: &str,
+    issue: &ExternalIssue,
+) -> Result<(), Error> {
+    let current: String = connection.query_row(
+        "SELECT status FROM tickets WHERE id = ?1",
+        [ticket_id],
+        |row| row.get(0),
+    )?;
+    let current: Status = current.parse().map_err(|error: std::io::Error| {
+        Error::Database(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        ))
+    })?;
+    let next = status_for(Some(ExternalState::Open), issue.state, current);
+    if next == current {
+        return Ok(());
+    }
+    connection.execute(
+        "UPDATE tickets SET status = ?2 WHERE id = ?1",
+        params![ticket_id, next.to_string()],
+    )?;
+    history::record(
+        connection,
+        ticket_id,
+        "status",
+        &current.to_string(),
+        &next.to_string(),
+        Some(&issue.reference.identity.provider),
+    )?;
+    if next == Status::Duplicate {
+        set_duplicate_target(connection, ticket_id, issue)?;
+    }
+    Ok(())
 }
 
 /// Gives `ticket_id` its external identity, external ownership and first sync
