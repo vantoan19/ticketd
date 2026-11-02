@@ -763,7 +763,7 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Select all 2" })).toBeNull();
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   expect(
@@ -799,7 +799,7 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert").textContent;
@@ -1352,9 +1352,7 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
@@ -1369,10 +1367,40 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
   expect(
     within(dialog).getByText(/Choose the canonical ticket for T-2/),
   ).toBeTruthy();
+  // The cursor is where the next answer goes, not on the dialog's frame.
+  expect(document.activeElement).toBe(
+    within(dialog).getByLabelText("Canonical ticket reference"),
+  );
   // Nothing is marked until the review names a canonical ticket.
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
     expect.anything(),
+  );
+});
+
+test("an exact reference leads the matches in the mark-duplicate search", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "Duplicate", availability: null }),
+    ],
+    count_tickets: counted({ duplicate: 1 }),
+    search_tickets: () => [bulkTicket(2)],
+    show_ticket: () => bulkTicket(3),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", {
+    name: "Mark a ticket as duplicate",
+  });
+  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
+    target: { value: "T-3" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  const matches = within(dialog).getByRole("list", { name: "Matches" });
+  expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
+    "T-3",
   );
 });
 
@@ -1421,6 +1449,33 @@ test("Next at the end of a page opens the first ticket of the next page", async 
       .getByRole("button", { name: /Ticket 51/ })
       .getAttribute("aria-pressed"),
   ).toBe("true");
+});
+
+test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
+  const all = Array.from({ length: 50 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      args.filter.offset === 0
+        ? all
+        : [{ ...bulkTicket(1), id: "51", reference: "T-51" }],
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  const next = screen.getByRole("button", { name: "Next" });
+  next.focus();
+  fireEvent.click(next);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect((next as HTMLButtonElement).disabled).toBe(true);
+  // Never the document root: the person can keep paging with the keyboard.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Previous" }),
+  );
 });
 
 test("a later page that empties moves back to the last page that exists", async () => {

@@ -27,6 +27,7 @@ import { client, type Note, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
+import { attribution } from "./ticket-source";
 import { formatDateTime } from "@/lib/format";
 import "./activity.css";
 
@@ -259,16 +260,11 @@ export function Activity({
             item.type === "note" ? (
               <li key={`note-${item.note.id}`} className="activity-entry">
                 <div className="activity-meta">
-                  <time
-                    dateTime={item.note.created_at}
-                    title={item.note.created_at}
-                  >
+                  <time dateTime={item.note.created_at}>
                     {formatDateTime(item.note.created_at)}
                   </time>
                   {item.note.updated_at !== item.note.created_at && (
-                    <span title={item.note.updated_at}>
-                      Edited {formatDateTime(item.note.updated_at)}
-                    </span>
+                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
                   )}
                   {item.note.editing_agent && (
                     <span>Agent: {item.note.editing_agent}</span>
@@ -320,14 +316,11 @@ export function Activity({
             ) : (
               <li key={`history-${item.index}`} className="activity-history">
                 <span>{historySentence(item.entry, lookups)}</span>
-                <time
-                  dateTime={item.entry.timestamp}
-                  title={item.entry.timestamp}
-                >
+                <time dateTime={item.entry.timestamp}>
                   {formatDateTime(item.entry.timestamp)}
                 </time>
                 {item.entry.editing_agent && (
-                  <span>Agent: {item.entry.editing_agent}</span>
+                  <span>{attribution(item.entry.editing_agent)}</span>
                 )}
               </li>
             ),

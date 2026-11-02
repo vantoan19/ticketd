@@ -1,5 +1,5 @@
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import type { SourceCounts } from "@/lib/api/client";
+import type { SourceCounts, Ticket } from "@/lib/api/client";
 import type { RefreshReport } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
 import { ago, providerName } from "./ticket-source";
@@ -55,9 +55,12 @@ export function SourceFilter({
 export function SourceRefresh({
   providers,
   state,
+  tickets = [],
 }: {
   providers: string[];
   state: { running: boolean; report: RefreshReport | null; error: string };
+  /** The listed tickets: a failure about one the source no longer owns is stale. */
+  tickets?: Ticket[];
 }) {
   const activity = useSourceActivity();
   // The workspace already folds an explicit run into `refreshing`.
@@ -67,13 +70,25 @@ export function SourceRefresh({
     .filter((time): time is string => Boolean(time))
     .sort()
     .at(-1);
+  // Only a source the core reads as synced may claim "Synced"; otherwise this is
+  // just when it last was.
+  const healthy = activity.sources.every(
+    (status) => status.health === "synced" || status.health === "waiting",
+  );
   const name = providers.map(providerName).join(", ");
-  const failures = state.report?.failures ?? [];
+  const failures = (state.report?.failures ?? []).filter((failure) => {
+    const listed = tickets.find(
+      (ticket) => ticket.reference === failure.reference,
+    );
+    return !listed || listed.source?.ownership === "external";
+  });
   return (
     <div className="source-refresh">
       {running && <span>Refreshing {name}…</span>}
       {!running && !state.report && !state.error && synced && (
-        <span>Synced {ago(synced)}</span>
+        <span>
+          {healthy ? "Synced" : "Last synced"} {ago(synced)}
+        </span>
       )}
       {!running && state.report && failures.length === 0 && (
         <span role="status">

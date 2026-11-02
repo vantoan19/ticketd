@@ -120,7 +120,7 @@ export function LocalPublication({
         />
       </>
     );
-  if (!preview || ticket.trashed) return null;
+  if (!preview) return null;
   if (preview.eligibility.kind === "eligible")
     return (
       <>
@@ -366,8 +366,8 @@ export function PublishDialog({
         )}
         {error && (
           <p className="publication-error" role="alert">
-            {error} {ticket.reference} remains a local ticket and nothing was
-            created.
+            {/[.!?]$/.test(error) ? error : `${error}.`} {ticket.reference}{" "}
+            remains a local ticket and nothing was created.
           </p>
         )}
         {publishing && <p role="status">Publishing to {name}…</p>}

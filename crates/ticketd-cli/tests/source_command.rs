@@ -184,6 +184,7 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     assert!(!stderr.contains("wrong-token"));
     let stderr = cli.fail(&["source", "test", "github"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");
+    assert!(stderr.contains("TICKETD_GITHUB_TOKEN"), "{stderr}");
 }
 
 #[test]
@@ -247,7 +248,7 @@ fn invalid_settings_and_provider_failures_do_not_save() {
     );
     assert!(stderr.contains("bogus"), "{stderr}");
     let stderr = cli.fail(&["source", "save", "github"], Some(TOKEN));
-    assert!(stderr.contains("is required"), "{stderr}");
+    assert!(stderr.contains("are required"), "{stderr}");
     let stderr = cli.fail(
         &[
             "source",
@@ -326,7 +327,7 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     );
     // External content is read-only; local progress is allowed.
     let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
-    assert!(stderr.contains("owned by github"), "{stderr}");
+    assert!(stderr.contains("owned by GitHub"), "{stderr}");
     cli.run(&["change", "T-1", "--status", "In progress"]);
     assert_eq!(
         cli.run(&["list", "--source", "github"])
@@ -440,7 +441,20 @@ fn unresolved_ticket(cli: &Cli) -> String {
     let reference = local_ticket(cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));
+    age_attempts(cli);
     reference
+}
+
+/// Makes every attempt an hour old, so a search counts for a "not created"
+/// verdict (GitHub lists a just-created issue only after a moment).
+fn age_attempts(cli: &Cli) {
+    let db = rusqlite::Connection::open(cli.dir.path().join("workspace.sqlite3")).unwrap();
+    db.execute_batch(
+        "UPDATE publication_attempts SET \
+         started_at = strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '-1 hour'), \
+         lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', lease_expires_at, '-1 hour')",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -464,7 +478,7 @@ fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     );
     assert_eq!(wrong.status.code(), Some(1));
     let stderr = String::from_utf8(wrong.stderr).unwrap();
-    assert!(stderr.contains("could not be verified"), "{stderr}");
+    assert!(stderr.contains("the issue is not in o/flaky"), "{stderr}");
     let no_credential = cli.command(&["source", "resolve", &reference, "--issue", "7"], None);
     assert_eq!(no_credential.status.code(), Some(1));
     assert_eq!(

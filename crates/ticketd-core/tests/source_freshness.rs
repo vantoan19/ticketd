@@ -121,6 +121,7 @@ impl Connector for Fake {
                 .map(|name| SkippedPartition {
                     code: "not_found".into(),
                     message: format!("{name}: was not found"),
+                    field: None,
                 })
                 .collect(),
         })

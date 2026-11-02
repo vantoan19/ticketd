@@ -930,6 +930,7 @@ fn review_publication(
 fn resolve_publication(
     reference: String,
     resolution: ticketd_core::source::Resolution,
+    accept_different_content: Option<bool>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
     let mut workspace = Workspace::open_default()?;
     Ok(workspace.resolve_publication(
@@ -939,6 +940,7 @@ fn resolve_publication(
             resolution,
             now: None,
             agent: None,
+            accept_different_content: accept_different_content.unwrap_or(false),
         },
     )?)
 }

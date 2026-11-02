@@ -4,6 +4,15 @@ export function providerName(provider: string): string {
   return provider === "github" ? "GitHub" : provider;
 }
 
+/**
+ * Who a change is attributed to. A change that came from a source is recorded
+ * under the provider's id; it reads as the source, never as an editing agent.
+ */
+export function attribution(agent: string): string {
+  const name = providerName(agent);
+  return name === agent ? `Agent: ${agent}` : `Changed on ${name}`;
+}
+
 /** The source of a ticket the provider currently owns; null for local tickets. */
 export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;
@@ -66,9 +75,18 @@ export function unavailableNotice(
   if (!unavailable || source.ownership !== "external") return null;
   const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
+  // Worded by what failed, once: the provider's own text is not chained on.
+  const cause =
+    unavailable.code === "not_found"
+      ? `${name} says ${source.display} was deleted or is not visible to your account.`
+      : unavailable.code === "unauthenticated"
+        ? `${name} rejected the sign-in, so ${source.display} could not be refreshed.`
+        : unavailable.code === "forbidden"
+          ? `${name} refused access to ${source.display}.`
+          : `${name} could not be reached for ${source.display}.`;
   return {
     title: "Source unavailable",
-    detail: `${name} could not be reached for ${source.display}: ${unavailable.message} Nothing was deleted or completed.`,
+    detail: `${cause} Nothing was deleted or completed.`,
     since: `Since ${since}`,
   };
 }

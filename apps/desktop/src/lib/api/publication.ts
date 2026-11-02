@@ -8,6 +8,14 @@ const publishedIssueSchema = z.object({
   url: z.string(),
 });
 
+/** An issue in the destination that may be the one a publication created. */
+const publicationCandidateSchema = publishedIssueSchema.extend({
+  title: z.string(),
+  created_at: z.string(),
+  reason: z.enum(["content_match", "created_by_account"]),
+});
+export type PublicationCandidate = z.infer<typeof publicationCandidateSchema>;
+
 /**
  * One try at creating an external issue for a local ticket. `in_flight` and
  * `unresolved` mean the issue may exist and block publishing again.
@@ -47,8 +55,12 @@ export const publicationReviewSchema = z.object({
       detail: z.string(),
     }),
   ),
-  candidates: z.array(publishedIssueSchema),
+  candidates: z.array(publicationCandidateSchema),
+  /** Other issues the account created in the window: shown, never blocking. */
+  other_recent: z.array(publicationCandidateSchema),
   candidates_complete: z.boolean().nullable(),
+  /** When a search first counts for a "not created" verdict (RFC 3339). */
+  search_ready_at: z.string().nullable(),
   lookup_failure: z
     .object({ code: z.string(), message: z.string() })
     .nullable(),
@@ -57,3 +69,9 @@ export type PublicationReview = z.infer<typeof publicationReviewSchema>;
 
 export type PublicationResolution =
   { kind: "attach"; issue: string | null } | { kind: "not_created" };
+
+/** What a person confirmed when settling; unknown fields default to no. */
+export type ResolveConfirmation = {
+  /** Attach an issue whose text differs from what was sent. */
+  acceptDifferentContent?: boolean;
+};

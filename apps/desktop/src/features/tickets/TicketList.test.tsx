@@ -173,16 +173,16 @@ test("groups rows in workflow order with whole-result counts and an Add action e
   expect(onAdd).toHaveBeenCalledWith("Todo", expect.any(HTMLButtonElement));
 });
 
-test("a Duplicate group adds through duplicate review, not a plain new ticket", () => {
+test("a Duplicate group's Add action is worded like every group's and hands over its status", () => {
+  const onAdd = vi.fn();
   renderList([inStatus(5, "Duplicate")], {
-    grouping: { counts: { ...counts, duplicate: 1 }, onAdd: vi.fn() },
+    grouping: { counts: { ...counts, duplicate: 1 }, onAdd },
   });
-  expect(
-    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
-  ).toBeTruthy();
-  expect(
-    screen.queryByRole("button", { name: "Add Duplicate ticket" }),
-  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  expect(onAdd).toHaveBeenCalledWith(
+    "Duplicate",
+    expect.any(HTMLButtonElement),
+  );
 });
 
 test("moves keyboard focus across group boundaries and omits empty groups", () => {

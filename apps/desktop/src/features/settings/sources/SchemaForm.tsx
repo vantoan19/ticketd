@@ -6,6 +6,8 @@ import type { ChoiceOption, SchemaField } from "@/lib/api/sources";
 import type { Draft } from "@/features/settings/sources/config-values";
 
 const SUGGESTION_DELAY_MS = 250;
+/** Announces which field opened its suggestions, so the others close. */
+const OPENED = "ticketd:suggestions-opened";
 
 type MultiSelect = Extract<SchemaField, { type: "multi_select" }>;
 
@@ -62,6 +64,7 @@ function MultiSelectField({
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
   const requests = useRef(0);
+  const container = useRef<HTMLDivElement>(null);
   const full = value.length >= field.max_items;
   const dynamic = field.options.source === "dynamic";
 
@@ -98,8 +101,27 @@ function MultiSelectField({
     return () => window.clearTimeout(timer);
   }, [open, query, field.key, optionsSource]);
 
+  // One list at a time, and a press anywhere outside the field closes its list
+  // (focus alone is not reliable: a pressed button may not take focus).
+  useEffect(() => {
+    if (!open) return;
+    const otherOpened = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== id) setOpen(false);
+    };
+    const pressed = (event: Event) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener(OPENED, otherOpened);
+    document.addEventListener("pointerdown", pressed, true);
+    return () => {
+      window.removeEventListener(OPENED, otherOpened);
+      document.removeEventListener("pointerdown", pressed, true);
+    };
+  }, [open, id]);
+
   /** Opens the suggestions; a dynamic list shows a pending state until it loads. */
   function show() {
+    window.dispatchEvent(new CustomEvent(OPENED, { detail: id }));
     setOpen(true);
     if (dynamic) setLoading(true);
   }
@@ -109,6 +131,7 @@ function MultiSelectField({
     if (!text || full || value.includes(text)) return;
     onChange([...value, text]);
     setQuery("");
+    setOpen(false);
   }
 
   const offered =
@@ -124,7 +147,15 @@ function MultiSelectField({
   const available = offered.filter((option) => !value.includes(option.value));
   return (
     <div
+      ref={container}
       className="source-field"
+      onKeyDown={(event) => {
+        // Escape closes only the foremost surface: this list, not the page.
+        if (event.key === "Escape" && open) {
+          event.stopPropagation();
+          setOpen(false);
+        }
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null))
           setOpen(false);
@@ -175,9 +206,6 @@ function MultiSelectField({
           if (event.key === "Enter") {
             event.preventDefault();
             if (field.allow_custom) add(query);
-          } else if (event.key === "Escape" && open) {
-            event.stopPropagation();
-            setOpen(false);
           }
         }}
       />

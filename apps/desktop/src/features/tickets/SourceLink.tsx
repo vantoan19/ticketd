@@ -18,19 +18,22 @@ export function SourceLink({
   if (!url.startsWith("https://")) return <span>{children}</span>;
   return (
     <>
-      <button
-        type="button"
+      {/* A real link (its address shows on hover and focus); the app opens it
+          in the default browser because a webview cannot follow it itself. */}
+      <a
+        href={url}
         className={`source-link ${className ?? ""}`.trim()}
-        onClick={() =>
+        onClick={(event) => {
+          event.preventDefault();
           void workspaceClient.openLink(url).then(
             () => setError(""),
             (reason: unknown) =>
               setError(`Could not open the link: ${String(reason)}`),
-          )
-        }
+          );
+        }}
       >
         {children}
-      </button>
+      </a>
       {error && <small role="alert">{error}</small>}
     </>
   );

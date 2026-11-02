@@ -378,7 +378,10 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
     assert_eq!(found, ["o/live#1"]);
     assert_eq!(summary.skipped.len(), 1);
     assert_eq!(summary.skipped[0].code, "not_found");
-    assert!(summary.skipped[0].message.contains("o/gone"));
+    assert_eq!(
+        summary.skipped[0].message,
+        "o/gone was not found, or your account cannot see it"
+    );
     // A repository closed to the account is skipped the same way, with its own code.
     fixture.respond(
         &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
@@ -393,6 +396,7 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
         .unwrap();
     assert_eq!(summary.skipped[0].code, "forbidden");
     // Saving rules that name an unreadable repository is still refused.
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
     fixture.respond(
         &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
         status(404, json!({"message": "Not Found"}), &[]),
@@ -401,7 +405,14 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
         &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
         ok(json!([])),
     );
-    assert!(engine.preview("github", &values).is_err());
+    // The refusal points at the repositories field and names the repository once.
+    let error = engine.preview("github", &values).unwrap_err();
+    assert_eq!(error.issues().len(), 1);
+    assert_eq!(error.issues()[0].field, "repositories");
+    assert_eq!(
+        error.issues()[0].message,
+        "cannot be used: o/gone was not found, or your account cannot see it"
+    );
 }
 
 #[test]
@@ -758,6 +769,58 @@ fn only_events_about_this_issue_count_and_the_latest_wins() {
         fetched.duplicate_withdrawn,
         "an unmark is a withdrawal, not a missing answer"
     );
+}
+
+fn closed_as_duplicate(canonical: Value) -> Value {
+    json!({"__typename": "ClosedEvent", "stateReason": "DUPLICATE", "duplicateOf": canonical})
+}
+
+#[test]
+fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    // `gh issue close 7 --duplicate-of 12`: the duplicate's timeline holds only the
+    // closed event; the marked event appears on the canonical's timeline instead.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([closed_as_duplicate(issue_node(900, 12, "o/other"))])),
+    );
+    let target = fetched.duplicate_of.expect("the closed event names it");
+    assert_eq!(target.identity.id, "900");
+    assert_eq!(target.locator, "o/other#12");
+    assert_eq!(
+        fetched.duplicate_of_url.as_deref(),
+        Some("https://github.example/o/other/issues/12")
+    );
+    // The latest event wins, whichever shape it has.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            closed_as_duplicate(issue_node(900, 9, "o/one")),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            closed_as_duplicate(issue_node(800, 8, "o/one")),
+            marked(7, issue_node(900, 9, "o/one")),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    // A closure that names nothing leaves an earlier mark standing.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            closed_as_duplicate(Value::Null),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "800");
 }
 
 #[test]
@@ -1155,7 +1218,7 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
 }
 
 #[test]
-fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_its_text() {
+fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_match_blocks() {
     let (fixture, engine) = setup(Some(TOKEN));
     let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
     rewritten["title"] = json!("Renamed by a teammate");
@@ -1177,8 +1240,11 @@ fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_
             },
         )
         .unwrap();
+    // The rewritten issue does not match the sent text, so it is listed for
+    // information only; someone else's issue is not listed at all.
+    assert!(found.matches.is_empty());
     let ids: Vec<_> = found
-        .matches
+        .recent
         .iter()
         .map(|i| i.reference.identity.id.as_str())
         .collect();

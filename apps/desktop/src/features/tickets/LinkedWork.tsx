@@ -271,7 +271,14 @@ function ExternalTargetRow({
         ) : url ? (
           <SourceLink url={url}>{label}</SourceLink>
         ) : (
-          <span className="linked-work-reference">{label}</span>
+          // A reference is monospace; "Unknown" is a word.
+          <span
+            className={
+              target.kind === "unknown" ? undefined : "linked-work-reference"
+            }
+          >
+            {label}
+          </span>
         )}{" "}
         <span className="linked-work-note">{note}</span>
       </span>

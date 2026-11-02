@@ -209,9 +209,20 @@ pub enum PublicationError {
     /// The ticket's title or description, or the destination, no longer match
     /// what the person previewed. Nothing was sent.
     #[error(
-        "{reference} changed since it was previewed, so nothing was sent; review the preview again"
+        "{reference} changed since it was previewed, so nothing was sent; review the preview again."
     )]
     ChangedSincePreview { reference: String },
+    /// The named issue does not hold the title and description that were sent, so
+    /// it may be an unrelated issue. Attaching it replaces this ticket's text with
+    /// the issue's, which only a person who has seen the difference may accept
+    /// ([`ResolveOptions::accept_different_content`]). Nothing was changed.
+    #[error(
+        "{}: {} does not hold what ticketd sent: {}. Attaching it would replace this ticket's text with the issue's; confirm only if it is the issue this publication created",
+        .0.reference,
+        .0.issue.display,
+        difference(.0.title_differs, .0.body_differs, &.0.issue_title, &.0.sent_title)
+    )]
+    DifferentContent(Box<ContentDifference>),
     /// Resolution was asked for a ticket with no uncertain attempt.
     #[error("{reference} has no uncertain publication to resolve")]
     NothingToResolve { reference: String },
@@ -261,6 +272,33 @@ pub enum PublicationError {
     },
 }
 
+/// How an issue named for attaching differs from what an attempt sent.
+#[derive(Debug)]
+pub struct ContentDifference {
+    pub reference: String,
+    pub attempt_id: String,
+    pub issue: PublishedIssue,
+    pub title_differs: bool,
+    pub body_differs: bool,
+    /// What the issue holds now, and the title that was sent.
+    pub issue_title: String,
+    pub sent_title: String,
+}
+
+/// What differs between an issue and the sent text, for a person to read.
+fn difference(title: bool, body: bool, issue_title: &str, sent_title: &str) -> String {
+    let mut parts = Vec::new();
+    if title {
+        parts.push(format!(
+            "its title is \u{201c}{issue_title}\u{201d} where ticketd sent \u{201c}{sent_title}\u{201d}"
+        ));
+    }
+    if body {
+        parts.push("its description is not the one that was sent".to_owned());
+    }
+    parts.join(", and ")
+}
+
 impl PublicationError {
     pub fn code(&self) -> &'static str {
         match self {
@@ -272,6 +310,7 @@ impl PublicationError {
             Self::StillRunning { .. } => "publication_still_running",
             Self::Unverified { .. } => "publication_unverified",
             Self::Mismatch { .. } => "publication_mismatch",
+            Self::DifferentContent { .. } => "publication_different_content",
             Self::Candidates { .. } => "publication_candidates",
             Self::Settled { .. } => "publication_settled",
         }
@@ -298,6 +337,11 @@ pub struct ResolveOptions {
     pub now: Option<String>,
     /// Who asked, recorded on the history of the outcome.
     pub agent: Option<String>,
+    /// Attach an issue whose title or description differs from what was sent.
+    /// The issue's text then replaces the ticket's, and the ticket's own is kept
+    /// as a note. Without it such an attach is refused.
+    #[serde(default)]
+    pub accept_different_content: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,12 +371,94 @@ pub struct PublicationReview {
     /// Why publishing is blocked and why another try is not safe yet.
     pub note: String,
     pub actions: Vec<ResolutionAction>,
-    /// Issues in the destination that may be this publication's result.
-    pub candidates: Vec<PublishedIssue>,
+    /// Issues in the destination whose title or description equals what was sent.
+    /// While any exists, "not created" is refused.
+    pub candidates: Vec<PublicationCandidate>,
+    /// Other issues the connected account created in the window. For information:
+    /// they do not block "not created" and can still be attached.
+    pub other_recent: Vec<PublicationCandidate>,
     /// `None` when no search ran or it failed; `Some(true)` when the whole
-    /// window was read.
+    /// window was read and enough time has passed for a just-created issue to be
+    /// listed (see `search_ready_at`).
     pub candidates_complete: Option<bool>,
+    /// When a search first counts for a "not created" verdict (RFC 3339); a search
+    /// that ran earlier cannot see an issue GitHub has not listed yet.
+    pub search_ready_at: Option<String>,
     pub lookup_failure: Option<SourceFailure>,
+}
+
+/// Why an issue is listed as possibly this publication's result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateReason {
+    /// Its title or description equals what was sent.
+    ContentMatch,
+    /// The connected account created it in the window.
+    CreatedByAccount,
+}
+
+/// An issue the destination holds that may be this publication's result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationCandidate {
+    pub identity: ExternalIdentity,
+    pub locator: String,
+    pub display: String,
+    pub url: String,
+    pub title: String,
+    pub created_at: String,
+    pub reason: CandidateReason,
+}
+
+fn candidate(issue: &ExternalIssue, reason: CandidateReason) -> PublicationCandidate {
+    PublicationCandidate {
+        identity: issue.reference.identity.clone(),
+        locator: issue.reference.locator.clone(),
+        display: issue.display.clone(),
+        url: issue.url.clone(),
+        title: issue.title.clone(),
+        created_at: issue.created_at.clone(),
+        reason,
+    }
+}
+
+/// A search counts for a "not created" verdict only this long after the create
+/// call could last have reached the provider: the provider's listing lags behind
+/// a creation by a few seconds.
+const LISTING_LAG_SECONDS: i64 = 60;
+
+/// When a search first counts for a verdict, as RFC 3339.
+fn search_ready_at(started_at: &str) -> Option<String> {
+    parse_time(started_at).map(|time| {
+        (time + chrono::Duration::seconds(LEASE_SECONDS + LISTING_LAG_SECONDS))
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    })
+}
+
+fn ready_text(started_at: &str) -> String {
+    search_ready_at(started_at)
+        .as_deref()
+        .and_then(parse_time)
+        .map_or_else(
+            || "a few minutes from now".to_owned(),
+            |time| format!("{} UTC", time.with_timezone(&chrono::Utc).format("%H:%M")),
+        )
+}
+
+fn search_settled(started_at: &str, now: &str) -> bool {
+    match (
+        search_ready_at(started_at).as_deref().and_then(parse_time),
+        parse_time(now),
+    ) {
+        (Some(ready), Some(now)) => now >= ready,
+        _ => true,
+    }
+}
+
+/// The wording of text for comparison: line endings and outer blanks are not
+/// differences (GitHub normalizes both).
+fn plain(text: &str) -> String {
+    text.replace("\r\n", "\n").trim().to_owned()
 }
 
 /// An issue created before the attempt began cannot be its result. A few
@@ -407,7 +533,6 @@ pub(crate) fn awaited_by_open_attempt(
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let plain = |text: &str| text.replace("\r\n", "\n").trim().to_owned();
     Ok(attempts.iter().any(|(title, body, started_at)| {
         !predates(&issue.created_at, started_at)
             && (plain(&issue.title) == plain(title)
@@ -622,20 +747,24 @@ fn eligibility(
     }
     let owned: Option<(String, String, String)> = connection
         .query_row(
-            "SELECT o.authority, i.provider, i.display FROM external_identities i \
+            "SELECT o.authority, i.origin, i.display FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.ticket_id = ?1",
             [&ticket.id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     match owned {
-        Some((authority, _, display)) if authority == "external" => {
-            return Ok(ineligible(
-                IneligibleReason::ExternallyOwned,
+        Some((authority, origin, display)) if authority == "external" => {
+            let message = if origin == "imported" {
+                format!(
+                    "{reference} was imported from {display} on {provider_name}; only local tickets are published"
+                )
+            } else {
                 format!(
                     "{reference} is already {display} on {provider_name} and is owned there; it is published only once"
-                ),
-            ));
+                )
+            };
+            return Ok(ineligible(IneligibleReason::ExternallyOwned, message));
         }
         Some((_, _, display)) => {
             return Ok(ineligible(
@@ -691,9 +820,7 @@ fn require_target<'a>(
     target.ok_or_else(|| {
         (
             IneligibleReason::SourceNotConnected,
-            format!(
-                "connect {provider_name} in Settings (or `ticketd source save {provider}`) before publishing"
-            ),
+            format!("connect {provider_name} in Settings before publishing"),
         )
     })
 }
@@ -896,11 +1023,15 @@ impl Workspace {
                 .into())
             }
             Err(error) => {
-                let message = format!("{}.", error.to_string().trim_end_matches('.'));
+                // Blind retrying is exactly what is blocked now, so the provider's
+                // own "retry later" advice is dropped from what is recorded.
+                let mut failure = failure_of(&error);
+                failure.message = without_retry_advice(&failure.message);
+                let message = format!("{}.", failure.message.trim_end_matches('.'));
                 let _ = self.settle(
                     &started.attempt_id,
                     AttemptState::Unresolved,
-                    Some(&failure_of(&error)),
+                    Some(&failure),
                     None,
                     options.now.as_deref(),
                 );
@@ -934,11 +1065,16 @@ impl Workspace {
                     replayed: false,
                 });
             }
-            Ok(Linked::Conflict) => (
+            Ok(Linked::Conflict { origin }) => (
                 "identity_conflict",
                 format!(
-                    "{provider_name} created {}, but discovery had already imported that issue as another ticket, so it was not attached here.",
-                    issue.display
+                    "{provider_name} created {}, but that issue was already {} as another ticket, so it was not attached here.",
+                    issue.display,
+                    if origin == "published" {
+                        "published"
+                    } else {
+                        "imported"
+                    }
                 ),
             ),
             Ok(Linked::SettledElsewhere) => (
@@ -999,7 +1135,11 @@ impl Workspace {
         let adopt = match identity_owner(&transaction, identity)? {
             None => None,
             Some(owner) if adoptable(&owner, &started_at) => Some(owner.ticket_id),
-            Some(_) => return Ok(Linked::Conflict),
+            Some(owner) => {
+                return Ok(Linked::Conflict {
+                    origin: owner.origin,
+                });
+            }
         };
         let now = clock(&transaction, now)?;
         let attempt = complete_attempt(
@@ -1012,6 +1152,7 @@ impl Workspace {
                 destination: &started.request.destination,
                 agent: started.agent.as_deref(),
                 adopt: adopt.as_deref(),
+                attached: None,
             },
             issue,
             &now,
@@ -1094,8 +1235,21 @@ impl Workspace {
         reference: &str,
         search: bool,
     ) -> Result<PublicationReview, Error> {
+        self.review_publication_at(engine, reference, search, None)
+    }
+
+    /// [`Workspace::review_publication`] judged at `now` (RFC 3339; the database
+    /// clock when absent).
+    pub fn review_publication_at(
+        &self,
+        engine: &Engine,
+        reference: &str,
+        search: bool,
+        now: Option<&str>,
+    ) -> Result<PublicationReview, Error> {
+        let now = clock(&self.connection, now)?;
         let ticket = subject(&self.connection, reference)?;
-        let Some(attempt) = open_attempt(&self.connection, &ticket.id, None)? else {
+        let Some(attempt) = open_attempt(&self.connection, &ticket.id, Some(&now))? else {
             return Err(PublicationError::NothingToResolve {
                 reference: ticket.reference,
             }
@@ -1124,10 +1278,11 @@ impl Workspace {
             Some("local_persistence_failed") => format!(
                 "{name} confirmed the issue, but ticketd could not record it on this ticket."
             ),
-            Some("identity_conflict") => {
-                "That issue was already imported as another ticket, so it was not attached here."
-                    .to_owned()
-            }
+            Some("identity_conflict") => attempt
+                .failure
+                .as_ref()
+                .map(|f| f.message.clone())
+                .unwrap_or_default(),
             Some(_) => attempt
                 .failure
                 .as_ref()
@@ -1151,8 +1306,10 @@ impl Workspace {
         };
 
         let mut candidates = Vec::new();
+        let mut other_recent = Vec::new();
         let mut candidates_complete = None;
         let mut lookup_failure = None;
+        let settled = search_settled(&attempt.started_at, &now);
         if search
             && !running
             && attempt.issue.is_none()
@@ -1164,8 +1321,17 @@ impl Workspace {
                 &search_for(&attempt, Some(&saved.account)),
             ) {
                 Ok(found) => {
-                    candidates = found.matches.iter().map(published).collect();
-                    candidates_complete = Some(found.complete);
+                    candidates = found
+                        .matches
+                        .iter()
+                        .map(|issue| candidate(issue, CandidateReason::ContentMatch))
+                        .collect();
+                    other_recent = found
+                        .recent
+                        .iter()
+                        .map(|issue| candidate(issue, CandidateReason::CreatedByAccount))
+                        .collect();
+                    candidates_complete = Some(found.complete && settled);
                 }
                 Err(error) => lookup_failure = Some(failure_of(&error)),
             }
@@ -1220,6 +1386,11 @@ impl Workspace {
                     format!(
                         "Not possible right now: {name} could not be searched, which does not mean nothing was created."
                     )
+                } else if candidates_complete == Some(false) && !settled {
+                    format!(
+                        "Not possible yet: {name} may not list a just-created issue for a minute or so. Look again after {}.",
+                        ready_text(&attempt.started_at)
+                    )
                 } else if candidates_complete == Some(false) {
                     format!(
                         "Not possible: only part of the recent issues in {} could be read.",
@@ -1240,7 +1411,9 @@ impl Workspace {
             note: "Publishing again is blocked: if the issue exists, creating another would duplicate it. It becomes available only after nothing is confirmed to have been created.".into(),
             actions,
             candidates,
+            other_recent,
             candidates_complete,
+            search_ready_at: search_ready_at(&attempt.started_at),
             lookup_failure,
             attempt,
         })
@@ -1288,7 +1461,7 @@ impl Workspace {
                     field: "source".into(),
                     message: format!(
                         "connect {} again before resolving this publication",
-                        attempt.provider
+                        super::provider_display_name(&attempt.provider)
                     ),
                 },
             ])));
@@ -1301,7 +1474,22 @@ impl Workspace {
                 ) {
                     (Some(text), _) => engine
                         .locate(&attempt.provider, &saved.config, &attempt.destination, text)
-                        .map_err(unverified)?,
+                        .map_err(|error| match error {
+                            // A mistake in what was typed (another repository, not an
+                            // issue number), not a failure to verify anything.
+                            SourceError::InvalidConfiguration(issues) => {
+                                Error::Publication(PublicationError::Mismatch {
+                                    reference: ticket.reference.clone(),
+                                    attempt_id: attempt.id.clone(),
+                                    message: issues
+                                        .iter()
+                                        .map(|issue| format!("the issue {}", issue.message))
+                                        .collect::<Vec<_>>()
+                                        .join("; "),
+                                })
+                            }
+                            other => unverified(other),
+                        })?,
                     (None, Some(known)) => engine
                         .fetch(
                             &attempt.provider,
@@ -1330,6 +1518,7 @@ impl Workspace {
                     &found,
                     options.now.as_deref(),
                     options.agent.as_deref(),
+                    options.accept_different_content,
                 )
             }
             Resolution::NotCreated => self.rule_out(
@@ -1423,6 +1612,7 @@ impl Workspace {
         issue: &ExternalIssue,
         now: Option<&str>,
         agent: Option<&str>,
+        accept_different_content: bool,
     ) -> Result<PublishOutcome, Error> {
         let identity = &issue.reference.identity;
         let mismatch = |message: String| {
@@ -1445,6 +1635,26 @@ impl Workspace {
                 "{} was created before this publication began, so it cannot be its result",
                 issue.display
             )));
+        }
+        // An issue ticketd itself created is the result by construction. Any other
+        // must hold the text that was sent, or a person must say it is the one: a
+        // title match is not identity, and its text will replace this ticket's.
+        let title_differs = plain(&issue.title) != plain(&attempt.title);
+        let body_differs = plain(&issue.body) != plain(&attempt.body);
+        let different = attempt.issue.is_none() && (title_differs || body_differs);
+        if different && !accept_different_content {
+            return Err(
+                PublicationError::DifferentContent(Box::new(ContentDifference {
+                    reference: ticket.reference.clone(),
+                    attempt_id: attempt.id.clone(),
+                    issue: published(issue),
+                    title_differs,
+                    body_differs,
+                    issue_title: issue.title.clone(),
+                    sent_title: attempt.title.clone(),
+                }))
+                .into(),
+            );
         }
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
@@ -1487,33 +1697,25 @@ impl Workspace {
             |row| row.get(0),
         )?;
         if (owner.is_some() && adopt.is_none()) || linked {
-            // Something else owns it. Keep what was learned and leave the attempt
-            // unresolved; never attach one identity twice.
-            let now = clock(&transaction, now)?;
-            let message = format!(
-                "{} is already linked to another ticket, so it cannot be attached here.",
-                issue.display
-            );
-            transaction.execute(
-                "UPDATE publication_attempts SET status = 'unresolved', updated_at = ?2, failure_code = 'identity_conflict', failure_message = ?3, \
-                 external_id = ?4, locator = ?5, display = ?6, url = ?7 WHERE id = ?1 AND status IN ('in_flight', 'unresolved') AND (external_id IS NULL OR external_id = ?4)",
-                params![
-                    attempt.id,
-                    now,
-                    message,
-                    identity.id,
-                    issue.reference.locator,
+            // Something else owns it. A person's choice that cannot be honored
+            // changes nothing: the attempt keeps what it knew, so the review still
+            // offers every action. Never attach one identity twice.
+            let message = match &owner {
+                Some(owner) => format!(
+                    "{} is already linked to another ticket (it was {} there), so it cannot be attached here",
                     issue.display,
-                    issue.url
-                ],
-            )?;
-            transaction.commit()?;
-            return Err(PublicationError::Unresolved {
-                reference: ticket.reference.clone(),
-                attempt_id: attempt.id.clone(),
-                message,
-            }
-            .into());
+                    if owner.origin == "published" {
+                        "published"
+                    } else {
+                        "imported"
+                    }
+                ),
+                None => format!(
+                    "{} is already linked to an issue of its own, so it cannot be attached here",
+                    ticket.reference
+                ),
+            };
+            return Err(mismatch(message));
         }
         let now = clock(&transaction, now)?;
         let settled = complete_attempt(
@@ -1526,6 +1728,7 @@ impl Workspace {
                 destination: &attempt.destination,
                 agent,
                 adopt: adopt.as_deref(),
+                attached: Some(different),
             },
             issue,
             &now,
@@ -1590,6 +1793,16 @@ impl Workspace {
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
         let now = clock(&transaction, now)?;
+        // The listing lags a creation by a few seconds, so a read this soon after
+        // the create call could last have landed may miss the issue it made.
+        if !search_settled(&attempt.started_at, &now) {
+            drop(transaction);
+            return Err(unverified(SourceError::Unavailable(format!(
+                "the issues in {} were read too soon to be conclusive, because a just-created issue may not be listed yet; look again after {}",
+                attempt.destination,
+                ready_text(&attempt.started_at)
+            ))));
+        }
         let changed = transaction.execute(
             "UPDATE publication_attempts SET status = 'failed', updated_at = ?2, failure_code = ?3, failure_message = ?4 \
              WHERE id = ?1 AND status IN ('in_flight', 'unresolved') AND external_id IS NULL \
@@ -1632,6 +1845,13 @@ impl Workspace {
     }
 }
 
+fn without_retry_advice(message: &str) -> String {
+    message
+        .trim_end_matches('.')
+        .trim_end_matches("; retry later")
+        .to_owned()
+}
+
 /// Failure code of an attempt a person confirmed was never created.
 const RULED_OUT: &str = "ruled_out";
 
@@ -1660,7 +1880,10 @@ struct Started {
 enum Linked {
     Done(Box<PublicationAttempt>),
     /// Discovery imported the created issue as a different ticket first.
-    Conflict,
+    Conflict {
+        /// How the other ticket got the identity: `published` or `imported`.
+        origin: String,
+    },
     /// Another process settled the attempt (for example after its lease ran out).
     SettledElsewhere,
 }
@@ -1677,6 +1900,10 @@ struct Sent<'a> {
     /// A ticket discovery imported for the created issue before it was attached.
     /// It gives its identity to the published ticket and goes to the trash.
     adopt: Option<&'a str>,
+    /// `Some(different)` when a person attached an issue they named: `different`
+    /// says its text differs from what was sent, so it replaces the ticket's.
+    /// `None` for the issue the publication itself created.
+    attached: Option<bool>,
 }
 
 /// The ticket that holds an external identity, as far as adoption needs to know.
@@ -1766,22 +1993,36 @@ fn complete_attempt(
     now: &str,
 ) -> Result<PublicationAttempt, Error> {
     let identity = &issue.reference.identity;
-    // Edits made after the text was sent are not on the provider. Keep them as a
-    // local note instead of letting the next refresh drop them.
+    // The issue holds what the provider has; the ticket takes that text over (the
+    // next refresh would do it anyway). Whatever local text it replaces is kept as
+    // a note in this same write, so nothing a person wrote is lost.
     let (title, body): (String, String) = transaction.query_row(
         "SELECT title, body FROM tickets WHERE id = ?1",
         [sent.ticket_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if title != sent.title || body != sent.body {
-        let note = format!(
-            "Edited while publishing to {}. The published issue holds the previewed text; these are the later local edits.\n\nTitle: {title}\n\n{body}",
-            sent.destination
-        );
+    let replaced_by_issue = sent.attached == Some(true);
+    let (new_title, new_body) = if replaced_by_issue {
+        (issue.title.as_str(), issue.body.as_str())
+    } else {
+        (sent.title, sent.body)
+    };
+    if title != new_title || body != new_body {
+        let note = if replaced_by_issue {
+            format!(
+                "Replaced when attaching {} to this ticket. The issue's title and description now apply; this was the ticket's text before.\n\nTitle: {title}\n\n{body}",
+                issue.display
+            )
+        } else {
+            format!(
+                "Edited while publishing to {}. The published issue holds the previewed text; these are the later local edits.\n\nTitle: {title}\n\n{body}",
+                sent.destination
+            )
+        };
         notes::add(transaction, sent.ticket_id, &note, sent.agent)?;
         transaction.execute(
             "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
-            params![sent.ticket_id, sent.title, sent.body],
+            params![sent.ticket_id, new_title, new_body],
         )?;
     }
     match sent.adopt {
@@ -1803,11 +2044,17 @@ fn complete_attempt(
             issue.url
         ],
     )?;
+    // An attach is recorded apart from a publication: the person linked an issue
+    // after an uncertain publication rather than ticketd creating it.
     history::record(
         transaction,
         sent.ticket_id,
         "source",
-        "",
+        if sent.attached.is_some() {
+            "attached"
+        } else {
+            ""
+        },
         &issue.display,
         sent.agent,
     )?;

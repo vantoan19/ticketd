@@ -26,8 +26,9 @@ export function useTicketSearch(
       const lookups: Promise<Ticket[]>[] = [
         client.searchTickets(text, "all", 0),
       ];
+      // An exact reference is what was asked for, so it leads the list.
       if (referencePattern.test(text))
-        lookups.push(
+        lookups.unshift(
           client.showTicket(text.toUpperCase()).then(
             (found) => [found],
             () => [],

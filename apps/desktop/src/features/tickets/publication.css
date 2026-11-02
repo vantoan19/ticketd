@@ -18,6 +18,18 @@
 }
 .publication-dialog {
   max-width: 560px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+/* The heading stays in view while a long review scrolls beneath it. */
+.publication-dialog [data-slot="dialog-header"] {
+  position: sticky;
+  top: -24px;
+  z-index: 1;
+  margin-top: -24px;
+  padding-top: 24px;
+  padding-bottom: 8px;
+  background: var(--popover);
 }
 .publication-preview {
   display: flex;

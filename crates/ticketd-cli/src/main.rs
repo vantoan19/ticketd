@@ -324,6 +324,10 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        /// Attach an issue whose title or description differs from what was sent. Its text
+        /// then replaces the ticket's, and the ticket's own text is kept as a note
+        #[arg(long)]
+        accept_different: bool,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -967,10 +971,15 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             if let Some(failure) = report.failures.first() {
                 return Err(format!(
-                    "refresh failed for {} ({}): {}",
+                    "refresh failed for {} ({}): {}{}",
                     failure.reference.as_deref().unwrap_or(&failure.provider),
                     failure.code,
-                    failure.message
+                    failure.message,
+                    if failure.code == "unauthenticated" {
+                        TOKEN_HINT
+                    } else {
+                        ""
+                    }
                 )
                 .into());
             }
@@ -1000,7 +1009,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     &engine,
                     &ticket,
                     &ticketd_core::source::PublishOptions {
-                        provider,
+                        provider: provider.clone(),
                         destination,
                         now: None,
                         expected_fingerprint: expect,
@@ -1018,6 +1027,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         writeln!(output, "{}", serde_json::to_string(attempt)?)?;
                     }
                     return Err(match error {
+                        ticketd_core::source::PublicationError::Ineligible {
+                            reason: ticketd_core::source::IneligibleReason::SourceNotConnected,
+                            ..
+                        } => format!(
+                            "{error}; from the command line, run `ticketd source save {provider} --set repositories=owner/name`"
+                        ),
                         ticketd_core::source::PublicationError::Unresolved { .. } => format!(
                             "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
                         ),
@@ -1036,6 +1051,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     attach,
                     not_created,
                     no_search,
+                    accept_different,
                     agent,
                 },
         } => {
@@ -1060,6 +1076,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                             resolution,
                             now: None,
                             agent,
+                            accept_different_content: accept_different,
                         },
                     );
                     if let Err(ticketd_core::Error::Publication(error)) = &result {
@@ -1071,6 +1088,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                             writeln!(output, "{}", serde_json::to_string(attempt)?)?;
                         }
                         return Err(match error {
+                            PublicationError::DifferentContent { .. } => format!(
+                                "{error}. Run the command again with --accept-different to attach it anyway"
+                            ),
                             PublicationError::Unverified { .. }
                             | PublicationError::Candidates { .. }
                             | PublicationError::Mismatch { .. } => format!(
@@ -1174,9 +1194,22 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
     Err("refresh and publish are handled before source configuration commands".into())
 }
 
+/// The command line's own way to sign in; the desktop app's guidance leaves it out.
+const TOKEN_HINT: &str =
+    " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
-        eprintln!("error: {error}");
+        use ticketd_core::source::SourceError;
+        let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
+            Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
+            _ => matches!(
+                error.downcast_ref::<SourceError>(),
+                Some(SourceError::Unauthenticated(_))
+            ),
+        };
+        let hint = if unauthenticated { TOKEN_HINT } else { "" };
+        eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }
 }

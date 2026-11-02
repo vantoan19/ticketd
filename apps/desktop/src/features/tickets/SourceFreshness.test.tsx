@@ -174,7 +174,9 @@ test("an unavailable source shows the failure, the last good sync and a working 
   );
   expect(screen.getByText("GitHub unavailable")).toBeTruthy();
   expect(
-    screen.getByText(/Network is down\. Showing content synced 4 min ago/),
+    screen.getByText(
+      /Network is down\. Showing content from the last sync, 4 min ago/,
+    ),
   ).toBeTruthy();
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="attention"]'),
@@ -243,8 +245,11 @@ test("the unavailable notice says what failed, since when, that nothing was lost
     within(notice).getByText(/Source unavailable · Since 12 min ago/),
   ).toBeTruthy();
   expect(
-    within(notice).getByText(/Nothing was deleted or completed/),
+    within(notice).getByText(
+      /GitHub could not be reached for .*\. Nothing was deleted or completed\./,
+    ),
   ).toBeTruthy();
+  expect(within(notice).queryByText(/Network is down/)).toBeNull();
   expect(within(notice).getByText(/Synced 30 min ago/)).toBeTruthy();
   expect(
     within(notice).getByRole("button", { name: /Take ownership/ }),
@@ -371,6 +376,83 @@ test("the list header shows the last sync when idle", () => {
     ),
   );
   expect(screen.getByText("Synced 4 min ago")).toBeTruthy();
+});
+
+test("the list header says Last synced, never Synced, while the source is unavailable", () => {
+  render(
+    withActivity(
+      { sources: [status({ health: "unavailable" })] },
+      <SourceRefresh
+        providers={["github"]}
+        state={{ running: false, report: null, error: "" }}
+      />,
+    ),
+  );
+  expect(screen.getByText("Last synced 4 min ago")).toBeTruthy();
+  expect(screen.queryByText(/^Synced/)).toBeNull();
+});
+
+test("the unavailable notice is worded by the failure, not by the provider's text", () => {
+  const worded = (code: string) =>
+    unavailableNotice(
+      source({
+        unavailable: {
+          code,
+          message: "raw provider text",
+          since: minutesAgo(1),
+        },
+      }),
+    )?.detail ?? "";
+  expect(worded("not_found")).toMatch(
+    /deleted or is not visible to your account/,
+  );
+  expect(worded("unauthenticated")).toMatch(/GitHub rejected the sign-in/);
+  for (const code of [
+    "not_found",
+    "unauthenticated",
+    "forbidden",
+    "unavailable",
+  ])
+    expect(worded(code)).not.toContain("raw provider text");
+});
+
+test("a refresh failure about a ticket that was taken over no longer shows", () => {
+  const report = {
+    imported: [],
+    updated: [],
+    failures: [
+      {
+        provider: "github",
+        reference: "T-1",
+        code: "not_found",
+        message: "gone",
+      },
+    ],
+    refreshed_at: "2026-02-02T00:00:00Z",
+  } as never;
+  const state = { running: false, report, error: "" };
+  const { rerender } = render(
+    withActivity(
+      {},
+      <SourceRefresh
+        providers={["github"]}
+        state={state}
+        tickets={[ticket({ source: source() })]}
+      />,
+    ),
+  );
+  expect(screen.getByRole("alert").textContent).toContain("Could not refresh");
+  rerender(
+    withActivity(
+      {},
+      <SourceRefresh
+        providers={["github"]}
+        state={state}
+        tickets={[ticket({ source: null })]}
+      />,
+    ),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("relative times degrade to the raw value only when unreadable", () => {

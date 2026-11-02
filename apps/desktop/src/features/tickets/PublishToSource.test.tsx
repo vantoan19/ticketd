@@ -173,6 +173,20 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
+test("a trashed ticket's rail says why it cannot be published", async () => {
+  bridgeAnswers({
+    ...eligible,
+    eligibility: {
+      kind: "ineligible",
+      reason: "trashed",
+      message: "T-1 is in the trash; restore it to publish it",
+    },
+  });
+  rail(ticket({ trashed: true }));
+  await screen.findByText("T-1 is in the trash; restore it to publish it");
+  expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
+});
+
 test("a ticket that changed since the preview sends nothing and is previewed again", async () => {
   bridgeAnswers(eligible, {
     reject: {
@@ -278,6 +292,8 @@ const review = (overrides: Record<string, unknown> = {}) => ({
     },
   ],
   candidates: [],
+  other_recent: [],
+  search_ready_at: null,
   candidates_complete: true,
   lookup_failure: null,
   ...overrides,
@@ -346,6 +362,7 @@ test("naming the created issue attaches it and refreshes the ticket", async () =
     expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
       reference: "T-1",
       resolution: { kind: "attach", issue: "12" },
+      acceptDifferentContent: false,
     }),
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
@@ -382,6 +399,9 @@ test("possible matches can be confirmed, and not-created is withheld while they 
           locator: "acme/api#7",
           display: "acme/api#7",
           url: "https://github.example/acme/api/issues/7",
+          title: "Escalate the cache bug",
+          created_at: "2026-03-01T10:00:00Z",
+          reason: "content_match",
         },
       ],
       actions: review().actions.map((action) =>
@@ -414,8 +434,55 @@ test("possible matches can be confirmed, and not-created is withheld while they 
     expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
       reference: "T-1",
       resolution: { kind: "attach", issue: "acme/api#7" },
+      acceptDifferentContent: false,
     }),
   );
+});
+
+test("an issue whose text differs is attached only after the person confirms it", async () => {
+  const candidate = {
+    identity: { provider: "github", id: "61" },
+    locator: "acme/api#22",
+    display: "acme/api#22",
+    url: "https://github.example/acme/api/issues/22",
+    title: "Unrelated probe",
+    created_at: "2026-03-01T10:00:00Z",
+    reason: "created_by_account",
+  };
+  let confirmed = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: Record<string, unknown>) => {
+      if (command === "preview_publication")
+        return { ...eligible, attempt: attempt() };
+      if (command === "review_publication")
+        return review({ other_recent: [candidate] });
+      if (command === "resolve_publication") {
+        if (args?.["acceptDifferentContent"] !== true)
+          throw {
+            code: "publication_different_content",
+            message:
+              "T-1: acme/api#22 does not hold what ticketd sent: its title is “Unrelated probe” where ticketd sent “Escalate the cache bug”.",
+            fields: [],
+          };
+        confirmed = true;
+        return { attempt: attempt({ state: "succeeded" }), replayed: false };
+      }
+      return [];
+    },
+  );
+  const refresh = rail(ticket({ publication: attempt() }));
+  const dialog = await openReview();
+  await within(dialog).findByText(/Created by your account/);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "This is acme/api#22" }),
+  );
+  await within(dialog).findByText(/does not hold what ticketd sent/);
+  expect(confirmed).toBe(false);
+  expect(refresh).not.toHaveBeenCalled();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Attach anyway" }),
+  );
+  await waitFor(() => expect(confirmed).toBe(true));
 });
 
 test("a failed search is reported and never shown as nothing found", async () => {

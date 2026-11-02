@@ -324,3 +324,77 @@ test("a saved source says how often it refreshes and when it last did", () => {
   ).toBeTruthy();
   expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
 });
+
+test("rules equal to the saved configuration are not described as changed", async () => {
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove o/r" }));
+  await addRepository("o/r");
+  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(screen.queryByText(/The rules changed/)).toBeNull();
+  expect(
+    screen.getByText(/These rules are the saved configuration/),
+  ).toBeTruthy();
+});
+
+test("an unavailable source never claims a fresh sync or a green configuration", () => {
+  const { container } = render(
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [
+          {
+            provider: "github",
+            health: "unavailable",
+            last_attempt_at: new Date().toISOString(),
+            last_refreshed_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+            error: {
+              code: "unauthenticated",
+              message: "GitHub rejected the sign-in.",
+            },
+            failing_since: new Date().toISOString(),
+            retry_after: null,
+            unavailable_tickets: 2,
+            partial_message: null,
+          },
+        ],
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          saved: {
+            provider: "github",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>,
+  );
+  expect(screen.getByText(/Last synced 4 min ago/)).toBeTruthy();
+  expect(screen.queryByText(/Last refreshed/)).toBeNull();
+  expect(screen.getByText(/GitHub is unavailable/)).toBeTruthy();
+  // The saved configuration is a separate fact and is not shown as healthy.
+  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(
+    container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
+  ).toBeNull();
+});

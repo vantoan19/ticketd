@@ -34,9 +34,10 @@ pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
-    ActionKind, AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
-    PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
-    Resolution, ResolutionAction, ResolveOptions,
+    ActionKind, AttemptState, CandidateReason, ContentDifference, Eligibility, IneligibleReason,
+    PublicationAttempt, PublicationCandidate, PublicationError, PublicationPreview,
+    PublicationReview, PublishOptions, PublishOutcome, PublishedIssue, Resolution,
+    ResolutionAction, ResolveOptions,
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
@@ -126,6 +127,11 @@ pub(crate) fn display_parts(
         }
         other => (other.to_owned(), String::new(), display.to_owned()),
     }
+}
+
+/// What a person calls a provider: its display name where it has one.
+pub(crate) fn provider_display_name(provider: &str) -> String {
+    display_parts(provider, "", "").0
 }
 
 /// The effective "now" of a write: the caller's RFC 3339 time when given, else the

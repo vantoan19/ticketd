@@ -88,11 +88,9 @@ export function TicketList({
                 </span>
                 <IconButton
                   className="ticket-group-add"
-                  label={
-                    status === "Duplicate"
-                      ? "Mark a ticket as duplicate"
-                      : `Add ${status} ticket`
-                  }
+                  // Every group offers the same action; the Duplicate group's
+                  // opens the review that names the canonical ticket.
+                  label={`Add ${status} ticket`}
                   onClick={(event) =>
                     grouping?.onAdd(status, event.currentTarget)
                   }

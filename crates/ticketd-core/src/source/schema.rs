@@ -164,7 +164,15 @@ impl ConfigSchema {
                 Some(value) => {
                     values.insert(field.key.clone(), value);
                 }
-                None if field.required => issues.push(issue(&field.key, "is required")),
+                None if field.required => issues.push(issue(
+                    &field.key,
+                    // A selection holds several values; its label is plural.
+                    if matches!(field.kind, FieldKind::MultiSelect { .. }) {
+                        "are required"
+                    } else {
+                        "is required"
+                    },
+                )),
                 None => {}
             }
         }

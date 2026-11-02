@@ -4,7 +4,7 @@ import {
   CircleCheck,
   CircleDot,
   CircleEqual,
-  CircleHelp,
+  Circle,
   CircleSlash,
   UserMinus,
   UserPlus,
@@ -41,7 +41,7 @@ function describeEvent(entry: EventEntry): {
         icon: CircleEqual,
       };
     case "closed":
-      return { text: `${actor} closed this`, icon: CircleHelp };
+      return { text: `${actor} closed this`, icon: Circle };
     case "reopened":
       return { text: `${actor} reopened this`, icon: CircleDot };
     case "assigned":

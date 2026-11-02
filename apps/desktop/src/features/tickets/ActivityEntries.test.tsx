@@ -43,6 +43,26 @@ const note = {
   editing_agent: "cli-agent",
 };
 
+test("a change that came from a source reads as the source, not as an agent", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_notes") return [];
+    if (command === "ticket_history")
+      return [
+        {
+          kind: "status",
+          from_value: "Todo",
+          to_value: "Canceled",
+          timestamp: "2026-10-31T11:00:00Z",
+          editing_agent: "github",
+        },
+      ];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<Activity {...props} reference="T-20" />);
+  await screen.findByText("Changed on GitHub");
+  expect(screen.queryByText(/Agent:/)).toBeNull();
+});
+
 test("shows an editing agent only when one was recorded and words history as sentences", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_notes")

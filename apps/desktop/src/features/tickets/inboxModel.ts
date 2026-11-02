@@ -1,5 +1,6 @@
 import { startOfLocalDay } from "@/lib/format";
 import { describeChange } from "./history-sentence";
+import { providerName } from "./ticket-source";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
 
@@ -20,7 +21,9 @@ export function summarize(entry: Entry): string {
       : entry.kind === "note"
         ? `New note: ${entry.to_value}`
         : describeChange(entry.kind, entry.from_value, entry.to_value);
-  return entry.editing_agent ? `${base} · ${entry.editing_agent}` : base;
+  return entry.editing_agent
+    ? `${base} · ${providerName(entry.editing_agent)}`
+    : base;
 }
 
 /** Group by local calendar day relative to `now`. */
