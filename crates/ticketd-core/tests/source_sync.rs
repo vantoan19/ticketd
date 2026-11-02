@@ -1463,3 +1463,57 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
         Some("2026-02-02T00:00:00Z")
     );
 }
+
+#[test]
+fn only_the_latest_closure_borrows_the_current_issues_reason() {
+    let mut f = Fixture::new();
+    let mut closed = issue(1, "Closed with a reason");
+    closed.state = ExternalState::Closed {
+        reason: ClosureReason::Completed,
+    };
+    f.publish(closed, true);
+    f.remote(|remote| {
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: Vec::new(),
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    // Closed issues are not discovered, so first import it open, then observe closure.
+    f.remote(|remote| remote.issues.get_mut(&1).unwrap().state = ExternalState::Open);
+    f.refresh();
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = ExternalState::Closed {
+            reason: ClosureReason::Completed,
+        };
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    let events = f.workspace.source_conversation("T-1").unwrap();
+    assert!(matches!(&events[0], ConversationEntry::Event {event, ..} if event == "closed"));
+    assert!(
+        matches!(&events[2], ConversationEntry::Event {event, ..} if event == "closed_completed")
+    );
+}

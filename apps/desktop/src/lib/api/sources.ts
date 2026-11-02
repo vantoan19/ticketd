@@ -190,6 +190,14 @@ const publicationPreviewSchema = z.object({
   body: z.string(),
   /** Identifies this title, description and destination; handed back to publish exactly this. */
   fingerprint: z.string(),
+  local: z
+    .object({
+      notes: z.number().int().nonnegative(),
+      effort: z.string().nullable(),
+      tags: z.array(z.string()),
+      subtickets: z.array(z.string()),
+    })
+    .optional(),
   eligibility: eligibilitySchema,
   attempt: publicationAttemptSchema.nullable(),
 });

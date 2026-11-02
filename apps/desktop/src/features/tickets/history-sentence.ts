@@ -92,6 +92,12 @@ export function describeChange(
         : to
           ? `Its source named ${to} as the original`
           : `Its source no longer names ${from} as the original`;
+    case "source_import":
+      return `Imported from ${to}${from ? ` as ${from}` : ""}`;
+    case "source_unavailable":
+      return `Source unavailable (${to.replaceAll("_", " ")})`;
+    case "publication_unresolved":
+      return `Publish to ${to} — no response, outcome unknown`;
     case "publication":
       return to === "not created"
         ? "Confirmed that nothing was created by the earlier publication attempt"

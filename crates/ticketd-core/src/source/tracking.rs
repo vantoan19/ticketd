@@ -944,7 +944,34 @@ impl Workspace {
                 continue;
             }
             match engine.conversation(&identity.provider, config, &issue.reference) {
-                Ok(Some(read)) => {
+                Ok(Some(mut read)) => {
+                    // REST timeline closes may omit a reason. Only the latest
+                    // state event can borrow the issue's currently observed closure.
+                    if let ExternalState::Closed { reason } = issue.state
+                        && let Some(event) = read
+                            .events
+                            .iter_mut()
+                            .filter(|event| {
+                                matches!(
+                                    event.kind,
+                                    super::ExternalEventKind::Closed(_)
+                                        | super::ExternalEventKind::Reopened
+                                )
+                            })
+                            .max_by(|a, b| a.created_at.cmp(&b.created_at))
+                        && matches!(event.kind, super::ExternalEventKind::Closed(_))
+                    {
+                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
+                            event.kind = super::ExternalEventKind::Closed(reason);
+                        }
+                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
+                        {
+                            event.subject = issue
+                                .duplicate_of
+                                .as_ref()
+                                .map(|target| target.locator.clone());
+                        }
+                    }
                     gathered
                         .conversations
                         .insert((identity.provider.clone(), identity.id.clone()), read);
@@ -1071,6 +1098,21 @@ impl Workspace {
                         // the last successful refresh and saved content are not touched.
                         // An attempt that started before the ticket was last confirmed
                         // is older news and records nothing.
+                        if FailureCode::parse(&found.failure.code)
+                            .is_some_and(FailureCode::is_unavailable)
+                        {
+                            let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
+                            if first {
+                                history::record(
+                                    &transaction,
+                                    &ticket.ticket_id,
+                                    "source_unavailable",
+                                    "",
+                                    &found.failure.code,
+                                    Some(&found.provider),
+                                )?;
+                            }
+                        }
                         transaction.execute(
                             "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
                              failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
@@ -1191,6 +1233,14 @@ fn apply_issue(
             )?;
             let number = connection.last_insert_rowid();
             link(connection, &id, issue, Origin::Imported, now)?;
+            history::record(
+                connection,
+                &id,
+                "source_import",
+                &status.to_string(),
+                &issue.display,
+                Some(&issue.reference.identity.provider),
+            )?;
             if status == Status::Duplicate {
                 set_duplicate_target(connection, &id, issue)?;
             }
