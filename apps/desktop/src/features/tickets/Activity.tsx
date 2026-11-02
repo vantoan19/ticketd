@@ -264,9 +264,7 @@ export function Activity({
                     {formatDateTime(item.note.created_at)}
                   </time>
                   {item.note.updated_at !== item.note.created_at && (
-                    <span>
-                      Edited {formatDateTime(item.note.updated_at)}
-                    </span>
+                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
                   )}
                   {item.note.editing_agent && (
                     <span>Agent: {item.note.editing_agent}</span>

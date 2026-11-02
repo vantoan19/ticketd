@@ -141,11 +141,11 @@ test("View and Comment link to the source and there is no composer", async () =>
   render(view(source()));
   await screen.findByRole("article");
 
-  fireEvent.click(screen.getByRole("button", { name: "View on GitHub" }));
+  fireEvent.click(screen.getByRole("link", { name: "View on GitHub" }));
   expect(opener.openUrl).toHaveBeenCalledWith(
     "https://github.com/acme/api/issues/98#issuecomment-501",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Comment on GitHub" }));
+  fireEvent.click(screen.getByRole("link", { name: "Comment on GitHub" }));
   expect(opener.openUrl).toHaveBeenLastCalledWith(
     "https://github.com/acme/api/issues/98",
   );
@@ -155,9 +155,7 @@ test("an externally owned ticket with no conversation says so and still links to
   conversation([]);
   render(view(source()));
   expect(await screen.findByText("No comments on GitHub yet.")).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Comment on GitHub" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Comment on GitHub" })).toBeTruthy();
 });
 
 test("a ticket whose ownership was taken shows retained entries, or nothing", async () => {

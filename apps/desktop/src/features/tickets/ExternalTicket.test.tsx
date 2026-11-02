@@ -236,7 +236,7 @@ test("the Source section shows the owner, the state, freshness and refreshes one
     .getByRole("heading", { name: "Source" })
     .closest("section")!;
   expect(
-    within(section).getByRole("button", { name: "acme / api #98" }),
+    within(section).getByRole("link", { name: "acme / api #98" }),
   ).toBeTruthy();
   expect(within(section).getByText("Open on GitHub")).toBeTruthy();
   expect(within(section).getByText(/^Synced|Synced/)).toBeTruthy();
@@ -249,7 +249,7 @@ test("the Source section shows the owner, the state, freshness and refreshes one
     ticket: "T-1",
   });
   fireEvent.click(
-    within(section).getByRole("button", { name: "acme / api #98" }),
+    within(section).getByRole("link", { name: "acme / api #98" }),
   );
   await waitFor(() =>
     expect(opener.openUrl).toHaveBeenCalledWith(
@@ -328,15 +328,15 @@ test("an externally owned description is a read-only source card without editing
   expect(within(card).getByText("GitHub · Read-only")).toBeTruthy();
   expect(within(card).getByText("Described on GitHub")).toBeTruthy();
   expect(
-    within(card).getByRole("button", { name: "Edit on GitHub" }),
+    within(card).getByRole("link", { name: "Edit on GitHub" }),
   ).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: /title/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   expect(screen.getByText("Open on GitHub · #98")).toBeTruthy();
   // The detail header and the rail's Source section both link to the issue.
-  expect(
-    screen.getAllByRole("button", { name: /acme \/ api #98/ }),
-  ).toHaveLength(2);
+  expect(screen.getAllByRole("link", { name: /acme \/ api #98/ })).toHaveLength(
+    2,
+  );
   expect(screen.getByText(/Notes stay in ticketd/)).toBeTruthy();
 });
 
