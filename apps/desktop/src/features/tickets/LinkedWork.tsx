@@ -162,12 +162,13 @@ export function LinkedWork({
       >
         {linkLabel(row.kind)}
       </span>
-      <StatusIcon
-        status={row.status}
-        size={16}
-        decorative
+      <span
         className="linked-work-icon"
-      />
+        role="img"
+        aria-label={statusText(row)}
+      >
+        <StatusIcon status={row.status} size={16} decorative />
+      </span>
       <span className="linked-work-reference">{row.reference}</span>
       <Button
         variant="link"
@@ -176,7 +177,17 @@ export function LinkedWork({
       >
         <span className="truncate">{row.title}</span>
       </Button>
-      <span className="linked-work-status">{statusText(row)}</span>
+      <span
+        className="linked-work-status"
+        aria-hidden="true"
+        data-qualified={
+          (row.kind === "blocked_by" && row.unresolved) ||
+          row.trashed ||
+          undefined
+        }
+      >
+        {statusText(row)}
+      </span>
       {isDuplicateKind(row.kind) &&
       !externalSource(work.ticket)?.status_locked ? (
         <RemoveDuplicate

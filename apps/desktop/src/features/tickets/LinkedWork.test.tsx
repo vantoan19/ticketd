@@ -197,6 +197,18 @@ test("builds every row from the one relationships read, including all dependents
     "duplicate_of",
   ]);
   expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
+  const blocker = screen
+    .getByRole("button", { name: "Blocker" })
+    .closest("li")!;
+  expect(
+    within(blocker).getByRole("img", {
+      name: "In progress · not done · in trash",
+    }),
+  ).toBeTruthy();
+  const dependent = screen
+    .getByRole("button", { name: "Waiting" })
+    .closest("li")!;
+  expect(within(dependent).getByRole("img", { name: "Todo" })).toBeTruthy();
   const commands = vi.mocked(invoke).mock.calls.map((call) => call[0]);
   expect(commands).not.toContain("dependency_graph");
   expect(commands).not.toContain("show_ticket");

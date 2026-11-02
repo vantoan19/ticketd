@@ -161,7 +161,7 @@
 /* Compact rail groups: a label followed by one icon/reference/title row. */
 @container (max-width: 260px) {
   .linked-work-row {
-    grid-template-columns: 16px 3rem minmax(0, 1fr) 24px;
+    grid-template-columns: 16px 3rem minmax(0, 1fr);
     min-height: 32px;
     padding: 0;
     gap: 4px 8px;
@@ -181,10 +181,25 @@
     white-space: nowrap;
   }
   .linked-work-remove {
-    grid-column: 4;
+    position: absolute;
+    top: 24px;
+    right: 0;
+    background: var(--background);
+  }
+  .linked-work-row:has(.linked-work-label[data-repeat]) .linked-work-remove {
+    top: 0;
+  }
+  .linked-work-row:hover .linked-work-remove,
+  .linked-work-row:focus-within .linked-work-remove {
+    background: var(--accent);
   }
   .linked-work-status {
     display: none;
+  }
+  .linked-work-status[data-qualified] {
+    display: block;
+    grid-column: 2 / -1;
+    white-space: normal;
   }
   .linked-work-external {
     grid-column: 1 / -1;
@@ -193,6 +208,11 @@
 @media (hover: none), (max-width: 767px) {
   .linked-work-remove {
     opacity: 1;
+  }
+  @container (max-width: 260px) {
+    .linked-work-title {
+      padding-right: 32px;
+    }
   }
 }
 .link-ticket-note {
