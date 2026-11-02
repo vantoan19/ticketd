@@ -102,6 +102,12 @@ export function Duplicates({
     null,
   );
   const [separate, setSeparate] = useState(startSeparate);
+
+  // Arriving at the form (for example after picking the ticket to mark) puts the
+  // cursor where the next answer goes, not on the dialog's frame.
+  useEffect(() => {
+    canonicalInput.current?.focus();
+  }, []);
   const target = canonical.trim();
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
   // The preview's normalized form of the source, which its edges refer to; the typed
