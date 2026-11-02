@@ -325,11 +325,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: 32px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--secondary-foreground);
-  font-size: 13px;
+  font-size: 14px;
 }
 .source-filter button[aria-pressed="true"] {
   background: var(--accent);

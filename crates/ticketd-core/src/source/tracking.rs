@@ -463,6 +463,23 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         Ownership::Local
     };
     let external = ownership == Ownership::External;
+    let status_choices: Vec<Status> = if external {
+        match state {
+            ExternalState::Open => ALL_STATUSES
+                .into_iter()
+                .filter(|status| status.is_local_progress())
+                .collect(),
+            ExternalState::Closed {
+                reason: ClosureReason::Unknown,
+            } => ALL_STATUSES
+                .into_iter()
+                .filter(|status| status.ends_work())
+                .collect(),
+            ExternalState::Closed { .. } => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
     let unavailable = match &row.error_code {
         Some(code)
@@ -503,24 +520,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                 reason: ClosureReason::Unknown
             }
         ),
-        status_locked: external && !matches!(state, ExternalState::Open),
-        status_choices: if external {
-            match state {
-                ExternalState::Open => ALL_STATUSES
-                    .into_iter()
-                    .filter(|status| status.is_local_progress())
-                    .collect(),
-                ExternalState::Closed {
-                    reason: ClosureReason::Unknown,
-                } => ALL_STATUSES
-                    .into_iter()
-                    .filter(|status| status.ends_work())
-                    .collect(),
-                ExternalState::Closed { .. } => Vec::new(),
-            }
-        } else {
-            Vec::new()
-        },
+        status_locked: external && status_choices.is_empty(),
+        status_choices,
         state,
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,

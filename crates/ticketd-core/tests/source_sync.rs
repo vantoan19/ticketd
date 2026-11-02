@@ -1307,6 +1307,12 @@ fn a_closed_issue_with_an_unrecognized_reason_is_never_ready_and_allows_a_local_
     assert_eq!(held.status, Status::Todo);
     assert!(held.source.as_ref().unwrap().closure_unrecognized);
     assert_eq!(held.availability, None);
+    let held_source = held.source.as_ref().unwrap();
+    assert!(!held_source.status_locked, "a local decision is allowed");
+    assert_eq!(
+        held_source.status_choices,
+        vec![Status::Done, Status::Canceled]
+    );
     let ready = TicketFilter {
         availability: Some(Availability::Ready),
         ..TicketFilter::default()

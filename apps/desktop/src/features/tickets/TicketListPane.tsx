@@ -138,7 +138,10 @@ export function TicketListPane({
           <IconButton
             className="list-refresh"
             label="Refresh"
-            onClick={() => void refresh()}
+            disabled={sourceRefresh.running}
+            onClick={() =>
+              void (configuredSources.length > 0 ? refreshSources() : refresh())
+            }
           >
             <RefreshCw />
           </IconButton>
@@ -156,7 +159,6 @@ export function TicketListPane({
             <SourceRefresh
               providers={configuredSources}
               state={sourceRefresh}
-              onRefresh={() => void refreshSources()}
             />
           )}
         </>

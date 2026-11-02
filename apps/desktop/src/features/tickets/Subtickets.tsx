@@ -56,7 +56,7 @@ export function Subtickets({
       <ul className="subtickets-rows">
         {rows.map((row) => (
           <li key={row.reference} className="subtickets-row">
-            <StatusIcon status={row.status} size={14} decorative />
+            <StatusIcon status={row.status} size={16} decorative />
             <span className="subtickets-reference">{row.reference}</span>
             <Button
               variant="link"

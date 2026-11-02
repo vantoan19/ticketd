@@ -121,10 +121,21 @@ export function duplicateTargetParts(target: DuplicateTarget): {
   };
 }
 
+/**
+ * The canonical issue a source named for a Duplicate that has no local original:
+ * the one rule every surface (row, rail, relationships) follows. A taken-over
+ * duplicate keeps the last one as provenance, so ownership is not part of it.
+ */
+export function externalDuplicateTarget(
+  ticket: Ticket,
+): DuplicateTarget | null {
+  return ticket.status === "Duplicate" && !ticket.duplicate_of
+    ? (ticket.source?.duplicate_target ?? null)
+    : null;
+}
+
 /** What a closed duplicate says about its canonical issue, never inventing one. */
-export function duplicateTargetText(source: TicketSource): string | null {
-  const target = source.duplicate_target;
-  if (!target) return null;
+export function duplicateTargetText(target: DuplicateTarget): string {
   if (target.kind === "unknown")
     return "Duplicate; the source did not name an accessible original";
   if (target.problem === "cycle")

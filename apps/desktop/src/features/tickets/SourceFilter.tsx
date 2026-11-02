@@ -1,5 +1,4 @@
-import { RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { SourceCounts } from "@/lib/api/client";
 import type { RefreshReport } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
@@ -25,43 +24,40 @@ export function SourceFilter({
   const known = [
     ...new Set([...providers, ...Object.keys(counts?.providers ?? {})]),
   ].sort();
-  const choices = [
-    { value: "all", label: "All", count: counts?.all },
-    ...known.map((provider) => ({
-      value: provider,
-      label: providerName(provider),
-      count: counts?.providers[provider] ?? 0,
-    })),
-    { value: "local", label: "Local", count: counts?.local },
-  ];
+  const withCount = (label: string, count: number | undefined) =>
+    count === undefined ? label : `${label} ${count}`;
   return (
-    <div className="source-filter" role="group" aria-label="Ticket source">
-      {choices.map((choice) => (
-        <button
-          key={choice.value}
-          type="button"
-          aria-pressed={value === choice.value}
-          onClick={() => onChange(choice.value)}
-        >
-          {choice.label}
-          {choice.count !== undefined && (
-            <span className="source-filter-count">{choice.count}</span>
-          )}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      className="source-filter"
+      aria-label="Ticket source"
+      value={value}
+      onValueChange={onChange}
+      options={[
+        { value: "all", label: withCount("All", counts?.all) },
+        ...known.map((provider) => ({
+          value: provider,
+          label: withCount(
+            providerName(provider),
+            counts?.providers[provider] ?? 0,
+          ),
+        })),
+        { value: "local", label: withCount("Local", counts?.local) },
+      ]}
+    />
   );
 }
 
-/** Manual refresh of every configured source, and what the last attempt did. */
+/**
+ * What the sources did last, beside the list's one Refresh button. Background
+ * refreshes are plain text, not announced; only the outcome of a refresh the
+ * person started is.
+ */
 export function SourceRefresh({
   providers,
   state,
-  onRefresh,
 }: {
   providers: string[];
   state: { running: boolean; report: RefreshReport | null; error: string };
-  onRefresh: () => void;
 }) {
   const activity = useSourceActivity();
   const running = state.running || activity.refreshing;
@@ -74,16 +70,7 @@ export function SourceRefresh({
   const failures = state.report?.failures ?? [];
   return (
     <div className="source-refresh">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={running}
-        onClick={onRefresh}
-      >
-        <RefreshCw data-icon="inline-start" />
-        Refresh {name}
-      </Button>
-      {running && <span role="status">Refreshing {name}…</span>}
+      {running && <span>Refreshing {name}…</span>}
       {!running && !state.report && !state.error && synced && (
         <span>Synced {ago(synced)}</span>
       )}

@@ -1130,7 +1130,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(countCall?.[1].filter.order).toBe("Workflow");
 });
 
-test("the source filter narrows list and counts together and Refresh GitHub imports on demand", async () => {
+test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
   const github = bulkTicket(1, {
     source: {
       provider: "github",
@@ -1183,14 +1183,14 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
       refreshed_at: "2026-02-01T00:00:00Z",
     },
   });
-  const filter = screen.getByRole("group", { name: "Ticket source" });
+  const filter = screen.getByRole("radiogroup", { name: "Ticket source" });
   expect(
     within(filter)
-      .getAllByRole("button")
-      .map((button) => button.textContent),
-  ).toEqual(["All3", "GitHub1", "Local2"]);
+      .getAllByRole("radio")
+      .map((radio) => radio.textContent),
+  ).toEqual(["All 3", "GitHub 1", "Local 2"]);
   expect(screen.getByText("GitHub #98")).toBeTruthy();
-  fireEvent.click(within(filter).getByRole("button", { name: /GitHub/ }));
+  fireEvent.click(within(filter).getByRole("radio", { name: /GitHub/ }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1201,7 +1201,8 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
       .at(-1);
   expect(sourceOf("find_tickets")).toEqual({ Provider: "github" });
   expect(sourceOf("count_tickets")).toEqual({ Provider: "github" });
-  fireEvent.click(screen.getByRole("button", { name: /Refresh GitHub/ }));
+  // The list's one Refresh also imports from the configured sources.
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {});
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: null,

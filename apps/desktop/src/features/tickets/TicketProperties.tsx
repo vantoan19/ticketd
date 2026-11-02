@@ -7,27 +7,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Folder,
-  HardDrive,
-  Layers,
-  Link2,
-  RefreshCw,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
-import { StatusDot } from "@/components/ui/status-dot";
-import { sourcesClient } from "@/lib/api/sources";
-import { useSourceActivity } from "./source-activity";
-import { SourceLink } from "./SourceLink";
-import { TakeOwnership } from "./TakeOwnership";
-import { LocalPublication } from "./PublishToSource";
+import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
+import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
+  externalDuplicateTarget,
   externalSource,
-  freshness,
-  sourceLocation,
-  sourceState,
 } from "./ticket-source";
 import { Button } from "@/components/ui/button";
 import { RailSection } from "./RailSection";
@@ -246,43 +231,16 @@ export function TicketProperties({
   }
   const disabled = ticket.trashed || !!pending;
   const owner = externalSource(ticket);
-  const activity = useSourceActivity();
   const ownerName = owner ? owner.provider_name : "";
   // While the issue is open its Todo, In progress and In review are local;
   // closing states follow the source and cannot be chosen here.
   const statusLocked = Boolean(owner?.status_locked);
-  const target =
-    owner && ticket.status === "Duplicate" && !ticket.duplicate_of
-      ? owner.duplicate_target
-      : null;
+  const target = externalDuplicateTarget(ticket);
   const resolvedTarget = target?.kind === "external" ? target.ticket : null;
   // The core says which statuses may be chosen; the current one is always shown.
   const statusChoices = owner
-    ? owner.status_choices.length > 0
-      ? owner.status_choices
-      : [ticket.status]
+    ? [...new Set([ticket.status, ...owner.status_choices])]
     : ticketStatuses;
-  async function refreshSource() {
-    setPending("Source");
-    setErrors((old) => ({ ...old, Source: "" }));
-    try {
-      const report = await sourcesClient.refresh(ticket.reference);
-      const failure = report.failures[0];
-      if (failure)
-        setErrors((old) => ({
-          ...old,
-          Source: `Could not refresh: ${failure.message} Saved content is unchanged.`,
-        }));
-      await refresh();
-    } catch (reason) {
-      setErrors((old) => ({
-        ...old,
-        Source: `Could not refresh: ${String(reason)} Saved content is unchanged.`,
-      }));
-    } finally {
-      setPending("");
-    }
-  }
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "Unlinked");
@@ -355,9 +313,7 @@ export function TicketProperties({
               Duplicate of {ticket.duplicate_of}
             </Button>
           )}
-          {owner && ticket.status === "Duplicate" && !ticket.duplicate_of && (
-            <small>{duplicateTargetText(owner)}</small>
-          )}
+          {target && <small>{duplicateTargetText(target)}</small>}
           {resolvedTarget && (
             <Button
               variant="link"
@@ -370,11 +326,11 @@ export function TicketProperties({
           )}
           {owner && (
             <small className="rail-note">
-              {owner.status_locked
-                ? owner.closure_unrecognized
-                  ? `${ownerName} closed this issue with a reason ticketd does not recognize, so its status was not changed.`
-                  : `Closed on ${ownerName}. Reopen it there to return this ticket to Todo.`
-                : `Progress is kept in ticketd and never sent to ${ownerName}. Closing follows ${ownerName}.`}
+              {owner.closure_unrecognized
+                ? `${ownerName} closed this issue with a reason ticketd does not recognize, so its status was not changed. Choose Done or Canceled here, or reopen it there.`
+                : owner.status_locked
+                  ? `Closed on ${ownerName}. Reopen it there to return this ticket to Todo.`
+                  : `Progress is kept in ticketd and never sent to ${ownerName}. Closing follows ${ownerName}.`}
             </small>
           )}
         </>,
@@ -396,78 +352,7 @@ export function TicketProperties({
           />
         </DialogContent>
       </Dialog>
-      <RailSection label="Source">
-        {owner ? (
-          <div className="rail-source">
-            <span className="rail-value">
-              <Link2 aria-hidden="true" />
-              <SourceLink url={owner.url}>{sourceLocation(owner)}</SourceLink>
-            </span>
-            <span className="rail-value">
-              {(() => {
-                const state = sourceState(owner);
-                return (
-                  <>
-                    {state.tone && <StatusDot tone={state.tone} size={8} />}
-                    {state.text}
-                  </>
-                );
-              })()}
-            </span>
-            <small className="rail-note">
-              {pending === "Source" || activity.refreshing ? (
-                <span role="status">Refreshing {ownerName}…</span>
-              ) : (
-                <>
-                  {!owner.last_error && owner.last_refreshed_at && (
-                    <StatusDot tone="positive" size={6} />
-                  )}{" "}
-                  {freshness(owner)}
-                </>
-              )}
-            </small>
-            {owner.last_error && (
-              <small className="rail-note rail-warning" role="status">
-                <StatusDot tone="attention" size={6} /> The last refresh failed:{" "}
-                {owner.last_error.message} Showing content synced earlier.
-              </small>
-            )}
-            <small className="rail-note">
-              {ownerName} owns the title and description. Edit them there.
-            </small>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!!pending}
-              onClick={() => void refreshSource()}
-            >
-              <RefreshCw data-icon="inline-start" />
-              Refresh
-            </Button>
-            <TakeOwnership ticket={ticket} refresh={refresh} variant="ghost" />
-            {errors.Source && <small role="alert">{errors.Source}</small>}
-          </div>
-        ) : ticket.source ? (
-          <div className="rail-source">
-            <span
-              className="rail-value"
-              title="Owned in ticketd; the external issue is kept as provenance"
-            >
-              <HardDrive aria-hidden="true" />
-              Local
-            </span>
-            <small className="rail-note">was {ticket.source.display}</small>
-          </div>
-        ) : (
-          <div className="rail-source">
-            <span className="rail-value" title="Created and edited in ticketd">
-              <HardDrive aria-hidden="true" />
-              Local
-            </span>
-            <LocalPublication ticket={ticket} refresh={refresh} />
-          </div>
-        )}
-      </RailSection>
+      <SourceRail ticket={ticket} refresh={refresh} />
       {property(
         "Project",
         <PropertyPicker

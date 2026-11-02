@@ -1,9 +1,8 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Ticket } from "@/lib/api/client";
-import { sourcesClient } from "@/lib/api/sources";
 import { TakeOwnership } from "./TakeOwnership";
+import { useTicketRefresh } from "./useTicketRefresh";
 import { externalSource, freshness, unavailableNotice } from "./ticket-source";
 
 /**
@@ -18,26 +17,15 @@ export function SourceUnavailableNotice({
   ticket: Ticket;
   refresh: () => Promise<void>;
 }) {
-  const [retrying, setRetrying] = useState(false);
-  const [failure, setFailure] = useState("");
+  const {
+    running: retrying,
+    failure,
+    run: retry,
+  } = useTicketRefresh(ticket.reference, refresh);
   const source = externalSource(ticket);
   const notice = source ? unavailableNotice(source) : null;
   if (!source || !notice) return null;
   const name = source.provider_name;
-  async function retry() {
-    setRetrying(true);
-    setFailure("");
-    try {
-      const report = await sourcesClient.refresh(ticket.reference);
-      const first = report.failures[0];
-      if (first) setFailure(first.message);
-      await refresh();
-    } catch (reason) {
-      setFailure(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setRetrying(false);
-    }
-  }
   return (
     <section
       className="source-unavailable-notice"

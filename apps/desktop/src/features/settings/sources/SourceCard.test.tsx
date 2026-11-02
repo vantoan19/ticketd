@@ -198,7 +198,7 @@ test("a partial count is labeled as a minimum", async () => {
 
 test("field problems from the core appear beside their fields", async () => {
   vi.mocked(sourcesClient.preview).mockRejectedValue(
-    new SourceFailure("invalid_configuration", "invalid", [
+    new SourceFailure("invalid_configuration", "invalid", null, [
       { field: "assignee", message: "must be a username" },
     ]),
   );

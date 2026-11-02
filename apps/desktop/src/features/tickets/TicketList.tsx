@@ -187,8 +187,12 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
       className="ticket-source-pill"
       title={`Owned by ${source.provider_name}: ${source.display}`}
     >
-      <span className="sr-only">Owned by {source.provider_name} </span>
-      {source.provider_name} {source.number}
+      <span className="sr-only">
+        Owned by {source.provider_name}, {source.number}
+      </span>
+      <span aria-hidden="true">
+        {source.provider_name} {source.number}
+      </span>
     </span>
   );
 }

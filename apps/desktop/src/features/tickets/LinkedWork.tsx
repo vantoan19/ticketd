@@ -19,7 +19,10 @@ import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { DuplicateTarget } from "@/lib/api/client";
 import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
-import { duplicateTargetParts } from "@/features/tickets/ticket-source";
+import {
+  duplicateTargetParts,
+  externalDuplicateTarget,
+} from "@/features/tickets/ticket-source";
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
@@ -111,10 +114,7 @@ export function LinkedWork({
   const rows = work.rows.filter((row) => row.kind !== "subticket");
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
-  const external =
-    work.ticket.status === "Duplicate" && !work.ticket.duplicate_of
-      ? work.ticket.source?.duplicate_target
-      : null;
+  const external = externalDuplicateTarget(work.ticket);
   const externalAt = rows.findIndex((row) => row.kind === "duplicates");
   const linkAction = (
     <Button variant="ghost" size="sm" onClick={() => work.openLink()}>

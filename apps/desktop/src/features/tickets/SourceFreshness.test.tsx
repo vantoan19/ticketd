@@ -325,7 +325,7 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
 });
 
-test("the list header reads Refreshing GitHub… for a background refresh and disables Refresh", () => {
+test("the list header reads Refreshing GitHub… for a background refresh without announcing it", () => {
   render(
     withActivity(
       { refreshing: true, sources: [status()] },
@@ -339,19 +339,13 @@ test("the list header reads Refreshing GitHub… for a background refresh and di
         <SourceRefresh
           providers={["github"]}
           state={{ running: false, report: null, error: "" }}
-          onRefresh={() => {}}
         />
       </>,
     ),
   );
+  // A background run is shown, not announced to screen readers.
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
-  expect(
-    (
-      screen.getByRole("button", {
-        name: /Refresh GitHub/,
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+  expect(screen.queryByRole("status")).toBeNull();
 });
 
 test("the list header shows the last sync when idle", () => {
@@ -361,7 +355,6 @@ test("the list header shows the last sync when idle", () => {
       <SourceRefresh
         providers={["github"]}
         state={{ running: false, report: null, error: "" }}
-        onRefresh={() => {}}
       />,
     ),
   );
