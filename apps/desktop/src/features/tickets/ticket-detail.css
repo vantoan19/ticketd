@@ -38,7 +38,9 @@
 }
 /* Expanded: the document column stays at most 800px and centered, and the
    rail keeps its place beside it. */
-@container ticket-detail (min-width: 652px) {
+/* 420 + 264 is 684: the expanded tracks start only where they fit, so the
+   view never scrolls sideways between 652px and 684px. */
+@container ticket-detail (min-width: 684px) {
   .ticket-detail[data-expanded] .detail-content {
     grid-template-columns: minmax(420px, 800px) 264px;
     justify-content: center;
@@ -51,6 +53,9 @@
   line-height: 24px;
 }
 .ticket-state-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 24px;
   color: var(--secondary-foreground);
   font-size: 14px;
@@ -71,11 +76,6 @@
   white-space: nowrap;
 }
 
-.ticket-state-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .header-source-link {
   min-width: 0;
   overflow: hidden;
@@ -103,7 +103,7 @@
 .source-card {
   overflow: hidden;
   border-radius: 12px;
-  box-shadow: var(--boundary-ring, 0 0 0 1px var(--border));
+  box-shadow: var(--shadow-border-base);
 }
 .source-card-header {
   display: flex;

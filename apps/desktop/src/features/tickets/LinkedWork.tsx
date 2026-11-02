@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SourceLink } from "@/features/tickets/SourceLink";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,10 @@ import { LinkTicketDialog } from "@/features/tickets/LinkTicketDialog";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { DuplicateTarget } from "@/lib/api/client";
 import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
-import { duplicateTargetParts } from "@/features/tickets/ticket-source";
+import {
+  duplicateTargetParts,
+  externalDuplicateTarget,
+} from "@/features/tickets/ticket-source";
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
@@ -43,6 +47,31 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
           await refresh();
         }}
       />
+      {ticket.duplicate_redirect && (
+        <Dialog open={work.redirecting} onOpenChange={work.setRedirecting}>
+          <DialogContent className="duplicate-dialog">
+            <DialogHeader>
+              <DialogTitle>Point this duplicate at the original</DialogTitle>
+              <DialogDescription>
+                {ticket.duplicate_of} became a duplicate of{" "}
+                {ticket.duplicate_redirect}. Review the dependencies, then mark{" "}
+                {ticket.reference} as a duplicate of {ticket.duplicate_redirect}{" "}
+                instead.
+              </DialogDescription>
+            </DialogHeader>
+            <Duplicates
+              ticket={ticket}
+              initialCanonical={ticket.duplicate_redirect}
+              refresh={async () => {
+                retry();
+                await refresh();
+              }}
+              onDone={() => work.setRedirecting(false)}
+              onCancel={() => work.setRedirecting(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
       <Dialog open={work.reviewing} onOpenChange={work.setReviewing}>
         <DialogContent className="duplicate-dialog">
           <DialogHeader>
@@ -85,10 +114,7 @@ export function LinkedWork({
   const rows = work.rows.filter((row) => row.kind !== "subticket");
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
-  const external =
-    work.ticket.status === "Duplicate" && !work.ticket.duplicate_of
-      ? work.ticket.source?.duplicate_target
-      : null;
+  const external = externalDuplicateTarget(work.ticket);
   const externalAt = rows.findIndex((row) => row.kind === "duplicates");
   const linkAction = (
     <Button variant="ghost" size="sm" onClick={() => work.openLink()}>
@@ -187,6 +213,19 @@ export function LinkedWork({
           {external && <ExternalTargetRow target={external} select={select} />}
           {rows.slice(split).map((row, index) => renderRow(row, split + index))}
         </ul>
+        {work.ticket.duplicate_redirect && (
+          <p className="linked-work-note">
+            {work.ticket.duplicate_of} is itself a duplicate of{" "}
+            {work.ticket.duplicate_redirect}.{" "}
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => work.setRedirecting(true)}
+            >
+              Point this at {work.ticket.duplicate_redirect}
+            </Button>
+          </p>
+        )}
         {work.more !== null && (
           <Button
             variant="outline"
@@ -216,7 +255,7 @@ function ExternalTargetRow({
   target: DuplicateTarget;
   select: (reference: string) => void;
 }) {
-  const { label, ticket, note } = duplicateTargetParts(target);
+  const { label, ticket, note, url } = duplicateTargetParts(target);
   return (
     <li className="linked-work-row" data-kind="duplicate_of" data-external>
       <span className="linked-work-label">{linkLabel("duplicate_of")}</span>
@@ -229,6 +268,8 @@ function ExternalTargetRow({
           >
             {label}
           </Button>
+        ) : url ? (
+          <SourceLink url={url}>{label}</SourceLink>
         ) : (
           <span className="linked-work-reference">{label}</span>
         )}{" "}

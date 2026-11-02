@@ -2,9 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
 import { publicationAttemptSchema } from "@/lib/api/publication";
+import { ticketStatuses } from "@/lib/statuses";
 
 export type { PublicationAttempt } from "@/lib/api/publication";
 
+const statusSchema = z.enum(ticketStatuses);
 const externalStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("open") }),
   z.object({
@@ -23,12 +25,22 @@ const duplicateTargetSchema = z.discriminatedUnion("kind", [
     ticket: z.string().nullish(),
     /** The reference is shown but not followed because it would loop back to this ticket. */
     problem: z.enum(["cycle"]).nullish(),
+    /** Where the canonical issue can be opened at its source. */
+    url: z.string().nullish(),
+    /** The source no longer supplied it: the last target it named, not a confirmed one. */
+    last_known: z.boolean().nullish(),
   }),
 ]);
 export type DuplicateTarget = z.infer<typeof duplicateTargetSchema>;
 /** The external issue a ticket is or was, with who owns it now and how fresh it is. */
 const ticketSourceSchema = z.object({
   provider: z.string(),
+  /** What people call the provider, such as "GitHub". */
+  provider_name: z.string(),
+  /** Where the issue lives, such as "owner/repo". */
+  place: z.string(),
+  /** The provider's short number for the issue, such as "#98". */
+  number: z.string(),
   id: z.string(),
   locator: z.string(),
   display: z.string(),
@@ -42,6 +54,10 @@ const ticketSourceSchema = z.object({
   last_refreshed_at: z.string().nullable(),
   last_attempt_at: z.string().nullable(),
   last_error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** The latest read of the issue's comments failed; the ticket itself is fine. */
+  conversation_error: z
+    .object({ code: z.string(), message: z.string() })
+    .nullish(),
   /**
    * Set while the source cannot be read: the latest refresh failed with an
    * unreachable, unauthorized, forbidden, missing or unusable answer. Saved content
@@ -52,6 +68,8 @@ const ticketSourceSchema = z.object({
     .nullish(),
   content_locked: z.boolean(),
   status_locked: z.boolean(),
+  /** The statuses that may be chosen for this ticket now, decided by the core. */
+  status_choices: z.array(statusSchema),
   duplicate_target: duplicateTargetSchema.nullable(),
 });
 export type TicketSource = z.infer<typeof ticketSourceSchema>;
@@ -66,6 +84,8 @@ const ticketSchema = z.object({
   project_id: z.string().nullable(),
   effort_id: z.string().nullable(),
   availability: z.string().nullable(),
+  /** This duplicate's canonical ticket became a Duplicate itself; the ticket that is now the original. */
+  duplicate_redirect: z.string().nullish(),
   parent: z
     .object({ reference: z.string(), title: z.string(), trashed: z.boolean() })
     .nullable(),
@@ -107,6 +127,8 @@ const relatedPageSchema = z.object({
 const relationshipsSchema = z.object({
   parent: relatedSchema.nullable(),
   children: relatedPageSchema,
+  /** Subticket progress over all subtickets, not only the page read. */
+  children_progress: z.object({ total: z.number(), done: z.number() }),
   prerequisites: relatedPageSchema,
   blocking: relatedPageSchema,
   related: relatedPageSchema,
@@ -137,13 +159,6 @@ const graphSchema = z.object({
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
 const reviewModeSchema = z.enum(["duplicate", "separate"]);
-const statusSchema = z.enum([
-  "Todo",
-  "In progress",
-  "In review",
-  "Done",
-  "Canceled",
-]);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),
@@ -251,6 +266,8 @@ const statusCountsSchema = z.object({
   done: z.number().int().nonnegative(),
   canceled: z.number().int().nonnegative(),
   duplicate: z.number().int().nonnegative(),
+  /** Every ticket of the result, summed by the core. */
+  total: z.number().int().nonnegative(),
 });
 /** A source comment or timeline event, read-only. Authors are the source's own, never editing agents. */
 const conversationEntrySchema = z.discriminatedUnion("type", [

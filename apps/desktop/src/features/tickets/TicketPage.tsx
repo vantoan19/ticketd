@@ -14,12 +14,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
-import {
-  externalNumber,
-  externalSource,
-  providerName,
-  sourceState,
-} from "@/features/tickets/ticket-source";
+import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import type { Project, Ticket } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
@@ -71,7 +66,7 @@ export function TicketPage({
       {source && state ? (
         <>
           {state.tone && <StatusDot tone={state.tone} size={8} />}
-          {state.text} · {externalNumber(source)}
+          {state.text} · {source.number}
         </>
       ) : (
         "Local ticket"
@@ -99,12 +94,12 @@ export function TicketPage({
               {source && contentLocked ? (
                 <section
                   className="source-card"
-                  aria-label={`Description from ${providerName(source.provider)}, read-only`}
+                  aria-label={`Description from ${source.provider_name}, read-only`}
                 >
                   <header className="source-card-header">
-                    <span>{providerName(source.provider)} · Read-only</span>
+                    <span>{source.provider_name} · Read-only</span>
                     <SourceLink url={source.url}>
-                      Edit on {providerName(source.provider)}
+                      Edit on {source.provider_name}
                     </SourceLink>
                   </header>
                   <div className="markdown-preview description-document">
@@ -174,8 +169,7 @@ export function TicketPage({
         )}
         {source && (
           <p className="source-caption">
-            Notes stay in ticketd and are never sent to{" "}
-            {providerName(source.provider)}.
+            Notes stay in ticketd and are never sent to {source.provider_name}.
           </p>
         )}
         <Activity

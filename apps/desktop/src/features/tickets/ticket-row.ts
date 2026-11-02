@@ -1,3 +1,4 @@
+import { externalDuplicateTarget } from "./ticket-source";
 import type { Ticket } from "@/lib/api/client";
 
 export type RowScope = {
@@ -35,8 +36,8 @@ export function readinessLabel(value: Readiness) {
 export function rowContext(ticket: Ticket, scope: RowScope): string | null {
   if (ticket.duplicate_of) return `Duplicate of ${ticket.duplicate_of}`;
   // An externally closed duplicate names the source's canonical issue, or says it is unknown.
-  const target = ticket.source?.duplicate_target;
-  if (ticket.status === "Duplicate" && target)
+  const target = externalDuplicateTarget(ticket);
+  if (target)
     return target.kind === "external"
       ? `Duplicate of ${target.ticket ?? target.display}`
       : "Duplicate; original unknown";

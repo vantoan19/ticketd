@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   Tooltip,
@@ -9,7 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
-import { externalNumber, externalSource, providerName } from "./ticket-source";
+import { externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
@@ -86,16 +86,9 @@ export function TicketList({
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
                 </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
+                <IconButton
                   className="ticket-group-add"
-                  aria-label={
-                    status === "Duplicate"
-                      ? "Mark a ticket as duplicate"
-                      : `Add ${status} ticket`
-                  }
-                  title={
+                  label={
                     status === "Duplicate"
                       ? "Mark a ticket as duplicate"
                       : `Add ${status} ticket`
@@ -105,7 +98,7 @@ export function TicketList({
                   }
                 >
                   <Plus aria-hidden="true" />
-                </Button>
+                </IconButton>
               </li>
             );
           }
@@ -185,10 +178,14 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
   return (
     <span
       className="ticket-source-pill"
-      title={`Owned by ${providerName(source.provider)}: ${source.display}`}
+      title={`Owned by ${source.provider_name}: ${source.display}`}
     >
-      <span className="sr-only">Owned by {providerName(source.provider)} </span>
-      {providerName(source.provider)} {externalNumber(source)}
+      <span className="sr-only">
+        Owned by {source.provider_name}, {source.number}
+      </span>
+      <span aria-hidden="true">
+        {source.provider_name} {source.number}
+      </span>
     </span>
   );
 }

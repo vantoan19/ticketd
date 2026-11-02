@@ -63,6 +63,30 @@ pub struct ExternalRef {
     pub locator: String,
 }
 
+impl ClosureReason {
+    /// The name stored and shown for the reason (the same words GitHub's
+    /// `state_reason` uses).
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::NotPlanned => "not_planned",
+            Self::Duplicate => "duplicate",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// The reason named by `name`; anything else, and no reason at all, is
+    /// [`Self::Unknown`], never assumed to be completion.
+    pub(crate) fn parse(name: Option<&str>) -> Self {
+        match name {
+            Some("completed") => Self::Completed,
+            Some("not_planned") => Self::NotPlanned,
+            Some("duplicate") => Self::Duplicate,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClosureReason {
@@ -100,6 +124,14 @@ pub struct ExternalIssue {
     /// contract 1; connectors that cannot tell leave it `None`.
     #[serde(default)]
     pub duplicate_of: Option<ExternalRef>,
+    /// Where the canonical issue can be opened, when the provider says.
+    #[serde(default)]
+    pub duplicate_of_url: Option<String>,
+    /// The provider says the duplicate marking was withdrawn. Distinct from
+    /// `duplicate_of` being `None`, which only means no target was supplied (a
+    /// lookup failed or access changed) and keeps the last known one.
+    #[serde(default)]
+    pub duplicate_withdrawn: bool,
 }
 
 /// A comment on an external issue, as its source reports it. Authors are the
@@ -161,6 +193,17 @@ pub struct DiscoveryPage {
     /// `Some` while more results remain. A page may be empty and still have a
     /// continuation, so an empty page is never proof that discovery is done.
     pub next_cursor: Option<String>,
+    /// Parts of the discovery rules the connector could not read (a repository
+    /// that is gone or inaccessible) and skipped, so the rest still ran.
+    pub skipped: Vec<SkippedPartition>,
+}
+
+/// One part of the discovery rules that could not be read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedPartition {
+    /// The failure code of the part (`not_found` or `forbidden`).
+    pub code: String,
+    pub message: String,
 }
 
 /// A request to create an ordinary issue. Connectors that do not declare
@@ -181,6 +224,11 @@ pub struct PublicationSearch {
     pub request: PublishRequest,
     /// RFC 3339 instant before which the attempt cannot have created anything.
     pub since: String,
+    /// The account the source was connected as. Whatever that account created in
+    /// the window is a candidate, whatever its text now says: a teammate or an
+    /// automation may have edited the title and description since.
+    #[serde(default)]
+    pub account: Option<String>,
 }
 
 /// What a search found. `matches` holds every issue the connector saw that could
@@ -205,6 +253,11 @@ pub enum SourceError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("{0}")]
     Unavailable(String),
+    /// The request never left this machine (no DNS answer, connection refused),
+    /// so the provider certainly did not act on it. Reads as unavailable
+    /// everywhere else, but a failed `publish` with it proves nothing was created.
+    #[error("{0}")]
+    NotSent(String),
     /// The provider answered and refused the request itself (for GitHub, a
     /// validation failure or a repository with issues disabled). Unlike
     /// [`Self::Unavailable`] and [`Self::Protocol`], nothing was created.
@@ -224,23 +277,136 @@ pub enum SourceError {
     IncompatibleContract { provider: String, found: u32 },
 }
 
+/// The kinds of failure ticketd records for a source or a ticket, with the one
+/// definition of what each means for availability and scheduling. Stored codes
+/// are these names; the SQL that counts unavailable tickets is generated from
+/// [`Self::is_unavailable`], so Rust and SQL cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureCode {
+    Unauthenticated,
+    Forbidden,
+    NotFound,
+    RateLimited,
+    Unavailable,
+    Rejected,
+    Protocol,
+    Unsupported,
+    InvalidConfiguration,
+    UnknownProvider,
+    IncompatibleContract,
+    NotConfigured,
+}
+
+impl FailureCode {
+    pub(crate) const ALL: [Self; 12] = [
+        Self::Unauthenticated,
+        Self::Forbidden,
+        Self::NotFound,
+        Self::RateLimited,
+        Self::Unavailable,
+        Self::Rejected,
+        Self::Protocol,
+        Self::Unsupported,
+        Self::InvalidConfiguration,
+        Self::UnknownProvider,
+        Self::IncompatibleContract,
+        Self::NotConfigured,
+    ];
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Unauthenticated => "unauthenticated",
+            Self::Forbidden => "forbidden",
+            Self::NotFound => "not_found",
+            Self::RateLimited => "rate_limited",
+            Self::Unavailable => "unavailable",
+            Self::Rejected => "rejected",
+            Self::Protocol => "protocol",
+            Self::Unsupported => "unsupported",
+            Self::InvalidConfiguration => "invalid_configuration",
+            Self::UnknownProvider => "unknown_provider",
+            Self::IncompatibleContract => "incompatible_contract",
+            Self::NotConfigured => "not_configured",
+        }
+    }
+
+    pub(crate) fn parse(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|known| known.as_str() == code)
+    }
+
+    /// After this failure an externally owned ticket reads Source unavailable:
+    /// the source cannot be reached, rejected the credential, denied access, no
+    /// longer has the issue, answered with something unusable, or is not
+    /// configured. A rate limit is delayed, not unavailable.
+    pub(crate) fn is_unavailable(self) -> bool {
+        match self {
+            Self::Unavailable
+            | Self::Unauthenticated
+            | Self::Forbidden
+            | Self::NotFound
+            | Self::Protocol
+            | Self::NotConfigured => true,
+            Self::RateLimited
+            | Self::Rejected
+            | Self::Unsupported
+            | Self::InvalidConfiguration
+            | Self::UnknownProvider
+            | Self::IncompatibleContract => false,
+        }
+    }
+
+    /// The failure says the source as a whole cannot be read right now, so asking
+    /// again for other tickets would only repeat it, and a scheduler should back
+    /// off. A single issue that is gone, denied or unreadable says nothing about
+    /// the others.
+    pub(crate) fn interrupts_source(self) -> bool {
+        match self {
+            Self::Unavailable | Self::RateLimited | Self::Unauthenticated => true,
+            Self::Forbidden
+            | Self::NotFound
+            | Self::Rejected
+            | Self::Protocol
+            | Self::Unsupported
+            | Self::InvalidConfiguration
+            | Self::UnknownProvider
+            | Self::IncompatibleContract
+            | Self::NotConfigured => false,
+        }
+    }
+
+    /// A quoted, comma-separated SQL list of the codes for which
+    /// [`Self::is_unavailable`] holds.
+    pub(crate) fn unavailable_sql_list() -> String {
+        Self::ALL
+            .into_iter()
+            .filter(|code| code.is_unavailable())
+            .map(|code| format!("'{}'", code.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 impl SourceError {
+    pub(crate) fn failure_code(&self) -> FailureCode {
+        match self {
+            Self::Unauthenticated(_) => FailureCode::Unauthenticated,
+            Self::Forbidden(_) => FailureCode::Forbidden,
+            Self::NotFound(_) => FailureCode::NotFound,
+            Self::RateLimited { .. } => FailureCode::RateLimited,
+            Self::Unavailable(_) | Self::NotSent(_) => FailureCode::Unavailable,
+            Self::Rejected(_) => FailureCode::Rejected,
+            Self::Protocol(_) => FailureCode::Protocol,
+            Self::Unsupported(_) => FailureCode::Unsupported,
+            Self::InvalidConfiguration(_) => FailureCode::InvalidConfiguration,
+            Self::UnknownProvider(_) => FailureCode::UnknownProvider,
+            Self::IncompatibleContract { .. } => FailureCode::IncompatibleContract,
+        }
+    }
+
     /// A stable machine-readable kind, so clients can branch without parsing
     /// messages.
     pub fn code(&self) -> &'static str {
-        match self {
-            Self::Unauthenticated(_) => "unauthenticated",
-            Self::Forbidden(_) => "forbidden",
-            Self::NotFound(_) => "not_found",
-            Self::RateLimited { .. } => "rate_limited",
-            Self::Unavailable(_) => "unavailable",
-            Self::Rejected(_) => "rejected",
-            Self::Protocol(_) => "protocol",
-            Self::Unsupported(_) => "unsupported",
-            Self::InvalidConfiguration(_) => "invalid_configuration",
-            Self::UnknownProvider(_) => "unknown_provider",
-            Self::IncompatibleContract { .. } => "incompatible_contract",
-        }
+        self.failure_code().as_str()
     }
 
     /// Whether a failed `publish` proves the provider created nothing.
@@ -256,6 +422,7 @@ impl SourceError {
             | Self::NotFound(_)
             | Self::RateLimited { .. }
             | Self::Rejected(_)
+            | Self::NotSent(_)
             | Self::Unsupported(_)
             | Self::InvalidConfiguration(_)
             | Self::UnknownProvider(_)

@@ -84,6 +84,7 @@ export function App() {
     revision,
     refresh,
     sourceHealth,
+    sourceEntries,
     sourceRefresh,
     refreshSources,
     create,
@@ -102,6 +103,9 @@ export function App() {
       value={{
         refreshing: sourceHealth.refreshing || sourceRefresh.running,
         sources: sourceHealth.sources,
+        entries: sourceEntries,
+        intervalSecs: sourceHealth.interval_secs ?? null,
+        openSettings: () => openView("settings"),
         refreshAll: () => refreshSources(),
       }}
     >

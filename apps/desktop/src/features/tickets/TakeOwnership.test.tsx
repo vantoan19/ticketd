@@ -32,6 +32,10 @@ afterEach(() => {
 
 const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   provider: "github",
+  provider_name: "GitHub",
+  place: "acme/api",
+  number: "#98",
+  status_choices: ["Todo", "In progress", "In review"],
   id: "42",
   locator: "acme/api#98",
   display: "acme/api#98",

@@ -33,7 +33,9 @@ use uuid::Uuid;
 
 use super::{
     ClosureReason, Conversation, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-    ExternalState, SourceError, conversation,
+    ExternalState, SourceError,
+    contract::FailureCode,
+    conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history, transaction_write_lock};
@@ -83,6 +85,13 @@ pub enum DuplicateTarget {
         /// reference is then shown but never resolved.
         #[serde(default)]
         problem: Option<TargetProblem>,
+        /// Where the canonical issue can be opened, when the source said.
+        #[serde(default)]
+        url: Option<String>,
+        /// The source no longer supplied this target (a failed lookup or lost
+        /// access), so it is the last one it named, not a confirmed one.
+        #[serde(default)]
+        last_known: bool,
     },
 }
 
@@ -98,6 +107,12 @@ pub enum TargetProblem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketSource {
     pub provider: String,
+    /// What people call the provider, such as "GitHub".
+    pub provider_name: String,
+    /// Where the issue lives, such as "owner/repo" (empty when the locator has no place).
+    pub place: String,
+    /// The provider's short number for the issue, such as "#98" (empty when it has none).
+    pub number: String,
     /// The provider's stable id for the issue (never a display value).
     pub id: String,
     pub locator: String,
@@ -115,6 +130,10 @@ pub struct TicketSource {
     pub last_attempt_at: Option<String>,
     /// Set when the most recent attempt failed; cleared by the next success.
     pub last_error: Option<SourceFailure>,
+    /// Set when the latest read of the issue's comments and events failed. The
+    /// issue itself was read, so this never makes the ticket unavailable; the
+    /// conversation shown is what an earlier read stored.
+    pub conversation_error: Option<SourceFailure>,
     /// Set while the ticket reads Source unavailable (see the `freshness` module for
     /// the exact rule): its latest attempt failed in a way that says the source
     /// cannot be read. Clients show a warning and never hide or complete the ticket.
@@ -124,6 +143,9 @@ pub struct TicketSource {
     /// Status follows the source's closure and cannot be changed here. While an
     /// externally owned issue is open, only Todo, In progress and In review are local.
     pub status_locked: bool,
+    /// The statuses a person may choose for this ticket now (empty when none can be
+    /// changed here), so no client repeats the rule.
+    pub status_choices: Vec<Status>,
     pub duplicate_target: Option<DuplicateTarget>,
 }
 
@@ -144,6 +166,15 @@ pub struct SourceCounts {
     pub providers: BTreeMap<String, u64>,
 }
 
+const ALL_STATUSES: [Status; 6] = [
+    Status::Todo,
+    Status::InProgress,
+    Status::InReview,
+    Status::Done,
+    Status::Canceled,
+    Status::Duplicate,
+];
+
 /// What a refresh was asked to cover.
 #[derive(Debug, Default, Clone)]
 pub struct RefreshOptions {
@@ -153,11 +184,29 @@ pub struct RefreshOptions {
     pub now: Option<String>,
 }
 
+/// What a refresh failure is about, which decides what it may affect.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureScope {
+    /// The source as a whole (discovery failed).
+    #[default]
+    Source,
+    /// One tracked ticket could not be read.
+    Ticket,
+    /// One part of the discovery rules (a repository) could not be read; the rest ran.
+    Partition,
+    /// An issue was read but its comments and events were not.
+    Conversation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefreshFailure {
     pub provider: String,
-    /// The ticket that could not be refreshed; absent when discovery itself failed.
+    /// The ticket that could not be refreshed; absent when discovery itself failed
+    /// or the issue has no ticket yet.
     pub reference: Option<String>,
+    #[serde(default)]
+    pub scope: FailureScope,
     pub code: String,
     pub message: String,
     /// For a rate limit, how long the source asked to wait, when it said.
@@ -219,15 +268,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 fn state_parts(state: ExternalState) -> (&'static str, Option<&'static str>) {
     match state {
         ExternalState::Open => ("open", None),
-        ExternalState::Closed { reason } => (
-            "closed",
-            Some(match reason {
-                ClosureReason::Completed => "completed",
-                ClosureReason::NotPlanned => "not_planned",
-                ClosureReason::Duplicate => "duplicate",
-                ClosureReason::Unknown => "unknown",
-            }),
-        ),
+        ExternalState::Closed { reason } => ("closed", Some(reason.as_str())),
     }
 }
 
@@ -236,39 +277,61 @@ fn state_from_parts(state: &str, reason: Option<&str>) -> ExternalState {
         return ExternalState::Open;
     }
     ExternalState::Closed {
-        reason: match reason {
-            Some("completed") => ClosureReason::Completed,
-            Some("not_planned") => ClosureReason::NotPlanned,
-            Some("duplicate") => ClosureReason::Duplicate,
-            _ => ClosureReason::Unknown,
-        },
+        reason: ClosureReason::parse(reason),
     }
 }
 
 /// The ownership of a ticket as write guards need it.
 pub(crate) enum Authority {
     Local,
-    External { provider: String, open: bool },
+    External {
+        provider: String,
+        open: bool,
+        /// Closed at the source for a reason ticketd does not recognize.
+        closure_unrecognized: bool,
+    },
+}
+
+/// SQL that is true for the ticket whose id is `id_expr` and whose issue the
+/// source owns and closed with a reason ticketd does not recognize. Such a ticket
+/// keeps its status, is flagged, and awaits a local decision, so it is never
+/// offered as Ready work.
+pub(crate) fn held_sql(id_expr: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM external_ownership ho JOIN source_sync hs ON hs.ticket_id = ho.ticket_id \
+         WHERE ho.ticket_id = {id_expr} AND ho.authority = 'external' \
+         AND hs.external_state = 'closed' AND hs.closure_reason = 'unknown')"
+    )
+}
+
+/// [`held_sql`] for one ticket.
+pub(crate) fn closure_held(connection: &Connection, id: &str) -> Result<bool, Error> {
+    Ok(
+        connection.query_row(&format!("SELECT {}", held_sql("?1")), [id], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 /// Whether a ticket is currently externally owned. Call inside the write
 /// transaction that depends on the answer.
 pub(crate) fn authority(connection: &Connection, id: &str) -> Result<Authority, Error> {
-    let row: Option<(String, String)> = connection
+    let row: Option<(String, String, Option<String>)> = connection
         .query_row(
-            "SELECT i.provider, s.external_state FROM external_ownership o \
+            "SELECT i.provider, s.external_state, s.closure_reason FROM external_ownership o \
              JOIN external_identities i ON i.ticket_id = o.ticket_id \
              JOIN source_sync s ON s.ticket_id = o.ticket_id \
              WHERE o.ticket_id = ?1 AND o.authority = 'external'",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     Ok(match row {
         None => Authority::Local,
-        Some((provider, state)) => Authority::External {
+        Some((provider, state, reason)) => Authority::External {
             provider,
             open: state == "open",
+            closure_unrecognized: state == "closed" && reason.as_deref() == Some("unknown"),
         },
     })
 }
@@ -281,7 +344,12 @@ pub(crate) fn guard_change(
     body: Option<&str>,
     status: Status,
 ) -> Result<(), Error> {
-    let Authority::External { provider, open } = authority(connection, &ticket.id)? else {
+    let Authority::External {
+        provider,
+        open,
+        closure_unrecognized,
+    } = authority(connection, &ticket.id)?
+    else {
         return Ok(());
     };
     let reference = ticket.reference.clone();
@@ -293,15 +361,17 @@ pub(crate) fn guard_change(
             provider,
         });
     }
-    if status != ticket.status {
-        let local_progress = matches!(status, Status::Todo | Status::InProgress | Status::InReview);
-        if !(open && local_progress) {
-            return Err(Error::ExternalStatus {
-                reference,
-                provider,
-                open,
-            });
-        }
+    // Open: Todo, In progress and In review are local. Closed for an unrecognized
+    // reason: Done or Canceled is the person's own decision (the flag stays).
+    let allowed =
+        (open && status.is_local_progress()) || (closure_unrecognized && status.ends_work());
+    if status != ticket.status && !allowed {
+        return Err(Error::ExternalStatus {
+            reference,
+            provider,
+            open,
+            closure_unrecognized,
+        });
     }
     Ok(())
 }
@@ -315,109 +385,130 @@ pub(crate) fn guard_duplicate(
 ) -> Result<(), Error> {
     match authority(connection, id)? {
         Authority::Local => Ok(()),
-        Authority::External { provider, open } => Err(Error::ExternalStatus {
+        Authority::External {
+            provider,
+            open,
+            closure_unrecognized,
+        } => Err(Error::ExternalStatus {
             reference: reference.to_owned(),
             provider,
             open,
+            closure_unrecognized,
         }),
     }
 }
 
+/// One ticket's external side as stored, before it is shaped for clients.
+struct SourceRow {
+    provider: String,
+    id: String,
+    locator: String,
+    display: String,
+    url: String,
+    origin: String,
+    authority: String,
+    state: String,
+    reason: Option<String>,
+    refreshed: Option<String>,
+    attempted: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    failing_since: Option<String>,
+    conversation_error_code: Option<String>,
+    conversation_error_message: Option<String>,
+}
+
 pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
-    type Row = (
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    );
-    let row: Option<Row> = connection
+    let row: Option<SourceRow> = connection
         .query_row(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
-                    s.external_state, s.closure_reason, s.external_updated_at, s.last_refreshed_at, \
-                    s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since \
+                    s.external_state, s.closure_reason, s.last_refreshed_at, \
+                    s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
+                    s.conversation_error_code, s.conversation_error_message \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
              WHERE i.ticket_id = ?1",
             [&ticket.id],
             |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                    row.get(7)?,
-                    row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
-                    row.get(11)?,
-                    row.get(12)?,
-                    row.get(13)?,
-                    row.get(14)?,
-                ))
+                Ok(SourceRow {
+                    provider: row.get(0)?,
+                    id: row.get(1)?,
+                    locator: row.get(2)?,
+                    display: row.get(3)?,
+                    url: row.get(4)?,
+                    origin: row.get(5)?,
+                    authority: row.get(6)?,
+                    state: row.get(7)?,
+                    reason: row.get(8)?,
+                    refreshed: row.get(9)?,
+                    attempted: row.get(10)?,
+                    error_code: row.get(11)?,
+                    error_message: row.get(12)?,
+                    failing_since: row.get(13)?,
+                    conversation_error_code: row.get(14)?,
+                    conversation_error_message: row.get(15)?,
+                })
             },
         )
         .optional()?;
-    let Some((
-        provider,
-        id,
-        locator,
-        display,
-        url,
-        origin,
-        authority,
-        state,
-        reason,
-        _updated,
-        refreshed,
-        attempted,
-        error_code,
-        error_message,
-        failing_since,
-    )) = row
-    else {
+    let Some(row) = row else {
         ticket.source = None;
         return Ok(());
     };
-    let state = state_from_parts(&state, reason.as_deref());
-    let ownership = if authority == "external" {
+    let state = state_from_parts(&row.state, row.reason.as_deref());
+    let ownership = if row.authority == "external" {
         Ownership::External
     } else {
         Ownership::Local
     };
     let external = ownership == Ownership::External;
+    let status_choices: Vec<Status> = if external {
+        match state {
+            ExternalState::Open => ALL_STATUSES
+                .into_iter()
+                .filter(|status| status.is_local_progress())
+                .collect(),
+            ExternalState::Closed {
+                reason: ClosureReason::Unknown,
+            } => ALL_STATUSES
+                .into_iter()
+                .filter(|status| status.ends_work())
+                .collect(),
+            ExternalState::Closed { .. } => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
-    let unavailable = match (&error_code, failing_since) {
-        (Some(code), since) if external && freshness::is_unavailable_code(code) => {
+    let unavailable = match &row.error_code {
+        Some(code)
+            if external && FailureCode::parse(code).is_some_and(FailureCode::is_unavailable) =>
+        {
             Some(SourceUnavailable {
                 code: code.clone(),
-                message: error_message.clone().unwrap_or_default(),
-                since: since.or_else(|| attempted.clone()).unwrap_or_default(),
+                message: row.error_message.clone().unwrap_or_default(),
+                since: row
+                    .failing_since
+                    .clone()
+                    .or_else(|| row.attempted.clone())
+                    .unwrap_or_default(),
             })
         }
         _ => None,
     };
+    let (provider_name, place, number) =
+        super::display_parts(&row.provider, &row.locator, &row.display);
     ticket.source = Some(TicketSource {
-        provider,
-        id,
-        locator,
-        display,
-        url,
-        origin: if origin == "published" {
+        provider_name,
+        place,
+        number,
+        provider: row.provider,
+        id: row.id,
+        locator: row.locator,
+        display: row.display,
+        url: row.url,
+        origin: if row.origin == "published" {
             Origin::Published
         } else {
             Origin::Imported
@@ -429,14 +520,19 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                 reason: ClosureReason::Unknown
             }
         ),
-        status_locked: external && !matches!(state, ExternalState::Open),
+        status_locked: external && status_choices.is_empty(),
+        status_choices,
         state,
-        last_refreshed_at: refreshed,
-        last_attempt_at: attempted,
+        last_refreshed_at: row.refreshed,
+        last_attempt_at: row.attempted,
         unavailable,
-        last_error: error_code.map(|code| SourceFailure {
+        last_error: row.error_code.map(|code| SourceFailure {
             code,
-            message: error_message.unwrap_or_default(),
+            message: row.error_message.unwrap_or_default(),
+        }),
+        conversation_error: row.conversation_error_code.map(|code| SourceFailure {
+            code,
+            message: row.conversation_error_message.unwrap_or_default(),
         }),
         content_locked: external,
         duplicate_target,
@@ -452,7 +548,7 @@ pub(crate) fn duplicate_target(
 ) -> Result<Option<DuplicateTarget>, Error> {
     let row = connection
         .query_row(
-            "SELECT provider, external_id, locator, display FROM external_duplicate_targets WHERE ticket_id = ?1",
+            "SELECT provider, external_id, locator, display, url, last_known FROM external_duplicate_targets WHERE ticket_id = ?1",
             [ticket_id],
             |row| {
                 Ok((
@@ -460,13 +556,15 @@ pub(crate) fn duplicate_target(
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
     Ok(match row {
         None => None,
-        Some((Some(provider), Some(id), locator, display)) => {
+        Some((Some(provider), Some(id), locator, display, url, last_known)) => {
             let identity = ExternalIdentity { provider, id };
             let (ticket, problem) = resolve_target(connection, ticket_id, &identity)?;
             Some(DuplicateTarget::External {
@@ -475,6 +573,8 @@ pub(crate) fn duplicate_target(
                 display: display.unwrap_or_default(),
                 ticket,
                 problem,
+                url,
+                last_known,
             })
         }
         Some(_) => Some(DuplicateTarget::Unknown),
@@ -553,8 +653,8 @@ fn ticket_for_identity(
 }
 
 /// The status an observed external state implies, given the state last observed
-/// and the ticket's current status. `None` means the status is not decided by
-/// the source and stays as it is.
+/// and the ticket's current status. An observation that does not decide the status
+/// (open stays open, an unrecognized closure) returns `current` unchanged.
 pub(crate) fn status_for(
     previous: Option<ExternalState>,
     observed: ExternalState,
@@ -580,13 +680,23 @@ pub(crate) fn status_for(
     }
 }
 
+/// One thing a refresh could not do, before it is applied.
+struct Found {
+    scope: FailureScope,
+    /// The ticket it concerns; `None` for the source as a whole or for an issue
+    /// that has no ticket yet.
+    reference: Option<String>,
+    provider: String,
+    failure: SourceFailure,
+}
+
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
     /// here keeps the conversation it already has.
     conversations: HashMap<(String, String), Conversation>,
-    failures: Vec<(Option<String>, String, SourceFailure)>,
+    failures: Vec<Found>,
     /// How each fully refreshed provider fared, for its persisted status.
     runs: Vec<ProviderRun>,
 }
@@ -599,27 +709,18 @@ struct Tracked {
     locator: String,
 }
 
-fn failure_of(error: &SourceError) -> SourceFailure {
+pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
     SourceFailure {
         code: error.code().to_owned(),
         message: error.to_string(),
     }
 }
 
-/// Failures that say the provider as a whole cannot be read right now, so
-/// asking again for every other ticket would only repeat them.
 fn retry_secs(error: &SourceError) -> Option<u64> {
     match error {
         SourceError::RateLimited { retry_after_secs } => *retry_after_secs,
         _ => None,
     }
-}
-
-fn provider_wide(error: &SourceError) -> bool {
-    !matches!(
-        error,
-        SourceError::NotFound(_) | SourceError::Forbidden(_) | SourceError::Unsupported(_)
-    )
 }
 
 #[derive(Default)]
@@ -639,11 +740,15 @@ impl Workspace {
     /// changes what is applied, never the identity of a ticket. A provider that
     /// cannot be read leaves saved content untouched and records the failed
     /// attempt without advancing the last refresh time.
+    ///
+    /// Every observation carries the time the run started. A run that finishes
+    /// late never overwrites what a run that started later already recorded.
     pub fn refresh_sources(
         &mut self,
         engine: &Engine,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
+        let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = self.tracked(options.ticket.as_deref())?;
         let mut gathered = Gathered {
             issues: Vec::new(),
@@ -672,28 +777,45 @@ impl Workspace {
             let config = saved.iter().find(|s| s.provider == provider);
             let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
+            // Set when the source as a whole cannot be read, so asking for more
+            // tickets would only repeat the failure.
             let mut blocked: Option<SourceFailure> = None;
             let mut retry_after_secs: Option<u64> = None;
             let mut discovery_failed: Option<SourceFailure> = None;
-            if options.ticket.is_none() {
-                match config {
-                    None => {}
-                    Some(source) => {
-                        let result = engine.discover(&provider, &source.config, |issue| {
-                            seen.insert(issue.reference.identity.id.clone());
-                            gathered.issues.push(issue);
-                            ControlFlow::Continue(())
+            let mut skipped: Vec<String> = Vec::new();
+            if let (None, Some(source)) = (&options.ticket, config) {
+                let result = engine.discover(&provider, &source.config, |issue| {
+                    seen.insert(issue.reference.identity.id.clone());
+                    gathered.issues.push(issue);
+                    ControlFlow::Continue(())
+                });
+                match result {
+                    Ok(summary) => {
+                        for part in summary.skipped {
+                            skipped.push(part.message.clone());
+                            gathered.failures.push(Found {
+                                scope: FailureScope::Partition,
+                                reference: None,
+                                provider: provider.clone(),
+                                failure: SourceFailure {
+                                    code: part.code,
+                                    message: part.message,
+                                },
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        let failure = failure_of(&error);
+                        gathered.failures.push(Found {
+                            scope: FailureScope::Source,
+                            reference: None,
+                            provider: provider.clone(),
+                            failure: failure.clone(),
                         });
-                        if let Err(error) = result {
-                            let failure = failure_of(&error);
-                            gathered
-                                .failures
-                                .push((None, provider.clone(), failure.clone()));
-                            retry_after_secs = retry_secs(&error);
-                            discovery_failed = Some(failure.clone());
-                            if provider_wide(&error) {
-                                blocked = Some(failure);
-                            }
+                        retry_after_secs = retry_secs(&error);
+                        discovery_failed = Some(failure.clone());
+                        if error.failure_code().interrupts_source() {
+                            blocked = Some(failure);
                         }
                     }
                 }
@@ -703,23 +825,36 @@ impl Workspace {
                     continue;
                 }
                 let reference = Some(ticket.reference.clone());
-                if let Some(failure) = &blocked {
-                    gathered
-                        .failures
-                        .push((reference, provider.clone(), failure.clone()));
+                if let Some(cause) = &blocked {
+                    // Not asked, because the source as a whole could not be read.
+                    // The cause is the source's, and is said to be, never passed
+                    // off as this issue's own answer.
+                    gathered.failures.push(Found {
+                        scope: FailureScope::Ticket,
+                        reference,
+                        provider: provider.clone(),
+                        failure: SourceFailure {
+                            code: cause.code.clone(),
+                            message: format!(
+                                "not refreshed because the source could not be read: {}",
+                                cause.message
+                            ),
+                        },
+                    });
                     continue;
                 }
                 let Some(source) = config else {
-                    gathered.failures.push((
+                    gathered.failures.push(Found {
+                        scope: FailureScope::Ticket,
                         reference,
-                        provider.clone(),
-                        SourceFailure {
-                            code: "not_configured".into(),
+                        provider: provider.clone(),
+                        failure: SourceFailure {
+                            code: FailureCode::NotConfigured.as_str().into(),
                             message: format!(
                                 "no saved configuration for {provider}; save the source to refresh this ticket"
                             ),
                         },
-                    ));
+                    });
                     continue;
                 };
                 let external = ExternalRef {
@@ -733,13 +868,16 @@ impl Workspace {
                     Ok(issue) => gathered.issues.push(issue),
                     Err(error) => {
                         let failure = failure_of(&error);
-                        if provider_wide(&error) {
+                        if error.failure_code().interrupts_source() {
                             retry_after_secs = retry_secs(&error);
                             blocked = Some(failure.clone());
                         }
-                        gathered
-                            .failures
-                            .push((reference, provider.clone(), failure));
+                        gathered.failures.push(Found {
+                            scope: FailureScope::Ticket,
+                            reference,
+                            provider: provider.clone(),
+                            failure,
+                        });
                     }
                 }
             }
@@ -757,16 +895,19 @@ impl Workspace {
                     provider: provider.clone(),
                     failure: discovery_failed.or(blocked),
                     retry_after_secs,
+                    skipped,
                 });
             }
         }
-        self.apply_refresh(gathered, options.now.as_deref(), &tracked)
+        self.apply_refresh(gathered, &started, &tracked)
     }
 
     /// Reads the conversation of each issue gathered since `first_issue` whose
     /// stored conversation is older than the issue itself. A failure keeps what
-    /// was stored and leaves the issue due again next time; a failure that
-    /// affects the whole provider stops further reads.
+    /// was stored and leaves the issue due again next time. It is recorded as a
+    /// conversation failure only: the issue itself was read, so it never makes a
+    /// ticket unavailable. Only a failure of the source as a whole stops further
+    /// reads.
     fn gather_conversations(
         &self,
         engine: &Engine,
@@ -798,22 +939,19 @@ impl Workspace {
                     let known = tracked
                         .iter()
                         .find(|t| t.provider == identity.provider && t.external_id == identity.id);
-                    let failure = match known {
-                        Some(_) => failure,
-                        None => SourceFailure {
+                    gathered.failures.push(Found {
+                        scope: FailureScope::Conversation,
+                        reference: known.map(|t| t.reference.clone()),
+                        provider: identity.provider.clone(),
+                        failure: SourceFailure {
                             code: failure.code,
                             message: format!(
                                 "comments of {} could not be read: {}",
                                 issue.display, failure.message
                             ),
                         },
-                    };
-                    gathered.failures.push((
-                        known.map(|t| t.reference.clone()),
-                        identity.provider.clone(),
-                        failure,
-                    ));
-                    if provider_wide(&error) {
+                    });
+                    if error.failure_code().interrupts_source() {
                         break;
                     }
                 }
@@ -867,19 +1005,11 @@ impl Workspace {
     fn apply_refresh(
         &mut self,
         gathered: Gathered,
-        now: Option<&str>,
+        now: &str,
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
-        let now = match now {
-            Some(now) => now.to_owned(),
-            None => {
-                transaction.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
-                    row.get(0)
-                })?
-            }
-        };
         let mut applied = Applied::default();
         for issue in &gathered.issues {
             let key = (
@@ -890,40 +1020,59 @@ impl Workspace {
                 &transaction,
                 issue,
                 gathered.conversations.get(&key),
-                &now,
+                now,
                 &mut applied,
             )?;
         }
         let by_reference: HashMap<&str, &Tracked> =
             tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
         let mut failures = Vec::new();
-        for (reference, provider, failure) in &gathered.failures {
-            if let Some(ticket) = reference.as_deref().and_then(|r| by_reference.get(r)) {
-                {
-                    // Truthful freshness: the attempt and its error are recorded,
-                    // the last successful refresh and saved content are not touched.
-                    transaction.execute(
-                        "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
-                         failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
-                         AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
-                        params![ticket.ticket_id, now, failure.code, failure.message],
-                    )?;
+        for found in &gathered.failures {
+            let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
+            if let Some(ticket) = ticket {
+                match found.scope {
+                    FailureScope::Conversation => {
+                        transaction.execute(
+                            "UPDATE source_sync SET conversation_error_code = ?2, conversation_error_message = ?3 \
+                             WHERE ticket_id = ?1 \
+                             AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
+                            params![ticket.ticket_id, found.failure.code, found.failure.message],
+                        )?;
+                    }
+                    FailureScope::Ticket | FailureScope::Source => {
+                        // Truthful freshness: the attempt and its error are recorded,
+                        // the last successful refresh and saved content are not touched.
+                        // An attempt that started before the ticket was last confirmed
+                        // is older news and records nothing.
+                        transaction.execute(
+                            "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
+                             failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
+                             AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) \
+                             AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external')",
+                            params![ticket.ticket_id, now, found.failure.code, found.failure.message],
+                        )?;
+                    }
+                    FailureScope::Partition => {}
                 }
             }
             failures.push(RefreshFailure {
-                provider: provider.clone(),
-                reference: reference.clone(),
-                code: failure.code.clone(),
-                message: failure.message.clone(),
+                provider: found.provider.clone(),
+                reference: found.reference.clone(),
+                code: found.failure.code.clone(),
+                message: found.failure.message.clone(),
                 retry_after_secs: gathered
                     .runs
                     .iter()
-                    .find(|run| run.provider == *provider && failure.code == "rate_limited")
+                    .find(|run| {
+                        run.provider == found.provider
+                            && found.failure.code == FailureCode::RateLimited.as_str()
+                    })
                     .and_then(|run| run.retry_after_secs),
+                scope: found.scope,
             });
         }
         for run in &gathered.runs {
-            freshness::record_run(&transaction, run, &now)?;
+            freshness::record_run(&transaction, run, now)?;
         }
         transaction.commit()?;
         Ok(RefreshReport {
@@ -931,7 +1080,7 @@ impl Workspace {
             updated: applied.updated,
             unchanged: applied.unchanged,
             failures,
-            refreshed_at: now,
+            refreshed_at: now.to_owned(),
         })
     }
 }
@@ -1004,6 +1153,9 @@ fn apply_issue(
     let (state, reason) = state_parts(issue.state);
     match existing {
         None => {
+            if super::publication::awaited_by_open_attempt(connection, issue)? {
+                return Ok(());
+            }
             let status = status_for(None, issue.state, Status::Todo);
             let id = Uuid::new_v4().to_string();
             connection.execute(
@@ -1057,10 +1209,6 @@ fn apply_issue(
             if next != status {
                 if status == Status::Duplicate {
                     duplicates::clear(connection, &id, Some(&identity.provider))?;
-                    connection.execute(
-                        "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
-                        [&id],
-                    )?;
                 }
                 connection.execute(
                     "UPDATE tickets SET status = ?2 WHERE id = ?1",
@@ -1100,6 +1248,10 @@ fn apply_issue(
             )?;
             if let Some(read) = read {
                 changed |= conversation::store(connection, &id, read, &issue.updated_at)?;
+                connection.execute(
+                    "UPDATE source_sync SET conversation_error_code = NULL, conversation_error_message = NULL WHERE ticket_id = ?1",
+                    [&id],
+                )?;
             }
             if changed {
                 applied.updated.push(format!("T-{number}"));
@@ -1111,57 +1263,159 @@ fn apply_issue(
     Ok(())
 }
 
-/// Records the canonical issue of an externally closed duplicate: the one the
-/// connector supplied, or an explicit unknown target. It never invents a local
-/// link. A target naming the issue itself is not a canonical issue and is kept
-/// as unknown. A known target is replaced by a different one but never by silence.
+/// Records the canonical issue of an externally closed duplicate, with a history
+/// row whenever what is shown changes. It never invents a local link.
+///
+/// - A named target replaces the stored one (a target naming the issue itself is
+///   not a canonical issue and counts as unnamed).
+/// - A definite withdrawal clears it to an explicit unknown.
+/// - A missing answer (a failed lookup, lost access) keeps the last known target
+///   and marks it `last_known`, so it is never shown as confirmed.
+///
 /// Returns whether the stored target changed.
 fn set_duplicate_target(
     connection: &Connection,
     id: &str,
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
-    let target = issue
+    type Stored = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        bool,
+    );
+    let named = issue
         .duplicate_of
         .as_ref()
         .filter(|target| target.identity != issue.reference.identity);
-    let stored: Option<(Option<String>, Option<String>, Option<String>)> = connection
+    let stored: Option<Stored> = connection
         .query_row(
-            "SELECT provider, external_id, locator FROM external_duplicate_targets WHERE ticket_id = ?1",
+            "SELECT provider, external_id, locator, url, last_known FROM external_duplicate_targets WHERE ticket_id = ?1",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
-    let wanted = target.map(|t| {
-        (
-            Some(t.identity.provider.clone()),
-            Some(t.identity.id.clone()),
-            Some(t.locator.clone()),
+    let stored_display = stored
+        .as_ref()
+        .and_then(|(_, _, locator, _, _)| locator.clone())
+        .unwrap_or_default();
+    let record = |to: &str| {
+        history::record(
+            connection,
+            id,
+            "external_duplicate",
+            &stored_display,
+            to,
+            Some(&issue.reference.identity.provider),
         )
-    });
-    let wanted = wanted.unwrap_or((None, None, None));
-    if stored.as_ref() == Some(&wanted) {
-        return Ok(false);
-    }
-    // A later observation that supplies no accessible target (permissions or
-    // visibility changed) does not erase an identity we already hold.
-    if target.is_none() && matches!(&stored, Some((Some(_), Some(_), _))) {
-        return Ok(false);
-    }
-    match target {
-        Some(target) => connection.execute(
-            "INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display) \
-             VALUES (?1, ?2, ?3, ?4, ?4) \
-             ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display",
-            params![id, target.identity.provider, target.identity.id, target.locator],
-        )?,
-        None => connection.execute(
-            "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1) \
-             ON CONFLICT(ticket_id) DO UPDATE SET provider = NULL, external_id = NULL, locator = NULL, display = NULL",
-            [id],
-        )?,
     };
-    Ok(true)
+    match (named, issue.duplicate_withdrawn) {
+        (Some(target), _) => {
+            let wanted: Stored = (
+                Some(target.identity.provider.clone()),
+                Some(target.identity.id.clone()),
+                Some(target.locator.clone()),
+                issue.duplicate_of_url.clone(),
+                false,
+            );
+            if stored.as_ref() == Some(&wanted) {
+                return Ok(false);
+            }
+            connection.execute(
+                "INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display, url, last_known) \
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0) \
+                 ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, last_known = 0",
+                params![id, target.identity.provider, target.identity.id, target.locator, issue.duplicate_of_url],
+            )?;
+            if stored_display != target.locator {
+                record(&target.locator)?;
+            }
+            Ok(true)
+        }
+        (None, true) => {
+            if matches!(&stored, Some((None, None, ..))) {
+                return Ok(false);
+            }
+            connection.execute(
+                "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1) \
+                 ON CONFLICT(ticket_id) DO UPDATE SET provider = NULL, external_id = NULL, locator = NULL, display = NULL, url = NULL, last_known = 0",
+                [id],
+            )?;
+            if !stored_display.is_empty() {
+                record("")?;
+            }
+            Ok(true)
+        }
+        (None, false) => match stored {
+            None => {
+                connection.execute(
+                    "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1)",
+                    [id],
+                )?;
+                Ok(true)
+            }
+            // A named target we hold stays, now flagged as not re-confirmed.
+            Some((Some(_), Some(_), _, _, false)) => {
+                connection.execute(
+                    "UPDATE external_duplicate_targets SET last_known = 1 WHERE ticket_id = ?1",
+                    [id],
+                )?;
+                Ok(true)
+            }
+            Some(_) => Ok(false),
+        },
+    }
+}
+
+/// Applies the closure of an issue that was already closed when it was linked
+/// (a resolved publication attached after the fact): the status it implies, and
+/// the canonical target of a duplicate, with the same history a refresh writes.
+pub(crate) fn map_closure(
+    connection: &Connection,
+    ticket_id: &str,
+    issue: &ExternalIssue,
+) -> Result<(), Error> {
+    let current: String = connection.query_row(
+        "SELECT status FROM tickets WHERE id = ?1",
+        [ticket_id],
+        |row| row.get(0),
+    )?;
+    let current: Status = current.parse().map_err(|error: std::io::Error| {
+        Error::Database(rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        ))
+    })?;
+    let next = status_for(Some(ExternalState::Open), issue.state, current);
+    if next == current {
+        return Ok(());
+    }
+    connection.execute(
+        "UPDATE tickets SET status = ?2 WHERE id = ?1",
+        params![ticket_id, next.to_string()],
+    )?;
+    history::record(
+        connection,
+        ticket_id,
+        "status",
+        &current.to_string(),
+        &next.to_string(),
+        Some(&issue.reference.identity.provider),
+    )?;
+    if next == Status::Duplicate {
+        set_duplicate_target(connection, ticket_id, issue)?;
+    }
+    Ok(())
 }
 
 /// Gives `ticket_id` its external identity, external ownership and first sync

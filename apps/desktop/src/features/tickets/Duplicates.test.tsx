@@ -123,6 +123,25 @@ test("disables an invalid Replace with the reason", async () => {
   ).toBe(false);
 });
 
+test("a waiting ticket that is itself a Duplicate does not break the review", async () => {
+  // T-2 was marked a duplicate earlier and kept its dependency, which is a supported state.
+  current = {
+    ...preview,
+    waiting: [
+      {
+        ticket: "T-3",
+        status: "Duplicate",
+        trashed: false,
+        readiness: "no_ready_state",
+        unresolved: ["T-1"],
+      },
+    ],
+  };
+  await openReview();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Affected dependencies")).toBeTruthy();
+});
+
 test("the summary and the apply label follow the choices", async () => {
   await openReview();
   const apply = () =>
@@ -137,7 +156,7 @@ test("the summary and the apply label follow the choices", async () => {
   await waitFor(() => expect(apply().disabled).toBe(false));
   expect(
     screen.getByText(
-      /Cancel T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
+      /Mark T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
     ),
   ).toBeTruthy();
   expect(screen.getByText("T-3 now waits on T-2")).toBeTruthy();

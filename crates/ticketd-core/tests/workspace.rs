@@ -2186,7 +2186,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2764,7 +2764,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
 
@@ -2992,7 +2992,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, 26);
+    assert_eq!(info.format_version, 27);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }
@@ -3240,6 +3240,7 @@ fn a_prerequisite_is_unresolved_until_it_is_done() {
     );
 }
 
+// Clippy only exempts #[test] functions, not the helpers they call.
 #[allow(clippy::unwrap_used)]
 fn set_status(workspace: &mut Workspace, reference: &str, status: Status) {
     workspace
@@ -4035,4 +4036,49 @@ mod duplicate_review_outcomes {
         ws.mark_duplicate_reviewed("T-1", "T-2", &preview.canonical, remove, None)
             .unwrap();
     }
+}
+
+#[test]
+fn subticket_progress_counts_every_subticket_not_only_the_first_page() {
+    use ticketd_core::ContextOptions;
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    for number in 0..30 {
+        let child = w.create_ticket(&format!("Child {number}")).unwrap();
+        w.set_parent(&child.reference, Some(&parent.reference), None)
+            .unwrap();
+        if number < 25 {
+            set_status(&mut w, &child.reference, Status::Done);
+        }
+    }
+    let relationships = w
+        .ticket_context(
+            &parent.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(relationships.children.items.len(), 20, "one page is read");
+    assert_eq!(relationships.children_progress.total, 30);
+    assert_eq!(relationships.children_progress.done, 25);
+}
+
+#[test]
+fn status_counts_serialize_their_total_so_clients_never_sum_them() {
+    let counts = ticketd_core::StatusCounts {
+        todo: 2,
+        in_progress: 1,
+        in_review: 0,
+        done: 3,
+        canceled: 1,
+        duplicate: 1,
+    };
+    let value = serde_json::to_value(counts).unwrap();
+    assert_eq!(value["total"], 8);
+    assert_eq!(value["duplicate"], 1);
 }

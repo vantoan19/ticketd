@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronDown,
@@ -32,7 +32,6 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import {
   externalSource,
-  providerName,
   sourceLocation,
 } from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
@@ -74,6 +73,22 @@ export function TicketHeader({
   const { copied, error: copyError, copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
+  // Previous/Next replace the ticket (and, at a page edge, the page), which
+  // remounts this group. Remember which one the keyboard used and give it focus back.
+  const listPosition = useRef<HTMLDivElement>(null);
+  const adjacentFocus = useRef<{
+    label: "Previous ticket" | "Next ticket";
+    from: string | null;
+  } | null>(null);
+  useEffect(() => {
+    const wanted = adjacentFocus.current;
+    // Wait for the neighboring ticket to be the loaded, selected one.
+    if (!wanted || !ticket || selected === wanted.from) return;
+    adjacentFocus.current = null;
+    listPosition.current
+      ?.querySelector<HTMLButtonElement>(`button[aria-label="${wanted.label}"]`)
+      ?.focus();
+  }, [selected, ticket, position]);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
   async function setTrashed(value: boolean) {
@@ -91,6 +106,7 @@ export function TicketHeader({
       setPending(false);
     }
   }
+  const owner = ticket ? externalSource(ticket) : null;
   const message = actionError || copyError;
   return (
     <div className="detail-header">
@@ -120,16 +136,10 @@ export function TicketHeader({
             {copied === "Reference" ? <Check /> : <Copy />}
           </IconButton>
         )}
-        {ticket && externalSource(ticket) && (
-          <SourceLink
-            url={externalSource(ticket)?.url ?? ""}
-            className="header-source-link"
-          >
-            <span className="sr-only">
-              Open on {providerName(externalSource(ticket)?.provider ?? "")}
-              :{" "}
-            </span>
-            {sourceLocation(externalSource(ticket)!)}
+        {owner && (
+          <SourceLink url={owner.url} className="header-source-link">
+            <span className="sr-only">Open on {owner.provider_name}: </span>
+            {sourceLocation(owner)}
           </SourceLink>
         )}
       </div>
@@ -137,6 +147,7 @@ export function TicketHeader({
         <div className="ticket-personal-actions">
           {position && onAdjacent && (
             <div
+              ref={listPosition}
               className="list-position"
               role="group"
               aria-label="Position in the list"
@@ -147,14 +158,26 @@ export function TicketHeader({
               <IconButton
                 label="Previous ticket"
                 disabled={position.index <= 1}
-                onClick={() => onAdjacent(-1)}
+                onClick={() => {
+                  adjacentFocus.current = {
+                    label: "Previous ticket",
+                    from: selected,
+                  };
+                  onAdjacent(-1);
+                }}
               >
                 <ChevronUp />
               </IconButton>
               <IconButton
                 label="Next ticket"
                 disabled={position.index >= position.total}
-                onClick={() => onAdjacent(1)}
+                onClick={() => {
+                  adjacentFocus.current = {
+                    label: "Next ticket",
+                    from: selected,
+                  };
+                  onAdjacent(1);
+                }}
               >
                 <ChevronDown />
               </IconButton>

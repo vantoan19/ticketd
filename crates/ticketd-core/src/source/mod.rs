@@ -10,14 +10,14 @@
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
 
-pub mod contract;
+mod contract;
 mod conversation;
-pub mod engine;
+mod engine;
 mod freshness;
-pub mod github;
+mod github;
 mod publication;
 mod schedule;
-pub mod schema;
+mod schema;
 mod takeover;
 mod tracking;
 
@@ -28,13 +28,11 @@ pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
     ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
+    PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use freshness::{
-    DEFAULT_RATE_LIMIT_SECS, SourceStatus, SourceUnavailable, is_unavailable_code,
-};
+pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
     ActionKind, AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
@@ -47,8 +45,8 @@ pub use schema::{
 };
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{
-    DuplicateTarget, Origin, Ownership, RefreshFailure, RefreshOptions, RefreshReport,
-    SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
+    DuplicateTarget, FailureScope, Origin, Ownership, RefreshFailure, RefreshOptions,
+    RefreshReport, SourceCounts, SourceFailure, SourceFilter, TargetProblem, TicketSource,
 };
 
 use crate::{Error, Workspace, transaction_write_lock};
@@ -103,7 +101,76 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
     publication::migrate(connection)
 }
 
-pub(crate) use tracking::{guard_change, guard_duplicate};
+/// How a provider and one of its issues are named for people: the provider's
+/// display name, where the issue lives and its short number. The locator is the
+/// connector's own, so the splitting belongs with the connector's module.
+pub(crate) fn display_parts(
+    provider: &str,
+    locator: &str,
+    display: &str,
+) -> (String, String, String) {
+    match provider {
+        github::PROVIDER => {
+            let (place, number) = locator
+                .rsplit_once('#')
+                .map_or((locator, ""), |(place, number)| (place, number));
+            (
+                github::DISPLAY_NAME.to_owned(),
+                place.to_owned(),
+                if number.is_empty() {
+                    String::new()
+                } else {
+                    format!("#{number}")
+                },
+            )
+        }
+        other => (other.to_owned(), String::new(), display.to_owned()),
+    }
+}
+
+/// The effective "now" of a write: the caller's RFC 3339 time when given, else the
+/// database clock. Every source workflow reads time through this one function.
+pub(crate) fn clock(connection: &rusqlite::Connection, now: Option<&str>) -> Result<String, Error> {
+    Ok(match now {
+        Some(now) => now.to_owned(),
+        None => connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
+            row.get(0)
+        })?,
+    })
+}
+
+/// Step 27: conversation read failures kept apart from refresh failures, the
+/// skipped-repository note of a source run, and the link and certainty of an
+/// external duplicate target. Each column is added only when missing, so a
+/// workspace reopened after its tables were rebuilt still migrates.
+pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), Error> {
+    for (table, column, definition) in [
+        ("source_sync", "conversation_error_code", "TEXT"),
+        ("source_sync", "conversation_error_message", "TEXT"),
+        ("source_status", "partial_message", "TEXT"),
+        ("external_duplicate_targets", "url", "TEXT"),
+        (
+            "external_duplicate_targets",
+            "last_known",
+            "INTEGER NOT NULL DEFAULT 0",
+        ),
+    ] {
+        let present: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |row| row.get(0),
+        )?;
+        if !present {
+            connection.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            ))?;
+        }
+    }
+    connection.execute_batch("PRAGMA user_version = 27;")?;
+    Ok(())
+}
+
+pub(crate) use tracking::{closure_held, guard_change, guard_duplicate, held_sql};
 
 /// Fills the ticket's external side and any blocking publication attempt.
 pub(crate) fn populate(

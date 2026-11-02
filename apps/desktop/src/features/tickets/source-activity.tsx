@@ -1,5 +1,9 @@
 import { createContext, useContext } from "react";
-import type { SourceStatus } from "@/lib/api/sources";
+import type {
+  SourceEntry,
+  SourceHealthState,
+  SourceStatus,
+} from "@/lib/api/sources";
 
 /**
  * How the configured sources are doing right now, for every place that shows it:
@@ -11,6 +15,15 @@ export type SourceActivity = {
   refreshing: boolean;
   /** Persisted status of each source with a saved configuration or a past run. */
   sources: SourceStatus[];
+  /**
+   * The connectors this build offers and what is saved for each, read once by the
+   * workspace. `null` where no workspace provides it (a view rendered alone).
+   */
+  entries: SourceEntry[] | null;
+  /** How often sources refresh by themselves, in seconds; `null` when unknown. */
+  intervalSecs: number | null;
+  /** Opens the Sources settings, where a source's connection and rules live. */
+  openSettings: () => void;
   /** Refreshes every source now, as the Retry and Refresh actions do. */
   refreshAll: () => Promise<void>;
 };
@@ -18,6 +31,9 @@ export type SourceActivity = {
 export const SourceActivityContext = createContext<SourceActivity>({
   refreshing: false,
   sources: [],
+  entries: null,
+  intervalSecs: null,
+  openSettings: () => {},
   refreshAll: async () => {},
 });
 
@@ -25,17 +41,12 @@ export function useSourceActivity(): SourceActivity {
   return useContext(SourceActivityContext);
 }
 
-export type SourceLineState =
-  "refreshing" | "unavailable" | "delayed" | "synced" | "waiting";
+export type SourceLineState = "refreshing" | SourceHealthState;
 
-/** What one source's status line says. A rate limit is delayed, never unavailable. */
+/** What one source's status line says. The core decides the health; this only picks wording. */
 export function sourceLine(
   status: SourceStatus,
   refreshing: boolean,
 ): SourceLineState {
-  if (refreshing) return "refreshing";
-  const code = status.error?.code;
-  if (code === "rate_limited") return "delayed";
-  if (code || status.unavailable_tickets > 0) return "unavailable";
-  return status.last_refreshed_at ? "synced" : "waiting";
+  return refreshing ? "refreshing" : status.health;
 }

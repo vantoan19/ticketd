@@ -56,10 +56,17 @@ pub struct ContextRelated {
     pub trashed: bool,
     pub unresolved: bool,
 }
+/// How far along a ticket's subtickets are, over all of them rather than the page shown.
+#[derive(Debug, Serialize)]
+pub struct ContextProgress {
+    pub total: u64,
+    pub done: u64,
+}
 #[derive(Debug, Serialize)]
 pub struct ContextRelationships {
     pub parent: Option<ContextRelated>,
     pub children: ContextPage<ContextRelated>,
+    pub children_progress: ContextProgress,
     pub prerequisites: ContextPage<ContextRelated>,
     pub blocking: ContextPage<ContextRelated>,
     pub related: ContextPage<ContextRelated>,
@@ -248,6 +255,14 @@ impl Workspace {
                 duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
                 external_duplicate_of: crate::source::duplicate_target(&tx, &id)?,
                 duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                children_progress: {
+                    let (total, done) = tx.query_row(
+                        "SELECT COUNT(*), COALESCE(SUM(t.status = 'Done'), 0) FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1",
+                        [&id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    ContextProgress { total, done }
+                },
                 children: related(
                     &tx,
                     "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",

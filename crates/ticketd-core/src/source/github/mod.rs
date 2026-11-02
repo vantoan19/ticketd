@@ -7,8 +7,8 @@
 mod credentials;
 mod transport;
 
-pub use credentials::{AmbientCredentials, CredentialSource, Secret};
-pub use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
+use credentials::{AmbientCredentials, CredentialSource};
+use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
 
 use serde_json::Value;
 
@@ -17,17 +17,20 @@ use super::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
         ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SourceError,
+        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
+        SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
     },
 };
 
-pub const PROVIDER: &str = "github";
+pub(crate) const PROVIDER: &str = "github";
+/// What people call this provider.
+pub(crate) const DISPLAY_NAME: &str = "GitHub";
 const DEFAULT_API_URL: &str = "https://api.github.com";
 /// Overrides the API address, for GitHub Enterprise or a test server.
-pub const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
+pub(crate) const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
 const MAX_REDIRECTS: usize = 3;
 const OPTION_PAGES: usize = 5;
 const LABEL_REPOSITORIES: usize = 5;
@@ -36,7 +39,7 @@ const CONVERSATION_PAGES: usize = 50;
 /// Pages (of 100) read when looking for a publication's issue before giving up.
 const SEARCH_PAGES: usize = 5;
 
-pub struct GithubConnector {
+pub(crate) struct GithubConnector {
     api_url: String,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
@@ -45,21 +48,21 @@ pub struct GithubConnector {
 impl GithubConnector {
     /// The connector as the application uses it: real network, ambient
     /// credentials, and the API address from [`API_URL_VARIABLE`] if set.
-    pub fn ambient() -> Self {
+    pub(crate) fn ambient() -> Self {
         let custom = std::env::var(API_URL_VARIABLE)
             .ok()
             .map(|url| url.trim().trim_end_matches('/').to_owned())
             .filter(|url| !url.is_empty());
-        // The GitHub CLI fallback only knows github.com.
-        let ask_gh = custom.is_none();
+        // github.com tokens are for github.com: another host gets its own.
+        let custom_host = custom.as_deref().map(host_of);
         Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
-            Box::new(AmbientCredentials::new(ask_gh)),
+            Box::new(AmbientCredentials::new(custom_host)),
         )
     }
 
-    pub fn new(
+    pub(crate) fn new(
         api_url: impl Into<String>,
         transport: Box<dyn HttpTransport>,
         credentials: Box<dyn CredentialSource>,
@@ -135,6 +138,14 @@ impl GithubConnector {
         body: Option<Vec<u8>>,
         subject: &str,
     ) -> Result<HttpResponse, SourceError> {
+        if !credential_may_travel(&self.api_url) {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: API_URL_VARIABLE.into(),
+                    message: "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear".into(),
+                },
+            ]));
+        }
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
             if !self.is_api_url(&url) && url != self.graphql_url() {
@@ -147,15 +158,7 @@ impl GithubConnector {
                     "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can read issues".into(),
                 )
             })?;
-            let mut headers = vec![
-                ("Accept".into(), "application/vnd.github+json".into()),
-                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
-                ("User-Agent".into(), "ticketd".into()),
-                ("Authorization".into(), format!("Bearer {}", token.expose())),
-            ];
-            if body.is_some() {
-                headers.push(("Content-Type".into(), "application/json".into()));
-            }
+            let headers = request_headers(&token, body.is_some());
             let request = HttpRequest {
                 method,
                 url: url.clone(),
@@ -198,20 +201,21 @@ impl GithubConnector {
         let http = HttpRequest {
             method: Method::Post,
             url: format!("{}/repos/{}/issues", self.api_url, encode_path(repository)),
-            headers: vec![
-                ("Accept".into(), "application/vnd.github+json".into()),
-                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
-                ("User-Agent".into(), "ticketd".into()),
-                ("Content-Type".into(), "application/json".into()),
-                ("Authorization".into(), format!("Bearer {}", token.expose())),
-            ],
+            headers: request_headers(&token, true),
             body: Some(body.to_string().into_bytes()),
         };
         let response = self.transport.send(&http).map_err(|error| {
-            // No answer: the request may or may not have been processed.
-            SourceError::Unavailable(format!(
-                "GitHub did not answer, so the issue may or may not have been created: {error}"
-            ))
+            if error.before_send {
+                // The request never left: nothing can have been created.
+                SourceError::NotSent(format!(
+                    "could not reach GitHub, so nothing was sent: {error}"
+                ))
+            } else {
+                // No answer: the request may or may not have been processed.
+                SourceError::Unavailable(format!(
+                    "GitHub did not answer, so the issue may or may not have been created: {error}"
+                ))
+            }
         })?;
         if response.status == 201 {
             let value: Value = serde_json::from_slice(&response.body).map_err(|_| {
@@ -240,6 +244,24 @@ impl GithubConnector {
         }
     }
 
+    /// How far GitHub's clock is ahead of this machine's (negative when this
+    /// machine is ahead), from the `Date` header of a request that costs nothing.
+    /// Zero when it cannot be measured.
+    fn clock_skew(&self) -> chrono::Duration {
+        let measured = (|| {
+            let response = self
+                .get(&format!("{}/rate_limit", self.api_url), "the rate limit")
+                .ok()?;
+            let server = chrono::DateTime::parse_from_rfc2822(response.header("date")?).ok()?;
+            let local = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?;
+            let local = chrono::DateTime::from_timestamp(i64::try_from(local.as_secs()).ok()?, 0)?;
+            Some(server.with_timezone(&chrono::Utc) - local)
+        })();
+        measured.unwrap_or_else(chrono::Duration::zero)
+    }
+
     /// GitHub Enterprise Server serves GraphQL beside, not under, its REST root.
     fn graphql_url(&self) -> String {
         match self.api_url.strip_suffix("/api/v3") {
@@ -256,7 +278,12 @@ impl GithubConnector {
     /// whose `duplicate` is this issue count, and a later `UnmarkedAsDuplicateEvent`
     /// withdraws the target. Anything unavailable (no access, an error, a pull
     /// request as canonical) is "not supplied", never a failure of the fetch.
-    fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Option<ExternalRef> {
+    fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Canonical {
+        self.look_up_canonical(repository, number, id)
+            .unwrap_or(Canonical::NotSupplied)
+    }
+
+    fn look_up_canonical(&self, repository: &str, number: &str, id: u64) -> Option<Canonical> {
         let (owner, name) = repository.split_once('/')?;
         let body = serde_json::json!({
             "query": CANONICAL_QUERY,
@@ -276,7 +303,7 @@ impl GithubConnector {
         let nodes = value
             .pointer("/data/repository/issue/timelineItems/nodes")?
             .as_array()?;
-        let mut target = None;
+        let mut target = Canonical::NotSupplied;
         for node in nodes {
             if node
                 .pointer("/duplicate/databaseId")
@@ -286,12 +313,16 @@ impl GithubConnector {
                 continue;
             }
             target = match node.get("__typename").and_then(Value::as_str) {
-                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?),
-                Some("UnmarkedAsDuplicateEvent") => None,
+                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?)
+                    .map_or(Canonical::NotSupplied, |(reference, url)| {
+                        Canonical::Named { reference, url }
+                    }),
+                // A definite withdrawal, not a missing answer.
+                Some("UnmarkedAsDuplicateEvent") => Canonical::Withdrawn,
                 _ => continue,
             };
         }
-        target
+        Some(target)
     }
 
     fn is_api_url(&self, url: &str) -> bool {
@@ -316,7 +347,7 @@ impl Connector for GithubConnector {
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),
-            name: "GitHub".into(),
+            name: DISPLAY_NAME.into(),
             contract_version: CONTRACT_VERSION,
             capabilities: vec![
                 Capability::Discover,
@@ -422,6 +453,7 @@ impl Connector for GithubConnector {
             return Ok(DiscoveryPage {
                 issues: Vec::new(),
                 next_cursor: None,
+                skipped: Vec::new(),
             });
         };
         let url = match cursor.next {
@@ -451,7 +483,29 @@ impl Connector for GithubConnector {
                 url
             }
         };
-        let (page, next) = self.json(&url, &format!("repository {repository}"))?;
+        let (page, next) = match self.json(&url, &format!("repository {repository}")) {
+            Ok(found) => found,
+            // One repository that is gone or closed to this account says nothing
+            // about the others: skip it, say so, and carry on with the next.
+            Err(error @ (SourceError::NotFound(_) | SourceError::Forbidden(_))) => {
+                let next_cursor = (cursor.repository + 1 < repositories.len()).then(|| {
+                    Cursor {
+                        repository: cursor.repository + 1,
+                        next: None,
+                    }
+                    .encode()
+                });
+                return Ok(DiscoveryPage {
+                    issues: Vec::new(),
+                    next_cursor,
+                    skipped: vec![SkippedPartition {
+                        code: error.code().to_owned(),
+                        message: format!("{repository}: {error}"),
+                    }],
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let items = page
             .as_array()
             .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
@@ -481,6 +535,7 @@ impl Connector for GithubConnector {
         Ok(DiscoveryPage {
             issues,
             next_cursor,
+            skipped: Vec::new(),
         })
     }
 
@@ -493,14 +548,7 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        if !ValueFormat::OwnerName.is_valid(&request.destination) {
-            return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "destination".into(),
-                    message: "must be a repository in the form owner/name".into(),
-                },
-            ]));
-        }
+        require_repository(&request.destination)?;
         self.create_issue(&request.destination, request)
     }
 
@@ -536,20 +584,26 @@ impl Connector for GithubConnector {
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError> {
         let destination = &search.request.destination;
-        if !ValueFormat::OwnerName.is_valid(destination) {
-            return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "destination".into(),
-                    message: "must be a repository in the form owner/name".into(),
-                },
-            ]));
-        }
-        let since = chrono::DateTime::parse_from_rfc3339(&search.since).ok();
+        require_repository(destination)?;
+        // The window was written with this machine's clock. When that clock runs
+        // ahead of GitHub's, the window would start after the real creation and
+        // miss it, so it is moved back by the measured difference.
+        let since = chrono::DateTime::parse_from_rfc3339(&search.since)
+            .ok()
+            .map(|since| since + self.clock_skew().min(chrono::Duration::zero()));
+        let since_text = since.map_or_else(
+            || search.since.clone(),
+            |since| {
+                since
+                    .with_timezone(&chrono::Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            },
+        );
         let mut url = Some(format!(
             "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100&since={}",
             self.api_url,
             encode_path(destination),
-            encode_component(&search.since)
+            encode_component(&since_text)
         ));
         let subject = format!("repository {destination}");
         let mut matches = Vec::new();
@@ -575,7 +629,15 @@ impl Connector for GithubConnector {
                         complete: true,
                     });
                 }
-                if could_be_published(&issue, &search.request) {
+                // Anything the connected account created in the window is a candidate
+                // whatever its text says now: a teammate or an automation may have
+                // rewritten both the title and the description.
+                let by_account = search.account.as_deref().is_some_and(|account| {
+                    item.pointer("/user/login")
+                        .and_then(Value::as_str)
+                        .is_some_and(|login| login.eq_ignore_ascii_case(account))
+                });
+                if by_account || could_be_published(&issue, &search.request) {
                     matches.push(issue);
                 }
             }
@@ -611,7 +673,14 @@ impl Connector for GithubConnector {
             })
         {
             let id = issue.reference.identity.id.parse().unwrap_or_default();
-            issue.duplicate_of = self.canonical_of(repository, number, id);
+            match self.canonical_of(repository, number, id) {
+                Canonical::Named { reference, url } => {
+                    issue.duplicate_of = Some(reference);
+                    issue.duplicate_of_url = url;
+                }
+                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
+                Canonical::NotSupplied => {}
+            }
         }
         Ok(issue)
     }
@@ -724,6 +793,63 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+/// A destination must be a repository in the form `owner/name`.
+fn require_repository(destination: &str) -> Result<(), SourceError> {
+    if ValueFormat::OwnerName.is_valid(destination) {
+        return Ok(());
+    }
+    Err(SourceError::InvalidConfiguration(vec![
+        super::schema::FieldIssue {
+            field: "destination".into(),
+            message: "must be a repository in the form owner/name".into(),
+        },
+    ]))
+}
+
+/// The headers of every authenticated request, with a JSON body when `json_body`.
+fn request_headers(token: &credentials::Secret, json_body: bool) -> Vec<(String, String)> {
+    let mut headers = vec![
+        (
+            "Accept".to_owned(),
+            "application/vnd.github+json".to_owned(),
+        ),
+        ("X-GitHub-Api-Version".to_owned(), "2022-11-28".to_owned()),
+        ("User-Agent".to_owned(), "ticketd".to_owned()),
+        (
+            "Authorization".to_owned(),
+            format!("Bearer {}", token.expose()),
+        ),
+    ];
+    if json_body {
+        headers.push(("Content-Type".to_owned(), "application/json".to_owned()));
+    }
+    headers
+}
+
+/// The host part of an API address.
+fn host_of(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit('@').next().unwrap_or("");
+    authority
+        .rsplit_once(':')
+        .filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit()))
+        .map_or(authority, |(host, _)| host)
+        .to_owned()
+}
+
+/// A token is sent only over https, or to this machine.
+fn credential_may_travel(api_url: &str) -> bool {
+    if api_url.starts_with("https://") {
+        return true;
+    }
+    api_url.starts_with("http://")
+        && matches!(
+            host_of(api_url).as_str(),
+            "localhost" | "127.0.0.1" | "[::1]"
+        )
+}
+
 fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
     locator
         .rsplit_once('#')
@@ -762,14 +888,9 @@ fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
 /// rest are not part of the conversation.
 fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
     let kind = match item.get("event").and_then(Value::as_str) {
-        Some("closed") => {
-            ExternalEventKind::Closed(match item.get("state_reason").and_then(Value::as_str) {
-                Some("completed") => ClosureReason::Completed,
-                Some("not_planned") => ClosureReason::NotPlanned,
-                Some("duplicate") => ClosureReason::Duplicate,
-                _ => ClosureReason::Unknown,
-            })
-        }
+        Some("closed") => ExternalEventKind::Closed(ClosureReason::parse(
+            item.get("state_reason").and_then(Value::as_str),
+        )),
         Some("reopened") => ExternalEventKind::Reopened,
         Some("assigned") => ExternalEventKind::Assigned,
         Some("unassigned") => ExternalEventKind::Unassigned,
@@ -803,25 +924,44 @@ repository(owner: $owner, name: $name) { issue(number: $number) { \
 timelineItems(last: 50, itemTypes: [MARKED_AS_DUPLICATE_EVENT, UNMARKED_AS_DUPLICATE_EVENT]) { nodes { \
 __typename \
 ... on MarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } \
-canonical { __typename ... on Issue { databaseId number repository { nameWithOwner } } } } \
+canonical { __typename ... on Issue { databaseId number url repository { nameWithOwner } } } } \
 ... on UnmarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } } } } } } }";
 
 /// An issue named as canonical, or `None` for anything ticketd cannot track
 /// (a pull request, or a target the credential cannot read).
-fn canonical_reference(canonical: &Value) -> Option<ExternalRef> {
+fn canonical_reference(canonical: &Value) -> Option<(ExternalRef, Option<String>)> {
     if canonical.get("__typename").and_then(Value::as_str) != Some("Issue") {
         return None;
     }
     let id = canonical.get("databaseId").and_then(Value::as_u64)?;
     let number = canonical.get("number").and_then(Value::as_u64)?;
     let repository = canonical.pointer("/repository/nameWithOwner")?.as_str()?;
-    Some(ExternalRef {
-        identity: ExternalIdentity {
-            provider: PROVIDER.into(),
-            id: id.to_string(),
+    let url = canonical
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((
+        ExternalRef {
+            identity: ExternalIdentity {
+                provider: PROVIDER.into(),
+                id: id.to_string(),
+            },
+            locator: format!("{repository}#{number}"),
         },
-        locator: format!("{repository}#{number}"),
-    })
+        url,
+    ))
+}
+
+/// What the timeline says about a duplicate's canonical issue.
+enum Canonical {
+    Named {
+        reference: ExternalRef,
+        url: Option<String>,
+    },
+    /// The marking was withdrawn.
+    Withdrawn,
+    /// Nothing usable came back (no access, an error, a pull request).
+    NotSupplied,
 }
 
 #[derive(Default)]
@@ -882,7 +1022,9 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
                 ))))
             }
         }
-        404 => Err(SourceError::NotFound(format!(
+        // 410 Gone (a deleted issue, or a repository with issues disabled) is an
+        // answer about that one resource, the same as not found.
+        404 | 410 => Err(SourceError::NotFound(format!(
             "{subject} was not found, or the credential cannot see it"
         ))),
         500..=599 => Err(SourceError::Unavailable(format!(
@@ -950,12 +1092,7 @@ fn translate_issue(
     let state = match text("state") {
         Some("open") => ExternalState::Open,
         Some("closed") => ExternalState::Closed {
-            reason: match text("state_reason") {
-                Some("completed") => ClosureReason::Completed,
-                Some("not_planned") => ClosureReason::NotPlanned,
-                Some("duplicate") => ClosureReason::Duplicate,
-                _ => ClosureReason::Unknown,
-            },
+            reason: ClosureReason::parse(text("state_reason")),
         },
         _ => return Err(missing("recognized state")),
     };
@@ -999,6 +1136,8 @@ fn translate_issue(
         updated_at: text("updated_at").unwrap_or_default().to_owned(),
         // The issue payload does not name the canonical issue; `fetch` looks it up.
         duplicate_of: None,
+        duplicate_of_url: None,
+        duplicate_withdrawn: false,
     }))
 }
 

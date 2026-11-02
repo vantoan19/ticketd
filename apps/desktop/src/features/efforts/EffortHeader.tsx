@@ -5,20 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
-import { StatusIcon, ticketStatuses } from "@/features/tickets/StatusIcon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { effortsClient, type Effort, type View } from "@/lib/api/efforts";
+import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import type { EffortViewState } from "./useEffortView";
 import "./effort.css";
-
-const countKeys = {
-  Todo: "todo",
-  "In progress": "in_progress",
-  "In review": "in_review",
-  Done: "done",
-  Canceled: "canceled",
-  Duplicate: "duplicate",
-} as const;
 
 const list = (names: string[]) =>
   names.length < 3
@@ -174,7 +166,7 @@ export function EffortHeader({
                 <StatusIcon status={status} size={14} decorative />
                 {status}
               </dt>
-              <dd>{view.counts[countKeys[status]]}</dd>
+              <dd>{view.counts[statusCountKey[status]]}</dd>
             </div>
           ))}
         </dl>

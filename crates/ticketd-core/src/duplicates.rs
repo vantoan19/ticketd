@@ -159,7 +159,19 @@ pub(crate) fn migrate_status(conn: &Connection) -> Result<(), Error> {
 /// another status. The chosen status stays.
 pub(crate) fn clear(conn: &Connection, id: &str, agent: Option<&str>) -> Result<(), Error> {
     // A taken-over ticket keeps the source's last canonical as provenance only
-    // while it stays Duplicate.
+    // while it stays Duplicate. What it was is written to history first, so
+    // leaving Duplicate never erases it without a trace.
+    let external: Option<String> = conn
+        .query_row(
+            "SELECT locator FROM external_duplicate_targets WHERE ticket_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    if let Some(display) = external {
+        history::record(conn, id, "external_duplicate", &display, "", agent)?;
+    }
     conn.execute(
         "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
         [id],
@@ -172,7 +184,68 @@ pub(crate) fn clear(conn: &Connection, id: &str, agent: Option<&str>) -> Result<
     Ok(())
 }
 
+/// The ticket that really is the original behind `canonical_id`: a local canonical
+/// is already final; one that became a Duplicate through its source follows that
+/// source's canonical (a ticket once imported, however far the chain goes). A
+/// canonical whose own target is unknown, not a ticket, or loops is refused, so a
+/// Duplicate never ends up pointing at another Duplicate.
+fn final_canonical(conn: &Connection, canonical_id: &str) -> Result<String, Error> {
+    let local: Option<String> = conn
+        .query_row(
+            "SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1",
+            [canonical_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(local) = local {
+        return Ok(local);
+    }
+    let Some(target) = crate::source::duplicate_target(conn, canonical_id)? else {
+        return Ok(canonical_id.to_owned());
+    };
+    let status: String = conn.query_row(
+        "SELECT status FROM tickets WHERE id = ?1",
+        [canonical_id],
+        |r| r.get(0),
+    )?;
+    if status != Status::Duplicate.to_string() {
+        return Ok(canonical_id.to_owned());
+    }
+    match target {
+        crate::source::DuplicateTarget::External {
+            ticket: Some(reference),
+            ..
+        } => relationships::id(conn, &reference),
+        _ => {
+            let reference: String = conn.query_row(
+                "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+                [canonical_id],
+                |r| r.get(0),
+            )?;
+            Err(Error::DuplicateCanonicalUnresolved(reference))
+        }
+    }
+}
+
 pub(crate) fn populate(conn: &Connection, ticket: &mut Ticket) -> Result<(), Error> {
+    ticket.duplicate_redirect = None;
+    let direct: Option<String> = conn
+        .query_row(
+            "SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1",
+            [&ticket.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(direct) = direct
+        && let Ok(resolved) = final_canonical(conn, &direct)
+        && resolved != direct
+    {
+        ticket.duplicate_redirect = Some(conn.query_row(
+            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            [&resolved],
+            |r| r.get(0),
+        )?);
+    }
     ticket.duplicate_of = conn.query_row("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.canonical_id WHERE d.source_id = ?1", [&ticket.id], |r| r.get(0)).optional()?;
     let mut stmt = conn.prepare("SELECT 'T-' || t.number FROM duplicate_tickets d JOIN tickets t ON t.id = d.source_id WHERE d.canonical_id = ?1 ORDER BY t.number")?;
     ticket.duplicates = stmt
@@ -205,7 +278,7 @@ impl Workspace {
         crate::ensure_editable(&tx, &source_id)?;
         crate::source::guard_duplicate(&tx, &source_id, source)?;
         crate::ensure_editable(&tx, &canonical_id)?;
-        let destination: String = tx.query_row("SELECT COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| r.get(0))?;
+        let destination = final_canonical(&tx, &canonical_id)?;
         crate::ensure_editable(&tx, &destination)?;
         if source_id == canonical_id || source_id == destination {
             return Err(Error::DuplicateCycle);
@@ -344,7 +417,12 @@ impl Snapshot {
             [&source_id],
             |r| r.get(0),
         )?;
-        let (destination_id, destination): (String, String) = connection.query_row("SELECT t.id, 'T-' || t.number FROM tickets t WHERE t.id = COALESCE((SELECT canonical_id FROM duplicate_tickets WHERE source_id = ?1), ?1)", [&canonical_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let destination_id = final_canonical(connection, &canonical_id)?;
+        let destination: String = connection.query_row(
+            "SELECT 'T-' || number FROM tickets WHERE id = ?1",
+            [&destination_id],
+            |r| r.get(0),
+        )?;
         if mode == ReviewMode::Duplicate {
             // Marking the duplicate fails for these whatever the choices, so say so up front.
             if source_id == destination_id {
@@ -564,7 +642,7 @@ impl Snapshot {
     }
 
     /// Readiness of every waiting ticket before and after all of `decisions` are applied
-    /// together; the duplicate counts as Canceled afterwards when the review cancels it.
+    /// together; the duplicate has the Duplicate status afterwards.
     fn outcomes(&self, decisions: &[DependencyDecision]) -> Result<Vec<WaitingOutcome>, Error> {
         let mut after_blockers = self.blockers.clone();
         for decision in decisions {
@@ -586,7 +664,7 @@ impl Snapshot {
         }
         let status_after = |reference: &str| -> Result<Status, Error> {
             if self.mode == ReviewMode::Duplicate && reference == self.source {
-                Ok(Status::Canceled)
+                Ok(Status::Duplicate)
             } else {
                 Ok(self.fact(reference)?.status)
             }

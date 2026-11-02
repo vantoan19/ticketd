@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/select";
 import { client, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
-import { directStatuses } from "./StatusIcon";
+import { directStatuses } from "@/lib/statuses";
 import { PropertyPicker } from "./TicketProperties";
 import "./create-ticket.css";
 

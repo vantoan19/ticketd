@@ -892,6 +892,7 @@ fn publish_ticket(
     reference: String,
     provider: String,
     destination: Option<String>,
+    expected_fingerprint: Option<String>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
     let mut workspace = Workspace::open_default()?;
     Ok(workspace.publish_ticket(
@@ -901,6 +902,8 @@ fn publish_ticket(
             provider,
             destination,
             now: None,
+            expected_fingerprint,
+            agent: None,
         },
     )?)
 }
@@ -935,6 +938,7 @@ fn resolve_publication(
         &ticketd_core::source::ResolveOptions {
             resolution,
             now: None,
+            agent: None,
         },
     )?)
 }
@@ -944,6 +948,8 @@ struct SourceHealth {
     /// A refresh is running now (startup, periodic or explicit).
     refreshing: bool,
     sources: Vec<ticketd_core::source::SourceStatus>,
+    /// How often the periodic refresh runs while the app is open, in seconds.
+    interval_secs: u64,
 }
 
 /// What the interface needs to say how fresh each source is: persisted status plus
@@ -954,6 +960,7 @@ fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth,
     Ok(SourceHealth {
         refreshing: refresher.0.is_refreshing(),
         sources,
+        interval_secs: ticketd_core::source::RefreshPolicy::default().interval_secs,
     })
 }
 
@@ -964,10 +971,22 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
         .name("source-refresh".into())
         .spawn(move || {
             let engine = ticketd_core::source::Engine::builtin();
+            let mut reported: Option<String> = None;
             loop {
-                // A failed tick is recorded per source by the refresh itself; the
-                // coordinator already spaces the next attempt.
-                let _ = coordinator.tick(&engine, &open_workspace);
+                // A source that fails is recorded per source by the refresh itself,
+                // and the coordinator spaces the next attempt. What it cannot record
+                // (the workspace would not open, the hold could not be read) is said
+                // once on stderr, and again only if it changes or comes back.
+                match coordinator.tick(&engine, &open_workspace) {
+                    Ok(_) => reported = None,
+                    Err(error) => {
+                        let message = error.to_string();
+                        if reported.as_deref() != Some(message.as_str()) {
+                            eprintln!("periodic source refresh could not run: {message}");
+                            reported = Some(message);
+                        }
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_secs(10));
             }
         });

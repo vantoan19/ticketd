@@ -85,6 +85,12 @@ function bridge(
         relationships: {
           parent: options.parent ? related(options.parent) : null,
           children: pageOf(options.children),
+          children_progress: {
+            total: options.children?.length ?? 0,
+            done:
+              options.children?.filter((item) => item.status === "Done")
+                .length ?? 0,
+          },
           prerequisites: pageOf(options.prerequisites),
           blocking: pageOf(options.blocking),
           related: pageOf(options.related, options.more ?? null),
@@ -367,6 +373,10 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
       status: "Duplicate",
       source: {
         provider: "github",
+        provider_name: "GitHub",
+        place: "acme/api",
+        number: "#1",
+        status_choices: ["Todo", "In progress", "In review"],
         id: "1",
         locator: "acme/api#1",
         display: "acme/api#1",

@@ -13,7 +13,10 @@
 
 use rusqlite::OptionalExtension;
 
-use super::tracking::{Authority, authority};
+use super::{
+    contract::FailureCode,
+    tracking::{Authority, authority},
+};
 use crate::{Error, Ticket, Workspace, history, relationships, transaction_write_lock};
 
 impl Workspace {
@@ -46,7 +49,11 @@ impl Workspace {
                 )
                 .optional()?
                 .flatten();
-            if !failure.is_some_and(|code| super::freshness::is_unavailable_code(&code)) {
+            let unavailable = failure
+                .as_deref()
+                .and_then(FailureCode::parse)
+                .is_some_and(FailureCode::is_unavailable);
+            if !unavailable {
                 return Err(Error::SourceAvailable {
                     reference: reference.to_owned(),
                     provider,

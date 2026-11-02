@@ -15,6 +15,7 @@ import type {
   PublicationReview,
 } from "@/lib/api/publication";
 import { sourcesClient, toSourceFailure } from "@/lib/api/sources";
+import { SourceLink } from "./SourceLink";
 import "./publication.css";
 
 /**
@@ -128,7 +129,7 @@ function ReviewBody({
     <>
       <div className="publication-facts">
         <section aria-label="Known">
-          <h4>What is known</h4>
+          <h3>What is known</h3>
           <ul>
             {review.known.map((line) => (
               <li key={line}>{line}</li>
@@ -136,7 +137,7 @@ function ReviewBody({
           </ul>
         </section>
         <section aria-label="Unknown">
-          <h4>What is not known</h4>
+          <h3>What is not known</h3>
           <ul>
             <li>{review.unknown}</li>
           </ul>
@@ -148,6 +149,12 @@ function ReviewBody({
           ). That does not mean nothing was created.
         </p>
       )}
+      {review.candidates_complete === false && (
+        <p className="publication-detail" role="status">
+          Only part of the recent issues in {attempt.destination} could be read,
+          so nothing can be ruled out yet.
+        </p>
+      )}
       {review.candidates.length > 0 && (
         <section aria-label="Possible matches" className="publication-field">
           <span className="publication-label">
@@ -156,13 +163,12 @@ function ReviewBody({
           <ul className="publication-candidates">
             {review.candidates.map((candidate) => (
               <li key={candidate.identity.id}>
-                <a href={candidate.url} target="_blank" rel="noreferrer">
-                  {candidate.display}
-                </a>
+                <SourceLink url={candidate.url}>{candidate.display}</SourceLink>
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={busy}
+                  aria-label={`This is ${candidate.display}`}
                   onClick={() =>
                     void resolve({ kind: "attach", issue: candidate.locator })
                   }
@@ -210,6 +216,9 @@ function ReviewBody({
           )}
           <p className="publication-detail">{attach.detail}</p>
         </section>
+      )}
+      {attach && !attach.available && (
+        <p className="publication-detail">{attach.detail}</p>
       )}
       {notCreated && (
         <section aria-label="Nothing was created" className="publication-field">

@@ -1,6 +1,8 @@
 //! Taking ownership of an unavailable external ticket, through the workspace
 //! workflow boundary with a controllable fake connector.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::BTreeMap,
@@ -89,6 +91,7 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues,
             next_cursor: None,
+            skipped: Vec::new(),
         })
     }
     fn fetch(
@@ -128,6 +131,8 @@ fn issue(id: u64, title: &str) -> ExternalIssue {
         created_at: "2026-01-01T00:00:00Z".into(),
         updated_at: "2026-02-01T00:00:00Z".into(),
         duplicate_of: None,
+        duplicate_of_url: None,
+        duplicate_withdrawn: false,
     }
 }
 

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { SourceLink } from "@/features/tickets/SourceLink";
-import { providerName } from "@/features/tickets/ticket-source";
+
 import { client } from "@/lib/api/client";
 import type { ConversationEntry, TicketSource } from "@/lib/api/client";
 import { formatDateTime } from "@/lib/format";
@@ -102,7 +102,7 @@ export function SourceConversation({
       active = false;
     };
   }, [reference, revision, refreshedAt]);
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   const owned = source.ownership === "external";
   // Provenance only: after takeover there is nothing to show unless it was retrieved.
   if (!owned && !error && (entries === null || entries.length === 0))

@@ -2,8 +2,11 @@
 //! controllable fake connector. The failure scenarios are the point: every one
 //! of them must leave the ticket local, and every one that might have created an
 //! issue must block another create.
-// Fake connector helpers panic to simulate a crash and to fail loudly on a wrong error.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
+// Only the fake connector's `publish` panics (to simulate a crash) and the error
+// matchers panic on the wrong error; those carry their own allow below.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::BTreeMap,
@@ -31,6 +34,8 @@ enum Mode {
     Create,
     /// The provider refuses before creating anything.
     Refuse,
+    /// The request never left this machine (no DNS answer, connection refused).
+    NotSent,
     /// The issue is created but the answer is lost (timeout).
     LoseResponse,
     /// The process dies during the call, after the issue exists.
@@ -144,6 +149,7 @@ impl Connector for Fake {
         Ok(DiscoveryPage {
             issues: remote.issues.values().cloned().collect(),
             next_cursor: None,
+            skipped: Vec::new(),
         })
     }
 
@@ -217,6 +223,8 @@ impl Connector for Fake {
             .collect()
     }
 
+    // Mode::Crash panics here on purpose: it simulates the process dying mid-call.
+    #[allow(clippy::panic)]
     fn publish(
         &self,
         _: &ConfigValues,
@@ -224,6 +232,9 @@ impl Connector for Fake {
     ) -> Result<ExternalIssue, SourceError> {
         let (mode, hook) = {
             let mut remote = self.0.lock().unwrap();
+            if remote.mode == Mode::NotSent {
+                return Err(SourceError::NotSent("could not reach the provider".into()));
+            }
             if remote.mode == Mode::Refuse {
                 return Err(SourceError::Forbidden(
                     "no permission to create issues".into(),
@@ -249,6 +260,8 @@ impl Connector for Fake {
                 created_at: now_rfc3339(),
                 updated_at: now_rfc3339(),
                 duplicate_of: None,
+                duplicate_of_url: None,
+                duplicate_withdrawn: false,
             };
             remote.issues.insert(id, issue);
             (remote.mode, remote.hook.clone())
@@ -344,6 +357,8 @@ fn options() -> PublishOptions {
         provider: "fake".into(),
         destination: None,
         now: None,
+        expected_fingerprint: None,
+        agent: None,
     }
 }
 
@@ -372,6 +387,7 @@ fn set_status(f: &mut Fixture, reference: &str, status: Status) {
         .unwrap();
 }
 
+#[allow(clippy::panic)]
 fn publication_error(error: Error) -> PublicationError {
     match error {
         Error::Publication(error) => error,
@@ -816,7 +832,7 @@ fn edits_made_while_publishing_are_kept_as_a_note_not_dropped_by_the_next_refres
 }
 
 #[test]
-fn discovery_importing_the_created_issue_first_does_not_attach_it_twice() {
+fn discovery_leaves_an_issue_an_open_attempt_is_creating_to_that_attempt() {
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body");
     let path = f.path();
@@ -828,15 +844,12 @@ fn discovery_importing_the_created_issue_first_does_not_attach_it_twice() {
             .unwrap();
     });
 
-    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
-    assert!(matches!(error, PublicationError::Unresolved { .. }));
+    // Discovery runs while the create call is out and does not import the issue
+    // as a ticket of its own, so the publish attaches it to the original ticket.
+    f.publish(&ticket.reference).unwrap();
     let after = f.ticket(&ticket.reference);
-    assert!(after.source.is_none(), "identity stays unique");
-    let attempt = after.publication.unwrap();
-    assert_eq!(attempt.failure.unwrap().code, "identity_conflict");
-    assert_eq!(attempt.issue.unwrap().identity.id, "101");
-    // Discovery's ticket is the only one that owns the issue.
-    assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+    assert_eq!(after.source.unwrap().id, "101");
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
 }
 
 #[test]
@@ -888,6 +901,7 @@ fn attach(issue: Option<&str>) -> ResolveOptions {
             issue: issue.map(str::to_owned),
         },
         now: None,
+        agent: None,
     }
 }
 
@@ -895,6 +909,7 @@ fn not_created() -> ResolveOptions {
     ResolveOptions {
         resolution: Resolution::NotCreated,
         now: None,
+        agent: None,
     }
 }
 
@@ -1118,23 +1133,251 @@ fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
 }
 
 #[test]
-fn discovery_owning_the_issue_first_keeps_the_attempt_unresolved_and_identity_unique() {
+fn a_lost_response_is_not_imported_by_discovery_and_attach_finishes_it() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");
     f.workspace
         .refresh_sources(&f.engine, &RefreshOptions::default())
         .unwrap();
+    assert_eq!(
+        f.workspace.list_tickets().unwrap().len(),
+        1,
+        "no second ticket while the attempt is open"
+    );
+
+    let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert_eq!(done.attempt.state, AttemptState::Succeeded);
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
+}
+
+#[test]
+fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.workspace
+        .add_note(&ticket.reference, "local work", None)
+        .unwrap();
+    // A teammate rewrote the title and the description, so discovery no longer
+    // recognizes the issue as this attempt's result and imports it as T-2.
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        let issue = remote.issues.get_mut(&101).unwrap();
+        issue.title = "Renamed".into();
+        issue.body = "Rewritten".into();
+    }
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
 
+    let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert_eq!(done.attempt.state, AttemptState::Succeeded);
+    let source = done.ticket.source.unwrap();
+    assert_eq!(
+        (source.id.as_str(), source.origin),
+        ("101", Origin::Published)
+    );
+    assert_eq!(
+        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        1
+    );
+    // The imported ticket is in the trash, not deleted, and the identity is unique.
+    assert!(f.workspace.show_ticket("T-2").unwrap().trashed);
+    assert!(f.workspace.show_ticket("T-2").unwrap().source.is_none());
+}
+
+#[test]
+fn publishing_sends_exactly_what_was_previewed_or_nothing() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    // An agent edits the description while the preview is on screen.
+    f.workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("internal notes the agent added".into()),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    let mut changed = options();
+    changed.expected_fingerprint = Some(preview.fingerprint.clone());
+    let error = publication_error(
+        f.workspace
+            .publish_ticket(&f.engine, &ticket.reference, &changed)
+            .unwrap_err(),
+    );
+    assert!(matches!(
+        error,
+        PublicationError::ChangedSincePreview { .. }
+    ));
+    assert_eq!(f.created(), 0, "nothing was sent");
+    assert!(f.ticket(&ticket.reference).publication.is_none());
+
+    let fresh = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    changed.expected_fingerprint = Some(fresh.fingerprint);
+    f.workspace
+        .publish_ticket(&f.engine, &ticket.reference, &changed)
+        .unwrap();
+    assert_eq!(
+        f.fake.0.lock().unwrap().created[0].body,
+        "internal notes the agent added"
+    );
+}
+
+#[test]
+fn attach_rechecks_eligibility_and_brings_a_closed_issues_closure() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    // While unresolved the ticket is local, so the person finishes it.
+    set_status(&mut f, &ticket.reference, Status::Done);
     let error = publication_error(
         f.resolve(&ticket.reference, &attach(Some("101")))
             .unwrap_err(),
     );
-    assert!(matches!(error, PublicationError::Unresolved { .. }));
+    assert!(
+        matches!(error, PublicationError::Mismatch { .. }),
+        "{error}"
+    );
     f.still_unresolved(&ticket.reference);
-    let attempt = f.ticket(&ticket.reference).publication.unwrap();
-    assert_eq!(attempt.failure.unwrap().code, "identity_conflict");
-    assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+
+    // Back in progress, and a teammate has meanwhile closed the issue as completed.
+    set_status(&mut f, &ticket.reference, Status::InProgress);
+    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().state = ExternalState::Closed {
+        reason: ticketd_core::source::ClosureReason::Completed,
+    };
+    let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert_eq!(done.ticket.status, Status::Done);
+    assert!(done.ticket.source.unwrap().status_locked);
+}
+
+#[test]
+fn a_late_creation_after_a_not_created_verdict_reopens_the_attempt_with_the_issue() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    let path = f.path();
+    let engine = f.engine.clone();
+    let reference = ticket.reference.clone();
+    let fake = f.fake.clone();
+    // The publisher stalls past its lease; a resolver searches while the issue is
+    // not yet visible and confirms "not created"; then the late answer arrives.
+    f.hook(move || {
+        let hidden = fake.0.lock().unwrap().issues.remove(&101).unwrap();
+        let mut other = Workspace::open(&path).unwrap();
+        let mut verdict = not_created();
+        verdict.now = Some("2999-01-01T00:00:00Z".into());
+        other
+            .resolve_publication(&engine, &reference, &verdict)
+            .unwrap();
+        fake.0.lock().unwrap().issues.insert(101, hidden);
+    });
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(error, PublicationError::Unresolved { .. }));
+    let after = f.ticket(&ticket.reference);
+    let attempt = after.publication.expect("the attempt is open again");
+    assert_eq!(attempt.state, AttemptState::Unresolved);
+    assert_eq!(attempt.issue.unwrap().identity.id, "101");
+    assert!(after.source.is_none());
+}
+
+#[test]
+fn one_clock_judges_the_lease_so_a_crashed_attempt_is_settled_consistently() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    f.mode(Mode::Crash);
+    let mut crashed = options();
+    crashed.now = Some("2000-01-01T00:00:00Z".into());
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        f.workspace
+            .publish_ticket(&f.engine, &ticket.reference, &crashed)
+    }));
+    assert!(outcome.is_err(), "the process died during the create call");
+    f.mode(Mode::Create);
+    f.fake.0.lock().unwrap().issues.clear();
+
+    // Thirty seconds later the lease has not run out: still running, by one clock.
+    let mut early = not_created();
+    early.now = Some("2000-01-01T00:00:30Z".into());
+    assert!(matches!(
+        publication_error(f.resolve(&ticket.reference, &early).unwrap_err()),
+        PublicationError::StillRunning { .. }
+    ));
+    // After the lease the attempt settles as not created.
+    let mut late = not_created();
+    late.now = Some("2000-01-01T00:05:00Z".into());
+    late.agent = Some("assistant".into());
+    let settled = f.resolve(&ticket.reference, &late).unwrap();
+    assert_eq!(settled.attempt.state, AttemptState::Failed);
+    // The verdict is in the history, attributed to who asked.
+    let history = f.workspace.ticket_history(&ticket.reference).unwrap();
+    let entry = history.iter().find(|e| e.kind == "publication").unwrap();
+    assert_eq!(entry.to_value, "not created");
+    assert_eq!(entry.editing_agent.as_deref(), Some("assistant"));
+}
+
+#[test]
+fn a_request_that_never_left_is_a_definite_failure_not_an_unresolved_attempt() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    f.mode(Mode::NotSent);
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(error, PublicationError::Failed { .. }), "{error}");
+    assert!(f.ticket(&ticket.reference).publication.is_none());
+}
+
+#[test]
+fn the_review_offers_only_actions_that_can_succeed() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.fake.0.lock().unwrap().issues.clear();
+    // The search cannot run: "nothing was created" must not be offered.
+    f.fake.0.lock().unwrap().lookup_down = true;
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert!(review.lookup_failure.is_some());
+    let not_created = review
+        .actions
+        .iter()
+        .find(|a| a.kind == ActionKind::NotCreated)
+        .unwrap();
+    assert!(!not_created.available, "{}", not_created.detail);
+    // Neither is it offered when only part of the window could be read.
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.lookup_down = false;
+        remote.search_complete = false;
+    }
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert!(
+        !review
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+    );
+    // With a complete empty search it is.
+    f.fake.0.lock().unwrap().search_complete = true;
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert!(
+        review
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+    );
 }
 
 #[test]

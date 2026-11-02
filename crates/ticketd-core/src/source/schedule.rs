@@ -151,6 +151,17 @@ impl RefreshCoordinator {
         &self,
         work: impl FnOnce() -> Result<RefreshReport, Error>,
     ) -> Result<RefreshReport, Error> {
+        self.run_explicit(true, work)
+    }
+
+    /// Like [`Self::run_now`]. A run that covers one ticket only (`feeds_schedule`
+    /// false) says nothing about the source as a whole, so it neither resets nor
+    /// extends the schedule of the full refresh.
+    fn run_explicit(
+        &self,
+        feeds_schedule: bool,
+        work: impl FnOnce() -> Result<RefreshReport, Error>,
+    ) -> Result<RefreshReport, Error> {
         {
             let mut state = self.lock();
             while state.running {
@@ -161,7 +172,12 @@ impl RefreshCoordinator {
             }
             state.running = true;
         }
-        self.execute(work)
+        if feeds_schedule {
+            self.execute(work)
+        } else {
+            let _running = Running(self);
+            work()
+        }
     }
 
     fn execute(
@@ -213,7 +229,7 @@ impl RefreshCoordinator {
         open: &dyn Fn() -> Result<Workspace, Error>,
         ticket: Option<&str>,
     ) -> Result<RefreshReport, Error> {
-        self.run_now(|| {
+        self.run_explicit(ticket.is_none(), || {
             open()?.refresh_sources(
                 engine,
                 &RefreshOptions {

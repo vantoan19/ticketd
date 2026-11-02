@@ -47,6 +47,8 @@ const status = (overrides: Partial<SourceStatus> = {}): SourceStatus => ({
   failing_since: null,
   retry_after: null,
   unavailable_tickets: 0,
+  health: "synced",
+  partial_message: null,
   ...overrides,
 });
 
@@ -56,6 +58,9 @@ function withActivity(activity: Partial<SourceActivity>, children: ReactNode) {
       value={{
         refreshing: false,
         sources: [],
+        entries: null,
+        intervalSecs: null,
+        openSettings: () => {},
         refreshAll: async () => {},
         ...activity,
       }}
@@ -67,6 +72,10 @@ function withActivity(activity: Partial<SourceActivity>, children: ReactNode) {
 
 const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   provider: "github",
+  provider_name: "GitHub",
+  place: "acme/api",
+  number: "#98",
+  status_choices: ["Todo", "In progress", "In review"],
   id: "42",
   locator: "acme/api#98",
   display: "acme/api#98",
@@ -125,6 +134,15 @@ test("the footer says Synced with a green dot, and nothing before a source exist
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
+test("the footer's status line opens the source's settings", () => {
+  const openSettings = vi.fn();
+  render(
+    withActivity({ openSettings, sources: [status()] }, <SourceStatusFooter />),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /GitHub synced/ }));
+  expect(openSettings).toHaveBeenCalled();
+});
+
 test("the footer reads Refreshing GitHub… without a dot while a refresh runs", () => {
   const { container } = render(
     withActivity(
@@ -144,6 +162,7 @@ test("an unavailable source shows the failure, the last good sync and a working 
         refreshAll,
         sources: [
           status({
+            health: "unavailable",
             error: { code: "unavailable", message: "Network is down." },
             failing_since: minutesAgo(12),
             unavailable_tickets: 3,
@@ -170,6 +189,7 @@ test("a rate limit reads as delayed, not unavailable", () => {
       {
         sources: [
           status({
+            health: "delayed",
             error: { code: "rate_limited", message: "Retry in 600 seconds." },
           }),
         ],
@@ -178,6 +198,17 @@ test("a rate limit reads as delayed, not unavailable", () => {
     ),
   );
   expect(screen.getByText("GitHub refresh delayed")).toBeTruthy();
+  expect(screen.queryByText("GitHub unavailable")).toBeNull();
+});
+
+test("one deleted issue reads partly refreshed, never GitHub unavailable", () => {
+  render(
+    withActivity(
+      { sources: [status({ health: "partial", unavailable_tickets: 1 })] },
+      <SourceStatusFooter />,
+    ),
+  );
+  expect(screen.getByText("GitHub partly refreshed")).toBeTruthy();
   expect(screen.queryByText("GitHub unavailable")).toBeNull();
 });
 
@@ -306,7 +337,7 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
 });
 
-test("the list header reads Refreshing GitHub… for a background refresh and disables Refresh", () => {
+test("the list header reads Refreshing GitHub… for a background refresh without announcing it", () => {
   render(
     withActivity(
       { refreshing: true, sources: [status()] },
@@ -320,19 +351,13 @@ test("the list header reads Refreshing GitHub… for a background refresh and di
         <SourceRefresh
           providers={["github"]}
           state={{ running: false, report: null, error: "" }}
-          onRefresh={() => {}}
         />
       </>,
     ),
   );
+  // A background run is shown, not announced to screen readers.
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
-  expect(
-    (
-      screen.getByRole("button", {
-        name: /Refresh GitHub/,
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+  expect(screen.queryByRole("status")).toBeNull();
 });
 
 test("the list header shows the last sync when idle", () => {
@@ -342,7 +367,6 @@ test("the list header shows the last sync when idle", () => {
       <SourceRefresh
         providers={["github"]}
         state={{ running: false, report: null, error: "" }}
-        onRefresh={() => {}}
       />,
     ),
   );

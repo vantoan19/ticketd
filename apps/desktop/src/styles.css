@@ -516,11 +516,27 @@
   align-items: flex-start;
   gap: 4px;
 }
-.sidebar-source > span {
+.sidebar-source > span,
+.sidebar-source-line {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--secondary-foreground);
+}
+.sidebar-source-line {
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+.sidebar-source-line:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sidebar-source-line:focus-visible {
+  border-radius: 4px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 .brand {
   display: flex;

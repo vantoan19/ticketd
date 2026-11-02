@@ -1,5 +1,7 @@
 //! Source configuration through the workspace workflow boundary, using a
 //! controllable fake connector instead of any provider transport.
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 use std::{
@@ -99,6 +101,7 @@ impl Connector for Fake {
             None => Ok(DiscoveryPage {
                 issues: Vec::new(),
                 next_cursor: None,
+                skipped: Vec::new(),
             }),
             Some(Err(message)) => Err(SourceError::Unavailable(message)),
             Some(Ok((issues, more))) => {
@@ -106,6 +109,7 @@ impl Connector for Fake {
                 Ok(DiscoveryPage {
                     issues,
                     next_cursor: more.then_some(next),
+                    skipped: Vec::new(),
                 })
             }
         }
@@ -139,6 +143,8 @@ fn issue(id: u64) -> ExternalIssue {
         created_at: String::new(),
         updated_at: String::new(),
         duplicate_of: None,
+        duplicate_of_url: None,
+        duplicate_withdrawn: false,
     }
 }
 
@@ -325,6 +331,7 @@ fn provider_failures_surface_and_a_looping_connector_is_stopped() {
             Ok(DiscoveryPage {
                 issues: vec![],
                 next_cursor: Some("same".into()),
+                skipped: Vec::new(),
             })
         }
         fn fetch(&self, c: &ConfigValues, r: &ExternalRef) -> Result<ExternalIssue, SourceError> {

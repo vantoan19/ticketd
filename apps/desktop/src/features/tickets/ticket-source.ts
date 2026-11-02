@@ -1,8 +1,5 @@
 import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
 
-/** The statuses a person manages locally while an externally owned issue is open. */
-export const localProgressStatuses = ["Todo", "In progress", "In review"];
-
 export function providerName(provider: string): string {
   return provider === "github" ? "GitHub" : provider;
 }
@@ -12,17 +9,9 @@ export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;
 }
 
-/** The provider's number for the issue, such as "#98", from its locator. */
-export function externalNumber(source: TicketSource): string {
-  const index = source.locator.lastIndexOf("#");
-  return index >= 0 ? source.locator.slice(index) : "";
-}
-
-/** Where the issue lives, such as "owner / repo #98". */
+/** Where the issue lives, such as "owner / repo #98", from the parts the core names. */
 export function sourceLocation(source: TicketSource): string {
-  const index = source.locator.lastIndexOf("#");
-  const place = index >= 0 ? source.locator.slice(0, index) : source.locator;
-  return `${place.replace("/", " / ")} ${externalNumber(source)}`.trim();
+  return `${source.place.replace("/", " / ")} ${source.number}`.trim();
 }
 
 /** The state line's words, and the tone of its dot, if it has one. */
@@ -30,7 +19,7 @@ export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
 } {
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   if (source.unavailable)
     return { text: "Source unavailable", tone: "attention" };
   if (source.state.state === "open")
@@ -75,7 +64,7 @@ export function unavailableNotice(
 ): { title: string; detail: string; since: string } | null {
   const unavailable = source.unavailable;
   if (!unavailable || source.ownership !== "external") return null;
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
   return {
     title: "Source unavailable",
@@ -95,36 +84,58 @@ export function duplicateTargetParts(target: DuplicateTarget): {
   /** The local ticket it resolved to, which can be opened. */
   ticket: string | null;
   note: string;
+  /** Where the canonical issue can be opened at its source. */
+  url: string | null;
 } {
   if (target.kind === "unknown")
     return {
       label: "Unknown",
       ticket: null,
       note: "The source did not name an accessible original.",
+      url: null,
     };
+  const url = target.url ?? null;
+  // A target the source stopped supplying is the last one it named.
+  const last = target.last_known
+    ? " Last known; the source no longer names it."
+    : "";
   if (target.problem === "cycle")
     return {
       label: target.display,
       ticket: null,
-      note: "Not followed: it leads back to this ticket.",
+      note: "Not followed: it leads back to this ticket." + last,
+      url,
     };
   if (target.ticket)
     return {
       label: target.ticket,
       ticket: target.ticket,
-      note: target.display,
+      note: target.display + (last ? " ·" + last : ""),
+      url,
     };
   return {
     label: target.display,
     ticket: null,
-    note: "Not imported into ticketd.",
+    note: "Not imported into ticketd." + last,
+    url,
   };
 }
 
+/**
+ * The canonical issue a source named for a Duplicate that has no local original:
+ * the one rule every surface (row, rail, relationships) follows. A taken-over
+ * duplicate keeps the last one as provenance, so ownership is not part of it.
+ */
+export function externalDuplicateTarget(
+  ticket: Ticket,
+): DuplicateTarget | null {
+  return ticket.status === "Duplicate" && !ticket.duplicate_of
+    ? (ticket.source?.duplicate_target ?? null)
+    : null;
+}
+
 /** What a closed duplicate says about its canonical issue, never inventing one. */
-export function duplicateTargetText(source: TicketSource): string | null {
-  const target = source.duplicate_target;
-  if (!target) return null;
+export function duplicateTargetText(target: DuplicateTarget): string {
   if (target.kind === "unknown")
     return "Duplicate; the source did not name an accessible original";
   if (target.problem === "cycle")

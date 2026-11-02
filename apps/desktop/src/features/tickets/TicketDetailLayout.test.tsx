@@ -39,7 +39,11 @@ beforeEach(() => {
         relationships: Record<string, unknown>;
       };
       return {
-        relationships: { ...base.relationships, children: page(children) },
+        relationships: {
+          ...base.relationships,
+          children: page(children),
+          children_progress: { total: children.length, done: 0 },
+        },
       };
     }
     if (command === "set_following") return null;

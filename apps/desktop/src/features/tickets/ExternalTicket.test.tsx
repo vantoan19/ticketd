@@ -37,6 +37,10 @@ afterEach(() => {
 
 const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   provider: "github",
+  provider_name: "GitHub",
+  place: "acme/api",
+  number: "#98",
+  status_choices: ["Todo", "In progress", "In review"],
   id: "42",
   locator: "acme/api#98",
   display: "acme/api#98",
@@ -358,7 +362,12 @@ test("a row shows the owner's pill and a local row shows none", () => {
   );
   const pills = screen.getAllByTitle(/Owned by GitHub/);
   expect(pills).toHaveLength(1);
-  expect(pills[0]?.textContent).toBe("Owned by GitHub GitHub #98");
+  // Read once: the visible words are hidden from assistive technology and the
+  // screen-reader text says the same thing in one sentence.
+  expect(within(pills[0]!).getByText("Owned by GitHub, #98")).toBeTruthy();
+  expect(pills[0]?.querySelector("[aria-hidden]")?.textContent).toBe(
+    "GitHub #98",
+  );
 });
 
 test("the source filter offers All, GitHub and Local with counts and reports the choice", () => {
@@ -371,18 +380,18 @@ test("the source filter offers All, GitHub and Local with counts and reports the
       providers={["github"]}
     />,
   );
-  const group = screen.getByRole("group", { name: "Ticket source" });
+  const group = screen.getByRole("radiogroup", { name: "Ticket source" });
   expect(
     within(group)
-      .getAllByRole("button")
-      .map((button) => button.textContent),
-  ).toEqual(["All11", "GitHub7", "Local4"]);
+      .getAllByRole("radio")
+      .map((radio) => radio.textContent),
+  ).toEqual(["All 11", "GitHub 7", "Local 4"]);
   expect(
     within(group)
-      .getByRole("button", { name: /All/ })
-      .getAttribute("aria-pressed"),
+      .getByRole("radio", { name: /All/ })
+      .getAttribute("aria-checked"),
   ).toBe("true");
-  fireEvent.click(within(group).getByRole("button", { name: /GitHub/ }));
+  fireEvent.click(within(group).getByRole("radio", { name: /GitHub/ }));
   expect(onChange).toHaveBeenCalledWith("github");
 });
 

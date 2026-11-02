@@ -42,10 +42,42 @@ impl HttpResponse {
     }
 }
 
+/// Why no HTTP response was obtained.
+#[derive(Debug, Clone)]
+pub struct TransportError {
+    pub message: String,
+    /// True when the failure happened before any request bytes could have
+    /// reached the server (DNS, refused connection, no route), so the request
+    /// was certainly not processed. A timeout or a dropped connection after the
+    /// request went out is not: the server may have acted on it.
+    pub before_send: bool,
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<String> for TransportError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            before_send: false,
+        }
+    }
+}
+
+impl From<&str> for TransportError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
 /// Sends one request. An `Err` means no HTTP response was obtained (DNS, TLS,
 /// connection, timeout); any status code, including 4xx and 5xx, is an `Ok`.
 pub trait HttpTransport: Send + Sync {
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, String>;
+    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError>;
 }
 
 /// The real network, over blocking HTTPS.
@@ -75,7 +107,7 @@ impl Default for UreqTransport {
 }
 
 impl HttpTransport for UreqTransport {
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, String> {
+    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
         let result = match request.method {
             Method::Get => {
                 let mut builder = self.agent.get(&request.url);
@@ -92,7 +124,16 @@ impl HttpTransport for UreqTransport {
                 builder.send(request.body.as_deref().unwrap_or_default())
             }
         };
-        let mut response = result.map_err(|error| error.to_string())?;
+        let mut response = result.map_err(|error| TransportError {
+            before_send: matches!(
+                error,
+                ureq::Error::HostNotFound
+                    | ureq::Error::ConnectionFailed
+                    | ureq::Error::BadUri(_)
+                    | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect)
+            ),
+            message: error.to_string(),
+        })?;
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -107,7 +148,7 @@ impl HttpTransport for UreqTransport {
         let body = response
             .body_mut()
             .read_to_vec()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| TransportError::from(error.to_string()))?;
         Ok(HttpResponse {
             status,
             headers,

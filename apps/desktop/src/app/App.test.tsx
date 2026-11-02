@@ -200,6 +200,10 @@ test("opens a related ticket outside the filtered list and preserves drafts when
         return {
           relationships: {
             parent: null,
+            children_progress: {
+              total: args?.reference === first.reference ? 1 : 0,
+              done: 0,
+            },
             children:
               args?.reference === first.reference
                 ? {
@@ -1079,12 +1083,25 @@ test("a selection ends when the search or filters change, and the bar can be ski
 });
 
 const zeroCounts = {
+  total: 0,
   todo: 0,
   in_progress: 0,
   in_review: 0,
   done: 0,
   canceled: 0,
   duplicate: 0,
+};
+/** Counts as the core reports them, with `total` summed over the statuses. */
+const counted = (counts: Partial<typeof zeroCounts>) => {
+  const merged = { ...zeroCounts, ...counts, total: 0 };
+  merged.total =
+    merged.todo +
+    merged.in_progress +
+    merged.in_review +
+    merged.done +
+    merged.canceled +
+    merged.duplicate;
+  return merged;
 };
 
 test("totals and group counts describe the whole result, not the loaded page", async () => {
@@ -1093,7 +1110,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
       bulkTicket(1, { status: "In progress", availability: null }),
       bulkTicket(2),
     ],
-    count_tickets: { ...zeroCounts, in_progress: 1, todo: 119 },
+    count_tickets: counted({ in_progress: 1, todo: 119 }),
   });
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
   expect(screen.getByText("120 tickets")).toBeTruthy();
@@ -1107,16 +1124,20 @@ test("totals and group counts describe the whole result, not the loaded page", a
     .filter(([command]) => command === "find_tickets")
     .map(([, args]) => args.filter.order);
   expect(new Set(asked)).toEqual(new Set(["Workflow"]));
-  const counted = bridge.invoke.mock.calls.find(
+  const countCall = bridge.invoke.mock.calls.find(
     ([command]) => command === "count_tickets",
   );
-  expect(counted?.[1].filter.order).toBe("Workflow");
+  expect(countCall?.[1].filter.order).toBe("Workflow");
 });
 
-test("the source filter narrows list and counts together and Refresh GitHub imports on demand", async () => {
+test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
   const github = bulkTicket(1, {
     source: {
       provider: "github",
+      provider_name: "GitHub",
+      place: "acme/api",
+      number: "#98",
+      status_choices: ["Todo", "In progress", "In review"],
       id: "9",
       locator: "acme/api#98",
       display: "acme/api#98",
@@ -1135,7 +1156,7 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
   });
   await renderBulk({
     find_tickets: () => [github],
-    count_tickets: { ...zeroCounts, todo: 1 },
+    count_tickets: counted({ todo: 1 }),
     count_by_source: { all: 3, local: 2, providers: { github: 1 } },
     list_sources: [
       {
@@ -1162,14 +1183,14 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
       refreshed_at: "2026-02-01T00:00:00Z",
     },
   });
-  const filter = screen.getByRole("group", { name: "Ticket source" });
+  const filter = screen.getByRole("radiogroup", { name: "Ticket source" });
   expect(
     within(filter)
-      .getAllByRole("button")
-      .map((button) => button.textContent),
-  ).toEqual(["All3", "GitHub1", "Local2"]);
+      .getAllByRole("radio")
+      .map((radio) => radio.textContent),
+  ).toEqual(["All 3", "GitHub 1", "Local 2"]);
   expect(screen.getByText("GitHub #98")).toBeTruthy();
-  fireEvent.click(within(filter).getByRole("button", { name: /GitHub/ }));
+  fireEvent.click(within(filter).getByRole("radio", { name: /GitHub/ }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1180,7 +1201,8 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
       .at(-1);
   expect(sourceOf("find_tickets")).toEqual({ Provider: "github" });
   expect(sourceOf("count_tickets")).toEqual({ Provider: "github" });
-  fireEvent.click(screen.getByRole("button", { name: /Refresh GitHub/ }));
+  // The list's one Refresh also imports from the configured sources.
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {});
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: null,
@@ -1200,12 +1222,14 @@ test("the sidebar footer follows persisted source health and keeps the list", as
         failing_since: "2026-02-01T00:10:00Z",
         retry_after: null,
         unavailable_tickets: 1,
+        health: "unavailable",
+        partial_message: null,
       },
     ],
   };
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
-    count_tickets: { ...zeroCounts, todo: 1 },
+    count_tickets: counted({ todo: 1 }),
     source_health: () => health,
   });
   const footer = screen.getByRole("group", { name: "Ticket sources" });
@@ -1229,6 +1253,8 @@ test("the sidebar footer follows persisted source health and keeps the list", as
         failing_since: null,
         retry_after: null,
         unavailable_tickets: 0,
+        health: "synced",
+        partial_message: null,
       },
     ],
   };
@@ -1249,7 +1275,7 @@ test("Previous and Next follow the visible list across groups and keep the selec
     find_tickets: () => tickets,
     show_ticket: (args: { reference: string }) =>
       tickets.find((item) => item.reference === args.reference),
-    count_tickets: { ...zeroCounts, in_progress: 1, todo: 2 },
+    count_tickets: counted({ in_progress: 1, todo: 2 }),
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   await act(async () => {});
@@ -1277,10 +1303,8 @@ test("a status move between groups keeps the selected ticket, its draft, and foc
   await renderBulk({
     find_tickets: () => tickets,
     show_ticket: () => tickets[0],
-    count_tickets: () => ({
-      ...zeroCounts,
-      [tickets[0]?.status === "Done" ? "done" : "todo"]: 1,
-    }),
+    count_tickets: () =>
+      counted({ [tickets[0]?.status === "Done" ? "done" : "todo"]: 1 }),
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
   await act(async () => {});
@@ -1310,7 +1334,7 @@ test("a group's Add action starts a ticket in that status", async () => {
     find_tickets: () => [
       bulkTicket(1, { status: "In review", availability: null }),
     ],
-    count_tickets: { ...zeroCounts, in_review: 1 },
+    count_tickets: counted({ in_review: 1 }),
   });
   fireEvent.click(screen.getByRole("button", { name: "Add In review ticket" }));
   await act(async () => {});
@@ -1325,7 +1349,7 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     find_tickets: () => [
       bulkTicket(1, { status: "Duplicate", availability: null }),
     ],
-    count_tickets: { ...zeroCounts, duplicate: 1 },
+    count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
   fireEvent.click(
@@ -1375,20 +1399,64 @@ test("Next at the end of a page opens the first ticket of the next page", async 
       reference: args.reference,
       title: args.reference,
     }),
-    count_tickets: { ...zeroCounts, todo: 60 },
+    count_tickets: counted({ todo: 60 }),
   });
   fireEvent.click(screen.getByRole("button", { name: /Ticket 50/ }));
   await act(async () => {});
   expect(position()).toBe("50 of 60");
-  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  const nextTicket = screen.getByRole("button", { name: "Next ticket" });
+  nextTicket.focus();
+  fireEvent.click(nextTicket);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offset).toBe(50);
   expect(position()).toBe("51 of 60");
+  // Keyboard focus stays on the control across the page edge.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Next ticket" }),
+  );
   expect(
     screen
       .getByRole("button", { name: /Ticket 51/ })
       .getAttribute("aria-pressed"),
   ).toBe("true");
+});
+
+test("a later page that empties moves back to the last page that exists", async () => {
+  const all = Array.from({ length: 50 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+    title: `Ticket ${index + 1}`,
+  }));
+  let total = 51;
+  const offsets: number[] = [];
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) => {
+      offsets.push(args.filter.offset);
+      if (args.filter.offset === 0) return all;
+      return total > 50
+        ? [{ ...bulkTicket(1), id: "51", reference: "T-51" }]
+        : [];
+    },
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: total }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offsets.at(-1)).toBe(50);
+  // The only ticket on page 2 leaves the result (trashed, or closed by an agent).
+  total = 50;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2500);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offsets.at(-1)).toBe(0);
+  expect(screen.getByText("50 tickets")).toBeTruthy();
+  expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });

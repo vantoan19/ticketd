@@ -14,7 +14,7 @@ use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
         DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, PublicationCandidates,
-        PublicationSearch, PublishRequest, SourceError,
+        PublicationSearch, PublishRequest, SkippedPartition, SourceError,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -58,12 +58,15 @@ pub struct DiscoveryPreview {
 }
 
 /// How a full discovery walk ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoverySummary {
     /// Distinct issues passed to the visitor.
     pub seen: usize,
     /// False when the visitor stopped the walk early.
     pub complete: bool,
+    /// Parts of the discovery rules the connector skipped because they could not
+    /// be read (a repository that is gone, for example).
+    pub skipped: Vec<SkippedPartition>,
 }
 
 #[derive(Default)]
@@ -80,10 +83,12 @@ impl Engine {
     /// An engine with every connector built into ticketd, using ambient
     /// credentials and the real network.
     pub fn builtin() -> Self {
-        let mut engine = Self::new();
-        // The built-in connector speaks the current contract by construction.
-        let _ = engine.register(Box::new(GithubConnector::ambient()));
-        engine
+        // The built-in connector speaks the current contract by construction (a
+        // test registers it through `register` to prove it), so it is added directly
+        // rather than through a check whose failure could only be ignored.
+        Self {
+            connectors: vec![Box::new(GithubConnector::ambient())],
+        }
     }
 
     /// Adds a connector, refusing one that speaks another contract version or
@@ -187,12 +192,14 @@ impl Engine {
         let mut seen_cursors = HashSet::new();
         let mut cursor: Option<String> = None;
         let mut seen = 0;
+        let mut skipped = Vec::new();
         for _ in 0..MAX_PAGES {
             let page = connector.discover(DiscoveryRequest {
                 config: &config,
                 cursor: cursor.as_deref(),
                 page_size: PAGE_SIZE,
             })?;
+            skipped.extend(page.skipped);
             for issue in page.issues {
                 if issue.reference.identity.provider != descriptor.provider {
                     return Err(SourceError::Protocol(
@@ -207,6 +214,7 @@ impl Engine {
                     return Ok(DiscoverySummary {
                         seen,
                         complete: false,
+                        skipped,
                     });
                 }
             }
@@ -215,6 +223,7 @@ impl Engine {
                     return Ok(DiscoverySummary {
                         seen,
                         complete: true,
+                        skipped,
                     });
                 }
                 Some(next) => {
@@ -260,6 +269,15 @@ impl Engine {
                 ControlFlow::Continue(())
             }
         })?;
+        // Saving rules that name a repository nobody can read is a mistake the
+        // person should hear about now; a refresh tolerates it later.
+        if let Some(part) = summary.skipped.first() {
+            return Err(if part.code == "forbidden" {
+                SourceError::Forbidden(part.message.clone())
+            } else {
+                SourceError::NotFound(part.message.clone())
+            });
+        }
         // Stopping exactly at the limit still proves nothing about what follows.
         let complete = summary.complete;
         Ok(DiscoveryPreview {
@@ -392,9 +410,10 @@ impl Engine {
         Ok(found)
     }
 
-    /// Reads an issue's conversation, sorted chronologically with comments
-    /// before events that share a timestamp and repeated ids dropped. `None`
-    /// when the connector does not declare [`Capability::Comments`].
+    /// Reads an issue's conversation with repeated ids dropped, and the comments and
+    /// the events each sorted chronologically (they are separate lists; interleaving
+    /// them is the reader's job). `None` when the connector does not declare
+    /// [`Capability::Comments`].
     pub fn conversation(
         &self,
         provider: &str,

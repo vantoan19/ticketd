@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./subtickets.css";
@@ -36,10 +37,10 @@ export function Subtickets({
         {add}
       </div>
     );
-  const done = rows.filter((row) => row.status === "Done").length;
-  // More subtickets than were read: the total is a lower bound.
+  // Progress comes from the core over every subticket, not the page read.
+  const { done, total } = links.children_progress;
   const partial = links.children.next_offset !== null;
-  const summary = `${done} of ${rows.length}${partial ? "+" : ""} done`;
+  const summary = `${done} of ${total} done`;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
       <div className="detail-section-heading">
@@ -48,7 +49,7 @@ export function Subtickets({
           className="subtickets-progress"
           aria-label="Subticket progress"
           value={done}
-          max={rows.length}
+          max={total}
         />
         <span className="subtickets-summary">{summary}</span>
         {add}
@@ -56,7 +57,7 @@ export function Subtickets({
       <ul className="subtickets-rows">
         {rows.map((row) => (
           <li key={row.reference} className="subtickets-row">
-            <StatusIcon status={row.status} size={14} decorative />
+            <StatusIcon status={row.status} size={16} decorative />
             <span className="subtickets-reference">{row.reference}</span>
             <Button
               variant="link"
@@ -68,17 +69,15 @@ export function Subtickets({
             <span className="subtickets-status">
               {row.trashed ? `${row.status} · in trash` : row.status}
             </span>
-            <Button
-              variant="ghost"
+            <IconButton
               size="icon-xs"
               className="subtickets-remove"
-              title="Remove relationship"
-              aria-label={`Remove relationship: Subtickets ${row.reference}`}
+              label={`Remove relationship: Subtickets ${row.reference}`}
               disabled={work.pending}
               onClick={() => void work.remove(row)}
             >
               <X aria-hidden="true" />
-            </Button>
+            </IconButton>
           </li>
         ))}
       </ul>

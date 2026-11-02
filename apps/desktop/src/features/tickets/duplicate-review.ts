@@ -109,7 +109,7 @@ export function summarize(
   const tally = (choice: string) =>
     choices.filter((value) => value === choice).length;
   const parts = [
-    `Cancel ${source} as a duplicate of ${canonical}`,
+    `Mark ${source} as a duplicate of ${canonical}`,
     ...(
       [
         ["replace", "replace"],

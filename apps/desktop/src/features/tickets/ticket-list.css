@@ -321,24 +321,7 @@
   gap: 4px;
   padding: 0 16px 8px;
 }
-.source-filter button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  color: var(--secondary-foreground);
-  font-size: 13px;
-}
-.source-filter button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--foreground);
-}
-.source-filter .source-filter-count {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
+
 .source-refresh {
   display: flex;
   align-items: center;

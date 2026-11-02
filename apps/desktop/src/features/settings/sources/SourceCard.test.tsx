@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SettingsNav } from "@/features/settings/SettingsNav";
+import { SourceActivityContext } from "@/features/tickets/source-activity";
 import {
   SourceFailure,
   sourcesClient,
@@ -106,7 +107,7 @@ test("a new source is not configured and cannot be saved before a preview", asyn
   expect(screen.getByText(/Preview the matching issues/)).toBeTruthy();
 });
 
-test("preview lists matches, then Save stores the rules without importing", async () => {
+test("preview lists matches, then Save turns discovery on without importing at once", async () => {
   vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
   vi.mocked(sourcesClient.save).mockResolvedValue({
     source: {
@@ -129,7 +130,7 @@ test("preview lists matches, then Save stores the rules without importing", asyn
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText(/no tickets have been imported/);
+  await screen.findByText(/Matching issues are imported on the next refresh/);
   expect(sourcesClient.save).toHaveBeenCalledWith("github", {
     repositories: ["o/r"],
   });
@@ -198,7 +199,7 @@ test("a partial count is labeled as a minimum", async () => {
 
 test("field problems from the core appear beside their fields", async () => {
   vi.mocked(sourcesClient.preview).mockRejectedValue(
-    new SourceFailure("invalid_configuration", "invalid", [
+    new SourceFailure("invalid_configuration", "invalid", null, [
       { field: "assignee", message: "must be a username" },
     ]),
   );
@@ -279,4 +280,47 @@ test("the section list offers a source only when its connector is available", as
   render(<SettingsNav onBack={() => {}} />);
   const group = await screen.findByRole("group", { name: "Sources" });
   expect(group.textContent).toContain("GitHub");
+});
+
+test("a saved source says how often it refreshes and when it last did", () => {
+  render(
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [
+          {
+            provider: "github",
+            health: "synced",
+            last_attempt_at: "2026-02-01T00:00:00Z",
+            last_refreshed_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+            error: null,
+            failing_since: null,
+            retry_after: null,
+            unavailable_tickets: 0,
+            partial_message: null,
+          },
+        ],
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          saved: {
+            provider: "github",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>,
+  );
+  expect(
+    screen.getByText(/Refreshes about every 5 minutes while ticketd is open/),
+  ).toBeTruthy();
+  expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
 });

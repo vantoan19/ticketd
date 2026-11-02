@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Search, SlidersHorizontal, X } from "lucide-react";
-import { ticketStatuses } from "./StatusIcon";
+import { ticketStatuses } from "@/lib/statuses";
 import "./ticket-filters.css";
 
 type Props = {

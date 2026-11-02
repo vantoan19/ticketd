@@ -72,8 +72,11 @@ export function Duplicates({
   onDone,
   onCancel,
   startSeparate = false,
+  initialCanonical = "",
 }: {
   ticket: Ticket;
+  /** The canonical ticket to review first, when the caller already knows it. */
+  initialCanonical?: string;
   /** Opens on the separate dependency review rather than on marking a duplicate. */
   startSeparate?: boolean;
   refresh: () => Promise<void>;
@@ -82,7 +85,7 @@ export function Duplicates({
   onCancel?: () => void;
 }) {
   const canonicalInput = useRef<HTMLInputElement>(null);
-  const [canonical, setCanonical] = useState("");
+  const [canonical, setCanonical] = useState(initialCanonical);
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);

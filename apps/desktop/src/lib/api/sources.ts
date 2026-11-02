@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { BridgeFailure, structured, toFailure } from "./bridge-failure";
 import {
   publicationAttemptSchema,
   publicationReviewSchema,
@@ -110,14 +111,29 @@ const refreshReportSchema = z.object({
       reference: z.string().nullable(),
       code: z.string(),
       message: z.string(),
+      /** What the failure is about: the source, one ticket, one repository or one thread. */
+      scope: z
+        .enum(["source", "ticket", "partition", "conversation"])
+        .catch("source"),
     }),
   ),
   refreshed_at: z.string(),
 });
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
+/** How a source is doing, as the core decides it. Clients only word it. */
+export const sourceHealthValues = [
+  "waiting",
+  "synced",
+  "delayed",
+  "unavailable",
+  "partial",
+] as const;
+export type SourceHealthState = (typeof sourceHealthValues)[number];
+
 const sourceStatusSchema = z.object({
   provider: z.string(),
+  health: z.enum(sourceHealthValues),
   last_attempt_at: z.string().nullable(),
   /** The last run in which the source could be read. */
   last_refreshed_at: z.string().nullable(),
@@ -127,6 +143,8 @@ const sourceStatusSchema = z.object({
   /** The earliest time the source asked to be contacted again. */
   retry_after: z.string().nullable(),
   unavailable_tickets: z.number(),
+  /** The discovery rules the last run skipped because they could not be read. */
+  partial_message: z.string().nullable(),
 });
 export type SourceStatus = z.infer<typeof sourceStatusSchema>;
 
@@ -134,6 +152,8 @@ const sourceHealthSchema = z.object({
   /** A refresh is running now: startup, periodic, or explicit. */
   refreshing: z.boolean(),
   sources: z.array(sourceStatusSchema),
+  /** How often the periodic refresh runs while the app is open, in seconds. */
+  interval_secs: z.number().nullish(),
 });
 export type SourceHealth = z.infer<typeof sourceHealthSchema>;
 
@@ -164,6 +184,8 @@ const publicationPreviewSchema = z.object({
   destinations: z.array(z.string()),
   title: z.string(),
   body: z.string(),
+  /** Identifies this title, description and destination; handed back to publish exactly this. */
+  fingerprint: z.string(),
   eligibility: eligibilitySchema,
   attempt: publicationAttemptSchema.nullable(),
 });
@@ -173,68 +195,8 @@ const publishOutcomeSchema = z.object({
   replayed: z.boolean(),
 });
 
-export type SourceFailureCode =
-  | "publication_ineligible"
-  | "publication_failed"
-  | "publication_unresolved"
-  | "publication_nothing_to_resolve"
-  | "publication_still_running"
-  | "publication_unverified"
-  | "publication_mismatch"
-  | "publication_candidates"
-  | "publication_settled"
-  | "rejected"
-  | "unauthenticated"
-  | "forbidden"
-  | "not_found"
-  | "rate_limited"
-  | "unavailable"
-  | "protocol"
-  | "unsupported"
-  | "invalid_configuration"
-  | "unknown_provider"
-  | "incompatible_contract"
-  | "failed";
-
-/** A failed source operation, with the core's kind and any per-field problems. */
-export class SourceFailure extends Error {
-  constructor(
-    readonly code: SourceFailureCode | string,
-    message: string,
-    readonly fields: { field: string; message: string }[] = [],
-  ) {
-    super(message);
-  }
-}
-
-const failureSchema = z.object({
-  code: z.string(),
-  message: z.string(),
-  fields: z.array(z.object({ field: z.string(), message: z.string() })),
-});
-
-export function toSourceFailure(reason: unknown): SourceFailure {
-  if (reason instanceof SourceFailure) return reason;
-  const parsed = failureSchema.safeParse(reason);
-  if (parsed.success)
-    return new SourceFailure(
-      parsed.data.code,
-      parsed.data.message,
-      parsed.data.fields,
-    );
-  return new SourceFailure(
-    "failed",
-    reason instanceof Error ? reason.message : String(reason),
-  );
-}
-
-async function call<T>(promise: Promise<T>): Promise<T> {
-  try {
-    return await promise;
-  } catch (reason) {
-    throw toSourceFailure(reason);
-  }
-}
+/** A failed source operation: the same structured failure every bridge command reports. */
+export { BridgeFailure as SourceFailure, toFailure as toSourceFailure };
 
 export const sourcesClient = {
   /**
@@ -244,12 +206,12 @@ export const sourcesClient = {
    */
   async refresh(ticket?: string) {
     return refreshReportSchema.parse(
-      await call(invoke("refresh_sources", { ticket: ticket ?? null })),
+      await structured(invoke("refresh_sources", { ticket: ticket ?? null })),
     );
   },
   /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
   async health() {
-    return sourceHealthSchema.parse(await call(invoke("source_health")));
+    return sourceHealthSchema.parse(await structured(invoke("source_health")));
   },
   /** What publishing a local ticket would send. Makes no network call. */
   async previewPublication(
@@ -258,7 +220,7 @@ export const sourcesClient = {
     destination?: string,
   ) {
     return publicationPreviewSchema.parse(
-      await call(
+      await structured(
         invoke("preview_publication", {
           reference,
           provider,
@@ -272,13 +234,19 @@ export const sourcesClient = {
    * `publication_failed` (nothing was created), `publication_unresolved` (the
    * issue may exist; publishing again is blocked), or `publication_ineligible`.
    */
-  async publish(reference: string, provider: string, destination?: string) {
+  async publish(
+    reference: string,
+    provider: string,
+    destination: string | undefined,
+    expectedFingerprint: string,
+  ) {
     return publishOutcomeSchema.parse(
-      await call(
+      await structured(
         invoke("publish_ticket", {
           reference,
           provider,
           destination: destination ?? null,
+          expectedFingerprint,
         }),
       ),
     );
@@ -289,7 +257,7 @@ export const sourcesClient = {
    */
   async reviewPublication(reference: string, search: boolean) {
     return publicationReviewSchema.parse(
-      await call(invoke("review_publication", { reference, search })),
+      await structured(invoke("review_publication", { reference, search })),
     );
   },
   /**
@@ -302,16 +270,20 @@ export const sourcesClient = {
     resolution: PublicationResolution,
   ) {
     return publishOutcomeSchema.parse(
-      await call(invoke("resolve_publication", { reference, resolution })),
+      await structured(
+        invoke("resolve_publication", { reference, resolution }),
+      ),
     );
   },
   /** The built-in sources and what is saved for each. */
   async list() {
-    return z.array(sourceEntrySchema).parse(await call(invoke("list_sources")));
+    return z
+      .array(sourceEntrySchema)
+      .parse(await structured(invoke("list_sources")));
   },
   async checkConnection(provider: string, config: SourceConfig) {
     return connectionSchema.parse(
-      await call(invoke("source_check_connection", { provider, config })),
+      await structured(invoke("source_check_connection", { provider, config })),
     );
   },
   async options(
@@ -323,7 +295,7 @@ export const sourcesClient = {
     return z
       .array(choiceOptionSchema)
       .parse(
-        await call(
+        await structured(
           invoke("source_options", { provider, field, query, config }),
         ),
       );
@@ -331,13 +303,13 @@ export const sourcesClient = {
   /** Lists what discovery would match. Imports and saves nothing. */
   async preview(provider: string, config: SourceConfig) {
     return previewSchema.parse(
-      await call(invoke("source_preview", { provider, config })),
+      await structured(invoke("source_preview", { provider, config })),
     );
   },
   /** Validates, previews, and saves the discovery configuration. Imports nothing. */
   async save(provider: string, config: SourceConfig) {
     return saveOutcomeSchema.parse(
-      await call(invoke("save_source", { provider, config })),
+      await structured(invoke("save_source", { provider, config })),
     );
   },
 };

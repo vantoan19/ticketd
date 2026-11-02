@@ -237,7 +237,7 @@ canonical appears when the duplicate is a dependent): its status, `before` and
 `after` readiness (`ready`, `blocked`, or `no_ready_state`), and the blockers
 still unresolved afterwards. Readiness uses `Status::satisfies_dependency`; a
 started, finished, or trashed ticket has no Ready state, matching the Ready list.
-The duplicate counts as Canceled afterwards in a duplicate review.
+The duplicate has the Duplicate status afterwards in a duplicate review.
 For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint with `--separate` and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived

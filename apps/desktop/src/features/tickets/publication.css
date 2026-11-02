@@ -10,7 +10,7 @@
   gap: 8px;
   margin: 0 0 12px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--muted);
   box-shadow: 0 0 0 1px var(--border);
   font-size: 14px;
@@ -36,7 +36,7 @@
 }
 .publication-title {
   margin: 0;
-  font-weight: 600;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 .publication-body {
@@ -44,7 +44,7 @@
   max-height: 200px;
   overflow: auto;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--muted);
   box-shadow: 0 0 0 1px var(--border);
   font: inherit;
@@ -62,9 +62,10 @@
 .publication-error {
   margin: 0;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--muted);
-  box-shadow: 0 0 0 1px var(--border);
+  border-radius: var(--radius-md);
+  background: var(--error-surface);
+  color: var(--error-foreground);
+  box-shadow: var(--shadow-border-base);
   font-size: 14px;
   line-height: 20px;
 }
@@ -75,10 +76,10 @@
   display: grid;
   gap: 12px;
 }
-.publication-facts h4 {
+.publication-facts h3 {
   margin: 0 0 4px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .publication-facts ul {
   margin: 0;

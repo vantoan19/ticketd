@@ -297,6 +297,12 @@ enum SourceCommand {
         /// Print the title, description, destination and eligibility; create nothing
         #[arg(long)]
         preview: bool,
+        /// The `fingerprint` printed by --preview. When given, nothing is sent if the
+        /// title, description or destination changed since
+        #[arg(long)]
+        expect: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Settle a publication whose outcome is unknown, without risking a second issue.
     /// With no flag it prints what is known and unknown and searches the destination
@@ -318,6 +324,8 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        #[arg(long)]
+        agent: Option<String>,
     },
 }
 
@@ -354,8 +362,23 @@ struct FindArgs {
     offset: u32,
 }
 impl FindArgs {
-    fn filter(self, query: String) -> TicketFilter {
-        TicketFilter {
+    fn filter(self, query: String) -> Result<TicketFilter, Box<dyn std::error::Error>> {
+        // A source that does not exist would silently list nothing: say so instead.
+        if let Some(source) = self.source.as_deref().filter(|source| *source != "local") {
+            let known: Vec<String> = ticketd_core::source::Engine::builtin()
+                .connectors()
+                .into_iter()
+                .map(|connector| connector.provider)
+                .collect();
+            if !known.iter().any(|provider| provider == source) {
+                return Err(format!(
+                    "unknown source '{source}'; choose local or one of: {}",
+                    known.join(", ")
+                )
+                .into());
+            }
+        }
+        Ok(TicketFilter {
             query,
             project: self.project,
             unlinked: self.unlinked,
@@ -377,7 +400,7 @@ impl FindArgs {
             limit: self.limit,
             offset: self.offset,
             ..TicketFilter::default()
-        }
+        })
     }
 }
 
@@ -893,10 +916,10 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::List { filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new()))?)?
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new())?)?)?
         }
         Command::Search { query, filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(query))?)?
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(query)?)?)?
         }
         Command::Backlinks {
             reference,
@@ -960,6 +983,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     provider,
                     destination,
                     preview,
+                    expect,
+                    agent,
                 },
         } => {
             let engine = ticketd_core::source::Engine::builtin();
@@ -978,6 +1003,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         provider,
                         destination,
                         now: None,
+                        expected_fingerprint: expect,
+                        agent,
                     },
                 );
                 if let Err(ticketd_core::Error::Publication(error)) = &result {
@@ -1009,6 +1036,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     attach,
                     not_created,
                     no_search,
+                    agent,
                 },
         } => {
             use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
@@ -1031,6 +1059,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         &ResolveOptions {
                             resolution,
                             now: None,
+                            agent,
                         },
                     );
                     if let Err(ticketd_core::Error::Publication(error)) = &result {

@@ -11,7 +11,7 @@ use std::{
 
 use serde_json::{Value, json};
 
-use super::*;
+use super::{credentials::Secret, transport::TransportError, *};
 use crate::source::{Engine, schema::ConfigValues};
 
 const API: &str = "https://api.example.test";
@@ -19,12 +19,12 @@ const TOKEN: &str = "ghp_secret_token_value";
 
 #[derive(Default)]
 struct Fixture {
-    routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, String>>>>,
+    routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, TransportError>>>>,
     requests: Mutex<Vec<HttpRequest>>,
 }
 
 impl Fixture {
-    fn respond(&self, url: &str, response: Result<HttpResponse, String>) {
+    fn respond(&self, url: &str, response: Result<HttpResponse, TransportError>) {
         self.routes
             .lock()
             .unwrap()
@@ -46,7 +46,7 @@ impl Fixture {
 struct Shared(Arc<Fixture>);
 
 impl HttpTransport for Shared {
-    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, String> {
+    fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
         self.0.requests.lock().unwrap().push(request.clone());
         self.0
             .routes
@@ -54,7 +54,7 @@ impl HttpTransport for Shared {
             .unwrap()
             .get_mut(&request.url)
             .and_then(VecDeque::pop_front)
-            .unwrap_or_else(|| Err(format!("no fixture for {}", request.url)))
+            .unwrap_or_else(|| Err(format!("no fixture for {}", request.url).into()))
     }
 }
 
@@ -78,11 +78,11 @@ fn setup(token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     (fixture, engine)
 }
 
-fn ok(body: Value) -> Result<HttpResponse, String> {
+fn ok(body: Value) -> Result<HttpResponse, TransportError> {
     ok_with(body, &[])
 }
 
-fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String> {
+fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, TransportError> {
     Ok(HttpResponse {
         status: 200,
         headers: headers
@@ -93,7 +93,11 @@ fn ok_with(body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String
     })
 }
 
-fn status(code: u16, body: Value, headers: &[(&str, &str)]) -> Result<HttpResponse, String> {
+fn status(
+    code: u16,
+    body: Value,
+    headers: &[(&str, &str)],
+) -> Result<HttpResponse, TransportError> {
     let mut response = ok_with(body, headers)?;
     response.status = code;
     Ok(response)
@@ -282,14 +286,10 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
 fn failures_are_classified_and_never_contain_the_token() {
     let url = format!("{API}/repos/o/one/issues?state=open&per_page=100");
     let values = config(json!({"repositories": ["o/one"]}));
-    let cases: Vec<(Result<HttpResponse, String>, &str)> = vec![
+    let cases: Vec<(Result<HttpResponse, TransportError>, &str)> = vec![
         (
             status(401, json!({"message": "Bad credentials"}), &[]),
             "unauthenticated",
-        ),
-        (
-            status(403, json!({"message": "Resource not accessible"}), &[]),
-            "forbidden",
         ),
         (
             status(
@@ -302,10 +302,6 @@ fn failures_are_classified_and_never_contain_the_token() {
         (
             status(429, json!({}), &[("retry-after", "30")]),
             "rate_limited",
-        ),
-        (
-            status(404, json!({"message": "Not Found"}), &[]),
-            "not_found",
         ),
         (status(503, json!({}), &[]), "unavailable"),
         (Err("connection refused".into()), "unavailable"),
@@ -326,6 +322,112 @@ fn failures_are_classified_and_never_contain_the_token() {
         assert!(!error.to_string().contains(TOKEN));
         assert!(!format!("{error:?}").contains(TOKEN));
     }
+}
+
+#[test]
+fn the_built_in_connector_is_accepted_by_the_registration_check_it_skips() {
+    let mut engine = Engine::new();
+    assert!(
+        engine
+            .register(Box::new(GithubConnector::ambient()))
+            .is_ok()
+    );
+    assert_eq!(Engine::builtin().connectors().len(), 1);
+}
+
+#[test]
+fn a_gone_issue_is_not_found_not_an_unusable_answer() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let values = config(json!({"repositories": ["o/one"]}));
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "7".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    for code in [404, 410] {
+        fixture.respond(
+            &format!("{API}/repos/o/one/issues/7"),
+            status(code, json!({"message": "This issue was deleted"}), &[]),
+        );
+        let error = engine.fetch("github", &values, &reference).unwrap_err();
+        assert_eq!(error.code(), "not_found", "status {code}");
+    }
+}
+
+#[test]
+fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([issue(1, 1, "o/live")])),
+    );
+    let values = config(json!({"repositories": ["o/gone", "o/live"]}));
+    let mut found = Vec::new();
+    let summary = engine
+        .discover("github", &values, |issue| {
+            found.push(issue.display);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(found, ["o/live#1"]);
+    assert_eq!(summary.skipped.len(), 1);
+    assert_eq!(summary.skipped[0].code, "not_found");
+    assert!(summary.skipped[0].message.contains("o/gone"));
+    // A repository closed to the account is skipped the same way, with its own code.
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(403, json!({"message": "Resource not accessible"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    let summary = engine
+        .discover("github", &values, |_| ControlFlow::Continue(()))
+        .unwrap();
+    assert_eq!(summary.skipped[0].code, "forbidden");
+    // Saving rules that name an unreadable repository is still refused.
+    fixture.respond(
+        &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
+        status(404, json!({"message": "Not Found"}), &[]),
+    );
+    fixture.respond(
+        &format!("{API}/repos/o/live/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    assert!(engine.preview("github", &values).is_err());
+}
+
+#[test]
+fn a_credential_is_never_sent_over_plain_http_except_to_this_machine() {
+    for (url, allowed) in [
+        ("https://ghe.corp.example/api/v3", true),
+        ("http://ghe.corp.example/api/v3", false),
+        ("http://localhost:8080", true),
+        ("http://127.0.0.1:9", true),
+        ("http://localhost.evil.example", false),
+    ] {
+        assert_eq!(credential_may_travel(url), allowed, "{url}");
+    }
+    let fixture = Arc::new(Fixture::default());
+    let connector = GithubConnector::new(
+        "http://ghe.corp.example/api/v3",
+        Box::new(Shared(fixture.clone())),
+        Box::new(Token(Some(TOKEN))),
+    );
+    let mut engine = Engine::new();
+    engine.register(Box::new(connector)).unwrap();
+    let error = engine
+        .check_connection("github", &config(json!({"repositories": ["o/one"]})))
+        .unwrap_err();
+    assert_eq!(error.code(), "invalid_configuration");
+    assert!(fixture.urls().is_empty(), "nothing was sent");
 }
 
 #[test]
@@ -551,7 +653,7 @@ fn closed_duplicate(id: u64, number: u64) -> Value {
 fn fetch_duplicate(
     fixture: &Fixture,
     engine: &Engine,
-    timeline: Result<HttpResponse, String>,
+    timeline: Result<HttpResponse, TransportError>,
 ) -> ExternalIssue {
     fixture.respond(
         &format!("{API}/repos/o/one/issues/7"),
@@ -574,7 +676,7 @@ fn fetch_duplicate(
         .unwrap()
 }
 
-fn timeline(nodes: Value) -> Result<HttpResponse, String> {
+fn timeline(nodes: Value) -> Result<HttpResponse, TransportError> {
     ok(json!({"data": {"repository": {"issue": {"timelineItems": {"nodes": nodes}}}}}))
 }
 
@@ -583,7 +685,7 @@ fn marked(duplicate: u64, canonical: Value) -> Value {
 }
 
 fn issue_node(id: u64, number: u64, repo: &str) -> Value {
-    json!({"__typename": "Issue", "databaseId": id, "number": number, "repository": {"nameWithOwner": repo}})
+    json!({"__typename": "Issue", "databaseId": id, "number": number, "url": format!("https://github.example/{repo}/issues/{number}"), "repository": {"nameWithOwner": repo}})
 }
 
 #[test]
@@ -598,6 +700,11 @@ fn a_duplicate_names_its_canonical_issue_from_the_graphql_timeline_in_another_re
     assert_eq!(target.identity.provider, "github");
     assert_eq!(target.identity.id, "900");
     assert_eq!(target.locator, "o/other#12");
+    assert_eq!(
+        fetched.duplicate_of_url.as_deref(),
+        Some("https://github.example/o/other/issues/12")
+    );
+    assert!(!fetched.duplicate_withdrawn);
     // One authenticated POST to the GraphQL endpoint, asking about this issue only.
     let requests = fixture.requests.lock().unwrap();
     let post = requests
@@ -647,6 +754,10 @@ fn only_events_about_this_issue_count_and_the_latest_wins() {
         ])),
     );
     assert!(fetched.duplicate_of.is_none());
+    assert!(
+        fetched.duplicate_withdrawn,
+        "an unmark is a withdrawal, not a missing answer"
+    );
 }
 
 #[test]
@@ -662,6 +773,10 @@ fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed
     ] {
         let fetched = fetch_duplicate(&fixture, &engine, response);
         assert!(fetched.duplicate_of.is_none());
+        assert!(
+            !fetched.duplicate_withdrawn,
+            "nothing supplied is not a withdrawal"
+        );
         assert_eq!(
             fetched.state,
             ExternalState::Closed {
@@ -992,6 +1107,7 @@ fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceErro
         "github",
         &config(json!({"repositories": ["o/r"]})),
         &PublicationSearch {
+            account: None,
             request: publish_request(),
             since: "2026-03-01T00:00:00Z".into(),
         },
@@ -1036,6 +1152,85 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
         .map(|i| i.reference.identity.id.as_str())
         .collect();
     assert_eq!(ids, ["9", "6"], "title and normalized body match only");
+}
+
+#[test]
+fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_its_text() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
+    rewritten["title"] = json!("Renamed by a teammate");
+    rewritten["body"] = json!("Rewritten by an automation");
+    rewritten["user"] = json!({"login": "Octo"});
+    let mut someone_else = created(issue(8, 8, "o/r"), "2026-03-02T00:00:00Z");
+    someone_else["user"] = json!({"login": "other"});
+    someone_else["title"] = json!("Unrelated");
+    someone_else["body"] = json!("Unrelated");
+    fixture.respond(SEARCH_URL, ok(json!([rewritten, someone_else])));
+    let found = engine
+        .find_published(
+            "github",
+            &config(json!({"repositories": ["o/r"]})),
+            &PublicationSearch {
+                account: Some("octo".into()),
+                request: publish_request(),
+                since: "2026-03-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+    let ids: Vec<_> = found
+        .matches
+        .iter()
+        .map(|i| i.reference.identity.id.as_str())
+        .collect();
+    assert_eq!(ids, ["9"]);
+}
+
+#[test]
+fn a_local_clock_ahead_of_githubs_moves_the_search_window_back() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // GitHub says it is an hour earlier than this machine thinks.
+    let github_now = chrono::DateTime::from_timestamp(i64::try_from(now).unwrap() - 3600, 0)
+        .unwrap()
+        .to_rfc2822();
+    fixture.respond(
+        &format!("{API}/rate_limit"),
+        ok_with(json!({}), &[("date", &github_now)]),
+    );
+    // Whether the search itself is answered does not matter; its window does.
+    let _ = search_for_title(&engine);
+    let urls = fixture.urls();
+    let search = urls.iter().find(|url| url.contains("since=")).unwrap();
+    let since = search.split("since=").nth(1).unwrap().replace("%3A", ":");
+    let since = chrono::DateTime::parse_from_rfc3339(&since).unwrap();
+    let expected = chrono::DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z").unwrap()
+        - chrono::Duration::seconds(3600);
+    assert!((since - expected).num_seconds().abs() <= 5, "{since}");
+}
+
+#[test]
+fn a_request_that_never_left_is_not_sent_but_a_lost_answer_is_not_proof() {
+    let url = format!("{API}/repos/o/r/issues");
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &url,
+        Err(TransportError {
+            message: "dns error".into(),
+            before_send: true,
+        }),
+    );
+    let error = publish_to(&engine).unwrap_err();
+    assert!(matches!(error, SourceError::NotSent(_)), "{error}");
+    assert!(error.ruled_out_creation());
+    // The same failure after the request went out proves nothing.
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(&url, Err("operation timed out".into()));
+    let error = publish_to(&engine).unwrap_err();
+    assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
+    assert!(!error.ruled_out_creation());
 }
 
 #[test]
