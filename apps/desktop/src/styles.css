@@ -327,6 +327,10 @@
   background: var(--recessed);
   box-shadow: none;
 }
+.ui-button-ghost:disabled,
+.ui-button-link:disabled {
+  background: transparent;
+}
 .ui-button[data-readonly]:disabled,
 .ui-select[data-readonly]:disabled {
   opacity: 1;
@@ -343,8 +347,9 @@
   line-height: 20px;
 }
 .ui-input:focus-visible {
+  box-shadow: none;
   outline: 1px solid var(--input-focus);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 .ui-select:focus-visible {
   outline: none;
