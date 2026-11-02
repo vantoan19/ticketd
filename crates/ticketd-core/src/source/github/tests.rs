@@ -760,6 +760,58 @@ fn only_events_about_this_issue_count_and_the_latest_wins() {
     );
 }
 
+fn closed_as_duplicate(canonical: Value) -> Value {
+    json!({"__typename": "ClosedEvent", "stateReason": "DUPLICATE", "duplicateOf": canonical})
+}
+
+#[test]
+fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    // `gh issue close 7 --duplicate-of 12`: the duplicate's timeline holds only the
+    // closed event; the marked event appears on the canonical's timeline instead.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([closed_as_duplicate(issue_node(900, 12, "o/other"))])),
+    );
+    let target = fetched.duplicate_of.expect("the closed event names it");
+    assert_eq!(target.identity.id, "900");
+    assert_eq!(target.locator, "o/other#12");
+    assert_eq!(
+        fetched.duplicate_of_url.as_deref(),
+        Some("https://github.example/o/other/issues/12")
+    );
+    // The latest event wins, whichever shape it has.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            closed_as_duplicate(issue_node(900, 9, "o/one")),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            closed_as_duplicate(issue_node(800, 8, "o/one")),
+            marked(7, issue_node(900, 9, "o/one")),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    // A closure that names nothing leaves an earlier mark standing.
+    let fetched = fetch_duplicate(
+        &fixture,
+        &engine,
+        timeline(json!([
+            marked(7, issue_node(800, 8, "o/one")),
+            closed_as_duplicate(Value::Null),
+        ])),
+    );
+    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "800");
+}
+
 #[test]
 fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed_fetch() {
     let (fixture, engine) = setup(Some(TOKEN));

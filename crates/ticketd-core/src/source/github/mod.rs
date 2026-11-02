@@ -273,10 +273,12 @@ impl GithubConnector {
     /// The canonical issue a duplicate was marked as a duplicate of.
     ///
     /// GitHub's REST issue payload and its timeline `marked_as_duplicate` event do
-    /// not name the canonical issue; only GraphQL's `MarkedAsDuplicateEvent.canonical`
-    /// does. A timeline also shows the event on the canonical issue, so only events
-    /// whose `duplicate` is this issue count, and a later `UnmarkedAsDuplicateEvent`
-    /// withdraws the target. Anything unavailable (no access, an error, a pull
+    /// not name the canonical issue; only GraphQL does. Closing as "duplicate of #N"
+    /// records it on this issue's own `ClosedEvent.duplicateOf`; marking records it
+    /// on `MarkedAsDuplicateEvent.canonical`, which a timeline also shows on the
+    /// canonical issue, so only marked events whose `duplicate` is this issue count.
+    /// The latest event wins, and a later `UnmarkedAsDuplicateEvent` withdraws the
+    /// target. Anything unavailable (no access, an error, a pull
     /// request as canonical) is "not supplied", never a failure of the fetch.
     fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Canonical {
         self.look_up_canonical(repository, number, id)
@@ -305,6 +307,16 @@ impl GithubConnector {
             .as_array()?;
         let mut target = Canonical::NotSupplied;
         for node in nodes {
+            // Closing as "duplicate of #N" records the canonical on this issue's own
+            // closed event; the marked event then appears only on the canonical's
+            // timeline. A closure that names no issue leaves an earlier mark standing.
+            if node.get("__typename").and_then(Value::as_str) == Some("ClosedEvent") {
+                if let Some((reference, url)) = node.get("duplicateOf").and_then(canonical_reference)
+                {
+                    target = Canonical::Named { reference, url };
+                }
+                continue;
+            }
             if node
                 .pointer("/duplicate/databaseId")
                 .and_then(Value::as_u64)
@@ -926,8 +938,9 @@ fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
 
 const CANONICAL_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { \
 repository(owner: $owner, name: $name) { issue(number: $number) { \
-timelineItems(last: 50, itemTypes: [MARKED_AS_DUPLICATE_EVENT, UNMARKED_AS_DUPLICATE_EVENT]) { nodes { \
+timelineItems(last: 50, itemTypes: [CLOSED_EVENT, MARKED_AS_DUPLICATE_EVENT, UNMARKED_AS_DUPLICATE_EVENT]) { nodes { \
 __typename \
+... on ClosedEvent { stateReason duplicateOf { __typename ... on Issue { databaseId number url repository { nameWithOwner } } } } \
 ... on MarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } \
 canonical { __typename ... on Issue { databaseId number url repository { nameWithOwner } } } } \
 ... on UnmarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } } } } } } }";
