@@ -260,14 +260,11 @@ export function Activity({
             item.type === "note" ? (
               <li key={`note-${item.note.id}`} className="activity-entry">
                 <div className="activity-meta">
-                  <time
-                    dateTime={item.note.created_at}
-                    title={item.note.created_at}
-                  >
+                  <time dateTime={item.note.created_at}>
                     {formatDateTime(item.note.created_at)}
                   </time>
                   {item.note.updated_at !== item.note.created_at && (
-                    <span title={item.note.updated_at}>
+                    <span>
                       Edited {formatDateTime(item.note.updated_at)}
                     </span>
                   )}
@@ -321,10 +318,7 @@ export function Activity({
             ) : (
               <li key={`history-${item.index}`} className="activity-history">
                 <span>{historySentence(item.entry, lookups)}</span>
-                <time
-                  dateTime={item.entry.timestamp}
-                  title={item.entry.timestamp}
-                >
+                <time dateTime={item.entry.timestamp}>
                   {formatDateTime(item.entry.timestamp)}
                 </time>
                 {item.entry.editing_agent && (
