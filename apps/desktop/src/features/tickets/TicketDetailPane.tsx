@@ -35,15 +35,13 @@ export function TicketDetailPane({
   } = workspace;
   return (
     <>
-      {selected &&
-        !loading &&
-        !queryError &&
-        !tickets.some((ticket) => ticket.reference === selected) && (
-          <p className="selection-context" role="status">
-            This ticket is outside the current results.
-          </p>
-        )}
       <TicketDetails
+        outsideResults={Boolean(
+          selected &&
+          !loading &&
+          !queryError &&
+          !tickets.some((ticket) => ticket.reference === selected),
+        )}
         expanded={expanded}
         onExpand={onExpand}
         onReturn={onReturn}

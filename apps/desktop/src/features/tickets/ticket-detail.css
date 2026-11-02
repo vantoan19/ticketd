@@ -42,8 +42,12 @@
    view never scrolls sideways between 652px and 684px. */
 @container ticket-detail (min-width: 684px) {
   .ticket-detail[data-expanded] .detail-content {
-    grid-template-columns: minmax(420px, 800px) 264px;
-    justify-content: center;
+    grid-template-columns: minmax(420px, 1fr) 264px;
+  }
+  .ticket-detail[data-expanded] .detail-document {
+    width: 100%;
+    max-width: 800px;
+    justify-self: center;
   }
 }
 .ticket-detail[data-expanded] .description-document,
