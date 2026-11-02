@@ -105,6 +105,24 @@ export function TicketListPane({
     navigation,
   ]);
   const previousView = useRef(viewKey);
+  // Pressing Previous or Next can disable that very button (the first or last
+  // page). Focus then moves to the other button, or to the list, never to the
+  // document root.
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  const paged = useRef<"previous" | "next" | null>(null);
+  useEffect(() => {
+    const which = paged.current;
+    if (!which || loading) return;
+    const own = which === "previous" ? previousButton : nextButton;
+    const other = which === "previous" ? nextButton : previousButton;
+    if (!own.current?.disabled) return;
+    paged.current = null;
+    (other.current && !other.current.disabled
+      ? other.current
+      : listRef.current
+    )?.focus();
+  });
   const { clearSelection } = bulk;
   useEffect(() => {
     if (previousView.current === viewKey) return;
@@ -118,6 +136,7 @@ export function TicketListPane({
     <section
       className="ticket-list"
       ref={listRef}
+      tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
       {scopedEffort ? (
@@ -310,8 +329,10 @@ export function TicketListPane({
         <div className="pagination">
           <button
             type="button"
+            ref={previousButton}
             disabled={offset === 0}
             onClick={() => {
+              paged.current = "previous";
               setOffset(Math.max(0, offset - PAGE_SIZE));
             }}
           >
@@ -323,8 +344,10 @@ export function TicketListPane({
           </span>
           <button
             type="button"
+            ref={nextButton}
             disabled={offset + tickets.length >= total}
             onClick={() => {
+              paged.current = "next";
               setOffset(offset + PAGE_SIZE);
             }}
           >

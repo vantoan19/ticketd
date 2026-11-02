@@ -1423,6 +1423,33 @@ test("Next at the end of a page opens the first ticket of the next page", async 
   ).toBe("true");
 });
 
+test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
+  const all = Array.from({ length: 50 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      args.filter.offset === 0
+        ? all
+        : [{ ...bulkTicket(1), id: "51", reference: "T-51" }],
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  const next = screen.getByRole("button", { name: "Next" });
+  next.focus();
+  fireEvent.click(next);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect((next as HTMLButtonElement).disabled).toBe(true);
+  // Never the document root: the person can keep paging with the keyboard.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Previous" }),
+  );
+});
+
 test("a later page that empties moves back to the last page that exists", async () => {
   const all = Array.from({ length: 50 }, (_, index) => ({
     ...bulkTicket(1),
