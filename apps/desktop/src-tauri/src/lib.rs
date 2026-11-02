@@ -968,10 +968,22 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
         .name("source-refresh".into())
         .spawn(move || {
             let engine = ticketd_core::source::Engine::builtin();
+            let mut reported: Option<String> = None;
             loop {
-                // A failed tick is recorded per source by the refresh itself; the
-                // coordinator already spaces the next attempt.
-                let _ = coordinator.tick(&engine, &open_workspace);
+                // A source that fails is recorded per source by the refresh itself,
+                // and the coordinator spaces the next attempt. What it cannot record
+                // (the workspace would not open, the hold could not be read) is said
+                // once on stderr, and again only if it changes or comes back.
+                match coordinator.tick(&engine, &open_workspace) {
+                    Ok(_) => reported = None,
+                    Err(error) => {
+                        let message = error.to_string();
+                        if reported.as_deref() != Some(message.as_str()) {
+                            eprintln!("periodic source refresh could not run: {message}");
+                            reported = Some(message);
+                        }
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_secs(10));
             }
         });

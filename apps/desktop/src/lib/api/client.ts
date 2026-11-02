@@ -6,6 +6,7 @@ import { ticketStatuses } from "@/lib/statuses";
 
 export type { PublicationAttempt } from "@/lib/api/publication";
 
+const statusSchema = z.enum(ticketStatuses);
 const externalStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("open") }),
   z.object({
@@ -34,6 +35,12 @@ export type DuplicateTarget = z.infer<typeof duplicateTargetSchema>;
 /** The external issue a ticket is or was, with who owns it now and how fresh it is. */
 const ticketSourceSchema = z.object({
   provider: z.string(),
+  /** What people call the provider, such as "GitHub". */
+  provider_name: z.string(),
+  /** Where the issue lives, such as "owner/repo". */
+  place: z.string(),
+  /** The provider's short number for the issue, such as "#98". */
+  number: z.string(),
   id: z.string(),
   locator: z.string(),
   display: z.string(),
@@ -61,6 +68,8 @@ const ticketSourceSchema = z.object({
     .nullish(),
   content_locked: z.boolean(),
   status_locked: z.boolean(),
+  /** The statuses that may be chosen for this ticket now, decided by the core. */
+  status_choices: z.array(statusSchema),
   duplicate_target: duplicateTargetSchema.nullable(),
 });
 export type TicketSource = z.infer<typeof ticketSourceSchema>;
@@ -150,7 +159,6 @@ const graphSchema = z.object({
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
 const reviewModeSchema = z.enum(["duplicate", "separate"]);
-const statusSchema = z.enum(ticketStatuses);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),

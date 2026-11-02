@@ -1,5 +1,7 @@
 //! Importing and refreshing externally owned tickets through the workspace
 //! workflow boundary, with a controllable fake connector and no transport.
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 use std::{
@@ -712,33 +714,6 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
 }
 
 #[test]
-fn a_ticket_whose_ownership_was_taken_is_never_resynchronized_or_recreated() {
-    let mut f = Fixture::new();
-    f.publish(issue(1, "Mine now"), true);
-    f.refresh();
-    // Ownership takeover has no workflow yet; flip the stored authority directly.
-    let db = rusqlite::Connection::open(f.path()).unwrap();
-    db.execute("UPDATE external_ownership SET authority = 'local'", [])
-        .unwrap();
-    drop(db);
-    f.publish(issue(1, "Upstream rewrite"), true);
-    f.refresh();
-    let ticket = f.ticket(1);
-    assert_eq!(ticket.title, "Mine now");
-    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
-    let source = ticket.source.unwrap();
-    assert_eq!(source.ownership, Ownership::Local);
-    assert!(!source.content_locked);
-    // It counts and filters as Local, and may be edited.
-    let counts = f
-        .workspace
-        .count_by_source(&TicketFilter::default())
-        .unwrap();
-    assert_eq!((counts.local, counts.providers.len()), (1, 0));
-    f.workspace.change_ticket("T-1", retitle("Edited")).unwrap();
-}
-
-#[test]
 fn concurrent_refreshes_create_one_ticket_per_issue() {
     let f = Fixture::new();
     f.publish(issue(1, "Raced"), true);
@@ -1108,10 +1083,10 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     assert!(f.refresh().failures.is_empty());
     assert_eq!(f.fake.0.lock().unwrap().conversation_calls.len(), calls + 1);
 
-    let db = rusqlite::Connection::open(f.path()).unwrap();
-    db.execute("UPDATE external_ownership SET authority = 'local'", [])
-        .unwrap();
-    drop(db);
+    // The source goes down, the person takes ownership, and the conversation stays.
+    f.remote(|r| r.outage = Some("down".into()));
+    f.refresh();
+    f.workspace.take_ownership("T-1", None).unwrap();
     assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
     assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
 }

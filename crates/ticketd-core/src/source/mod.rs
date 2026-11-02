@@ -101,6 +101,44 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
     publication::migrate(connection)
 }
 
+/// How a provider and one of its issues are named for people: the provider's
+/// display name, where the issue lives and its short number. The locator is the
+/// connector's own, so the splitting belongs with the connector's module.
+pub(crate) fn display_parts(
+    provider: &str,
+    locator: &str,
+    display: &str,
+) -> (String, String, String) {
+    match provider {
+        github::PROVIDER => {
+            let (place, number) = locator
+                .rsplit_once('#')
+                .map_or((locator, ""), |(place, number)| (place, number));
+            (
+                github::DISPLAY_NAME.to_owned(),
+                place.to_owned(),
+                if number.is_empty() {
+                    String::new()
+                } else {
+                    format!("#{number}")
+                },
+            )
+        }
+        other => (other.to_owned(), String::new(), display.to_owned()),
+    }
+}
+
+/// The effective "now" of a write: the caller's RFC 3339 time when given, else the
+/// database clock. Every source workflow reads time through this one function.
+pub(crate) fn clock(connection: &rusqlite::Connection, now: Option<&str>) -> Result<String, Error> {
+    Ok(match now {
+        Some(now) => now.to_owned(),
+        None => connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
+            row.get(0)
+        })?,
+    })
+}
+
 /// Step 27: conversation read failures kept apart from refresh failures, the
 /// skipped-repository note of a source run, and the link and certainty of an
 /// external duplicate target. Each column is added only when missing, so a

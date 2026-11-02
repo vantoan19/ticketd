@@ -1,5 +1,7 @@
 //! `ticketd source` against a loopback server standing in for GitHub's API.
 //! The desktop is never involved, and nothing here reaches the real network.
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 use std::{
@@ -334,6 +336,9 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
         1
     );
     assert_eq!(cli.run(&["list", "--source", "local"]), json!([]));
+    // A source that does not exist is refused rather than listing nothing.
+    let stderr = cli.fail(&["list", "--source", "githb"], None);
+    assert!(stderr.contains("unknown source 'githb'"), "{stderr}");
     // Refreshing the single ticket observes that the issue closed.
     let report = cli.run(&["source", "refresh", "--ticket", "T-1"]);
     assert_eq!(report["updated"], json!(["T-1"]));

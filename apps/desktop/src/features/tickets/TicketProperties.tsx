@@ -26,8 +26,6 @@ import {
   duplicateTargetText,
   externalSource,
   freshness,
-  localProgressStatuses,
-  providerName,
   sourceLocation,
   sourceState,
 } from "./ticket-source";
@@ -249,7 +247,7 @@ export function TicketProperties({
   const disabled = ticket.trashed || !!pending;
   const owner = externalSource(ticket);
   const activity = useSourceActivity();
-  const ownerName = owner ? providerName(owner.provider) : "";
+  const ownerName = owner ? owner.provider_name : "";
   // While the issue is open its Todo, In progress and In review are local;
   // closing states follow the source and cannot be chosen here.
   const statusLocked = Boolean(owner?.status_locked);
@@ -258,10 +256,11 @@ export function TicketProperties({
       ? owner.duplicate_target
       : null;
   const resolvedTarget = target?.kind === "external" ? target.ticket : null;
+  // The core says which statuses may be chosen; the current one is always shown.
   const statusChoices = owner
-    ? owner.status_locked
-      ? [ticket.status]
-      : localProgressStatuses
+    ? owner.status_choices.length > 0
+      ? owner.status_choices
+      : [ticket.status]
     : ticketStatuses;
   async function refreshSource() {
     setPending("Source");

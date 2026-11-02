@@ -1134,6 +1134,10 @@ test("the source filter narrows list and counts together and Refresh GitHub impo
   const github = bulkTicket(1, {
     source: {
       provider: "github",
+      provider_name: "GitHub",
+      place: "acme/api",
+      number: "#98",
+      status_choices: ["Todo", "In progress", "In review"],
       id: "9",
       locator: "acme/api#98",
       display: "acme/api#98",

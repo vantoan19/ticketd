@@ -106,7 +106,7 @@ test("a new source is not configured and cannot be saved before a preview", asyn
   expect(screen.getByText(/Preview the matching issues/)).toBeTruthy();
 });
 
-test("preview lists matches, then Save stores the rules without importing", async () => {
+test("preview lists matches, then Save turns discovery on without importing at once", async () => {
   vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
   vi.mocked(sourcesClient.save).mockResolvedValue({
     source: {
@@ -129,7 +129,7 @@ test("preview lists matches, then Save stores the rules without importing", asyn
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText(/no tickets have been imported/);
+  await screen.findByText(/Matching issues are imported on the next refresh/);
   expect(sourcesClient.save).toHaveBeenCalledWith("github", {
     repositories: ["o/r"],
   });

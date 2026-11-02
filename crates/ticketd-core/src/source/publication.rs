@@ -43,16 +43,14 @@ use uuid::Uuid;
 
 use super::{
     ConfigValues, Engine, ExternalIdentity, ExternalIssue, ExternalRef, PublicationSearch,
-    PublishRequest, SourceError, SourceFailure,
-    tracking::{self, Origin},
+    PublishRequest, SourceError, SourceFailure, clock,
+    tracking::{self, Origin, failure_of},
 };
 use crate::{Error, Status, Ticket, Workspace, history, notes, transaction_write_lock};
 
 /// How long an `in_flight` attempt is trusted to still be running. The HTTP
 /// transport gives up after 30 seconds, so a live create finishes well inside it.
 const LEASE_SECONDS: i64 = 120;
-
-const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
 /// Where a publication attempt stands. `InFlight` and `Unresolved` block another
 /// create; `Failed` and `Succeeded` are final.
@@ -66,13 +64,14 @@ pub enum AttemptState {
 }
 
 impl AttemptState {
-    /// Whether the provider may already hold an issue for this attempt.
-    pub fn may_have_created(self) -> bool {
-        matches!(self, Self::InFlight | Self::Unresolved | Self::Succeeded)
-    }
-
-    pub fn blocks_create(self) -> bool {
-        matches!(self, Self::InFlight | Self::Unresolved)
+    /// The stored `status` of an attempt settled into this state by a write.
+    fn stored(self) -> &'static str {
+        match self {
+            Self::InFlight => "in_flight",
+            Self::Unresolved => "unresolved",
+            Self::Failed => "failed",
+            Self::Succeeded => "succeeded",
+        }
     }
 }
 
@@ -675,10 +674,27 @@ fn eligibility(
     Ok(Eligibility::Eligible)
 }
 
-fn clock(connection: &Connection, now: Option<&str>) -> Result<String, Error> {
-    Ok(match now {
-        Some(now) => now.to_owned(),
-        None => connection.query_row(&format!("SELECT {NOW}"), [], |row| row.get(0))?,
+/// What must exist before anything can be published to `provider`: a connector
+/// that can create issues and a saved configuration to publish with.
+fn require_target<'a>(
+    engine: &Engine,
+    provider: &str,
+    provider_name: &str,
+    target: Option<&'a Target>,
+) -> Result<&'a Target, (IneligibleReason, String)> {
+    if !engine.can_publish(provider) {
+        return Err((
+            IneligibleReason::Unsupported,
+            format!("{provider_name} cannot create issues from ticketd"),
+        ));
+    }
+    target.ok_or_else(|| {
+        (
+            IneligibleReason::SourceNotConnected,
+            format!(
+                "connect {provider_name} in Settings (or `ticketd source save {provider}`) before publishing"
+            ),
+        )
     })
 }
 
@@ -718,21 +734,11 @@ impl Workspace {
             .unwrap_or_default();
         let destination = chosen_destination(destination, &destinations);
         let mut eligibility = eligibility(&self.connection, &ticket, &descriptor.name, None)?;
-        if matches!(eligibility, Eligibility::Eligible) {
-            if !engine.can_publish(provider) {
-                eligibility = ineligible(
-                    IneligibleReason::Unsupported,
-                    format!("{} cannot create issues from ticketd", descriptor.name),
-                );
-            } else if target.is_none() {
-                eligibility = ineligible(
-                    IneligibleReason::SourceNotConnected,
-                    format!(
-                        "connect {} in Settings (or `ticketd source save {provider}`) before publishing",
-                        descriptor.name
-                    ),
-                );
-            }
+        if matches!(eligibility, Eligibility::Eligible)
+            && let Err((reason, message)) =
+                require_target(engine, provider, &descriptor.name, target.as_ref())
+        {
+            eligibility = ineligible(reason, message);
         }
         Ok(PublicationPreview {
             reference: ticket.reference,
@@ -813,20 +819,9 @@ impl Workspace {
             )? {
                 return Err(refuse(reason, message));
             }
-            if !engine.can_publish(provider) {
-                return Err(refuse(
-                    IneligibleReason::Unsupported,
-                    format!("{} cannot create issues from ticketd", descriptor.name),
-                ));
-            }
-            let Some(target) = target else {
-                return Err(refuse(
-                    IneligibleReason::SourceNotConnected,
-                    format!(
-                        "connect {} in Settings (or `ticketd source save {provider}`) before publishing",
-                        descriptor.name
-                    ),
-                ));
+            let target = match require_target(engine, provider, &descriptor.name, target.as_ref()) {
+                Ok(target) => target,
+                Err((reason, message)) => return Err(refuse(reason, message)),
             };
             let Some(destination) =
                 chosen_destination(options.destination.as_deref(), &target.destinations)
@@ -873,7 +868,7 @@ impl Workspace {
                     body: ticket.body,
                     destination,
                 },
-                config: target.config,
+                config: target.config.clone(),
                 agent: options.agent.clone(),
             }
         };
@@ -888,8 +883,8 @@ impl Workspace {
                 // safe direction: it blocks until it can be resolved.
                 let _ = self.settle(
                     &started.attempt_id,
-                    "failed",
-                    Some(&failure(&error)),
+                    AttemptState::Failed,
+                    Some(&failure_of(&error)),
                     None,
                     options.now.as_deref(),
                 );
@@ -904,8 +899,8 @@ impl Workspace {
                 let message = format!("{}.", error.to_string().trim_end_matches('.'));
                 let _ = self.settle(
                     &started.attempt_id,
-                    "unresolved",
-                    Some(&failure(&error)),
+                    AttemptState::Unresolved,
+                    Some(&failure_of(&error)),
                     None,
                     options.now.as_deref(),
                 );
@@ -965,7 +960,7 @@ impl Workspace {
         // has to guess. A no-op when the attempt was settled elsewhere.
         let _ = self.settle(
             &started.attempt_id,
-            "unresolved",
+            AttemptState::Unresolved,
             Some(&SourceFailure {
                 code: code.into(),
                 message: message.clone(),
@@ -1033,7 +1028,7 @@ impl Workspace {
     fn settle(
         &mut self,
         attempt_id: &str,
-        status: &str,
+        status: AttemptState,
         failure: Option<&SourceFailure>,
         issue: Option<&ExternalIssue>,
         now: Option<&str>,
@@ -1050,7 +1045,7 @@ impl Workspace {
                                     WHERE o.ticket_id = publication_attempts.ticket_id AND o.status IN ('in_flight', 'unresolved'))))",
             params![
                 attempt_id,
-                status,
+                status.stored(),
                 now,
                 failure.map(|f| f.code.as_str()),
                 failure.map(|f| f.message.as_str()),
@@ -1172,7 +1167,7 @@ impl Workspace {
                     candidates = found.matches.iter().map(published).collect();
                     candidates_complete = Some(found.complete);
                 }
-                Err(error) => lookup_failure = Some(failure(&error)),
+                Err(error) => lookup_failure = Some(failure_of(&error)),
             }
         }
 
@@ -1411,10 +1406,12 @@ impl Workspace {
                     "this publication was already confirmed as not created; nothing was changed",
                 ))
             }
-            _ => Err(PublicationError::NothingToResolve {
-                reference: ticket.reference.clone(),
+            (_, AttemptState::InFlight | AttemptState::Unresolved | AttemptState::Failed) => {
+                Err(PublicationError::NothingToResolve {
+                    reference: ticket.reference.clone(),
+                }
+                .into())
             }
-            .into()),
         }
     }
 
@@ -1830,12 +1827,5 @@ fn chosen_destination(requested: Option<&str>, suggested: &[String]) -> Option<S
             [only] => Some(only.clone()),
             _ => None,
         },
-    }
-}
-
-fn failure(error: &SourceError) -> SourceFailure {
-    SourceFailure {
-        code: error.code().to_owned(),
-        message: error.to_string(),
     }
 }

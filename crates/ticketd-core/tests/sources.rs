@@ -1,5 +1,7 @@
 //! Source configuration through the workspace workflow boundary, using a
 //! controllable fake connector instead of any provider transport.
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 use std::{

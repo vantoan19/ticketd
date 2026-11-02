@@ -32,7 +32,6 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import {
   externalSource,
-  providerName,
   sourceLocation,
 } from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
@@ -142,8 +141,7 @@ export function TicketHeader({
             className="header-source-link"
           >
             <span className="sr-only">
-              Open on {providerName(externalSource(ticket)?.provider ?? "")}
-              :{" "}
+              Open on {externalSource(ticket)?.provider_name ?? ""}:{" "}
             </span>
             {sourceLocation(externalSource(ticket)!)}
           </SourceLink>

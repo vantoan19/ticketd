@@ -26,6 +26,8 @@ use super::{
 };
 
 pub(crate) const PROVIDER: &str = "github";
+/// What people call this provider.
+pub(crate) const DISPLAY_NAME: &str = "GitHub";
 const DEFAULT_API_URL: &str = "https://api.github.com";
 /// Overrides the API address, for GitHub Enterprise or a test server.
 pub(crate) const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
@@ -156,15 +158,7 @@ impl GithubConnector {
                     "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can read issues".into(),
                 )
             })?;
-            let mut headers = vec![
-                ("Accept".into(), "application/vnd.github+json".into()),
-                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
-                ("User-Agent".into(), "ticketd".into()),
-                ("Authorization".into(), format!("Bearer {}", token.expose())),
-            ];
-            if body.is_some() {
-                headers.push(("Content-Type".into(), "application/json".into()));
-            }
+            let headers = request_headers(&token, body.is_some());
             let request = HttpRequest {
                 method,
                 url: url.clone(),
@@ -207,13 +201,7 @@ impl GithubConnector {
         let http = HttpRequest {
             method: Method::Post,
             url: format!("{}/repos/{}/issues", self.api_url, encode_path(repository)),
-            headers: vec![
-                ("Accept".into(), "application/vnd.github+json".into()),
-                ("X-GitHub-Api-Version".into(), "2022-11-28".into()),
-                ("User-Agent".into(), "ticketd".into()),
-                ("Content-Type".into(), "application/json".into()),
-                ("Authorization".into(), format!("Bearer {}", token.expose())),
-            ],
+            headers: request_headers(&token, true),
             body: Some(body.to_string().into_bytes()),
         };
         let response = self.transport.send(&http).map_err(|error| {
@@ -359,7 +347,7 @@ impl Connector for GithubConnector {
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),
-            name: "GitHub".into(),
+            name: DISPLAY_NAME.into(),
             contract_version: CONTRACT_VERSION,
             capabilities: vec![
                 Capability::Discover,
@@ -560,14 +548,7 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        if !ValueFormat::OwnerName.is_valid(&request.destination) {
-            return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "destination".into(),
-                    message: "must be a repository in the form owner/name".into(),
-                },
-            ]));
-        }
+        require_repository(&request.destination)?;
         self.create_issue(&request.destination, request)
     }
 
@@ -603,14 +584,7 @@ impl Connector for GithubConnector {
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError> {
         let destination = &search.request.destination;
-        if !ValueFormat::OwnerName.is_valid(destination) {
-            return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "destination".into(),
-                    message: "must be a repository in the form owner/name".into(),
-                },
-            ]));
-        }
+        require_repository(destination)?;
         // The window was written with this machine's clock. When that clock runs
         // ahead of GitHub's, the window would start after the real creation and
         // miss it, so it is moved back by the measured difference.
@@ -819,6 +793,39 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+/// A destination must be a repository in the form `owner/name`.
+fn require_repository(destination: &str) -> Result<(), SourceError> {
+    if ValueFormat::OwnerName.is_valid(destination) {
+        return Ok(());
+    }
+    Err(SourceError::InvalidConfiguration(vec![
+        super::schema::FieldIssue {
+            field: "destination".into(),
+            message: "must be a repository in the form owner/name".into(),
+        },
+    ]))
+}
+
+/// The headers of every authenticated request, with a JSON body when `json_body`.
+fn request_headers(token: &credentials::Secret, json_body: bool) -> Vec<(String, String)> {
+    let mut headers = vec![
+        (
+            "Accept".to_owned(),
+            "application/vnd.github+json".to_owned(),
+        ),
+        ("X-GitHub-Api-Version".to_owned(), "2022-11-28".to_owned()),
+        ("User-Agent".to_owned(), "ticketd".to_owned()),
+        (
+            "Authorization".to_owned(),
+            format!("Bearer {}", token.expose()),
+        ),
+    ];
+    if json_body {
+        headers.push(("Content-Type".to_owned(), "application/json".to_owned()));
+    }
+    headers
+}
+
 /// The host part of an API address.
 fn host_of(url: &str) -> String {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
@@ -881,14 +888,9 @@ fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
 /// rest are not part of the conversation.
 fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
     let kind = match item.get("event").and_then(Value::as_str) {
-        Some("closed") => {
-            ExternalEventKind::Closed(match item.get("state_reason").and_then(Value::as_str) {
-                Some("completed") => ClosureReason::Completed,
-                Some("not_planned") => ClosureReason::NotPlanned,
-                Some("duplicate") => ClosureReason::Duplicate,
-                _ => ClosureReason::Unknown,
-            })
-        }
+        Some("closed") => ExternalEventKind::Closed(ClosureReason::parse(
+            item.get("state_reason").and_then(Value::as_str),
+        )),
         Some("reopened") => ExternalEventKind::Reopened,
         Some("assigned") => ExternalEventKind::Assigned,
         Some("unassigned") => ExternalEventKind::Unassigned,
@@ -1090,12 +1092,7 @@ fn translate_issue(
     let state = match text("state") {
         Some("open") => ExternalState::Open,
         Some("closed") => ExternalState::Closed {
-            reason: match text("state_reason") {
-                Some("completed") => ClosureReason::Completed,
-                Some("not_planned") => ClosureReason::NotPlanned,
-                Some("duplicate") => ClosureReason::Duplicate,
-                _ => ClosureReason::Unknown,
-            },
+            reason: ClosureReason::parse(text("state_reason")),
         },
         _ => return Err(missing("recognized state")),
     };

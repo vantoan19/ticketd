@@ -325,6 +325,17 @@ fn failures_are_classified_and_never_contain_the_token() {
 }
 
 #[test]
+fn the_built_in_connector_is_accepted_by_the_registration_check_it_skips() {
+    let mut engine = Engine::new();
+    assert!(
+        engine
+            .register(Box::new(GithubConnector::ambient()))
+            .is_ok()
+    );
+    assert_eq!(Engine::builtin().connectors().len(), 1);
+}
+
+#[test]
 fn a_gone_issue_is_not_found_not_an_unusable_answer() {
     let (fixture, engine) = setup(Some(TOKEN));
     let values = config(json!({"repositories": ["o/one"]}));

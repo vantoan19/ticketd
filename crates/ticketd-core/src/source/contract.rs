@@ -63,6 +63,30 @@ pub struct ExternalRef {
     pub locator: String,
 }
 
+impl ClosureReason {
+    /// The name stored and shown for the reason (the same words GitHub's
+    /// `state_reason` uses).
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::NotPlanned => "not_planned",
+            Self::Duplicate => "duplicate",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    /// The reason named by `name`; anything else, and no reason at all, is
+    /// [`Self::Unknown`], never assumed to be completion.
+    pub(crate) fn parse(name: Option<&str>) -> Self {
+        match name {
+            Some("completed") => Self::Completed,
+            Some("not_planned") => Self::NotPlanned,
+            Some("duplicate") => Self::Duplicate,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ClosureReason {

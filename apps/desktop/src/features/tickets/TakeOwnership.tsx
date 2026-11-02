@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { client, type Ticket } from "@/lib/api/client";
-import { externalSource, providerName } from "./ticket-source";
+import { externalSource } from "./ticket-source";
 
 /**
  * Take ownership of a ticket whose source is unavailable. It is always a
@@ -32,7 +32,7 @@ export function TakeOwnership({
   const requestId = useRef<string | null>(null);
   const source = externalSource(ticket);
   if (!source?.unavailable) return null;
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   async function confirm() {
     requestId.current ??= crypto.randomUUID();
     setPending(true);

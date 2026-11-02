@@ -9,7 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
-import { externalNumber, externalSource, providerName } from "./ticket-source";
+import { externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
@@ -185,10 +185,10 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
   return (
     <span
       className="ticket-source-pill"
-      title={`Owned by ${providerName(source.provider)}: ${source.display}`}
+      title={`Owned by ${source.provider_name}: ${source.display}`}
     >
-      <span className="sr-only">Owned by {providerName(source.provider)} </span>
-      {providerName(source.provider)} {externalNumber(source)}
+      <span className="sr-only">Owned by {source.provider_name} </span>
+      {source.provider_name} {source.number}
     </span>
   );
 }

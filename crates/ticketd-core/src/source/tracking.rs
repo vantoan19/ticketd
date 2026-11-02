@@ -107,6 +107,12 @@ pub enum TargetProblem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketSource {
     pub provider: String,
+    /// What people call the provider, such as "GitHub".
+    pub provider_name: String,
+    /// Where the issue lives, such as "owner/repo" (empty when the locator has no place).
+    pub place: String,
+    /// The provider's short number for the issue, such as "#98" (empty when it has none).
+    pub number: String,
     /// The provider's stable id for the issue (never a display value).
     pub id: String,
     pub locator: String,
@@ -137,6 +143,9 @@ pub struct TicketSource {
     /// Status follows the source's closure and cannot be changed here. While an
     /// externally owned issue is open, only Todo, In progress and In review are local.
     pub status_locked: bool,
+    /// The statuses a person may choose for this ticket now (empty when none can be
+    /// changed here), so no client repeats the rule.
+    pub status_choices: Vec<Status>,
     pub duplicate_target: Option<DuplicateTarget>,
 }
 
@@ -156,6 +165,15 @@ pub struct SourceCounts {
     pub local: u64,
     pub providers: BTreeMap<String, u64>,
 }
+
+const ALL_STATUSES: [Status; 6] = [
+    Status::Todo,
+    Status::InProgress,
+    Status::InReview,
+    Status::Done,
+    Status::Canceled,
+    Status::Duplicate,
+];
 
 /// What a refresh was asked to cover.
 #[derive(Debug, Default, Clone)]
@@ -250,15 +268,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 fn state_parts(state: ExternalState) -> (&'static str, Option<&'static str>) {
     match state {
         ExternalState::Open => ("open", None),
-        ExternalState::Closed { reason } => (
-            "closed",
-            Some(match reason {
-                ClosureReason::Completed => "completed",
-                ClosureReason::NotPlanned => "not_planned",
-                ClosureReason::Duplicate => "duplicate",
-                ClosureReason::Unknown => "unknown",
-            }),
-        ),
+        ExternalState::Closed { reason } => ("closed", Some(reason.as_str())),
     }
 }
 
@@ -267,12 +277,7 @@ fn state_from_parts(state: &str, reason: Option<&str>) -> ExternalState {
         return ExternalState::Open;
     }
     ExternalState::Closed {
-        reason: match reason {
-            Some("completed") => ClosureReason::Completed,
-            Some("not_planned") => ClosureReason::NotPlanned,
-            Some("duplicate") => ClosureReason::Duplicate,
-            _ => ClosureReason::Unknown,
-        },
+        reason: ClosureReason::parse(reason),
     }
 }
 
@@ -475,7 +480,12 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         }
         _ => None,
     };
+    let (provider_name, place, number) =
+        super::display_parts(&row.provider, &row.locator, &row.display);
     ticket.source = Some(TicketSource {
+        provider_name,
+        place,
+        number,
         provider: row.provider,
         id: row.id,
         locator: row.locator,
@@ -494,6 +504,23 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             }
         ),
         status_locked: external && !matches!(state, ExternalState::Open),
+        status_choices: if external {
+            match state {
+                ExternalState::Open => ALL_STATUSES
+                    .into_iter()
+                    .filter(|status| status.is_local_progress())
+                    .collect(),
+                ExternalState::Closed {
+                    reason: ClosureReason::Unknown,
+                } => ALL_STATUSES
+                    .into_iter()
+                    .filter(|status| status.ends_work())
+                    .collect(),
+                ExternalState::Closed { .. } => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        },
         state,
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,
@@ -625,8 +652,8 @@ fn ticket_for_identity(
 }
 
 /// The status an observed external state implies, given the state last observed
-/// and the ticket's current status. `None` means the status is not decided by
-/// the source and stays as it is.
+/// and the ticket's current status. An observation that does not decide the status
+/// (open stays open, an unrecognized closure) returns `current` unchanged.
 pub(crate) fn status_for(
     previous: Option<ExternalState>,
     observed: ExternalState,
@@ -720,14 +747,7 @@ impl Workspace {
         engine: &Engine,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
-        let started = match options.now.as_deref() {
-            Some(now) => now.to_owned(),
-            None => self.connection.query_row(
-                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-                [],
-                |row| row.get(0),
-            )?,
-        };
+        let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = self.tracked(options.ticket.as_deref())?;
         let mut gathered = Gathered {
             issues: Vec::new(),

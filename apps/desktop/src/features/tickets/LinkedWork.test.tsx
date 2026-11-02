@@ -373,6 +373,10 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
       status: "Duplicate",
       source: {
         provider: "github",
+        provider_name: "GitHub",
+        place: "acme/api",
+        number: "#1",
+        status_choices: ["Todo", "In progress", "In review"],
         id: "1",
         locator: "acme/api#1",
         display: "acme/api#1",

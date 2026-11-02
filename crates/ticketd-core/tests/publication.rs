@@ -2,8 +2,11 @@
 //! controllable fake connector. The failure scenarios are the point: every one
 //! of them must leave the ticket local, and every one that might have created an
 //! issue must block another create.
-// Fake connector helpers panic to simulate a crash and to fail loudly on a wrong error.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
+// Only the fake connector's `publish` panics (to simulate a crash) and the error
+// matchers panic on the wrong error; those carry their own allow below.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::BTreeMap,
@@ -220,6 +223,8 @@ impl Connector for Fake {
             .collect()
     }
 
+    // Mode::Crash panics here on purpose: it simulates the process dying mid-call.
+    #[allow(clippy::panic)]
     fn publish(
         &self,
         _: &ConfigValues,
@@ -382,6 +387,7 @@ fn set_status(f: &mut Fixture, reference: &str, status: Status) {
         .unwrap();
 }
 
+#[allow(clippy::panic)]
 fn publication_error(error: Error) -> PublicationError {
     match error {
         Error::Publication(error) => error,

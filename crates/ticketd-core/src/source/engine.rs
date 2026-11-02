@@ -83,10 +83,12 @@ impl Engine {
     /// An engine with every connector built into ticketd, using ambient
     /// credentials and the real network.
     pub fn builtin() -> Self {
-        let mut engine = Self::new();
-        // The built-in connector speaks the current contract by construction.
-        let _ = engine.register(Box::new(GithubConnector::ambient()));
-        engine
+        // The built-in connector speaks the current contract by construction (a
+        // test registers it through `register` to prove it), so it is added directly
+        // rather than through a check whose failure could only be ignored.
+        Self {
+            connectors: vec![Box::new(GithubConnector::ambient())],
+        }
     }
 
     /// Adds a connector, refusing one that speaks another contract version or
@@ -408,9 +410,10 @@ impl Engine {
         Ok(found)
     }
 
-    /// Reads an issue's conversation, sorted chronologically with comments
-    /// before events that share a timestamp and repeated ids dropped. `None`
-    /// when the connector does not declare [`Capability::Comments`].
+    /// Reads an issue's conversation with repeated ids dropped, and the comments and
+    /// the events each sorted chronologically (they are separate lists; interleaving
+    /// them is the reader's job). `None` when the connector does not declare
+    /// [`Capability::Comments`].
     pub fn conversation(
         &self,
         provider: &str,

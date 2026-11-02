@@ -1,6 +1,8 @@
 //! Taking ownership of an unavailable external ticket, through the workspace
 //! workflow boundary with a controllable fake connector.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::BTreeMap,

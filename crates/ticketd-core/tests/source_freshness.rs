@@ -1,6 +1,8 @@
 //! Automatic refresh, freshness, and the Source unavailable state, through the
 //! workspace workflow boundary with a controllable fake connector and a manual clock.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
+// share; those unwrap so a broken setup fails the test loudly.
+#![allow(clippy::unwrap_used)]
 
 use std::{
     collections::BTreeMap,
@@ -9,7 +11,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
     thread,
-    time::Duration,
 };
 
 use serde_json::json;
@@ -559,6 +560,8 @@ fn coordinator(clock: &ManualClock) -> RefreshCoordinator {
     )
 }
 
+// A helper, so Clippy does not exempt its panic like it does a #[test] function's.
+#[allow(clippy::panic)]
 fn ran<T>(run: Run<T>) -> T {
     match run {
         Run::Ran(value) => value,
@@ -566,6 +569,7 @@ fn ran<T>(run: Run<T>) -> T {
     }
 }
 
+#[allow(clippy::panic)]
 fn not_due_in<T>(run: Run<T>) -> u64 {
     match run {
         Run::Skipped(Skip::NotDue { in_secs }) => in_secs,
@@ -656,12 +660,16 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
     let coordinator = Arc::new(coordinator(&clock));
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel::<()>();
+    let (waiting_tx, waiting_rx) = mpsc::channel::<()>();
+    let order = Arc::new(Mutex::new(Vec::new()));
     let background = {
         let coordinator = Arc::clone(&coordinator);
+        let order = Arc::clone(&order);
         thread::spawn(move || {
             coordinator.run_if_due(|| {
                 started_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
+                order.lock().unwrap().push("background");
                 Ok(RefreshReport::default())
             })
         })
@@ -675,11 +683,11 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
             .unwrap(),
         Run::Skipped(Skip::Running)
     ));
-    let order = Arc::new(Mutex::new(Vec::new()));
     let manual = {
         let coordinator = Arc::clone(&coordinator);
         let order = Arc::clone(&order);
         thread::spawn(move || {
+            waiting_tx.send(()).unwrap();
             coordinator
                 .run_now(|| {
                     order.lock().unwrap().push("manual");
@@ -688,12 +696,9 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
                 .unwrap()
         })
     };
-    thread::sleep(Duration::from_millis(50));
-    assert!(
-        order.lock().unwrap().is_empty(),
-        "manual waits for the running refresh"
-    );
-    order.lock().unwrap().push("background");
+    // The manual refresh is on its way to the coordinator. If it did not wait for
+    // the running one it would record itself before the background run is released.
+    waiting_rx.recv().unwrap();
     release_tx.send(()).unwrap();
     background.join().unwrap().unwrap();
     manual.join().unwrap();

@@ -1,8 +1,5 @@
 import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
 
-/** The statuses a person manages locally while an externally owned issue is open. */
-export const localProgressStatuses = ["Todo", "In progress", "In review"];
-
 export function providerName(provider: string): string {
   return provider === "github" ? "GitHub" : provider;
 }
@@ -12,17 +9,9 @@ export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;
 }
 
-/** The provider's number for the issue, such as "#98", from its locator. */
-export function externalNumber(source: TicketSource): string {
-  const index = source.locator.lastIndexOf("#");
-  return index >= 0 ? source.locator.slice(index) : "";
-}
-
-/** Where the issue lives, such as "owner / repo #98". */
+/** Where the issue lives, such as "owner / repo #98", from the parts the core names. */
 export function sourceLocation(source: TicketSource): string {
-  const index = source.locator.lastIndexOf("#");
-  const place = index >= 0 ? source.locator.slice(0, index) : source.locator;
-  return `${place.replace("/", " / ")} ${externalNumber(source)}`.trim();
+  return `${source.place.replace("/", " / ")} ${source.number}`.trim();
 }
 
 /** The state line's words, and the tone of its dot, if it has one. */
@@ -30,7 +19,7 @@ export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
 } {
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   if (source.unavailable)
     return { text: "Source unavailable", tone: "attention" };
   if (source.state.state === "open")
@@ -75,7 +64,7 @@ export function unavailableNotice(
 ): { title: string; detail: string; since: string } | null {
   const unavailable = source.unavailable;
   if (!unavailable || source.ownership !== "external") return null;
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
   return {
     title: "Source unavailable",

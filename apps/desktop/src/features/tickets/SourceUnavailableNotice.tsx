@@ -4,12 +4,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import type { Ticket } from "@/lib/api/client";
 import { sourcesClient } from "@/lib/api/sources";
 import { TakeOwnership } from "./TakeOwnership";
-import {
-  externalSource,
-  freshness,
-  providerName,
-  unavailableNotice,
-} from "./ticket-source";
+import { externalSource, freshness, unavailableNotice } from "./ticket-source";
 
 /**
  * A recessed notice at the top of the document column while the ticket's source
@@ -28,7 +23,7 @@ export function SourceUnavailableNotice({
   const source = externalSource(ticket);
   const notice = source ? unavailableNotice(source) : null;
   if (!source || !notice) return null;
-  const name = providerName(source.provider);
+  const name = source.provider_name;
   async function retry() {
     setRetrying(true);
     setFailure("");
