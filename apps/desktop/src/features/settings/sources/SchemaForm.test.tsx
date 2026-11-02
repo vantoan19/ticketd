@@ -15,7 +15,10 @@ const multi = (key: string, label: string): SchemaField => ({
   max_items: 3,
   format: null,
 });
-const fields = [multi("repositories", "Repositories"), multi("labels", "Labels")];
+const fields = [
+  multi("repositories", "Repositories"),
+  multi("labels", "Labels"),
+];
 
 afterEach(() => cleanup());
 

@@ -416,6 +416,45 @@ test("the unavailable notice is worded by the failure, not by the provider's tex
     expect(worded(code)).not.toContain("raw provider text");
 });
 
+test("a refresh failure about a ticket that was taken over no longer shows", () => {
+  const report = {
+    imported: [],
+    updated: [],
+    failures: [
+      {
+        provider: "github",
+        reference: "T-1",
+        code: "not_found",
+        message: "gone",
+      },
+    ],
+    refreshed_at: "2026-02-02T00:00:00Z",
+  } as never;
+  const state = { running: false, report, error: "" };
+  const { rerender } = render(
+    withActivity(
+      {},
+      <SourceRefresh
+        providers={["github"]}
+        state={state}
+        tickets={[ticket({ source: source() })]}
+      />,
+    ),
+  );
+  expect(screen.getByRole("alert").textContent).toContain("Could not refresh");
+  rerender(
+    withActivity(
+      {},
+      <SourceRefresh
+        providers={["github"]}
+        state={state}
+        tickets={[ticket({ source: null })]}
+      />,
+    ),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 test("relative times degrade to the raw value only when unreadable", () => {
   const now = Date.parse("2026-02-01T01:00:00Z");
   expect(ago("2026-02-01T00:59:40Z", now)).toBe("just now");

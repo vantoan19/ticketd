@@ -1,5 +1,5 @@
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import type { SourceCounts } from "@/lib/api/client";
+import type { SourceCounts, Ticket } from "@/lib/api/client";
 import type { RefreshReport } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
 import { ago, providerName } from "./ticket-source";
@@ -55,9 +55,12 @@ export function SourceFilter({
 export function SourceRefresh({
   providers,
   state,
+  tickets = [],
 }: {
   providers: string[];
   state: { running: boolean; report: RefreshReport | null; error: string };
+  /** The listed tickets: a failure about one the source no longer owns is stale. */
+  tickets?: Ticket[];
 }) {
   const activity = useSourceActivity();
   // The workspace already folds an explicit run into `refreshing`.
@@ -73,7 +76,12 @@ export function SourceRefresh({
     (status) => status.health === "synced" || status.health === "waiting",
   );
   const name = providers.map(providerName).join(", ");
-  const failures = state.report?.failures ?? [];
+  const failures = (state.report?.failures ?? []).filter((failure) => {
+    const listed = tickets.find(
+      (ticket) => ticket.reference === failure.reference,
+    );
+    return !listed || listed.source?.ownership === "external";
+  });
   return (
     <div className="source-refresh">
       {running && <span>Refreshing {name}…</span>}

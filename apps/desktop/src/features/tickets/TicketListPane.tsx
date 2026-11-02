@@ -178,6 +178,7 @@ export function TicketListPane({
             <SourceRefresh
               providers={configuredSources}
               state={sourceRefresh}
+              tickets={tickets}
             />
           )}
         </>
