@@ -275,7 +275,9 @@ impl Connector for Fake {
             hook();
         }
         match mode {
-            Mode::LoseResponse => Err(SourceError::Unavailable("request timed out".into())),
+            Mode::LoseResponse => Err(SourceError::Unavailable(
+                "GitHub is unavailable (status 502); retry later".into(),
+            )),
             Mode::Crash => panic!("process died during the create call"),
             _ => {
                 let remote = self.0.lock().unwrap();
@@ -1734,4 +1736,29 @@ fn an_imported_ticket_says_only_local_tickets_are_published() {
         message.contains("only local tickets are published"),
         "{message}"
     );
+}
+
+#[test]
+fn an_unresolved_publication_never_advises_retrying_later() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt = f.ticket(&ticket.reference).publication.unwrap();
+    let failure = attempt.failure.unwrap();
+    assert!(failure.message.contains("status 502"), "{}", failure.message);
+    assert!(!failure.message.contains("retry later"), "{}", failure.message);
+}
+
+#[test]
+fn an_issue_in_another_repository_is_a_plain_mistake_not_an_internal_error() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let error = publication_error(
+        f.resolve(&ticket.reference, &attach(Some("elsewhere/repo#101")))
+            .unwrap_err(),
+    );
+    assert!(matches!(error, PublicationError::Mismatch { .. }), "{error}");
+    let text = error.to_string();
+    assert!(text.contains("the issue is not in o/r"), "{text}");
+    assert!(!text.contains("invalid source configuration"), "{text}");
+    assert!(!text.contains("could not be verified"), "{text}");
 }

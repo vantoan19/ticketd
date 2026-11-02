@@ -477,7 +477,7 @@ fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     );
     assert_eq!(wrong.status.code(), Some(1));
     let stderr = String::from_utf8(wrong.stderr).unwrap();
-    assert!(stderr.contains("could not be verified"), "{stderr}");
+    assert!(stderr.contains("the issue is not in o/flaky"), "{stderr}");
     let no_credential = cli.command(&["source", "resolve", &reference, "--issue", "7"], None);
     assert_eq!(no_credential.status.code(), Some(1));
     assert_eq!(

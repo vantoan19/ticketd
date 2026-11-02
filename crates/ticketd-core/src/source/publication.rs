@@ -209,7 +209,7 @@ pub enum PublicationError {
     /// The ticket's title or description, or the destination, no longer match
     /// what the person previewed. Nothing was sent.
     #[error(
-        "{reference} changed since it was previewed, so nothing was sent; review the preview again"
+        "{reference} changed since it was previewed, so nothing was sent; review the preview again."
     )]
     ChangedSincePreview { reference: String },
     /// The named issue does not hold the title and description that were sent, so
@@ -1016,11 +1016,15 @@ impl Workspace {
                 .into())
             }
             Err(error) => {
-                let message = format!("{}.", error.to_string().trim_end_matches('.'));
+                // Blind retrying is exactly what is blocked now, so the provider's
+                // own "retry later" advice is dropped from what is recorded.
+                let mut failure = failure_of(&error);
+                failure.message = without_retry_advice(&failure.message);
+                let message = format!("{}.", failure.message.trim_end_matches('.'));
                 let _ = self.settle(
                     &started.attempt_id,
                     AttemptState::Unresolved,
-                    Some(&failure_of(&error)),
+                    Some(&failure),
                     None,
                     options.now.as_deref(),
                 );
@@ -1455,7 +1459,22 @@ impl Workspace {
                 ) {
                     (Some(text), _) => engine
                         .locate(&attempt.provider, &saved.config, &attempt.destination, text)
-                        .map_err(unverified)?,
+                        .map_err(|error| match error {
+                            // A mistake in what was typed (another repository, not an
+                            // issue number), not a failure to verify anything.
+                            SourceError::InvalidConfiguration(issues) => {
+                                Error::Publication(PublicationError::Mismatch {
+                                    reference: ticket.reference.clone(),
+                                    attempt_id: attempt.id.clone(),
+                                    message: issues
+                                        .iter()
+                                        .map(|issue| format!("the issue {}", issue.message))
+                                        .collect::<Vec<_>>()
+                                        .join("; "),
+                                })
+                            }
+                            other => unverified(other),
+                        })?,
                     (None, Some(known)) => engine
                         .fetch(
                             &attempt.provider,
@@ -1804,6 +1823,13 @@ impl Workspace {
             replayed: false,
         })
     }
+}
+
+fn without_retry_advice(message: &str) -> String {
+    message
+        .trim_end_matches('.')
+        .trim_end_matches("; retry later")
+        .to_owned()
 }
 
 /// Failure code of an attempt a person confirmed was never created.
