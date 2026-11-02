@@ -88,6 +88,8 @@ export function CreateTicketDialog({
   const [tagQuery, setTagQuery] = useState("");
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(false);
+  // Escape in the tag field puts the suggestions away before it closes the dialog.
+  const [suggestionsHidden, setSuggestionsHidden] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
@@ -180,9 +182,9 @@ export function CreateTicketDialog({
       setPending(false);
     }
   }
-  const suggestions = vocabulary
-    .filter((tag) => !draft.tags.includes(tag))
-    .slice(0, 6);
+  const suggestions = suggestionsHidden
+    ? []
+    : vocabulary.filter((tag) => !draft.tags.includes(tag)).slice(0, 6);
   const projectName =
     projects.find((p) => p.id === draft.project)?.name ??
     (draft.project || "Unlinked");
@@ -198,6 +200,16 @@ export function CreateTicketDialog({
         className="create-panel"
         showCloseButton={false}
         aria-describedby={undefined}
+        onEscapeKeyDown={(event) => {
+          // Escape closes only the foremost surface: the open suggestions.
+          if (
+            suggestions.length > 0 &&
+            document.activeElement === tagInputRef.current
+          ) {
+            event.preventDefault();
+            setSuggestionsHidden(true);
+          }
+        }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           triggerRef.current?.focus();
@@ -384,7 +396,11 @@ export function CreateTicketDialog({
                   placeholder="Add a tag"
                   disabled={pending}
                   value={tagQuery}
-                  onChange={(event) => setTagQuery(event.target.value)}
+                  onFocus={() => setSuggestionsHidden(false)}
+                  onChange={(event) => {
+                    setSuggestionsHidden(false);
+                    setTagQuery(event.target.value);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === ",") {
                       if (event.ctrlKey || event.metaKey) return;

@@ -18,7 +18,12 @@ beforeAll(async () => {
   await import("@/features/markdown/MarkdownEditor");
 });
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
+// What the tag search answers; empty unless a test sets it.
+const answers = vi.hoisted(() => ({ tags: [] as string[] }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (command: string) =>
+    Promise.resolve(command === "search_tags" ? answers.tags : []),
+}));
 vi.mock("@uiw/react-codemirror", () => ({
   default: ({
     value,
@@ -49,7 +54,10 @@ window.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  answers.tags = [];
+});
 
 function Harness({
   create,
@@ -268,4 +276,19 @@ test("tags are chips that can be added and removed", () => {
   expect(screen.getByText("bug")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Remove tag bug" }));
   expect(screen.queryByText("bug")).toBeNull();
+});
+
+test("Escape closes only the foremost surface: the tag suggestions, then the dialog", async () => {
+  answers.tags = ["alpha", "beta"];
+  render(<Harness create={vi.fn()} />);
+  const tags = screen.getByRole("textbox", { name: "Add tag" });
+  await screen.findByRole("list", { name: "Tag suggestions" });
+  tags.focus();
+  fireEvent.keyDown(tags, { key: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByRole("list", { name: "Tag suggestions" })).toBeNull(),
+  );
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  fireEvent.keyDown(tags, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
