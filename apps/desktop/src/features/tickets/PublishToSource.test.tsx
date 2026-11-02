@@ -10,6 +10,8 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { PublicationAttempt, Ticket } from "@/lib/api/client";
 import { SourceActivityContext } from "./source-activity";
+import { PublicationNotice } from "./PublishToSource";
+import { TicketHeader } from "./TicketHeader";
 import { TicketProperties } from "./TicketProperties";
 
 window.ResizeObserver = class {
@@ -139,11 +141,11 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   ).toBe("Cache entries never expire.");
   expect(within(dialog).getByText("acme/api")).toBeTruthy();
   expect(
-    within(dialog).getByText(/no notes, Efforts, dependencies, subtickets/),
+    within(dialog).getByText(/No ticketd labels, fields or comments are added/),
   ).toBeTruthy();
 
   fireEvent.click(
-    within(dialog).getByRole("button", { name: "Publish to acme/api" }),
+    within(dialog).getByRole("button", { name: "Publish issue" }),
   );
 
   await waitFor(() =>
@@ -169,7 +171,9 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
   });
   rail(ticket({ status: "Done" }));
   // The core's own sentence states the rule; the rail adds none of its own.
-  await screen.findByText(/T-1 is Done; only Todo, In progress and In review/);
+  await screen.findByText(
+    /Only Todo, In progress and In review tickets can be published/,
+  );
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
@@ -183,7 +187,7 @@ test("a trashed ticket's rail says why it cannot be published", async () => {
     },
   });
   rail(ticket({ trashed: true }));
-  await screen.findByText("T-1 is in the trash; restore it to publish it");
+  await screen.findByText("Restore this ticket from the trash to publish it.");
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
@@ -200,7 +204,7 @@ test("a ticket that changed since the preview sends nothing and is previewed aga
   );
   const dialog = await screen.findByRole("dialog");
   fireEvent.click(
-    await within(dialog).findByRole("button", { name: "Publish to acme/api" }),
+    await within(dialog).findByRole("button", { name: "Publish issue" }),
   );
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain("nothing was sent");
@@ -228,15 +232,15 @@ test("a refusal says nothing was created and allows another try", async () => {
   );
   const dialog = await screen.findByRole("dialog");
   fireEvent.click(
-    await within(dialog).findByRole("button", { name: "Publish to acme/api" }),
+    await within(dialog).findByRole("button", { name: "Publish issue" }),
   );
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain("no permission");
-  expect(alert.textContent).toContain("nothing was created");
+  expect(alert.textContent?.toLowerCase()).toContain("nothing was created");
   expect(
     (
       within(dialog).getByRole("button", {
-        name: "Publish to acme/api",
+        name: "Publish issue",
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
@@ -255,7 +259,7 @@ test("an unknown outcome blocks retrying and says the issue may exist", async ()
   );
   const dialog = await screen.findByRole("dialog");
   fireEvent.click(
-    await within(dialog).findByRole("button", { name: "Publish to acme/api" }),
+    await within(dialog).findByRole("button", { name: "Publish issue" }),
   );
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain("The outcome is not known");
@@ -326,9 +330,9 @@ async function openReview() {
 test("an unresolved attempt shows the warning and no way to publish blindly", async () => {
   reviewAnswers(review());
   rail(ticket({ publication: attempt() }));
-  expect(screen.getByText("Publication unresolved")).toBeTruthy();
+  expect(screen.getByText("Publish outcome unknown")).toBeTruthy();
   expect(
-    screen.getByText(/It may already exist\. Publishing again is blocked/),
+    screen.getByText(/Stays Local until the outcome is settled/),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 
@@ -336,7 +340,7 @@ test("an unresolved attempt shows the warning and no way to publish blindly", as
   await within(dialog).findByText("What is known");
   expect(within(dialog).getByText("What is not known")).toBeTruthy();
   expect(
-    within(dialog).getByText(/whether GitHub created an issue/),
+    within(dialog).getByText(/Whether GitHub created an issue/),
   ).toBeTruthy();
   expect(
     within(dialog).getByText(/creating another would duplicate/),
@@ -536,10 +540,120 @@ test("connecting the source in Settings makes a local ticket publishable without
   );
   const { rerender } = render(view([{ ...githubEntry, saved: null }]));
   // Not connected: the rail says why, and offers nothing.
-  await screen.findByText("connect GitHub in Settings before publishing");
+  await screen.findByText("Connect GitHub in Settings to publish.");
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
   // The person connects the source and returns: the same ticket now shows Publish.
   connected = true;
   rerender(view([githubEntry]));
   await screen.findByRole("button", { name: /Publish to GitHub/ });
+});
+
+test("the inline unresolved panel keeps retry disabled after dismissing a candidate and can check again", async () => {
+  const candidate = {
+    identity: { provider: "github", id: "99" },
+    locator: "acme/api#99",
+    display: "acme/api#99",
+    url: "https://github.com/acme/api/issues/99",
+    title: "Possible result",
+    created_at: "2026-02-01T00:00:00Z",
+    reason: "content_match",
+  };
+  const value = review({
+    candidates: [candidate],
+    actions: [
+      { kind: "attach", available: true, label: "Attach", detail: "Name it" },
+      {
+        kind: "not_created",
+        available: false,
+        label: "Confirm nothing was created",
+        detail: "A matching issue still exists.",
+      },
+    ],
+  });
+  reviewAnswers(value);
+  render(
+    <PublicationNotice
+      ticket={ticket({ publication: attempt() })}
+      refresh={vi.fn(async () => {})}
+    />,
+  );
+  const panel = screen.getByRole("region", { name: "Publish outcome unknown" });
+  expect(await within(panel).findByText("Possible result")).toBeTruthy();
+  const retry = within(panel).getByRole("button", { name: "Publish again" });
+  expect(retry).toHaveProperty("disabled", true);
+  fireEvent.click(within(panel).getByRole("button", { name: "Not this one" }));
+  expect(within(panel).queryByText("Possible result")).toBeNull();
+  expect(retry).toHaveProperty("disabled", true);
+  fireEvent.click(within(panel).getByRole("button", { name: "Check again" }));
+  expect(await within(panel).findByText("Possible result")).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+});
+
+test("the Actions menu offers publish with the core's disabled reason", async () => {
+  bridgeAnswers({
+    ...eligible,
+    eligibility: {
+      kind: "ineligible",
+      reason: "status",
+      message: "core status refusal",
+    },
+  });
+  render(
+    <TicketHeader
+      selected="T-1"
+      ticket={ticket({ status: "Done" })}
+      expanded={false}
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      onClose={vi.fn()}
+      onOpenGraph={vi.fn()}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
+    key: "Enter",
+  });
+  const item = await screen.findByRole("menuitem", {
+    name: /Publish to GitHub/,
+  });
+  await waitFor(() =>
+    expect(item.textContent).toContain(
+      "Only Todo, In progress and In review tickets can be published.",
+    ),
+  );
+  expect(item.getAttribute("data-disabled")).not.toBeNull();
+});
+
+test("publishing from Actions opens the same exact preview before sending", async () => {
+  bridgeAnswers(eligible);
+  render(
+    <TicketHeader
+      selected="T-1"
+      ticket={ticket()}
+      expanded={false}
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      onClose={vi.fn()}
+      onOpenGraph={vi.fn()}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("button", { name: "Ticket actions" }), {
+    key: "Enter",
+  });
+  const item = await screen.findByRole("menuitem", {
+    name: "Publish to GitHub…",
+  });
+  await waitFor(() => expect(item.getAttribute("data-disabled")).toBeNull());
+  fireEvent.click(item);
+  expect(
+    await screen.findByRole("dialog", { name: "Publish T-1 to GitHub" }),
+  ).toBeTruthy();
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
 });

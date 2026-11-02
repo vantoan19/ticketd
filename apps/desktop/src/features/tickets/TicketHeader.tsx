@@ -28,12 +28,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PublishDialog } from "./PublishToSource";
+import {
+  publicationReason,
+  usePublishTarget,
+  usePublicationPreview,
+} from "./use-publication-preview";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { SourceLink } from "@/features/tickets/SourceLink";
-import {
-  externalSource,
-  sourceLocation,
-} from "@/features/tickets/ticket-source";
+import { externalSource } from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 
@@ -70,6 +73,9 @@ export function TicketHeader({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  const target = usePublishTarget();
+  const preview = usePublicationPreview(ticket, target);
+  const [publishing, setPublishing] = useState(false);
   const { copied, error: copyError, copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
@@ -139,7 +145,8 @@ export function TicketHeader({
         {owner && (
           <SourceLink url={owner.url} className="header-source-link">
             <span className="sr-only">Open on {owner.provider_name}: </span>
-            {sourceLocation(owner)}
+            <span>{owner.place.replace("/", " / ")}</span>{" "}
+            <span className="source-number">{owner.number}</span>
           </SourceLink>
         )}
       </div>
@@ -203,7 +210,11 @@ export function TicketHeader({
                 <MoreHorizontal />
               </IconButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
+            <DropdownMenuContent
+              className="ticket-actions-menu"
+              align="end"
+              sideOffset={4}
+            >
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   onSelect={() => void copy("Reference", ticket.reference)}
@@ -220,13 +231,27 @@ export function TicketHeader({
                 >
                   Copy context command
                 </DropdownMenuItem>
+                {!ticket.source && target && (
+                  <DropdownMenuItem
+                    disabled={
+                      !preview || preview.eligibility.kind !== "eligible"
+                    }
+                    onSelect={() => setPublishing(true)}
+                    className="publication-menu-item"
+                  >
+                    <span>Publish to GitHub…</span>
+                    {preview && preview.eligibility.kind !== "eligible" && (
+                      <small>{publicationReason(preview)}</small>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 {!ticket.trashed && (
                   <>
                     <DropdownMenuItem onSelect={() => setDuplicateOpen(true)}>
                       Mark as duplicate…
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={onOpenGraph}>
-                      Open dependency graph
+                      Show in dependency graph
                     </DropdownMenuItem>
                   </>
                 )}
@@ -242,7 +267,7 @@ export function TicketHeader({
                     variant="destructive"
                     onSelect={() => void setTrashed(true)}
                   >
-                    Move to trash
+                    Trash ticket
                   </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
@@ -277,6 +302,14 @@ export function TicketHeader({
         >
           {message || `${copied} copied`}
         </p>
+      )}
+      {ticket && publishing && target && (
+        <PublishDialog
+          ticket={ticket}
+          provider={target.provider}
+          refresh={refresh}
+          onOpenChange={setPublishing}
+        />
       )}
       {ticket && (
         <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>

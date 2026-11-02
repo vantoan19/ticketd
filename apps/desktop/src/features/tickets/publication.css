@@ -6,10 +6,11 @@
 }
 .publication-notice {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 12px;
-  padding: 8px 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin: 0 0 24px;
+  padding: 16px;
   border-radius: var(--radius-md);
   background: var(--muted);
   box-shadow: 0 0 0 1px var(--border);
@@ -17,7 +18,7 @@
   line-height: 20px;
 }
 .publication-dialog {
-  max-width: 560px;
+  max-width: 600px;
   max-height: calc(100vh - 32px);
   overflow-y: auto;
 }
@@ -34,17 +35,17 @@
 .publication-preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
 }
 .publication-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 .publication-label {
   color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 20px;
 }
 .publication-title {
   margin: 0;
@@ -96,6 +97,7 @@
 .publication-facts ul {
   margin: 0;
   padding-left: 20px;
+  list-style: disc;
   font-size: 14px;
   line-height: 20px;
 }
@@ -116,4 +118,132 @@
 .publication-attach {
   display: flex;
   gap: 8px;
+}
+
+.publication-notice h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.publish-dialog {
+  top: min(96px, 10vh);
+  transform: translateX(-50%);
+  translate: none;
+  max-height: calc(100dvh - min(96px, 10vh) - 16px);
+  gap: 20px;
+}
+.publication-dialog [data-slot="dialog-title"] {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+.publication-reference {
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+.publication-repository {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.publication-field h3 {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.publication-issue-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 6px;
+  background: var(--background);
+  box-shadow: var(--shadow-border-base);
+}
+.publication-issue-card h4 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+.publication-issue-card .markdown-preview {
+  font-size: 14px;
+  line-height: 20px;
+}
+.publication-local-list {
+  display: grid;
+  gap: 6px;
+  list-style: disc;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--secondary-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.publication-footer {
+  position: sticky;
+  bottom: -24px;
+  flex-flow: row wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -24px -24px;
+  padding: 12px 24px;
+  background: var(--recessed);
+  box-shadow: 0 -1px 0 var(--border);
+}
+.publication-footer > p {
+  margin-right: auto;
+}
+.publication-menu-item {
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: normal;
+}
+.publication-menu-item small {
+  font-size: 12px;
+  line-height: 16px;
+}
+.ticket-actions-menu {
+  width: 260px;
+}
+.ticket-actions-menu [data-slot="dropdown-menu-item"] {
+  min-height: 36px;
+}
+.rail-publish-link {
+  padding: 0;
+  color: var(--link-foreground);
+  text-decoration: none;
+}
+.rail-publish-link:hover {
+  text-decoration: underline;
+}
+.publication-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.publication-candidate-panel,
+.publication-candidate-card {
+  display: grid;
+  gap: 8px;
+}
+.publication-candidate-card {
+  padding: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  border-radius: 6px;
+}
+.publication-candidate-card h4 {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.publication-dialog [data-slot="dialog-footer"]:not(.publication-footer) {
+  position: sticky;
+  bottom: -24px;
+  background: var(--popover);
+  padding-block: 8px;
 }

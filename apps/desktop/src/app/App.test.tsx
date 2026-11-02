@@ -493,6 +493,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
     target: { value: "zebra" },
   });
@@ -1070,6 +1071,7 @@ test("a selection ends when the search or filters change, and the bar can be ski
   expect(document.activeElement).toBe(
     screen.getByRole("region", { name: "Bulk edit" }),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
     target: { value: "second" },
   });
@@ -1189,7 +1191,7 @@ test("the source filter narrows list and counts together and Refresh imports on 
       .getAllByRole("radio")
       .map((radio) => radio.textContent),
   ).toEqual(["All 3", "GitHub 1", "Local 2"]);
-  expect(screen.getByText("GitHub #98")).toBeTruthy();
+  expect(screen.getByText("#98")).toBeTruthy();
   fireEvent.click(within(filter).getByRole("radio", { name: /GitHub/ }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1233,7 +1235,7 @@ test("the sidebar footer follows persisted source health and keeps the list", as
     source_health: () => health,
   });
   const footer = screen.getByRole("group", { name: "Ticket sources" });
-  expect(within(footer).getByText("GitHub unavailable")).toBeTruthy();
+  expect(within(footer).getByText("1 source issue")).toBeTruthy();
   // The failure never empties the list.
   expect(screen.getByText("First")).toBeTruthy();
   // A refresh started elsewhere (startup or periodic) shows up on the next poll.
