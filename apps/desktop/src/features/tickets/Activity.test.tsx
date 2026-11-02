@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -292,6 +293,63 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   await waitFor(() =>
     expect(screen.queryByText("Edited earlier update")).toBeNull(),
   );
+});
+
+test("finishing a note edit does not discard a newer note navigation", async () => {
+  const first = {
+    id: "first",
+    content: "First target",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  const second = { ...first, id: "second", content: "Second target" };
+  let finishSave: (note: typeof first) => void = () => {};
+  let finishSecond: (note: typeof first) => void = () => {};
+  const save = new Promise<typeof first>((resolve) => (finishSave = resolve));
+  const secondRead = new Promise<typeof first>(
+    (resolve) => (finishSecond = resolve),
+  );
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id: string }) => {
+      if (command === "get_note")
+        return args?.id === "second" ? secondRead : first;
+      if (command === "list_notes" || command === "ticket_history") return [];
+      if (command === "edit_note") return save;
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  );
+  const targetProps = {
+    reference: "T-1",
+    status: "Todo",
+    revision: 0,
+    projects: [],
+    active: true,
+    trashed: false,
+  };
+  const view = render(
+    <Activity {...targetProps} target={{ id: "first", key: 1 }} />,
+  );
+  await screen.findByText("First target");
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  view.rerender(
+    <Activity {...targetProps} target={{ id: "second", key: 2 }} />,
+  );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("get_note", {
+      reference: "T-1",
+      id: "second",
+    }),
+  );
+  await act(async () => finishSave({ ...first, content: "Saved first" }));
+  await waitFor(() => expect(screen.queryByText("Saving…")).toBeNull());
+  await act(async () => finishSecond(second));
+  expect(await screen.findByText("Second target")).toBeTruthy();
 });
 
 const props = {

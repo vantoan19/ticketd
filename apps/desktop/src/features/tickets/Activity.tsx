@@ -70,7 +70,7 @@ export function Activity({
   const now = useNow();
   const [loadError, setLoadError] = useState("");
   const [targetNote, setTargetNote] = useState<Note | null>(null);
-  const targetRequest = useRef(0);
+  const targetRequest = useRef<{ id: string } | null>(null);
   const targetRef = useRef<HTMLLIElement>(null);
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
   const targetId = target?.id;
@@ -78,7 +78,8 @@ export function Activity({
   useEffect(() => {
     if (!active || targetId === undefined) return;
     let current = true;
-    const request = ++targetRequest.current;
+    const request = { id: targetId };
+    targetRequest.current = request;
     void client
       .note(reference, targetId)
       .then((note) => {
@@ -165,12 +166,11 @@ export function Activity({
           edit.id,
           edit.content,
         );
-        if (savedNote.id === targetId) {
-          targetRequest.current += 1;
-          setTargetNote((previous) =>
-            previous?.id === savedNote.id ? savedNote : previous,
-          );
-        }
+        if (targetRequest.current?.id === savedNote.id)
+          targetRequest.current = null;
+        setTargetNote((previous) =>
+          previous?.id === savedNote.id ? savedNote : previous,
+        );
       } else await client.addNote(reference, draft);
       if (edit) setEdit(null);
       else {
@@ -193,10 +193,8 @@ export function Activity({
     setError("");
     try {
       await client.deleteNote(reference, id);
-      if (id === targetId) {
-        targetRequest.current += 1;
-        setTargetNote((previous) => (previous?.id === id ? null : previous));
-      }
+      if (targetRequest.current?.id === id) targetRequest.current = null;
+      setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
       await onChanged?.();
     } catch (reason) {
