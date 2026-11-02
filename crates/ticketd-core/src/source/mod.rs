@@ -90,11 +90,16 @@ pub(crate) fn migrate_conversation(connection: &rusqlite::Connection) -> Result<
     conversation::migrate(connection)
 }
 
-pub(crate) use conversation::load as conversation_entries;
+pub(crate) use conversation::present as conversation_entries;
 
 /// Step 25: failure streaks and per-source status.
 pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate(connection)
+}
+
+/// Step 29: preserve the count belonging to the last accepted provider run.
+pub(crate) fn migrate_run_counts(connection: &rusqlite::Connection) -> Result<(), Error> {
+    freshness::migrate_run_counts(connection)
 }
 
 /// Step 26: publication attempts.

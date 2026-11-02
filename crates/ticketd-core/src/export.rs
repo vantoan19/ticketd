@@ -69,7 +69,7 @@ impl Workspace {
             ),
             (
                 "source_status",
-                "provider, last_attempt_at, last_refreshed_at, error_code, error_message, failing_since, retry_after",
+                "provider, last_attempt_at, last_refreshed_at, error_code, error_message, failing_since, retry_after, last_checked_tickets",
             ),
             (
                 "publication_attempts",

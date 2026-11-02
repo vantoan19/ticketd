@@ -127,6 +127,9 @@ pub struct TicketSource {
     pub ownership: Ownership,
     /// The external state last observed.
     pub state: ExternalState,
+    /// The latest source closure time, only when the matching conversation is fresh.
+    #[serde(default)]
+    pub closed_at: Option<String>,
     /// The source closed the issue with a reason ticketd does not recognize, so
     /// the closure was flagged and no outcome was guessed.
     pub closure_unrecognized: bool,
@@ -490,6 +493,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         Vec::new()
     };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
+    let closed_at = conversation::closed_at(connection, &ticket.id)?;
     let unavailable = match &row.error_code {
         Some(code)
             if external && FailureCode::parse(code).is_some_and(FailureCode::is_unavailable) =>
@@ -534,6 +538,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         status_locked: external && status_choices.is_empty(),
         status_choices,
         state,
+        closed_at,
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,
         unavailable,
@@ -887,6 +892,9 @@ impl Workspace {
                     },
                     locator: ticket.locator.clone(),
                 };
+                // Count an issue once whether it was discovered or fetched, and
+                // include attempted reads that returned a ticket-level failure.
+                seen.insert(ticket.external_id.clone());
                 match engine.fetch(&provider, &source.config, &external) {
                     Ok(issue) => gathered.issues.push(issue),
                     Err(error) => {
@@ -919,6 +927,7 @@ impl Workspace {
                     failure: discovery_failed.or(blocked),
                     retry_after_secs,
                     skipped,
+                    checked_tickets: u32::try_from(seen.len()).unwrap_or(u32::MAX),
                 });
             }
         }
@@ -954,24 +963,37 @@ impl Workspace {
                 Ok(Some(mut read)) => {
                     // REST timeline closes may omit a reason. Only the latest
                     // state event can borrow the issue's currently observed closure.
+                    // An unreadable time makes the latest event unknown, and
+                    // offsets must be compared as instants, not text.
+                    let latest = read
+                        .events
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, event)| {
+                            matches!(
+                                event.kind,
+                                super::ExternalEventKind::Closed(_)
+                                    | super::ExternalEventKind::Reopened
+                            )
+                        })
+                        .map(|(index, event)| {
+                            chrono::DateTime::parse_from_rfc3339(&event.created_at)
+                                .map(|time| (index, time))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()
+                        .and_then(|events| events.into_iter().max_by(|a, b| a.1.cmp(&b.1)))
+                        .map(|(index, _)| index);
                     if let ExternalState::Closed { reason } = issue.state
-                        && let Some(event) = read
-                            .events
-                            .iter_mut()
-                            .filter(|event| {
-                                matches!(
-                                    event.kind,
-                                    super::ExternalEventKind::Closed(_)
-                                        | super::ExternalEventKind::Reopened
-                                )
-                            })
-                            .max_by(|a, b| a.created_at.cmp(&b.created_at))
+                        && let Some(index) = latest
+                        && let Some(event) = read.events.get_mut(index)
                         && matches!(event.kind, super::ExternalEventKind::Closed(_))
                     {
                         if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
                             event.kind = super::ExternalEventKind::Closed(reason);
                         }
                         if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
+                            && event.subject.is_none()
                         {
                             event.subject = issue
                                 .duplicate_of

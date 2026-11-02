@@ -1595,12 +1595,17 @@ fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration()
         Some("2026-02-01T00:00:00Z"),
         "the rejected A discovery must not advance accepted provider health"
     );
+    assert_eq!(stale_status[0].last_checked_tickets, Some(1));
 
     f.publish(issue(1, "Still syncing outside B"), false);
     let b_report = f.refresh_at("2026-02-03T00:00:00Z");
     assert_eq!(b_report.imported, ["T-2"]);
     assert_eq!(f.ticket(2).title, "Only in B");
     assert_eq!(f.ticket(1).title, "Still syncing outside B");
+    assert_eq!(
+        f.workspace.source_statuses().unwrap()[0].last_checked_tickets,
+        Some(2)
+    );
     assert_eq!(
         f.ticket(1).source.as_ref().unwrap().discovery_matches,
         Some(false)
@@ -1659,4 +1664,228 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
     assert!(
         matches!(&events[2], ConversationEntry::Event {event, ..} if event == "closed_completed")
     );
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-03T00:00:00Z")
+    );
+}
+
+#[test]
+fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Lifecycle"), true);
+    f.refresh();
+    assert_eq!(f.ticket(1).source.unwrap().closed_at, None);
+    let mut legacy = serde_json::to_value(f.ticket(1).source.unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("closed_at");
+    let source: ticketd_core::source::TicketSource = serde_json::from_value(legacy).unwrap();
+    assert_eq!(source.closed_at, None);
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Completed),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-03T00:00:00Z")
+    );
+    f.remote(|remote| {
+        remote.issues.get_mut(&1).unwrap().updated_at = "2026-02-04T00:00:00Z".into();
+        remote.conversation_outage = Some("offline".into());
+    });
+    f.refresh_at("2026-02-05T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "stale conversation"
+    );
+
+    f.remote(|remote| {
+        remote.conversation_outage = None;
+        remote.conversations.get_mut(&1).unwrap().events.push(event(
+            "later-reopen",
+            ExternalEventKind::Reopened,
+            "octo",
+            "2026-01-04T00:00:00Z",
+        ));
+    });
+    f.refresh_at("2026-02-06T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "latest lifecycle event is reopened"
+    );
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = ExternalState::Open;
+        issue.updated_at = "2026-02-07T00:00:00Z".into();
+    });
+    f.refresh_at("2026-02-08T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "the issue reopened"
+    );
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-09T00:00:00Z".into();
+        remote.conversations.get_mut(&1).unwrap().events.push(event(
+            "invalid",
+            ExternalEventKind::Closed(ClosureReason::Completed),
+            "octo",
+            "not-a-time",
+        ));
+    });
+    f.refresh_at("2026-02-10T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "invalid source timestamp"
+    );
+}
+
+#[test]
+fn legacy_latest_closure_is_enriched_only_while_the_conversation_is_fresh() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Duplicate"), true);
+    f.refresh();
+    let mut duplicate = duplicate_of(1, "Duplicate", Some(9));
+    duplicate.updated_at = "2026-02-02T00:00:00Z".into();
+    f.publish(duplicate, true);
+    f.remote(|remote| {
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    // Simulate a row saved by an older version without reason or subject.
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute(
+        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        [],
+    )
+    .unwrap();
+    let entries = f.conversation(1);
+    assert!(matches!(&entries[0], ConversationEntry::Event { event, .. } if event == "closed"));
+    assert!(
+        matches!(&entries[2], ConversationEntry::Event { event, subject, .. } if event == "closed_duplicate" && subject.as_deref() == Some("o/r#9"))
+    );
+    // Reading is an overlay, not a mutation of stored historical source data.
+    let stored: (String, Option<String>) = db
+        .query_row(
+            "SELECT event, subject FROM source_conversation WHERE entry_id = 'latest'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, ("closed".into(), None));
+    db.execute("UPDATE source_conversation SET event = 'closed_duplicate', subject = 'o/r#7' WHERE entry_id = 'latest'", []).unwrap();
+    let explicit = f.conversation(1);
+    assert!(
+        matches!(&explicit[2], ConversationEntry::Event { subject, .. } if subject.as_deref() == Some("o/r#7"))
+    );
+    db.execute(
+        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE source_sync SET external_updated_at = '2026-02-04T00:00:00Z'",
+        [],
+    )
+    .unwrap();
+    let stale = f.conversation(1);
+    assert!(
+        matches!(&stale[2], ConversationEntry::Event { event, subject, .. } if event == "closed" && subject.is_none())
+    );
+    assert_eq!(f.ticket(1).source.unwrap().closed_at, None);
+}
+
+#[test]
+fn lifecycle_events_compare_instants_not_timestamp_text() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Offsets"), true);
+    f.refresh();
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "close",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T23:00:00-02:00",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-01T23:00:00-02:00")
+    );
+    assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, .. } if id == "close" && event == "closed_completed")));
 }

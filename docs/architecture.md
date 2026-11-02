@@ -148,6 +148,11 @@ last run, current error and any rate-limit hold. A ticket reads _Source
 unavailable_ exactly when its latest recorded attempt failed with an unreachable,
 unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
 limit is delayed, not unavailable. Neither changes content, status or ownership.
+A successful or partial whole-source run persists its distinct checked-issue
+count with its refresh time; a failed or single-ticket run does not replace it.
+The current tracked-ticket count is read separately. A source closure time comes
+only from the latest close event in a conversation retrieved for the currently
+observed source update; missing or stale evidence remains unknown.
 A refresh ignores an observation older than the one it holds, so a slower
 overlapping run cannot move confirmed state backwards. The desktop starts
 refreshing on launch and periodically through one in-process
