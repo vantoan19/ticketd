@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
@@ -122,7 +123,7 @@ test("preview lists matches, then Save turns discovery on without importing at o
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
-  expect(panel.textContent).toContain("1 matching issue");
+  expect(panel.textContent).toContain("1 issue matches");
   expect(panel.textContent).toContain("First issue");
   expect(panel.textContent).toContain("nothing has been imported");
   expect(sourcesClient.preview).toHaveBeenCalledWith("github", {
@@ -143,7 +144,7 @@ test("editing after a preview makes the preview stale and blocks Save", async ()
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByRole("region", { name: "Preview" });
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "octo" },
   });
   expect(screen.queryByRole("region", { name: "Preview" })).toBeNull();
@@ -193,7 +194,7 @@ test("a partial count is labeled as a minimum", async () => {
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
-  expect(panel.textContent).toContain("At least 200 matching issues");
+  expect(panel.textContent).toContain("at least 200 issues match");
   expect(panel.textContent).toContain("Showing the first 1");
 });
 
@@ -205,12 +206,12 @@ test("field problems from the core appear beside their fields", async () => {
   );
   render(<SourceCard entry={entry} />);
   await addRepository("o/r");
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "-x-" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText("Assignee must be a username");
-  expect(screen.getByLabelText("Assignee").getAttribute("aria-invalid")).toBe(
+  expect(screen.getByLabelText(/Assignee/).getAttribute("aria-invalid")).toBe(
     "true",
   );
 });
@@ -230,10 +231,10 @@ test("a saved configuration is shown as saved until edited", () => {
     />,
   );
   expect(screen.getByText("Saved configuration")).toBeTruthy();
-  expect((screen.getByLabelText("Assignee") as HTMLInputElement).value).toBe(
+  expect((screen.getByLabelText(/Assignee/) as HTMLInputElement).value).toBe(
     "octo",
   );
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "someone" },
   });
   expect(screen.getByText("Unsaved changes")).toBeTruthy();
@@ -319,9 +320,7 @@ test("a saved source says how often it refreshes and when it last did", () => {
       />
     </SourceActivityContext.Provider>,
   );
-  expect(
-    screen.getByText(/Refreshes about every 5 minutes while ticketd is open/),
-  ).toBeTruthy();
+  expect(screen.getByText(/every 5 minutes while it is open/)).toBeTruthy();
   expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
 });
 
@@ -397,4 +396,47 @@ test("an unavailable source never claims a fresh sync or a green configuration",
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).toBeNull();
+});
+
+test("discovery uses the core's imported references and Discard restores saved rules", async () => {
+  vi.mocked(sourcesClient.preview).mockResolvedValue({
+    ...preview,
+    new: 0,
+    already_here: 1,
+    issues: [{ ...preview.issues[0]!, ticket: "T-142" }],
+  });
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-01-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
+  for (const name of ["Connection", "Discovery", "Sync"])
+    expect(screen.getByRole("heading", { name })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
+    target: { value: "someone" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  const table = await screen.findByRole("table");
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent),
+  ).toEqual(["Issue", "Title", "In ticketd"]);
+  expect(screen.getByText("0 new · 1 already here")).toBeTruthy();
+  expect(table.textContent).toContain("Already T-142");
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
+  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+    "disabled",
+    true,
+  );
 });

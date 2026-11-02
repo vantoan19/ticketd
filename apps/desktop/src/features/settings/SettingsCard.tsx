@@ -10,12 +10,14 @@ export function SettingsCard({
   title,
   actions,
   children,
+  footer,
 }: {
   id: SettingsCardKey;
   title: string;
   /** Controls beside the title, such as Edit. */
   actions?: ReactNode;
   children: ReactNode;
+  footer?: ReactNode;
 }) {
   const headingId = `${settingsCardId(id)}-heading`;
   return (
@@ -34,6 +36,7 @@ export function SettingsCard({
         <h2 id={headingId}>{title}</h2>
       )}
       {children}
+      {footer && <div className="settings-card-footer">{footer}</div>}
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
@@ -26,6 +27,8 @@ export function App() {
     | "settings"
     | "inbox"
   >("tickets");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsCardKey>("appearance");
   useThemeSync();
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
   const [viewBeforeSettings, setViewBeforeSettings] =
@@ -40,7 +43,10 @@ export function App() {
     }
   }, [view]);
   const openView = (next: typeof view) => {
-    if (next === "settings" && view !== "settings") setViewBeforeSettings(view);
+    if (next === "settings" && view !== "settings") {
+      setViewBeforeSettings(view);
+      setSettingsSection("appearance");
+    }
     setView(next);
   };
   const [inboxTarget, setInboxTarget] = useState<{
@@ -105,7 +111,10 @@ export function App() {
         sources: sourceHealth.sources,
         entries: sourceEntries,
         intervalSecs: sourceHealth.interval_secs ?? null,
-        openSettings: () => openView("settings"),
+        openSettings: () => {
+          openView("settings");
+          setSettingsSection("source-github");
+        },
         refreshAll: () => refreshSources(),
       }}
     >
@@ -127,6 +136,8 @@ export function App() {
         >
           {view === "settings" ? (
             <SettingsNav
+              selected={settingsSection}
+              onSelect={setSettingsSection}
               onBack={() => {
                 returnToSettingsEntry.current = true;
                 setView(viewBeforeSettings);
@@ -178,6 +189,7 @@ export function App() {
             />
             {view === "settings" && (
               <SettingsView
+                selected={settingsSection}
                 onOpenInbox={() => setView("inbox")}
                 onRestore={async () => {
                   setSelected(null);

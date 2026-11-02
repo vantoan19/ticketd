@@ -1,3 +1,4 @@
+import type { SettingsCardKey } from "./settings-sections";
 import { useEffect, useRef, useState } from "react";
 import {
   Copy,
@@ -615,7 +616,9 @@ function AboutCard() {
 export function SettingsView({
   onRestore,
   onOpenInbox,
+  selected,
 }: {
+  selected?: SettingsCardKey;
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
 }) {
@@ -626,14 +629,33 @@ export function SettingsView({
   const { entries: sources } = useSources();
   const heading = useRef<HTMLHeadingElement>(null);
   // Opening Settings replaces the sidebar, which held focus; land on the title.
-  useEffect(() => heading.current?.focus(), []);
+  useEffect(() => heading.current?.focus(), [selected]);
+  const source = sources.find(
+    (entry) => selected === `source-${entry.connector.provider}`,
+  );
+  if (source)
+    return (
+      <div className="management settings-page">
+        <div className="settings-column source-settings-column">
+          <h1 ref={heading} tabIndex={-1}>
+            {source.connector.name}
+          </h1>
+          <p>
+            Bring matching GitHub issues into this workspace. Their title,
+            description, state and comments sync inward; GitHub stays the place
+            to edit them.
+          </p>
+          <SourceCard key={source.connector.provider} entry={source} />
+        </div>
+      </div>
+    );
   return (
     <div className="management settings-page">
       <div className="settings-column">
         <h1 ref={heading} tabIndex={-1}>
           Settings
         </h1>
-        <p>Changes apply right away.</p>
+        <p>Changes apply right away, except source rules, which you save.</p>
         <AppearanceCard />
         <AttentionCard onOpenInbox={onOpenInbox} />
         <LocationCard refreshKey={restores} />
@@ -645,9 +667,10 @@ export function SettingsView({
         />
         <ExportCard />
         <CommandLineCard />
-        {sources.map((entry) => (
-          <SourceCard key={entry.connector.provider} entry={entry} />
-        ))}
+        {!selected &&
+          sources.map((entry) => (
+            <SourceCard key={entry.connector.provider} entry={entry} />
+          ))}
         <KeyboardShortcutsCard />
         <AboutCard />
       </div>
