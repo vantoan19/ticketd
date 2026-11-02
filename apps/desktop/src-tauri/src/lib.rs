@@ -833,7 +833,11 @@ fn source_preview(
     provider: String,
     config: ticketd_core::source::ConfigValues,
 ) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
-    Ok(ticketd_core::source::Engine::builtin().preview(&provider, &config)?)
+    Ok(Workspace::open_default()?.preview_source(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &config,
+    )?)
 }
 #[tauri::command(async)]
 fn save_source(

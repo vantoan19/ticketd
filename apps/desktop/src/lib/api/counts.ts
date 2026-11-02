@@ -4,6 +4,7 @@ import { z } from "zod";
 const countSchema = z.number().int().nonnegative();
 const sidebarCountsSchema = z.object({
   unread_inbox: countSchema,
+  total: countSchema.optional(),
   ready: countSchema,
   in_progress: countSchema,
 });

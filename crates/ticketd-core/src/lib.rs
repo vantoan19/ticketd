@@ -52,12 +52,12 @@ mod inbox;
 pub use inbox::InboxEntry;
 mod notes;
 pub use history::{HistoryEntry, Readiness, Status};
-pub use notes::{Note, NotePatch};
+pub use notes::{Note, NotePatch, ReportedUpdate};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 27;
+pub const FORMAT_VERSION: i64 = 28;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -193,6 +193,12 @@ pub struct Ticket {
     pub title: String,
     pub status: Status,
     pub body: String,
+    /// Last content or organization change; unknown for legacy tickets with no dated records.
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    /// Latest authored note, selected by the core independently of ticket history.
+    #[serde(default)]
+    pub latest_update: Option<ReportedUpdate>,
     pub tags: Vec<String>,
     pub effort_id: Option<String>,
     pub project_id: Option<String>,
@@ -444,6 +450,9 @@ impl Workspace {
         if version < 27 {
             source::migrate_details(&transaction)?;
         }
+        if version < 28 {
+            notes::migrate_updates(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -476,26 +485,7 @@ impl Workspace {
             history::record(&transaction, &id, "project", "", project_id, None)?;
         }
         transaction.commit()?;
-        Ok(Ticket {
-            id,
-            trashed: false,
-            reference: format!("T-{number}"),
-            title: title.to_owned(),
-            status: Status::Todo,
-            body: String::new(),
-            tags: Vec::new(),
-            effort_id: None,
-            project_id: project_id.map(str::to_owned),
-            availability: Some("Ready".into()),
-            prerequisites: Vec::new(),
-            duplicate_of: None,
-            duplicates: Vec::new(),
-            duplicate_redirect: None,
-            source: None,
-            publication: None,
-            parent: None,
-            children: Vec::new(),
-        })
+        self.show_ticket(&format!("T-{number}"))
     }
 
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
@@ -592,6 +582,7 @@ impl Workspace {
         hierarchy::populate(&transaction, &mut updated)?;
         duplicates::populate(&transaction, &mut updated)?;
         source::populate(&transaction, &mut updated)?;
+        notes::populate_update(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -701,6 +692,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             duplicates::populate(&self.connection, ticket)?;
             source::populate(&self.connection, ticket)?;
+            notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -723,6 +715,7 @@ impl Workspace {
         hierarchy::populate(&self.connection, &mut ticket)?;
         duplicates::populate(&self.connection, &mut ticket)?;
         source::populate(&self.connection, &mut ticket)?;
+        notes::populate_update(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -741,6 +734,8 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
             )
         })?,
         body: row.get(4)?,
+        updated_at: None,
+        latest_update: None,
         tags: Vec::new(),
         project_id: row.get(5)?,
         effort_id: row.get(6)?,

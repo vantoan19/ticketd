@@ -78,3 +78,51 @@ pub(crate) fn read(
         .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
         .collect::<Result<Vec<_>, _>>()?)
 }
+
+/// A note's reporting time and attribution for list and rail summaries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportedUpdate {
+    pub note_id: String,
+    pub reported_at: String,
+    pub editing_agent: Option<String>,
+}
+
+pub(crate) fn populate_update(conn: &Connection, ticket: &mut crate::Ticket) -> Result<(), Error> {
+    ticket.updated_at = conn.query_row(
+        "SELECT updated_at FROM tickets WHERE id = ?1",
+        [&ticket.id],
+        |row| row.get(0),
+    )?;
+    ticket.latest_update = conn.query_row("SELECT id, created_at, editing_agent FROM notes WHERE ticket_id = ?1 ORDER BY created_at DESC, number DESC LIMIT 1", [&ticket.id], |row| Ok(ReportedUpdate { note_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
+    Ok(())
+}
+
+pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch("ALTER TABLE tickets ADD COLUMN updated_at TEXT;
+        ALTER TABLE source_sync ADD COLUMN discovery_matches INTEGER;
+        UPDATE tickets SET updated_at = (SELECT MAX(time) FROM (
+            SELECT timestamp AS time FROM ticket_history WHERE ticket_id = tickets.id
+            UNION ALL SELECT updated_at FROM notes WHERE ticket_id = tickets.id
+            UNION ALL SELECT external_updated_at FROM source_sync WHERE ticket_id = tickets.id));
+        CREATE TRIGGER ticket_created_time AFTER INSERT ON tickets BEGIN
+            UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
+        END;
+        CREATE TRIGGER ticket_changed_time AFTER UPDATE OF title, body, status, project_id, effort_id, trashed ON tickets
+        WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body OR OLD.status IS NOT NEW.status OR OLD.project_id IS NOT NEW.project_id OR OLD.effort_id IS NOT NEW.effort_id OR OLD.trashed IS NOT NEW.trashed BEGIN
+            UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
+        END;
+        CREATE TRIGGER ticket_history_time AFTER INSERT ON ticket_history BEGIN
+            UPDATE tickets SET updated_at = NEW.timestamp WHERE id = NEW.ticket_id;
+        END;
+        CREATE TRIGGER note_created_time AFTER INSERT ON notes BEGIN
+            UPDATE tickets SET updated_at = NEW.created_at WHERE id = NEW.ticket_id;
+        END;
+        CREATE TRIGGER note_changed_time AFTER UPDATE ON notes BEGIN
+            UPDATE tickets SET updated_at = NEW.updated_at WHERE id = NEW.ticket_id;
+        END;
+        CREATE TRIGGER note_deleted_time AFTER DELETE ON notes BEGIN
+            UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = OLD.ticket_id;
+        END;
+        PRAGMA user_version = 28;")?;
+    Ok(())
+}

@@ -87,12 +87,15 @@ const previewSchema = z.object({
       display: z.string(),
       url: z.string(),
       title: z.string(),
+      ticket: z.string().nullish(),
       assignees: z.array(z.string()),
       labels: z.array(z.string()),
       updated_at: z.string(),
     }),
   ),
   matched: z.number(),
+  new: z.number().optional(),
+  already_here: z.number().optional(),
   complete: z.boolean(),
 });
 export type DiscoveryPreview = z.infer<typeof previewSchema>;

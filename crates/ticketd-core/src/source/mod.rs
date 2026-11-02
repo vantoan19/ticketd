@@ -211,6 +211,23 @@ impl Workspace {
         rows.into_iter().map(into_saved).collect()
     }
 
+    /// Previews discovery against the workspace's stable external identities.
+    /// Retained identities and trashed tickets are already here as well.
+    pub fn preview_source(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<DiscoveryPreview, Error> {
+        let mut statement = self.connection.prepare("SELECT i.external_id, 'T-' || t.number FROM external_identities i JOIN tickets t ON t.id = i.ticket_id WHERE i.provider = ?1")?;
+        let known = statement
+            .query_map([provider], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+        Ok(engine.preview_with(provider, raw, |identity| known.get(&identity.id).cloned())?)
+    }
+
     /// Validates `raw`, previews discovery against the provider, and only then
     /// saves the configuration. A configuration that cannot be validated or
     /// previewed (bad fields, failed credentials, provider outage) is not
@@ -223,7 +240,7 @@ impl Workspace {
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
         let config = engine.validate(provider, raw)?;
-        let preview = engine.preview(provider, &config)?;
+        let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;

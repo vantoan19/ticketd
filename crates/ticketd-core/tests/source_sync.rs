@@ -1418,3 +1418,48 @@ fn a_withdrawn_target_clears_to_unknown_but_a_missing_answer_keeps_the_last_know
         Some(&("o/r#2".to_owned(), "".to_owned()))
     );
 }
+
+#[test]
+fn preview_reports_existing_stable_identities_and_discovery_membership_survives_restart() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Already imported"), true);
+    let imported = f.refresh().imported.remove(0);
+    assert_eq!(
+        f.workspace
+            .show_ticket(&imported)
+            .unwrap()
+            .source
+            .unwrap()
+            .discovery_matches,
+        Some(true)
+    );
+    f.publish(issue(2, "New match"), true);
+    let config = f.workspace.saved_source("fake").unwrap().unwrap().config;
+    let preview = f
+        .workspace
+        .preview_source(&f.engine, "fake", &config)
+        .unwrap();
+    assert_eq!((preview.new, preview.already_here), (1, 1));
+    assert_eq!(preview.issues[0].ticket.as_deref(), Some(imported.as_str()));
+    assert_eq!(preview.issues[1].ticket, None);
+    f.remote(|r| r.matching.retain(|id| *id != 1));
+    f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(
+        f.workspace
+            .show_ticket(&imported)
+            .unwrap()
+            .source
+            .unwrap()
+            .discovery_matches,
+        Some(false)
+    );
+    let path = f.path();
+    drop(f.workspace);
+    let reopened = Workspace::open(path).unwrap();
+    let source = reopened.show_ticket(&imported).unwrap().source.unwrap();
+    assert_eq!(source.discovery_matches, Some(false));
+    assert_eq!(
+        source.last_refreshed_at.as_deref(),
+        Some("2026-02-02T00:00:00Z")
+    );
+}

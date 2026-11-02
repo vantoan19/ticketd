@@ -1174,7 +1174,7 @@ fn source_command(
         }
         SourceCommand::Preview { provider, settings } => {
             let values = resolve(workspace, &provider, settings)?;
-            serde_json::to_string(&engine.preview(&provider, &values)?)?
+            serde_json::to_string(&workspace.preview_source(&engine, &provider, &values)?)?
         }
         SourceCommand::Save { provider, settings } => {
             let values = resolve(workspace, &provider, settings)?;

@@ -17,7 +17,7 @@ impl Workspace {
             ("efforts", "id, name, archived"),
             (
                 "tickets",
-                "number, id, title, status, body, project_id, effort_id, trashed",
+                "number, id, title, status, body, project_id, effort_id, trashed, updated_at",
             ),
             (
                 "notes",
@@ -57,7 +57,7 @@ impl Workspace {
             ("external_ownership", "ticket_id, authority, changed_at"),
             (
                 "source_sync",
-                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since",
+                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches",
             ),
             (
                 "external_duplicate_targets",

@@ -119,6 +119,11 @@ pub struct TicketSource {
     pub display: String,
     pub url: String,
     pub origin: Origin,
+    /// Last complete discovery membership observation; unknown until a full walk succeeds.
+    #[serde(default)]
+    pub discovery_matches: Option<bool>,
+    #[serde(default)]
+    pub ownership_changed_at: Option<String>,
     pub ownership: Ownership,
     /// The external state last observed.
     pub state: ExternalState,
@@ -407,6 +412,8 @@ struct SourceRow {
     url: String,
     origin: String,
     authority: String,
+    discovery_matches: Option<bool>,
+    ownership_changed_at: Option<String>,
     state: String,
     reason: Option<String>,
     refreshed: Option<String>,
@@ -424,7 +431,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
-                    s.conversation_error_code, s.conversation_error_message \
+                    s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
@@ -448,6 +455,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     failing_since: row.get(13)?,
                     conversation_error_code: row.get(14)?,
                     conversation_error_message: row.get(15)?,
+                    discovery_matches: row.get(16)?,
+                    ownership_changed_at: row.get(17)?,
                 })
             },
         )
@@ -514,6 +523,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             Origin::Imported
         },
         ownership,
+        discovery_matches: row.discovery_matches,
+        ownership_changed_at: row.ownership_changed_at,
         closure_unrecognized: matches!(
             state,
             ExternalState::Closed {
@@ -692,6 +703,7 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
+    discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
     /// here keeps the conversation it already has.
@@ -755,6 +767,7 @@ impl Workspace {
             conversations: HashMap::new(),
             failures: Vec::new(),
             runs: Vec::new(),
+            discovery: Vec::new(),
         };
         let saved = self.saved_sources()?;
         let providers: Vec<String> = if options.ticket.is_some() {
@@ -791,6 +804,9 @@ impl Workspace {
                 });
                 match result {
                     Ok(summary) => {
+                        if summary.complete && summary.skipped.is_empty() {
+                            gathered.discovery.push((provider.clone(), seen.clone()));
+                        }
                         for part in summary.skipped {
                             skipped.push(part.message.clone());
                             gathered.failures.push(Found {
@@ -1023,6 +1039,17 @@ impl Workspace {
                 now,
                 &mut applied,
             )?;
+        }
+        for (provider, seen) in &gathered.discovery {
+            let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
+            let identities = statement
+                .query_map([provider], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (id, external_id) in identities {
+                transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
+            }
         }
         let by_reference: HashMap<&str, &Tracked> =
             tracked.iter().map(|t| (t.reference.as_str(), t)).collect();

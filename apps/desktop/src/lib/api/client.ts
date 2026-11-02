@@ -46,6 +46,8 @@ const ticketSourceSchema = z.object({
   display: z.string(),
   url: z.string(),
   origin: z.enum(["imported", "published"]),
+  discovery_matches: z.boolean().nullish(),
+  ownership_changed_at: z.string().nullish(),
   /** Who may change the ticket's content now. Retained identity alone is not ownership. */
   ownership: z.enum(["external", "local"]),
   state: externalStateSchema,
@@ -80,6 +82,14 @@ const ticketSchema = z.object({
   title: z.string(),
   status: z.string(),
   body: z.string(),
+  updated_at: z.string().nullish(),
+  latest_update: z
+    .object({
+      note_id: z.string(),
+      reported_at: z.string(),
+      editing_agent: z.string().nullable(),
+    })
+    .nullish(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
   effort_id: z.string().nullable(),
