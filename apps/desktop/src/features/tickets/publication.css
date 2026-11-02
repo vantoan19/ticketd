@@ -129,10 +129,10 @@
   font-weight: 500;
 }
 .publish-dialog {
-  top: min(96px, 10vh);
+  top: 96px;
   transform: translateX(-50%);
   translate: none;
-  max-height: calc(100dvh - min(96px, 10vh) - 16px);
+  max-height: calc(100dvh - 112px);
   gap: 20px;
 }
 .publication-dialog [data-slot="dialog-title"] {
@@ -246,4 +246,29 @@
   bottom: -24px;
   background: var(--popover);
   padding-block: 8px;
+}
+
+.publish-dialog[data-state="open"] {
+  animation: publication-enter 0.2s ease-out;
+}
+@keyframes publication-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (max-height: 480px) {
+  .publish-dialog {
+    top: 16px;
+    max-height: calc(100dvh - 32px);
+  }
+}
+.publication-attach {
+  flex-wrap: wrap;
+}
+.publication-attach .ui-input {
+  flex: 1 1 180px;
+  min-width: 0;
 }

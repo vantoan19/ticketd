@@ -476,7 +476,7 @@
   box-shadow: var(--shadow-menu), var(--focus-ring);
 }
 .sidebar {
-  width: 208px;
+  width: 224px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -1212,7 +1212,7 @@
   color: var(--syntax-title);
 }
 
-@media (max-width: 1063px) {
+@media (max-width: 1071px) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }

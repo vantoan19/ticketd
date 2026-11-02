@@ -1,6 +1,6 @@
 /* Settings navigation: takes the workspace sidebar's place. */
 .settings-nav {
-  width: 208px;
+  width: 224px;
   flex: none;
   display: flex;
   flex-direction: column;

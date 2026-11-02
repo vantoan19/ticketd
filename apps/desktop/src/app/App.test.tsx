@@ -1209,7 +1209,11 @@ test("the source filter narrows list and counts together and Refresh imports on 
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: null,
   });
-  expect(screen.getByText("1 new, 0 updated")).toBeTruthy();
+  expect(screen.queryByText("1 new, 0 updated")).toBeNull();
+  expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty(
+    "disabled",
+    false,
+  );
 });
 
 test("the sidebar footer follows persisted source health and keeps the list", async () => {

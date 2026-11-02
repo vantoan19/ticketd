@@ -38,8 +38,7 @@
 }
 /* Expanded: the document column stays at most 800px and centered, and the
    rail keeps its place beside it. */
-/* 420 + 264 is 684: the expanded tracks start only where they fit, so the
-   view never scrolls sideways between 652px and 684px. */
+/* A 420px document and 232px rail share a row only where both fit. */
 @container ticket-detail (min-width: 652px) {
   .ticket-detail[data-expanded] .detail-content {
     grid-template-columns: minmax(420px, 1fr) 232px;

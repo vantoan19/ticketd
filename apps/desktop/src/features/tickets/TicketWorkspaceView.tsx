@@ -12,7 +12,7 @@ import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
-const NARROW_QUERY = "(max-width: 1063px)";
+const NARROW_QUERY = "(max-width: 1071px)";
 
 /**
  * Arranges the list and detail panes and the split, expanded, and narrow
