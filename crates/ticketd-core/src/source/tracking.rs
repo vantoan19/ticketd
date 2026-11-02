@@ -358,7 +358,7 @@ pub(crate) fn guard_change(
     {
         return Err(Error::ExternalContent {
             reference,
-            provider,
+            provider: super::provider_display_name(&provider),
         });
     }
     // Open: Todo, In progress and In review are local. Closed for an unrecognized
@@ -368,7 +368,7 @@ pub(crate) fn guard_change(
     if status != ticket.status && !allowed {
         return Err(Error::ExternalStatus {
             reference,
-            provider,
+            provider: super::provider_display_name(&provider),
             open,
             closure_unrecognized,
         });
@@ -391,7 +391,7 @@ pub(crate) fn guard_duplicate(
             closure_unrecognized,
         } => Err(Error::ExternalStatus {
             reference: reference.to_owned(),
-            provider,
+            provider: super::provider_display_name(&provider),
             open,
             closure_unrecognized,
         }),

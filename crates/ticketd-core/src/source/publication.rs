@@ -1442,7 +1442,7 @@ impl Workspace {
                     field: "source".into(),
                     message: format!(
                         "connect {} again before resolving this publication",
-                        attempt.provider
+                        super::provider_display_name(&attempt.provider)
                     ),
                 },
             ])));

@@ -128,6 +128,11 @@ pub(crate) fn display_parts(
     }
 }
 
+/// What a person calls a provider: its display name where it has one.
+pub(crate) fn provider_display_name(provider: &str) -> String {
+    display_parts(provider, "", "").0
+}
+
 /// The effective "now" of a write: the caller's RFC 3339 time when given, else the
 /// database clock. Every source workflow reads time through this one function.
 pub(crate) fn clock(connection: &rusqlite::Connection, now: Option<&str>) -> Result<String, Error> {

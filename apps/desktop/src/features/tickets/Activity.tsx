@@ -27,6 +27,7 @@ import { client, type Note, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
+import { attribution } from "./ticket-source";
 import { formatDateTime } from "@/lib/format";
 import "./activity.css";
 
@@ -327,7 +328,7 @@ export function Activity({
                   {formatDateTime(item.entry.timestamp)}
                 </time>
                 {item.entry.editing_agent && (
-                  <span>Agent: {item.entry.editing_agent}</span>
+                  <span>{attribution(item.entry.editing_agent)}</span>
                 )}
               </li>
             ),

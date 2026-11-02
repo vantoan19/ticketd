@@ -4,6 +4,15 @@ export function providerName(provider: string): string {
   return provider === "github" ? "GitHub" : provider;
 }
 
+/**
+ * Who a change is attributed to. A change that came from a source is recorded
+ * under the provider's id; it reads as the source, never as an editing agent.
+ */
+export function attribution(agent: string): string {
+  const name = providerName(agent);
+  return name === agent ? `Agent: ${agent}` : `Changed on ${name}`;
+}
+
 /** The source of a ticket the provider currently owns; null for local tickets. */
 export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;

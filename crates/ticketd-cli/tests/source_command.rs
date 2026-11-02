@@ -326,7 +326,7 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     );
     // External content is read-only; local progress is allowed.
     let stderr = cli.fail(&["change", "T-1", "--title", "Mine"], None);
-    assert!(stderr.contains("owned by github"), "{stderr}");
+    assert!(stderr.contains("owned by GitHub"), "{stderr}");
     cli.run(&["change", "T-1", "--status", "In progress"]);
     assert_eq!(
         cli.run(&["list", "--source", "github"])
