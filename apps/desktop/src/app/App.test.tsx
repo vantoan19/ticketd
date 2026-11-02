@@ -763,7 +763,7 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Select all 2" })).toBeNull();
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   expect(
@@ -799,7 +799,7 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert").textContent;
@@ -1352,9 +1352,7 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     count_tickets: counted({ duplicate: 1 }),
     search_tickets: () => [bulkTicket(2)],
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",
@@ -1389,9 +1387,7 @@ test("an exact reference leads the matches in the mark-duplicate search", async 
     search_tickets: () => [bulkTicket(2)],
     show_ticket: () => bulkTicket(3),
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Mark a ticket as duplicate" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
     name: "Mark a ticket as duplicate",

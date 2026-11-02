@@ -96,7 +96,7 @@ export function BulkControls({
                 variant="ghost"
                 size="sm"
                 disabled={pending}
-                aria-label="Change status of selected tickets"
+                aria-label="Status of selected tickets"
               >
                 Status
                 <ChevronDown data-icon="inline-end" />
