@@ -85,6 +85,13 @@ pub enum DuplicateTarget {
         /// reference is then shown but never resolved.
         #[serde(default)]
         problem: Option<TargetProblem>,
+        /// Where the canonical issue can be opened, when the source said.
+        #[serde(default)]
+        url: Option<String>,
+        /// The source no longer supplied this target (a failed lookup or lost
+        /// access), so it is the last one it named, not a confirmed one.
+        #[serde(default)]
+        last_known: bool,
     },
 }
 
@@ -272,27 +279,54 @@ fn state_from_parts(state: &str, reason: Option<&str>) -> ExternalState {
 /// The ownership of a ticket as write guards need it.
 pub(crate) enum Authority {
     Local,
-    External { provider: String, open: bool },
+    External {
+        provider: String,
+        open: bool,
+        /// Closed at the source for a reason ticketd does not recognize.
+        closure_unrecognized: bool,
+    },
+}
+
+/// SQL that is true for the ticket whose id is `id_expr` and whose issue the
+/// source owns and closed with a reason ticketd does not recognize. Such a ticket
+/// keeps its status, is flagged, and awaits a local decision, so it is never
+/// offered as Ready work.
+pub(crate) fn held_sql(id_expr: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM external_ownership ho JOIN source_sync hs ON hs.ticket_id = ho.ticket_id \
+         WHERE ho.ticket_id = {id_expr} AND ho.authority = 'external' \
+         AND hs.external_state = 'closed' AND hs.closure_reason = 'unknown')"
+    )
+}
+
+/// [`held_sql`] for one ticket.
+pub(crate) fn closure_held(connection: &Connection, id: &str) -> Result<bool, Error> {
+    Ok(
+        connection.query_row(&format!("SELECT {}", held_sql("?1")), [id], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 /// Whether a ticket is currently externally owned. Call inside the write
 /// transaction that depends on the answer.
 pub(crate) fn authority(connection: &Connection, id: &str) -> Result<Authority, Error> {
-    let row: Option<(String, String)> = connection
+    let row: Option<(String, String, Option<String>)> = connection
         .query_row(
-            "SELECT i.provider, s.external_state FROM external_ownership o \
+            "SELECT i.provider, s.external_state, s.closure_reason FROM external_ownership o \
              JOIN external_identities i ON i.ticket_id = o.ticket_id \
              JOIN source_sync s ON s.ticket_id = o.ticket_id \
              WHERE o.ticket_id = ?1 AND o.authority = 'external'",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
     Ok(match row {
         None => Authority::Local,
-        Some((provider, state)) => Authority::External {
+        Some((provider, state, reason)) => Authority::External {
             provider,
             open: state == "open",
+            closure_unrecognized: state == "closed" && reason.as_deref() == Some("unknown"),
         },
     })
 }
@@ -305,7 +339,12 @@ pub(crate) fn guard_change(
     body: Option<&str>,
     status: Status,
 ) -> Result<(), Error> {
-    let Authority::External { provider, open } = authority(connection, &ticket.id)? else {
+    let Authority::External {
+        provider,
+        open,
+        closure_unrecognized,
+    } = authority(connection, &ticket.id)?
+    else {
         return Ok(());
     };
     let reference = ticket.reference.clone();
@@ -317,11 +356,16 @@ pub(crate) fn guard_change(
             provider,
         });
     }
-    if status != ticket.status && !(open && status.is_local_progress()) {
+    // Open: Todo, In progress and In review are local. Closed for an unrecognized
+    // reason: Done or Canceled is the person's own decision (the flag stays).
+    let allowed =
+        (open && status.is_local_progress()) || (closure_unrecognized && status.ends_work());
+    if status != ticket.status && !allowed {
         return Err(Error::ExternalStatus {
             reference,
             provider,
             open,
+            closure_unrecognized,
         });
     }
     Ok(())
@@ -336,10 +380,15 @@ pub(crate) fn guard_duplicate(
 ) -> Result<(), Error> {
     match authority(connection, id)? {
         Authority::Local => Ok(()),
-        Authority::External { provider, open } => Err(Error::ExternalStatus {
+        Authority::External {
+            provider,
+            open,
+            closure_unrecognized,
+        } => Err(Error::ExternalStatus {
             reference: reference.to_owned(),
             provider,
             open,
+            closure_unrecognized,
         }),
     }
 }
@@ -471,7 +520,7 @@ pub(crate) fn duplicate_target(
 ) -> Result<Option<DuplicateTarget>, Error> {
     let row = connection
         .query_row(
-            "SELECT provider, external_id, locator, display FROM external_duplicate_targets WHERE ticket_id = ?1",
+            "SELECT provider, external_id, locator, display, url, last_known FROM external_duplicate_targets WHERE ticket_id = ?1",
             [ticket_id],
             |row| {
                 Ok((
@@ -479,13 +528,15 @@ pub(crate) fn duplicate_target(
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, bool>(5)?,
                 ))
             },
         )
         .optional()?;
     Ok(match row {
         None => None,
-        Some((Some(provider), Some(id), locator, display)) => {
+        Some((Some(provider), Some(id), locator, display, url, last_known)) => {
             let identity = ExternalIdentity { provider, id };
             let (ticket, problem) = resolve_target(connection, ticket_id, &identity)?;
             Some(DuplicateTarget::External {
@@ -494,6 +545,8 @@ pub(crate) fn duplicate_target(
                 display: display.unwrap_or_default(),
                 ticket,
                 problem,
+                url,
+                last_known,
             })
         }
         Some(_) => Some(DuplicateTarget::Unknown),
@@ -1135,10 +1188,6 @@ fn apply_issue(
             if next != status {
                 if status == Status::Duplicate {
                     duplicates::clear(connection, &id, Some(&identity.provider))?;
-                    connection.execute(
-                        "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
-                        [&id],
-                    )?;
                 }
                 connection.execute(
                     "UPDATE tickets SET status = ?2 WHERE id = ?1",
@@ -1193,57 +1242,117 @@ fn apply_issue(
     Ok(())
 }
 
-/// Records the canonical issue of an externally closed duplicate: the one the
-/// connector supplied, or an explicit unknown target. It never invents a local
-/// link. A target naming the issue itself is not a canonical issue and is kept
-/// as unknown. A known target is replaced by a different one but never by silence.
+/// Records the canonical issue of an externally closed duplicate, with a history
+/// row whenever what is shown changes. It never invents a local link.
+///
+/// - A named target replaces the stored one (a target naming the issue itself is
+///   not a canonical issue and counts as unnamed).
+/// - A definite withdrawal clears it to an explicit unknown.
+/// - A missing answer (a failed lookup, lost access) keeps the last known target
+///   and marks it `last_known`, so it is never shown as confirmed.
+///
 /// Returns whether the stored target changed.
 fn set_duplicate_target(
     connection: &Connection,
     id: &str,
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
-    let target = issue
+    type Stored = (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        bool,
+    );
+    let named = issue
         .duplicate_of
         .as_ref()
         .filter(|target| target.identity != issue.reference.identity);
-    let stored: Option<(Option<String>, Option<String>, Option<String>)> = connection
+    let stored: Option<Stored> = connection
         .query_row(
-            "SELECT provider, external_id, locator FROM external_duplicate_targets WHERE ticket_id = ?1",
+            "SELECT provider, external_id, locator, url, last_known FROM external_duplicate_targets WHERE ticket_id = ?1",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .optional()?;
-    let wanted = target.map(|t| {
-        (
-            Some(t.identity.provider.clone()),
-            Some(t.identity.id.clone()),
-            Some(t.locator.clone()),
+    let stored_display = stored
+        .as_ref()
+        .and_then(|(_, _, locator, _, _)| locator.clone())
+        .unwrap_or_default();
+    let record = |to: &str| {
+        history::record(
+            connection,
+            id,
+            "external_duplicate",
+            &stored_display,
+            to,
+            Some(&issue.reference.identity.provider),
         )
-    });
-    let wanted = wanted.unwrap_or((None, None, None));
-    if stored.as_ref() == Some(&wanted) {
-        return Ok(false);
-    }
-    // A later observation that supplies no accessible target (permissions or
-    // visibility changed) does not erase an identity we already hold.
-    if target.is_none() && matches!(&stored, Some((Some(_), Some(_), _))) {
-        return Ok(false);
-    }
-    match target {
-        Some(target) => connection.execute(
-            "INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display) \
-             VALUES (?1, ?2, ?3, ?4, ?4) \
-             ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display",
-            params![id, target.identity.provider, target.identity.id, target.locator],
-        )?,
-        None => connection.execute(
-            "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1) \
-             ON CONFLICT(ticket_id) DO UPDATE SET provider = NULL, external_id = NULL, locator = NULL, display = NULL",
-            [id],
-        )?,
     };
-    Ok(true)
+    match (named, issue.duplicate_withdrawn) {
+        (Some(target), _) => {
+            let wanted: Stored = (
+                Some(target.identity.provider.clone()),
+                Some(target.identity.id.clone()),
+                Some(target.locator.clone()),
+                issue.duplicate_of_url.clone(),
+                false,
+            );
+            if stored.as_ref() == Some(&wanted) {
+                return Ok(false);
+            }
+            connection.execute(
+                "INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display, url, last_known) \
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, 0) \
+                 ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, last_known = 0",
+                params![id, target.identity.provider, target.identity.id, target.locator, issue.duplicate_of_url],
+            )?;
+            if stored_display != target.locator {
+                record(&target.locator)?;
+            }
+            Ok(true)
+        }
+        (None, true) => {
+            if matches!(&stored, Some((None, None, ..))) {
+                return Ok(false);
+            }
+            connection.execute(
+                "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1) \
+                 ON CONFLICT(ticket_id) DO UPDATE SET provider = NULL, external_id = NULL, locator = NULL, display = NULL, url = NULL, last_known = 0",
+                [id],
+            )?;
+            if !stored_display.is_empty() {
+                record("")?;
+            }
+            Ok(true)
+        }
+        (None, false) => match stored {
+            None => {
+                connection.execute(
+                    "INSERT INTO external_duplicate_targets (ticket_id) VALUES (?1)",
+                    [id],
+                )?;
+                Ok(true)
+            }
+            // A named target we hold stays, now flagged as not re-confirmed.
+            Some((Some(_), Some(_), _, _, false)) => {
+                connection.execute(
+                    "UPDATE external_duplicate_targets SET last_known = 1 WHERE ticket_id = ?1",
+                    [id],
+                )?;
+                Ok(true)
+            }
+            Some(_) => Ok(false),
+        },
+    }
 }
 
 /// Applies the closure of an issue that was already closed when it was linked

@@ -255,6 +255,8 @@ impl Connector for Fake {
                 created_at: now_rfc3339(),
                 updated_at: now_rfc3339(),
                 duplicate_of: None,
+                duplicate_of_url: None,
+                duplicate_withdrawn: false,
             };
             remote.issues.insert(id, issue);
             (remote.mode, remote.hook.clone())

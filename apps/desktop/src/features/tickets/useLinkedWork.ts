@@ -32,6 +32,7 @@ export function useLinkedWork(
   const [reload, setReload] = useState(0);
   const [linking, setLinking] = useState<AddableKind | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const attempts = useRef(new Map<string, string>());
@@ -113,6 +114,8 @@ export function useLinkedWork(
     closeLink: () => setLinking(null),
     reviewing,
     setReviewing,
+    redirecting,
+    setRedirecting,
   };
 }
 

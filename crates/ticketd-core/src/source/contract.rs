@@ -100,6 +100,14 @@ pub struct ExternalIssue {
     /// contract 1; connectors that cannot tell leave it `None`.
     #[serde(default)]
     pub duplicate_of: Option<ExternalRef>,
+    /// Where the canonical issue can be opened, when the provider says.
+    #[serde(default)]
+    pub duplicate_of_url: Option<String>,
+    /// The provider says the duplicate marking was withdrawn. Distinct from
+    /// `duplicate_of` being `None`, which only means no target was supplied (a
+    /// lookup failed or access changed) and keeps the last known one.
+    #[serde(default)]
+    pub duplicate_withdrawn: bool,
 }
 
 /// A comment on an external issue, as its source reports it. Authors are the

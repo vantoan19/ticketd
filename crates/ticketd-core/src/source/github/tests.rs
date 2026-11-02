@@ -11,7 +11,7 @@ use std::{
 
 use serde_json::{Value, json};
 
-use super::*;
+use super::{credentials::Secret, transport::TransportError, *};
 use crate::source::{Engine, schema::ConfigValues};
 
 const API: &str = "https://api.example.test";
@@ -394,6 +394,32 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
 }
 
 #[test]
+fn a_credential_is_never_sent_over_plain_http_except_to_this_machine() {
+    for (url, allowed) in [
+        ("https://ghe.corp.example/api/v3", true),
+        ("http://ghe.corp.example/api/v3", false),
+        ("http://localhost:8080", true),
+        ("http://127.0.0.1:9", true),
+        ("http://localhost.evil.example", false),
+    ] {
+        assert_eq!(credential_may_travel(url), allowed, "{url}");
+    }
+    let fixture = Arc::new(Fixture::default());
+    let connector = GithubConnector::new(
+        "http://ghe.corp.example/api/v3",
+        Box::new(Shared(fixture.clone())),
+        Box::new(Token(Some(TOKEN))),
+    );
+    let mut engine = Engine::new();
+    engine.register(Box::new(connector)).unwrap();
+    let error = engine
+        .check_connection("github", &config(json!({"repositories": ["o/one"]})))
+        .unwrap_err();
+    assert_eq!(error.code(), "invalid_configuration");
+    assert!(fixture.urls().is_empty(), "nothing was sent");
+}
+
+#[test]
 fn rate_limit_reports_when_to_retry() {
     let (fixture, engine) = setup(Some(TOKEN));
     fixture.respond(
@@ -648,7 +674,7 @@ fn marked(duplicate: u64, canonical: Value) -> Value {
 }
 
 fn issue_node(id: u64, number: u64, repo: &str) -> Value {
-    json!({"__typename": "Issue", "databaseId": id, "number": number, "repository": {"nameWithOwner": repo}})
+    json!({"__typename": "Issue", "databaseId": id, "number": number, "url": format!("https://github.example/{repo}/issues/{number}"), "repository": {"nameWithOwner": repo}})
 }
 
 #[test]
@@ -663,6 +689,11 @@ fn a_duplicate_names_its_canonical_issue_from_the_graphql_timeline_in_another_re
     assert_eq!(target.identity.provider, "github");
     assert_eq!(target.identity.id, "900");
     assert_eq!(target.locator, "o/other#12");
+    assert_eq!(
+        fetched.duplicate_of_url.as_deref(),
+        Some("https://github.example/o/other/issues/12")
+    );
+    assert!(!fetched.duplicate_withdrawn);
     // One authenticated POST to the GraphQL endpoint, asking about this issue only.
     let requests = fixture.requests.lock().unwrap();
     let post = requests
@@ -712,6 +743,10 @@ fn only_events_about_this_issue_count_and_the_latest_wins() {
         ])),
     );
     assert!(fetched.duplicate_of.is_none());
+    assert!(
+        fetched.duplicate_withdrawn,
+        "an unmark is a withdrawal, not a missing answer"
+    );
 }
 
 #[test]
@@ -727,6 +762,10 @@ fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed
     ] {
         let fetched = fetch_duplicate(&fixture, &engine, response);
         assert!(fetched.duplicate_of.is_none());
+        assert!(
+            !fetched.duplicate_withdrawn,
+            "nothing supplied is not a withdrawal"
+        );
         assert_eq!(
             fetched.state,
             ExternalState::Closed {

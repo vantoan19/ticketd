@@ -157,6 +157,8 @@ fn issue(id: u64, title: &str) -> ExternalIssue {
         created_at: "2026-01-01T00:00:00Z".into(),
         updated_at: "2026-01-01T00:00:00Z".into(),
         duplicate_of: None,
+        duplicate_of_url: None,
+        duplicate_withdrawn: false,
     }
 }
 
@@ -1258,4 +1260,180 @@ fn a_failed_comment_read_is_recorded_apart_and_never_makes_a_confirmed_ticket_un
     f.remote(|r| r.conversation_outage = None);
     f.refresh_at("2026-02-01T00:20:00Z");
     assert!(f.ticket(1).source.unwrap().conversation_error.is_none());
+}
+
+#[test]
+fn a_local_duplicate_never_points_at_a_ticket_the_source_closed_as_a_duplicate() {
+    let mut f = Fixture::new();
+    // T-1 is the true original, T-2 and T-3 were imported open.
+    f.publish(issue(1, "Original"), true);
+    f.publish(
+        issue(2, "Closed later as a duplicate of the original"),
+        true,
+    );
+    f.publish(
+        issue(3, "Closed later as a duplicate of something unknown"),
+        true,
+    );
+    f.publish(issue(4, "Local-looking duplicate of T-2"), true);
+    f.refresh();
+    // A local ticket the person already marked as a duplicate of T-2 (still open).
+    let local = f.workspace.create_ticket("Local duplicate").unwrap();
+    f.workspace
+        .mark_duplicate(&local.reference, "T-2", None)
+        .unwrap();
+    // The source now closes T-2 as a duplicate of T-1, and T-3 of an issue nobody imported.
+    f.publish(duplicate_of(2, "Dup 2", Some(1)), true);
+    f.publish(duplicate_of(3, "Dup 3", Some(99)), true);
+    f.refresh();
+
+    // (a) A new marking against T-2 follows it to the real original, T-1.
+    let fresh = f.workspace.create_ticket("Another duplicate").unwrap();
+    let marked = f
+        .workspace
+        .mark_duplicate(&fresh.reference, "T-2", None)
+        .unwrap();
+    assert_eq!(marked.duplicate_of.as_deref(), Some("T-1"));
+    // An original that is itself a duplicate of nothing known is refused.
+    let refused = f
+        .workspace
+        .mark_duplicate(&fresh.reference, "T-3", None)
+        .unwrap_err();
+    assert!(
+        matches!(refused, Error::DuplicateCanonicalUnresolved(_)),
+        "{refused}"
+    );
+
+    // (b) The earlier local designation is flagged, never rewritten behind the
+    // person's back, and moving it is one explicit marking.
+    let flagged = f.workspace.show_ticket(&local.reference).unwrap();
+    assert_eq!(flagged.duplicate_of.as_deref(), Some("T-2"));
+    assert_eq!(flagged.duplicate_redirect.as_deref(), Some("T-1"));
+    let moved = f
+        .workspace
+        .mark_duplicate(&local.reference, "T-2", None)
+        .unwrap();
+    assert_eq!(moved.duplicate_of.as_deref(), Some("T-1"));
+    assert_eq!(moved.duplicate_redirect, None);
+}
+
+#[test]
+fn a_closed_issue_with_an_unrecognized_reason_is_never_ready_and_allows_a_local_decision() {
+    use ticketd_core::Availability;
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Closed for a reason nobody recognizes"), true);
+    f.refresh();
+    assert_eq!(f.ticket(1).availability.as_deref(), Some("Ready"));
+    f.set_state(1, closed(ClosureReason::Unknown));
+    f.refresh();
+
+    // Flagged and held: it keeps its status but is not offered as work to pick up.
+    let held = f.ticket(1);
+    assert_eq!(held.status, Status::Todo);
+    assert!(held.source.as_ref().unwrap().closure_unrecognized);
+    assert_eq!(held.availability, None);
+    let ready = TicketFilter {
+        availability: Some(Availability::Ready),
+        ..TicketFilter::default()
+    };
+    assert!(f.workspace.find_tickets(&ready).unwrap().is_empty());
+    assert_eq!(f.workspace.sidebar_counts().unwrap().ready, 0);
+
+    // The person can decide locally; the message for anything else says so.
+    let error = f
+        .workspace
+        .change_ticket("T-1", progress(Status::InProgress))
+        .unwrap_err();
+    assert!(error.to_string().contains("Done or Canceled"), "{error}");
+    let decided = f
+        .workspace
+        .change_ticket("T-1", progress(Status::Canceled))
+        .unwrap();
+    assert_eq!(decided.status, Status::Canceled);
+    // A later refresh of the unchanged closure keeps the decision and the flag.
+    f.refresh();
+    let after = f.ticket(1);
+    assert_eq!(after.status, Status::Canceled);
+    assert!(after.source.unwrap().closure_unrecognized);
+}
+
+fn history_of(f: &Fixture, reference: &str, kind: &str) -> Vec<(String, String)> {
+    f.workspace
+        .ticket_history(reference)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.kind == kind)
+        .map(|entry| (entry.from_value, entry.to_value))
+        .collect()
+}
+
+#[test]
+fn an_external_canonical_is_linked_recorded_in_history_and_never_erased_without_a_trace() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Dup"), true);
+    f.refresh();
+    let mut named = duplicate_of(1, "Dup", Some(2));
+    named.duplicate_of_url = Some("https://example.test/o/r/issues/2".into());
+    f.publish(named, true);
+    f.refresh();
+    match target(&f.ticket(1)) {
+        DuplicateTarget::External {
+            url, last_known, ..
+        } => {
+            assert_eq!(url.as_deref(), Some("https://example.test/o/r/issues/2"));
+            assert!(!last_known);
+        }
+        other => panic!("expected an external target, got {other:?}"),
+    }
+    assert_eq!(
+        history_of(&f, "T-1", "external_duplicate"),
+        vec![("".to_owned(), "o/r#2".to_owned())]
+    );
+
+    // The source reopens the issue: the designation leaves, the history stays.
+    f.publish(issue(1, "Dup"), true);
+    f.refresh();
+    assert!(f.ticket(1).source.unwrap().duplicate_target.is_none());
+    assert_eq!(
+        history_of(&f, "T-1", "external_duplicate"),
+        vec![
+            ("".to_owned(), "o/r#2".to_owned()),
+            ("o/r#2".to_owned(), "".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn a_withdrawn_target_clears_to_unknown_but_a_missing_answer_keeps_the_last_known_one() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Dup"), true);
+    f.refresh();
+    f.publish(duplicate_of(1, "Dup", Some(2)), true);
+    f.refresh();
+
+    // The lookup returned nothing (permissions changed): the target stays, flagged.
+    f.publish(duplicate_of(1, "Dup", None), true);
+    f.refresh();
+    match target(&f.ticket(1)) {
+        DuplicateTarget::External {
+            display,
+            last_known,
+            ..
+        } => {
+            assert_eq!(display, "o/r#2");
+            assert!(last_known, "no longer confirmed by the source");
+        }
+        other => panic!("expected the last known target, got {other:?}"),
+    }
+
+    // The source says the marking was withdrawn: the target is unknown, and says so.
+    let mut withdrawn = duplicate_of(1, "Dup", None);
+    withdrawn.duplicate_withdrawn = true;
+    f.publish(withdrawn, true);
+    f.refresh();
+    assert_eq!(target(&f.ticket(1)), DuplicateTarget::Unknown);
+    assert_eq!(
+        history_of(&f, "T-1", "external_duplicate").last(),
+        Some(&("o/r#2".to_owned(), "".to_owned()))
+    );
 }

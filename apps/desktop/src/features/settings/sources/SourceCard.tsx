@@ -148,7 +148,7 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
           preview: outcome.preview,
         });
         setNotice(
-          "Saved. These rules are stored only; no tickets have been imported.",
+          "Saved. Matching issues are imported on the next refresh, and then kept up to date automatically.",
         );
       },
     );
@@ -159,8 +159,9 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
   return (
     <SettingsCard id={`source-${connector.provider}`} title={connector.name}>
       <p className="settings-hint">
-        Choose which issues ticketd discovers. Saving stores these rules only;
-        it does not import tickets or change anything in {connector.name}.
+        Choose which issues ticketd discovers. Saving turns discovery on:
+        matching issues are imported as tickets on the next refresh and then
+        refreshed automatically. Nothing is changed in {connector.name}.
       </p>
       <p className="settings-label source-status" data-status={status}>
         <StatusDot

@@ -27,7 +27,7 @@ use super::{FailureScope, RefreshFailure, SourceFailure, contract::FailureCode};
 use crate::{Error, Workspace};
 
 /// Used when a rate-limited source does not say how long to wait.
-pub const DEFAULT_RATE_LIMIT_SECS: u64 = 300;
+const DEFAULT_RATE_LIMIT_SECS: u64 = 300;
 
 /// Why and since when a ticket cannot be refreshed. Present only while it can't.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

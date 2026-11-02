@@ -107,7 +107,10 @@ impl Workspace {
             values.push(tag.into());
         }
         if let Some(availability) = filter.availability {
-            sql.push_str(" AND t.status = 'Todo' AND ");
+            sql.push_str(&format!(
+                " AND t.status = 'Todo' AND NOT {} AND ",
+                crate::source::held_sql("t.id")
+            ));
             if matches!(availability, Availability::Ready) {
                 sql.push_str("NOT ");
             }

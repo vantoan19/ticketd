@@ -49,6 +49,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         ticket.trashed,
         ticket.prerequisites.iter().map(|p| p.status),
     ) {
+        // Awaiting a local decision on an unrecognized closure: not Ready, not Blocked.
+        _ if crate::source::closure_held(connection, &ticket.id)? => None,
         history::Readiness::Ready => Some("Ready".into()),
         history::Readiness::Blocked => Some("Blocked".into()),
         history::Readiness::NoReadyState => None,

@@ -116,6 +116,10 @@ pub enum Error {
     DuplicateDependencies,
     #[error("choose a canonical ticket to mark a ticket as Duplicate")]
     DuplicateNeedsCanonical,
+    #[error(
+        "{0} is itself a duplicate of an issue that is not a known ticket (or that loops back), so it cannot be the original; choose the original ticket directly"
+    )]
+    DuplicateCanonicalUnresolved(String),
     #[error("a ticket cannot be related to itself")]
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
@@ -150,11 +154,14 @@ pub enum Error {
         "{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change"
     )]
     ExternalContent { reference: String, provider: String },
-    #[error("{}", external_status_message(.reference, .provider, *.open))]
+    #[error("{}", external_status_message(.reference, .provider, *.open, *.closure_unrecognized))]
     ExternalStatus {
         reference: String,
         provider: String,
         open: bool,
+        /// The issue is closed for a reason ticketd does not recognize, so Done or
+        /// Canceled may be chosen here.
+        closure_unrecognized: bool,
     },
     #[error("{0} is not owned by an external source, so there is nothing to refresh")]
     NotSynchronized(String),
@@ -195,6 +202,11 @@ pub struct Ticket {
     pub duplicate_of: Option<String>,
     #[serde(default)]
     pub duplicates: Vec<String>,
+    /// Set when this duplicate's canonical ticket has itself become a Duplicate
+    /// (its source closed it as one): the ticket that is now the original, so the
+    /// designation can be moved there. Never changed automatically.
+    #[serde(default)]
+    pub duplicate_redirect: Option<String>,
     /// The external issue this ticket is or was, with current ownership and freshness.
     #[serde(default)]
     pub source: Option<source::TicketSource>,
@@ -232,8 +244,17 @@ fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
-fn external_status_message(reference: &str, provider: &str, open: bool) -> String {
-    if open {
+fn external_status_message(
+    reference: &str,
+    provider: &str,
+    open: bool,
+    closure_unrecognized: bool,
+) -> String {
+    if closure_unrecognized {
+        format!(
+            "{reference} is closed on {provider} for a reason ticketd does not recognize; choose Done or Canceled here, or reopen it there"
+        )
+    } else if open {
         format!(
             "{reference} is open on {provider}; locally choose Todo, In progress or In review. Closing is done on {provider}"
         )
@@ -469,6 +490,7 @@ impl Workspace {
             prerequisites: Vec::new(),
             duplicate_of: None,
             duplicates: Vec::new(),
+            duplicate_redirect: None,
             source: None,
             publication: None,
             parent: None,
@@ -726,6 +748,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         prerequisites: Vec::new(),
         duplicate_of: None,
         duplicates: Vec::new(),
+        duplicate_redirect: None,
         source: None,
         publication: None,
         parent: None,

@@ -34,6 +34,15 @@ impl Status {
         }
     }
 
+    /// Done and Canceled end work on a ticket. The local choices a person has
+    /// when the source closed an issue with a reason ticketd does not recognize.
+    pub fn ends_work(self) -> bool {
+        match self {
+            Self::Done | Self::Canceled => true,
+            Self::Todo | Self::InProgress | Self::InReview | Self::Duplicate => false,
+        }
+    }
+
     /// Position in workflow order: the order work is listed in.
     pub(crate) fn workflow_rank(self) -> u8 {
         match self {
@@ -116,6 +125,11 @@ pub(crate) fn availability(
         .iter()
         .map(|status| status.parse::<Status>())
         .collect::<Result<Vec<_>, _>>()?;
+    // A ticket whose issue the source closed for an unrecognized reason awaits a
+    // local decision; it is neither Ready nor Blocked.
+    if crate::source::closure_held(connection, id)? {
+        return Ok(None);
+    }
     Ok(match readiness(status, trashed, blockers) {
         Readiness::Ready => Some("Ready".into()),
         Readiness::Blocked => Some("Blocked".into()),

@@ -24,6 +24,10 @@ const duplicateTargetSchema = z.discriminatedUnion("kind", [
     ticket: z.string().nullish(),
     /** The reference is shown but not followed because it would loop back to this ticket. */
     problem: z.enum(["cycle"]).nullish(),
+    /** Where the canonical issue can be opened at its source. */
+    url: z.string().nullish(),
+    /** The source no longer supplied it: the last target it named, not a confirmed one. */
+    last_known: z.boolean().nullish(),
   }),
 ]);
 export type DuplicateTarget = z.infer<typeof duplicateTargetSchema>;
@@ -71,6 +75,8 @@ const ticketSchema = z.object({
   project_id: z.string().nullable(),
   effort_id: z.string().nullable(),
   availability: z.string().nullable(),
+  /** This duplicate's canonical ticket became a Duplicate itself; the ticket that is now the original. */
+  duplicate_redirect: z.string().nullish(),
   parent: z
     .object({ reference: z.string(), title: z.string(), trashed: z.boolean() })
     .nullable(),

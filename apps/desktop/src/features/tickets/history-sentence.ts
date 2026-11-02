@@ -86,6 +86,16 @@ export function describeChange(
           : from === to
             ? `Updated evidence ${quote(to)}`
             : `Renamed evidence ${quote(from)} to ${quote(to)}`;
+    case "external_duplicate":
+      return from && to
+        ? `Its source now names ${to} as the original, not ${from}`
+        : to
+          ? `Its source named ${to} as the original`
+          : `Its source no longer names ${from} as the original`;
+    case "publication":
+      return to === "not created"
+        ? "Confirmed that nothing was created by the earlier publication attempt"
+        : "Publication attempt updated";
     case "ownership":
       return `Took ownership from ${from === "github" ? "GitHub" : from}; the ticket is now local`;
     case "source":

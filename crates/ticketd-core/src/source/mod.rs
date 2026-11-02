@@ -10,14 +10,14 @@
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
 
-pub mod contract;
+mod contract;
 mod conversation;
-pub mod engine;
+mod engine;
 mod freshness;
-pub mod github;
+mod github;
 mod publication;
 mod schedule;
-pub mod schema;
+mod schema;
 mod takeover;
 mod tracking;
 
@@ -32,7 +32,7 @@ pub use contract::{
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
-pub use freshness::{DEFAULT_RATE_LIMIT_SECS, SourceHealth, SourceStatus, SourceUnavailable};
+pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
     ActionKind, AttemptState, Eligibility, IneligibleReason, PublicationAttempt, PublicationError,
     PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
@@ -132,7 +132,7 @@ pub(crate) fn migrate_details(connection: &rusqlite::Connection) -> Result<(), E
     Ok(())
 }
 
-pub(crate) use tracking::{guard_change, guard_duplicate};
+pub(crate) use tracking::{closure_held, guard_change, guard_duplicate, held_sql};
 
 /// Fills the ticket's external side and any blocking publication attempt.
 pub(crate) fn populate(

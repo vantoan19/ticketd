@@ -95,29 +95,40 @@ export function duplicateTargetParts(target: DuplicateTarget): {
   /** The local ticket it resolved to, which can be opened. */
   ticket: string | null;
   note: string;
+  /** Where the canonical issue can be opened at its source. */
+  url: string | null;
 } {
   if (target.kind === "unknown")
     return {
       label: "Unknown",
       ticket: null,
       note: "The source did not name an accessible original.",
+      url: null,
     };
+  const url = target.url ?? null;
+  // A target the source stopped supplying is the last one it named.
+  const last = target.last_known
+    ? " Last known; the source no longer names it."
+    : "";
   if (target.problem === "cycle")
     return {
       label: target.display,
       ticket: null,
-      note: "Not followed: it leads back to this ticket.",
+      note: "Not followed: it leads back to this ticket." + last,
+      url,
     };
   if (target.ticket)
     return {
       label: target.ticket,
       ticket: target.ticket,
-      note: target.display,
+      note: target.display + (last ? " ·" + last : ""),
+      url,
     };
   return {
     label: target.display,
     ticket: null,
-    note: "Not imported into ticketd.",
+    note: "Not imported into ticketd." + last,
+    url,
   };
 }
 

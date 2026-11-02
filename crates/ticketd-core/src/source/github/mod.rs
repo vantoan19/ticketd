@@ -7,10 +7,8 @@
 mod credentials;
 mod transport;
 
-pub use credentials::{AmbientCredentials, CredentialSource, Secret};
-pub use transport::{
-    HttpRequest, HttpResponse, HttpTransport, Method, TransportError, UreqTransport,
-};
+use credentials::{AmbientCredentials, CredentialSource};
+use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport};
 
 use serde_json::Value;
 
@@ -27,10 +25,10 @@ use super::{
     },
 };
 
-pub const PROVIDER: &str = "github";
+pub(crate) const PROVIDER: &str = "github";
 const DEFAULT_API_URL: &str = "https://api.github.com";
 /// Overrides the API address, for GitHub Enterprise or a test server.
-pub const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
+pub(crate) const API_URL_VARIABLE: &str = "TICKETD_GITHUB_API_URL";
 const MAX_REDIRECTS: usize = 3;
 const OPTION_PAGES: usize = 5;
 const LABEL_REPOSITORIES: usize = 5;
@@ -39,7 +37,7 @@ const CONVERSATION_PAGES: usize = 50;
 /// Pages (of 100) read when looking for a publication's issue before giving up.
 const SEARCH_PAGES: usize = 5;
 
-pub struct GithubConnector {
+pub(crate) struct GithubConnector {
     api_url: String,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
@@ -48,21 +46,21 @@ pub struct GithubConnector {
 impl GithubConnector {
     /// The connector as the application uses it: real network, ambient
     /// credentials, and the API address from [`API_URL_VARIABLE`] if set.
-    pub fn ambient() -> Self {
+    pub(crate) fn ambient() -> Self {
         let custom = std::env::var(API_URL_VARIABLE)
             .ok()
             .map(|url| url.trim().trim_end_matches('/').to_owned())
             .filter(|url| !url.is_empty());
-        // The GitHub CLI fallback only knows github.com.
-        let ask_gh = custom.is_none();
+        // github.com tokens are for github.com: another host gets its own.
+        let custom_host = custom.as_deref().map(host_of);
         Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
-            Box::new(AmbientCredentials::new(ask_gh)),
+            Box::new(AmbientCredentials::new(custom_host)),
         )
     }
 
-    pub fn new(
+    pub(crate) fn new(
         api_url: impl Into<String>,
         transport: Box<dyn HttpTransport>,
         credentials: Box<dyn CredentialSource>,
@@ -138,6 +136,14 @@ impl GithubConnector {
         body: Option<Vec<u8>>,
         subject: &str,
     ) -> Result<HttpResponse, SourceError> {
+        if !credential_may_travel(&self.api_url) {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: API_URL_VARIABLE.into(),
+                    message: "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear".into(),
+                },
+            ]));
+        }
         let mut url = url.to_owned();
         for _ in 0..=MAX_REDIRECTS {
             if !self.is_api_url(&url) && url != self.graphql_url() {
@@ -284,7 +290,12 @@ impl GithubConnector {
     /// whose `duplicate` is this issue count, and a later `UnmarkedAsDuplicateEvent`
     /// withdraws the target. Anything unavailable (no access, an error, a pull
     /// request as canonical) is "not supplied", never a failure of the fetch.
-    fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Option<ExternalRef> {
+    fn canonical_of(&self, repository: &str, number: &str, id: u64) -> Canonical {
+        self.look_up_canonical(repository, number, id)
+            .unwrap_or(Canonical::NotSupplied)
+    }
+
+    fn look_up_canonical(&self, repository: &str, number: &str, id: u64) -> Option<Canonical> {
         let (owner, name) = repository.split_once('/')?;
         let body = serde_json::json!({
             "query": CANONICAL_QUERY,
@@ -304,7 +315,7 @@ impl GithubConnector {
         let nodes = value
             .pointer("/data/repository/issue/timelineItems/nodes")?
             .as_array()?;
-        let mut target = None;
+        let mut target = Canonical::NotSupplied;
         for node in nodes {
             if node
                 .pointer("/duplicate/databaseId")
@@ -314,12 +325,16 @@ impl GithubConnector {
                 continue;
             }
             target = match node.get("__typename").and_then(Value::as_str) {
-                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?),
-                Some("UnmarkedAsDuplicateEvent") => None,
+                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?)
+                    .map_or(Canonical::NotSupplied, |(reference, url)| {
+                        Canonical::Named { reference, url }
+                    }),
+                // A definite withdrawal, not a missing answer.
+                Some("UnmarkedAsDuplicateEvent") => Canonical::Withdrawn,
                 _ => continue,
             };
         }
-        target
+        Some(target)
     }
 
     fn is_api_url(&self, url: &str) -> bool {
@@ -684,7 +699,14 @@ impl Connector for GithubConnector {
             })
         {
             let id = issue.reference.identity.id.parse().unwrap_or_default();
-            issue.duplicate_of = self.canonical_of(repository, number, id);
+            match self.canonical_of(repository, number, id) {
+                Canonical::Named { reference, url } => {
+                    issue.duplicate_of = Some(reference);
+                    issue.duplicate_of_url = url;
+                }
+                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
+                Canonical::NotSupplied => {}
+            }
         }
         Ok(issue)
     }
@@ -797,6 +819,30 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+/// The host part of an API address.
+fn host_of(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let authority = authority.rsplit('@').next().unwrap_or("");
+    authority
+        .rsplit_once(':')
+        .filter(|(_, port)| port.chars().all(|c| c.is_ascii_digit()))
+        .map_or(authority, |(host, _)| host)
+        .to_owned()
+}
+
+/// A token is sent only over https, or to this machine.
+fn credential_may_travel(api_url: &str) -> bool {
+    if api_url.starts_with("https://") {
+        return true;
+    }
+    api_url.starts_with("http://")
+        && matches!(
+            host_of(api_url).as_str(),
+            "localhost" | "127.0.0.1" | "[::1]"
+        )
+}
+
 fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
     locator
         .rsplit_once('#')
@@ -876,25 +922,44 @@ repository(owner: $owner, name: $name) { issue(number: $number) { \
 timelineItems(last: 50, itemTypes: [MARKED_AS_DUPLICATE_EVENT, UNMARKED_AS_DUPLICATE_EVENT]) { nodes { \
 __typename \
 ... on MarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } \
-canonical { __typename ... on Issue { databaseId number repository { nameWithOwner } } } } \
+canonical { __typename ... on Issue { databaseId number url repository { nameWithOwner } } } } \
 ... on UnmarkedAsDuplicateEvent { duplicate { ... on Issue { databaseId } } } } } } } }";
 
 /// An issue named as canonical, or `None` for anything ticketd cannot track
 /// (a pull request, or a target the credential cannot read).
-fn canonical_reference(canonical: &Value) -> Option<ExternalRef> {
+fn canonical_reference(canonical: &Value) -> Option<(ExternalRef, Option<String>)> {
     if canonical.get("__typename").and_then(Value::as_str) != Some("Issue") {
         return None;
     }
     let id = canonical.get("databaseId").and_then(Value::as_u64)?;
     let number = canonical.get("number").and_then(Value::as_u64)?;
     let repository = canonical.pointer("/repository/nameWithOwner")?.as_str()?;
-    Some(ExternalRef {
-        identity: ExternalIdentity {
-            provider: PROVIDER.into(),
-            id: id.to_string(),
+    let url = canonical
+        .get("url")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((
+        ExternalRef {
+            identity: ExternalIdentity {
+                provider: PROVIDER.into(),
+                id: id.to_string(),
+            },
+            locator: format!("{repository}#{number}"),
         },
-        locator: format!("{repository}#{number}"),
-    })
+        url,
+    ))
+}
+
+/// What the timeline says about a duplicate's canonical issue.
+enum Canonical {
+    Named {
+        reference: ExternalRef,
+        url: Option<String>,
+    },
+    /// The marking was withdrawn.
+    Withdrawn,
+    /// Nothing usable came back (no access, an error, a pull request).
+    NotSupplied,
 }
 
 #[derive(Default)]
@@ -1074,6 +1139,8 @@ fn translate_issue(
         updated_at: text("updated_at").unwrap_or_default().to_owned(),
         // The issue payload does not name the canonical issue; `fetch` looks it up.
         duplicate_of: None,
+        duplicate_of_url: None,
+        duplicate_withdrawn: false,
     }))
 }
 

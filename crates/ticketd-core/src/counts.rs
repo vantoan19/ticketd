@@ -17,11 +17,13 @@ impl Workspace {
     pub fn sidebar_counts(&self) -> Result<SidebarCounts, Error> {
         self.deliver_due_reminders()?;
         let unresolved = unresolved_blocker_sql("blocker");
+        let held = crate::source::held_sql("t.id");
         let counts = self.connection.query_row(
             &format!(
                 "SELECT \
                (SELECT COUNT(*) FROM inbox_entries WHERE person = ?1 AND read = 0), \
                (SELECT COUNT(*) FROM tickets t WHERE t.trashed = 0 AND t.status = 'Todo' \
+                  AND NOT {held} \
                   AND NOT EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id \
                                   WHERE d.dependent_id = t.id AND {unresolved})), \
                (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress')"
