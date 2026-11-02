@@ -87,7 +87,6 @@ function ReviewBody({
 
   useEffect(() => {
     let active = true;
-    setLoad({ kind: "loading" });
     sourcesClient.reviewPublication(attempt.reference, true).then(
       (review) => {
         if (active) setLoad({ kind: "ready", review });
@@ -175,7 +174,10 @@ function ReviewBody({
             variant="outline"
             size="sm"
             disabled={busy}
-            onClick={() => setRound((n) => n + 1)}
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              setRound((n) => n + 1);
+            }}
           >
             Look again
           </Button>
