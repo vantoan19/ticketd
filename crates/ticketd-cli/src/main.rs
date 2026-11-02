@@ -324,6 +324,10 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        /// Attach an issue whose title or description differs from what was sent. Its text
+        /// then replaces the ticket's, and the ticket's own text is kept as a note
+        #[arg(long)]
+        accept_different: bool,
         #[arg(long)]
         agent: Option<String>,
     },
@@ -1036,6 +1040,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     attach,
                     not_created,
                     no_search,
+                    accept_different,
                     agent,
                 },
         } => {
@@ -1060,6 +1065,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                             resolution,
                             now: None,
                             agent,
+                            accept_different_content: accept_different,
                         },
                     );
                     if let Err(ticketd_core::Error::Publication(error)) = &result {
@@ -1071,6 +1077,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                             writeln!(output, "{}", serde_json::to_string(attempt)?)?;
                         }
                         return Err(match error {
+                            PublicationError::DifferentContent { .. } => format!(
+                                "{error}. Run the command again with --accept-different to attach it anyway"
+                            ),
                             PublicationError::Unverified { .. }
                             | PublicationError::Candidates { .. }
                             | PublicationError::Mismatch { .. } => format!(

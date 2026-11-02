@@ -56,6 +56,9 @@ struct Remote {
     search_complete: bool,
     /// Runs inside a lookup, after its answer is computed, before it returns.
     lookup_hook: Option<Hook>,
+    /// Issues the connected account created in the window whose text does not
+    /// match the attempt; searches list them without counting them as matches.
+    recent: Vec<ExternalIssue>,
 }
 
 #[derive(Clone)]
@@ -71,6 +74,7 @@ impl Fake {
             lookup_down: false,
             search_complete: true,
             lookup_hook: None,
+            recent: Vec::new(),
         })))
     }
 }
@@ -209,6 +213,7 @@ impl Connector for Fake {
                     })
                     .cloned()
                     .collect(),
+                recent: remote.recent.clone(),
                 complete: remote.search_complete,
             })
         })
@@ -902,14 +907,35 @@ fn attach(issue: Option<&str>) -> ResolveOptions {
         },
         now: None,
         agent: None,
+        accept_different_content: false,
     }
+}
+
+fn accept_different(issue: &str) -> ResolveOptions {
+    ResolveOptions {
+        accept_different_content: true,
+        ..attach(Some(issue))
+    }
+}
+
+/// An hour after the attempts the tests make: past the create call's lease and
+/// the time GitHub needs to list a just-created issue.
+fn later() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    chrono::DateTime::from_timestamp(now as i64 + 3600, 0)
+        .unwrap()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 fn not_created() -> ResolveOptions {
     ResolveOptions {
         resolution: Resolution::NotCreated,
-        now: None,
+        now: Some(later()),
         agent: None,
+        accept_different_content: false,
     }
 }
 
@@ -1170,16 +1196,19 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
         .unwrap();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
 
-    let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    let done = f
+        .resolve(&ticket.reference, &accept_different("101"))
+        .unwrap();
     assert_eq!(done.attempt.state, AttemptState::Succeeded);
     let source = done.ticket.source.unwrap();
     assert_eq!(
         (source.id.as_str(), source.origin),
         ("101", Origin::Published)
     );
+    // The local note, and the text the issue replaced.
     assert_eq!(
         f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
-        1
+        2
     );
     // The imported ticket is in the trash, not deleted, and the identity is unique.
     assert!(f.workspace.show_ticket("T-2").unwrap().trashed);
@@ -1341,7 +1370,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
     f.fake.0.lock().unwrap().lookup_down = true;
     let review = f
         .workspace
-        .review_publication(&f.engine, &ticket.reference, true)
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
         .unwrap();
     assert!(review.lookup_failure.is_some());
     let not_created = review
@@ -1358,7 +1387,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
     }
     let review = f
         .workspace
-        .review_publication(&f.engine, &ticket.reference, true)
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
         .unwrap();
     assert!(
         !review
@@ -1370,7 +1399,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
     f.fake.0.lock().unwrap().search_complete = true;
     let review = f
         .workspace
-        .review_publication(&f.engine, &ticket.reference, true)
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
         .unwrap();
     assert!(
         review
@@ -1477,7 +1506,7 @@ fn the_review_states_what_is_known_and_unknown_and_which_actions_are_safe() {
 
     let review = f
         .workspace
-        .review_publication(&f.engine, &ticket.reference, true)
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
         .unwrap();
     assert_eq!(review.attempt.state, AttemptState::Unresolved);
     assert!(review.known.iter().any(|line| line.contains("o/r")));
@@ -1498,7 +1527,7 @@ fn the_review_states_what_is_known_and_unknown_and_which_actions_are_safe() {
     f.fake.0.lock().unwrap().lookup_down = true;
     let down = f
         .workspace
-        .review_publication(&f.engine, &ticket.reference, true)
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
         .unwrap();
     assert!(down.candidates.is_empty());
     assert_eq!(down.candidates_complete, None);
@@ -1522,4 +1551,152 @@ fn resolution_outcomes_survive_export_backup_and_restore() {
     let workspace = Workspace::open(&path).unwrap();
     let restored = workspace.show_ticket(&ticket.reference).unwrap();
     assert_eq!(restored.source.unwrap().display, "o/r#101");
+}
+
+// ---- Live-test fixes (#98): attach safety, blocking rules, listing lag ----
+
+/// An issue the same account created in the window that is not this ticket's.
+fn unrelated_issue(f: &Fixture, id: u64, title: &str, body: &str) -> ExternalIssue {
+    let mut issue = f.fake.0.lock().unwrap().issues[&101].clone();
+    issue.reference.identity.id = id.to_string();
+    issue.reference.locator = format!("o/r#{id}");
+    issue.display = format!("o/r#{id}");
+    issue.title = title.into();
+    issue.body = body.into();
+    issue
+}
+
+#[test]
+fn attaching_an_issue_with_other_text_needs_confirmation_and_keeps_the_local_text() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let other = unrelated_issue(&f, 22, "Unrelated probe", "Unrelated text");
+    f.fake.0.lock().unwrap().issues.insert(22, other);
+    f.fake.0.lock().unwrap().issues.remove(&101);
+
+    // Refused, and nothing about the attempt or the ticket changes.
+    let error = publication_error(f.resolve(&ticket.reference, &attach(Some("22"))).unwrap_err());
+    let PublicationError::DifferentContent {
+        issue,
+        title_differs,
+        body_differs,
+        ..
+    } = error
+    else {
+        panic!("expected a content difference");
+    };
+    assert_eq!(issue.display, "o/r#22");
+    assert!(title_differs && body_differs);
+    f.still_unresolved(&ticket.reference);
+    assert_eq!(f.ticket(&ticket.reference).title, "Escalate");
+
+    // Confirmed: the issue's text applies and the ticket's own is kept as a note.
+    f.resolve(&ticket.reference, &accept_different("22"))
+        .unwrap();
+    let after = f.ticket(&ticket.reference);
+    assert_eq!(after.title, "Unrelated probe");
+    assert_eq!(after.body, "Unrelated text");
+    let notes = f.workspace.notes(&ticket.reference, 10, 0).unwrap();
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.content.contains("Title: Escalate") && n.content.contains("Body")),
+        "{notes:?}"
+    );
+    // A refresh finds nothing further to lose.
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(f.ticket(&ticket.reference).title, "Unrelated probe");
+}
+
+#[test]
+fn attaching_the_issue_that_holds_the_sent_text_needs_no_confirmation() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
+    assert_eq!(f.ticket(&ticket.reference).title, "Escalate");
+}
+
+#[test]
+fn other_recent_issues_are_listed_but_do_not_block_not_created() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Never landed");
+    let other = unrelated_issue(&f, 18, "Another ticket", "Another body");
+    f.fake.0.lock().unwrap().issues.clear();
+    f.fake.0.lock().unwrap().recent = vec![other];
+
+    let review = f
+        .workspace
+        .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
+        .unwrap();
+    assert!(review.candidates.is_empty());
+    assert_eq!(review.other_recent.len(), 1);
+    assert_eq!(review.other_recent[0].title, "Another ticket");
+    assert!(
+        review
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+    );
+    let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
+    assert_eq!(outcome.attempt.state, AttemptState::Failed);
+}
+
+#[test]
+fn a_refused_attach_of_an_issue_owned_elsewhere_leaves_the_attempt_untouched() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    // Another ticket published its own issue (#102) and owns it.
+    let other = describe(&mut f, "Other ticket", "Other body");
+    f.publish(&other.reference).unwrap();
+    assert_eq!(f.ticket(&other.reference).source.unwrap().id, "102");
+
+    let error = publication_error(
+        f.resolve(&ticket.reference, &accept_different("102"))
+            .unwrap_err(),
+    );
+    assert!(matches!(error, PublicationError::Mismatch { .. }), "{error}");
+    assert!(error.to_string().contains("published"), "{error}");
+    let attempt = f.ticket(&ticket.reference).publication.unwrap();
+    assert!(attempt.issue.is_none(), "no issue may be recorded");
+    assert_ne!(attempt.failure.map(|x| x.code), Some("identity_conflict".into()));
+    let review = f
+        .workspace
+        .review_publication_at(&f.engine, &ticket.reference, false, Some(&later()))
+        .unwrap();
+    assert!(
+        review
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::Attach && a.available)
+    );
+}
+
+#[test]
+fn nothing_created_is_not_concluded_before_a_just_created_issue_could_be_listed() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Never landed");
+    f.fake.0.lock().unwrap().issues.clear();
+
+    // Right away: the read was complete but proves nothing yet.
+    let mut early = not_created();
+    early.now = None;
+    let error = publication_error(f.resolve(&ticket.reference, &early).unwrap_err());
+    assert!(matches!(error, PublicationError::Unverified { .. }), "{error}");
+    assert!(error.to_string().contains("look again"), "{error}");
+    f.still_unresolved(&ticket.reference);
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, true)
+        .unwrap();
+    assert!(review.search_ready_at.is_some());
+    assert!(
+        !review
+            .actions
+            .iter()
+            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+    );
+
+    f.resolve(&ticket.reference, &not_created()).unwrap();
 }

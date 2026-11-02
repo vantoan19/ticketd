@@ -607,6 +607,7 @@ impl Connector for GithubConnector {
         ));
         let subject = format!("repository {destination}");
         let mut matches = Vec::new();
+        let mut recent = Vec::new();
         for _ in 0..SEARCH_PAGES {
             let Some(current) = url.take() else {
                 break;
@@ -626,25 +627,29 @@ impl Connector for GithubConnector {
                 {
                     return Ok(PublicationCandidates {
                         matches,
+                        recent,
                         complete: true,
                     });
                 }
-                // Anything the connected account created in the window is a candidate
-                // whatever its text says now: a teammate or an automation may have
-                // rewritten both the title and the description.
+                // An issue the connected account created in the window may have been
+                // rewritten by a teammate or an automation, so it is listed and can be
+                // attached; only a text match blocks "not created".
                 let by_account = search.account.as_deref().is_some_and(|account| {
                     item.pointer("/user/login")
                         .and_then(Value::as_str)
                         .is_some_and(|login| login.eq_ignore_ascii_case(account))
                 });
-                if by_account || could_be_published(&issue, &search.request) {
+                if could_be_published(&issue, &search.request) {
                     matches.push(issue);
+                } else if by_account {
+                    recent.push(issue);
                 }
             }
             url = next;
         }
         Ok(PublicationCandidates {
             matches,
+            recent,
             complete: url.is_none(),
         })
     }

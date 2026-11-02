@@ -1155,7 +1155,7 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
 }
 
 #[test]
-fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_its_text() {
+fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_match_blocks() {
     let (fixture, engine) = setup(Some(TOKEN));
     let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
     rewritten["title"] = json!("Renamed by a teammate");
@@ -1177,8 +1177,11 @@ fn whatever_the_connected_account_created_in_the_window_is_a_candidate_whatever_
             },
         )
         .unwrap();
+    // The rewritten issue does not match the sent text, so it is listed for
+    // information only; someone else's issue is not listed at all.
+    assert!(found.matches.is_empty());
     let ids: Vec<_> = found
-        .matches
+        .recent
         .iter()
         .map(|i| i.reference.identity.id.as_str())
         .collect();

@@ -401,6 +401,7 @@ impl Engine {
         if found
             .matches
             .iter()
+            .chain(&found.recent)
             .any(|issue| issue.reference.identity.provider != provider)
         {
             return Err(SourceError::Protocol(

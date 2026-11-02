@@ -440,7 +440,20 @@ fn unresolved_ticket(cli: &Cli) -> String {
     let reference = local_ticket(cli);
     let args = ["source", "publish", &reference, "--destination", "o/flaky"];
     assert_eq!(cli.command(&args, Some(TOKEN)).status.code(), Some(1));
+    age_attempts(cli);
     reference
+}
+
+/// Makes every attempt an hour old, so a search counts for a "not created"
+/// verdict (GitHub lists a just-created issue only after a moment).
+fn age_attempts(cli: &Cli) {
+    let db = rusqlite::Connection::open(cli.dir.path().join("workspace.sqlite3")).unwrap();
+    db.execute_batch(
+        "UPDATE publication_attempts SET \
+         started_at = strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '-1 hour'), \
+         lease_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', lease_expires_at, '-1 hour')",
+    )
+    .unwrap();
 }
 
 #[test]

@@ -231,13 +231,18 @@ pub struct PublicationSearch {
     pub account: Option<String>,
 }
 
-/// What a search found. `matches` holds every issue the connector saw that could
-/// be the created one (same title or same description). `complete` is true only
-/// when the connector read the whole window: then an empty `matches` proves that
-/// nothing was created, while an incomplete read proves nothing.
+/// What a search found. `matches` holds every issue the connector saw whose
+/// title or non-empty description equals what the attempt sent. `recent` holds
+/// the other issues the connected account created in the window: they are shown
+/// for information and may be attached, but never block a "not created" verdict.
+/// `complete` is true only when the connector read the whole window: then an
+/// empty `matches` proves that nothing was created, while an incomplete read
+/// proves nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicationCandidates {
     pub matches: Vec<ExternalIssue>,
+    #[serde(default)]
+    pub recent: Vec<ExternalIssue>,
     pub complete: bool,
 }
 
