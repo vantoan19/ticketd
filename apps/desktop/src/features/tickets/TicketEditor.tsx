@@ -336,6 +336,7 @@ export function TicketEditor({
               size="sm"
               type="button"
               className="description-empty"
+              ref={editButton}
               onClick={() => setBodyMode("editing")}
             >
               Add a description…

@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { test, vi, expect, afterEach } from "vitest";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -447,7 +448,7 @@ test("a passage that is gone says so and lands on the description without guessi
   expect(marked()).toBeNull();
 });
 
-test("an empty description has one add affordance", () => {
+test("an empty description has one add affordance and keeps focus when editing ends", async () => {
   render(
     <TicketEditor
       ticket={{ ...initial, id: "empty-description", body: "" }}
@@ -458,4 +459,11 @@ test("an empty description has one add affordance", () => {
     screen.getByRole("button", { name: "Add a description…" }),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add a description…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done editing" }));
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Add a description…" }),
+    ),
+  );
 });

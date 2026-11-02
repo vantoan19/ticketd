@@ -10,6 +10,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { Ticket, TicketSource } from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
+import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
 import { TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
@@ -136,13 +137,14 @@ test("a closed external ticket locks status and explains why", () => {
   ).toBeTruthy();
 });
 
-test("an unrecognized closure is flagged instead of guessed", () => {
+test("an unrecognized closure is flagged instead of guessed", async () => {
   bridge.invoke.mockResolvedValue([]);
   properties(
     ticket({
       source: source({
         state: { state: "closed", reason: "unknown" },
-        status_locked: true,
+        status_locked: false,
+        status_choices: ["Done", "Canceled"],
         closure_unrecognized: true,
       }),
     }),
@@ -153,6 +155,18 @@ test("an unrecognized closure is flagged instead of guessed", () => {
     ),
   ).toBeTruthy();
   expect(screen.queryByText("Agent: github")).toBeNull();
+  fireEvent.click(screen.getByRole("combobox", { name: "Status: Todo" }));
+  expect(
+    await screen.findByText(
+      "Choose Done or Canceled here, or reopen it on GitHub.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getAllByRole("option")
+      .filter((option) => option.getAttribute("aria-disabled") !== "true")
+      .map((option) => option.textContent),
+  ).toEqual(["Done", "Canceled"]);
 });
 
 test("a closed duplicate names the source's canonical issue or says it is unknown", () => {
@@ -455,4 +469,34 @@ test("a local child explains its independent ownership when its parent belongs t
       /belongs to GitHub; this ticket stays local unless you publish it on its own/,
     ),
   ).toBeTruthy();
+});
+
+test("a long source description can expand without making the field editable", () => {
+  const height = vi
+    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+    .mockReturnValue(400);
+  try {
+    render(
+      <SourceDescription
+        ticket={ticket({ body: "## Scope\n\nA long source document." })}
+        source={source()}
+        revision={0}
+        select={vi.fn()}
+      />,
+    );
+    const expand = screen.getByRole("button", {
+      name: "Show full description",
+    });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(expand);
+    expect(
+      screen
+        .getByRole("button", { name: "Show less" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  } finally {
+    height.mockRestore();
+  }
 });

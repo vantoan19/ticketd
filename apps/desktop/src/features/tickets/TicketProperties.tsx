@@ -330,9 +330,11 @@ export function TicketProperties({
                     <SelectSeparator />
                     <SelectGroup>
                       <SelectLabel>
-                        {owner.status_locked
-                          ? `Closed on ${ownerName}`
-                          : `Set by ${ownerName} when the issue closes`}
+                        {owner.closure_unrecognized
+                          ? `The closure reason on ${ownerName} is unknown`
+                          : owner.status_locked
+                            ? `Closed on ${ownerName}`
+                            : `Set by ${ownerName} when the issue closes`}
                       </SelectLabel>
                       {ticketStatuses
                         .filter((status) => !statusChoices.includes(status))
@@ -343,9 +345,11 @@ export function TicketProperties({
                         ))}
                     </SelectGroup>
                     <p className="status-menu-caption">
-                      {owner.status_locked
-                        ? `Reopen it on ${ownerName} to work on it again; it comes back as Todo.`
-                        : `Done, Canceled and Duplicate follow ${ownerName} when the issue closes.`}
+                      {owner.closure_unrecognized
+                        ? `Choose Done or Canceled here, or reopen it on ${ownerName}.`
+                        : owner.status_locked
+                          ? `Reopen it on ${ownerName} to work on it again; it comes back as Todo.`
+                          : `Done, Canceled and Duplicate follow ${ownerName} when the issue closes.`}
                     </p>
                   </>
                 )}
