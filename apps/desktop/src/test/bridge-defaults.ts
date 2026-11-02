@@ -29,6 +29,7 @@ export function bridgeDefault(
       return [];
     case "count_tickets":
       return {
+        total: 0,
         todo: 0,
         in_progress: 0,
         in_review: 0,
@@ -105,6 +106,7 @@ export function bridgeDefault(
         relationships: {
           parent: null,
           children: emptyPage,
+          children_progress: { total: 0, done: 0 },
           prerequisites: emptyPage,
           blocking: emptyPage,
           related: emptyPage,

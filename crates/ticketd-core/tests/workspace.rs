@@ -4036,3 +4036,48 @@ mod duplicate_review_outcomes {
             .unwrap();
     }
 }
+
+#[test]
+fn subticket_progress_counts_every_subticket_not_only_the_first_page() {
+    use ticketd_core::ContextOptions;
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = w.create_ticket("Parent").unwrap();
+    for number in 0..30 {
+        let child = w.create_ticket(&format!("Child {number}")).unwrap();
+        w.set_parent(&child.reference, Some(&parent.reference), None)
+            .unwrap();
+        if number < 25 {
+            set_status(&mut w, &child.reference, Status::Done);
+        }
+    }
+    let relationships = w
+        .ticket_context(
+            &parent.reference,
+            ContextOptions {
+                relationships: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .relationships
+        .unwrap();
+    assert_eq!(relationships.children.items.len(), 20, "one page is read");
+    assert_eq!(relationships.children_progress.total, 30);
+    assert_eq!(relationships.children_progress.done, 25);
+}
+
+#[test]
+fn status_counts_serialize_their_total_so_clients_never_sum_them() {
+    let counts = ticketd_core::StatusCounts {
+        todo: 2,
+        in_progress: 1,
+        in_review: 0,
+        done: 3,
+        canceled: 1,
+        duplicate: 1,
+    };
+    let value = serde_json::to_value(counts).unwrap();
+    assert_eq!(value["total"], 8);
+    assert_eq!(value["duplicate"], 1);
+}

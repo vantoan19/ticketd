@@ -111,7 +111,9 @@ const refreshReportSchema = z.object({
       code: z.string(),
       message: z.string(),
       /** What the failure is about: the source, one ticket, one repository or one thread. */
-      scope: z.enum(["source", "ticket", "partition", "conversation"]).catch("source"),
+      scope: z
+        .enum(["source", "ticket", "partition", "conversation"])
+        .catch("source"),
     }),
   ),
   refreshed_at: z.string(),

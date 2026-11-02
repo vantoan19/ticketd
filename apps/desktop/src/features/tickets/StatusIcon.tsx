@@ -8,26 +8,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-// Kept beside the icon that renders it; Fast Refresh only affects dev reloads.
-// eslint-disable-next-line react-refresh/only-export-components
-export const ticketStatuses = [
-  "Todo",
-  "In progress",
-  "In review",
-  "Done",
-  "Canceled",
-  "Duplicate",
-] as const;
-
-/**
- * Statuses a person or agent can choose directly. Duplicate is not among them: marking one
- * needs a canonical ticket, so it goes through the duplicate review instead.
- */
-// eslint-disable-next-line react-refresh/only-export-components
-export const directStatuses = ticketStatuses.filter(
-  (status) => status !== "Duplicate",
-);
-
 const statusIcons: Record<string, LucideIcon> = {
   Todo: Circle,
   "In progress": CircleDot,

@@ -5,6 +5,7 @@ import { groupTickets } from "./ticket-groups";
 const ticket = (id: number, status: string) =>
   ({ id: String(id), reference: `T-${id}`, status }) as Ticket;
 const counts = {
+  total: 0,
   todo: 0,
   in_progress: 0,
   in_review: 0,

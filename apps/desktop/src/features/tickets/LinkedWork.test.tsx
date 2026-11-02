@@ -85,6 +85,12 @@ function bridge(
         relationships: {
           parent: options.parent ? related(options.parent) : null,
           children: pageOf(options.children),
+          children_progress: {
+            total: options.children?.length ?? 0,
+            done:
+              options.children?.filter((item) => item.status === "Done")
+                .length ?? 0,
+          },
           prerequisites: pageOf(options.prerequisites),
           blocking: pageOf(options.blocking),
           related: pageOf(options.related, options.more ?? null),

@@ -564,7 +564,7 @@ impl Snapshot {
     }
 
     /// Readiness of every waiting ticket before and after all of `decisions` are applied
-    /// together; the duplicate counts as Canceled afterwards when the review cancels it.
+    /// together; the duplicate has the Duplicate status afterwards.
     fn outcomes(&self, decisions: &[DependencyDecision]) -> Result<Vec<WaitingOutcome>, Error> {
         let mut after_blockers = self.blockers.clone();
         for decision in decisions {
@@ -586,7 +586,7 @@ impl Snapshot {
         }
         let status_after = |reference: &str| -> Result<Status, Error> {
             if self.mode == ReviewMode::Duplicate && reference == self.source {
-                Ok(Status::Canceled)
+                Ok(Status::Duplicate)
             } else {
                 Ok(self.fact(reference)?.status)
             }

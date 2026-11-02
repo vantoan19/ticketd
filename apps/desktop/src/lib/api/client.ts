@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
 import { publicationAttemptSchema } from "@/lib/api/publication";
+import { ticketStatuses } from "@/lib/statuses";
 
 export type { PublicationAttempt } from "@/lib/api/publication";
 
@@ -111,6 +112,8 @@ const relatedPageSchema = z.object({
 const relationshipsSchema = z.object({
   parent: relatedSchema.nullable(),
   children: relatedPageSchema,
+  /** Subticket progress over all subtickets, not only the page read. */
+  children_progress: z.object({ total: z.number(), done: z.number() }),
   prerequisites: relatedPageSchema,
   blocking: relatedPageSchema,
   related: relatedPageSchema,
@@ -141,13 +144,7 @@ const graphSchema = z.object({
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
 const reviewModeSchema = z.enum(["duplicate", "separate"]);
-const statusSchema = z.enum([
-  "Todo",
-  "In progress",
-  "In review",
-  "Done",
-  "Canceled",
-]);
+const statusSchema = z.enum(ticketStatuses);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),
@@ -255,6 +252,8 @@ const statusCountsSchema = z.object({
   done: z.number().int().nonnegative(),
   canceled: z.number().int().nonnegative(),
   duplicate: z.number().int().nonnegative(),
+  /** Every ticket of the result, summed by the core. */
+  total: z.number().int().nonnegative(),
 });
 /** A source comment or timeline event, read-only. Authors are the source's own, never editing agents. */
 const conversationEntrySchema = z.discriminatedUnion("type", [

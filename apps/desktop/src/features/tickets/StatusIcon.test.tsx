@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { StatusIcon, directStatuses, ticketStatuses } from "./StatusIcon";
+import { directStatuses, ticketStatuses } from "@/lib/statuses";
+import { StatusIcon } from "./StatusIcon";
 
 afterEach(cleanup);
 

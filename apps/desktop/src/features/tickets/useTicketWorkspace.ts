@@ -16,16 +16,6 @@ import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
-export function statusTotal(counts: StatusCounts) {
-  return (
-    counts.todo +
-    counts.in_progress +
-    counts.in_review +
-    counts.done +
-    counts.canceled +
-    counts.duplicate
-  );
-}
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
  * fetched after the selection, so it is judged against the stored text rather than
@@ -156,6 +146,18 @@ export function useTicketWorkspace(
         }),
       ]);
       if (request !== generation.current) return;
+      const found = result[3];
+      if (!trash && found && offset > 0 && offset >= found.total) {
+        // The page this view was on no longer exists (its last tickets left the
+        // result): go to the last page that does instead of showing an empty list
+        // under a non-zero total.
+        setOffset(
+          found.total === 0
+            ? 0
+            : Math.floor((found.total - 1) / PAGE_SIZE) * PAGE_SIZE,
+        );
+        return;
+      }
       setQueryError(false);
       setTickets(result[0]);
       setLoadedOffset(offset);
@@ -329,14 +331,18 @@ export function useTicketWorkspace(
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
   }, []);
-  const total = counts ? statusTotal(counts) : tickets.length;
+  const total = counts ? counts.total : tickets.length;
   const selectedIndex = tickets.findIndex(
     (item) => item.reference === selected,
   );
-  /** The selected ticket's place in the visible list, across pages. */
+  /**
+   * The selected ticket's place in the visible list, across pages. It is read
+   * against the page that is loaded, so it stays put (and the Previous/Next
+   * buttons stay mounted, keeping focus) while the neighboring page loads.
+   */
   const position =
-    selectedIndex >= 0 && loadedOffset === offset
-      ? { index: offset + selectedIndex + 1, total }
+    selectedIndex >= 0
+      ? { index: loadedOffset + selectedIndex + 1, total }
       : null;
   function openAdjacent(direction: 1 | -1) {
     if (selectedIndex < 0) return;

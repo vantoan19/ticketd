@@ -13,7 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
-import { StatusIcon, directStatuses } from "@/features/tickets/StatusIcon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { directStatuses } from "@/lib/statuses";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";

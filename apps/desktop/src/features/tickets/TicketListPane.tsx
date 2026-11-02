@@ -304,7 +304,7 @@ export function TicketListPane({
           />
         </>
       )}
-      {!trash && total > PAGE_SIZE && (
+      {!trash && (offset > 0 || total > PAGE_SIZE) && (
         <div className="pagination">
           <button
             type="button"

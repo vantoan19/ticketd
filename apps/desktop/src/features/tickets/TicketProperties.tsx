@@ -33,7 +33,8 @@ import {
 } from "./ticket-source";
 import { Button } from "@/components/ui/button";
 import { RailSection } from "./RailSection";
-import { StatusIcon, ticketStatuses } from "./StatusIcon";
+import { ticketStatuses } from "@/lib/statuses";
+import { StatusIcon } from "./StatusIcon";
 import { Duplicates } from "./Duplicates";
 import {
   Dialog,

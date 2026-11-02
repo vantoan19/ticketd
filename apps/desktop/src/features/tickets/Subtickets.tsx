@@ -36,10 +36,10 @@ export function Subtickets({
         {add}
       </div>
     );
-  const done = rows.filter((row) => row.status === "Done").length;
-  // More subtickets than were read: the total is a lower bound.
+  // Progress comes from the core over every subticket, not the page read.
+  const { done, total } = links.children_progress;
   const partial = links.children.next_offset !== null;
-  const summary = `${done} of ${rows.length}${partial ? "+" : ""} done`;
+  const summary = `${done} of ${total} done`;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
       <div className="detail-section-heading">
@@ -48,7 +48,7 @@ export function Subtickets({
           className="subtickets-progress"
           aria-label="Subticket progress"
           value={done}
-          max={rows.length}
+          max={total}
         />
         <span className="subtickets-summary">{summary}</span>
         {add}
