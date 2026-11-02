@@ -388,6 +388,35 @@ test("the list header says Last synced, never Synced, while the source is unavai
   expect(screen.queryByText(/^Synced/)).toBeNull();
 });
 
+test("a refresh command failure is visible until a newer source attempt supersedes it", async () => {
+  const state = {
+    running: false,
+    report: null,
+    error: "workspace is busy",
+    errorAt: "2026-02-02T10:00:00Z",
+  };
+  const { rerender } = render(
+    withActivity(
+      { sources: [status({ last_attempt_at: "2026-02-02T09:59:00Z" })] },
+      <SourceRefresh providers={["github"]} state={state} />,
+    ),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "GitHub refresh failed" }),
+  );
+  expect(await screen.findByText("workspace is busy")).toBeTruthy();
+  rerender(
+    withActivity(
+      { sources: [status({ last_attempt_at: "2026-02-02T10:01:00Z" })] },
+      <SourceRefresh providers={["github"]} state={state} />,
+    ),
+  );
+  expect(
+    screen.queryByRole("button", { name: "GitHub refresh failed" }),
+  ).toBeNull();
+  expect(screen.queryByText("workspace is busy")).toBeNull();
+});
+
 test("the unavailable notice is worded by the failure, not by the provider's text", () => {
   const worded = (code: string) =>
     unavailableNotice(

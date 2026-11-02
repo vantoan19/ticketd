@@ -73,7 +73,8 @@ export function useTicketWorkspace(
     running: boolean;
     report: RefreshReport | null;
     error: string;
-  }>({ running: false, report: null, error: "" });
+    errorAt: string | null;
+  }>({ running: false, report: null, error: "", errorAt: null });
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   // The counts describe the whole filtered result; they are null in Trash,
@@ -279,15 +280,16 @@ export function useTicketWorkspace(
    * one. Saved content stays visible while it runs and when it fails.
    */
   async function refreshSources(ticket?: string) {
-    setSourceRefresh({ running: true, report: null, error: "" });
+    setSourceRefresh({ running: true, report: null, error: "", errorAt: null });
     try {
       const report = await sourcesClient.refresh(ticket);
-      setSourceRefresh({ running: false, report, error: "" });
+      setSourceRefresh({ running: false, report, error: "", errorAt: null });
     } catch (reason) {
       setSourceRefresh({
         running: false,
         report: null,
         error: reason instanceof Error ? reason.message : String(reason),
+        errorAt: new Date().toISOString(),
       });
     }
     await refresh();
