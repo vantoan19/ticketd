@@ -60,7 +60,8 @@ export function SourceRefresh({
   state: { running: boolean; report: RefreshReport | null; error: string };
 }) {
   const activity = useSourceActivity();
-  const running = state.running || activity.refreshing;
+  // The workspace already folds an explicit run into `refreshing`.
+  const running = activity.refreshing;
   const synced = activity.sources
     .map((status) => status.last_refreshed_at)
     .filter((time): time is string => Boolean(time))

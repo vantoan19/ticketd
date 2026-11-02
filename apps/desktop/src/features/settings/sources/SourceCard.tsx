@@ -3,6 +3,8 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SettingsCard } from "@/features/settings/SettingsCard";
+import { useSourceActivity } from "@/features/tickets/source-activity";
+import { ago } from "@/features/tickets/ticket-source";
 import {
   SchemaForm,
   type LoadOptions,
@@ -67,6 +69,10 @@ function PreviewPanel({ preview }: { preview: DiscoveryPreview }) {
 /** One available source: connection check, schema-driven rules, preview, then save. */
 export function SourceCard({ entry }: { entry: SourceEntry }) {
   const { connector } = entry;
+  const schedule = useSourceActivity();
+  const lastRefreshed = schedule.sources.find(
+    (item) => item.provider === connector.provider,
+  )?.last_refreshed_at;
   const fields = connector.schema.fields;
   const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
   const [draft, setDraft] = useState<Draft>(() =>
@@ -163,6 +169,16 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
         matching issues are imported as tickets on the next refresh and then
         refreshed automatically. Nothing is changed in {connector.name}.
       </p>
+      {saved && (
+        <p className="settings-hint">
+          {schedule.intervalSecs
+            ? `Refreshes about every ${Math.max(1, Math.round(schedule.intervalSecs / 60))} minutes while ticketd is open. `
+            : "Refreshes while ticketd is open. "}
+          {lastRefreshed
+            ? `Last refreshed ${ago(lastRefreshed)}.`
+            : "Not refreshed yet."}
+        </p>
+      )}
       <p className="settings-label source-status" data-status={status}>
         <StatusDot
           tone={

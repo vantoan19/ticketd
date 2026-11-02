@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
   Tooltip,
@@ -86,16 +86,9 @@ export function TicketList({
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
                 </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
+                <IconButton
                   className="ticket-group-add"
-                  aria-label={
-                    status === "Duplicate"
-                      ? "Mark a ticket as duplicate"
-                      : `Add ${status} ticket`
-                  }
-                  title={
+                  label={
                     status === "Duplicate"
                       ? "Mark a ticket as duplicate"
                       : `Add ${status} ticket`
@@ -105,7 +98,7 @@ export function TicketList({
                   }
                 >
                   <Plus aria-hidden="true" />
-                </Button>
+                </IconButton>
               </li>
             );
           }

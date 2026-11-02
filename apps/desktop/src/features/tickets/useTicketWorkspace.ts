@@ -10,6 +10,7 @@ import {
 import {
   sourcesClient,
   type RefreshReport,
+  type SourceEntry,
   type SourceHealth,
 } from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
@@ -55,8 +56,11 @@ export function useTicketWorkspace(
   const [family, setFamily] = useState("");
   // "all", "local", or a provider id such as "github".
   const [source, setSourceFilter] = useState("all");
-  // Providers with a saved configuration; the source filter appears once one exists.
-  const [configuredSources, setConfiguredSources] = useState<string[]>([]);
+  // The connectors and what is saved for each. The source filter appears once one is saved.
+  const [sourceEntries, setSourceEntries] = useState<SourceEntry[]>([]);
+  const configuredSources = sourceEntries
+    .filter((entry) => entry.saved)
+    .map((entry) => entry.connector.provider);
   const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
   // What the core persisted about each source's freshness, and whether a refresh
   // (startup, periodic or explicit) is running. Kept when a read fails, so a
@@ -193,12 +197,7 @@ export function useTicketWorkspace(
     let active = true;
     void sourcesClient.list().then(
       (entries) => {
-        if (active)
-          setConfiguredSources(
-            entries
-              .filter((entry) => entry.saved)
-              .map((entry) => entry.connector.provider),
-          );
+        if (active) setSourceEntries(entries);
       },
       () => {},
     );
@@ -406,6 +405,7 @@ export function useTicketWorkspace(
     setSource,
     sourceCounts,
     configuredSources,
+    sourceEntries,
     sourceRefresh,
     sourceHealth,
     refreshSources,

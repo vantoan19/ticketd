@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./subtickets.css";
@@ -68,17 +69,15 @@ export function Subtickets({
             <span className="subtickets-status">
               {row.trashed ? `${row.status} · in trash` : row.status}
             </span>
-            <Button
-              variant="ghost"
+            <IconButton
               size="icon-xs"
               className="subtickets-remove"
-              title="Remove relationship"
-              aria-label={`Remove relationship: Subtickets ${row.reference}`}
+              label={`Remove relationship: Subtickets ${row.reference}`}
               disabled={work.pending}
               onClick={() => void work.remove(row)}
             >
               <X aria-hidden="true" />
-            </Button>
+            </IconButton>
           </li>
         ))}
       </ul>

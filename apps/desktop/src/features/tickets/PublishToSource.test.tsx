@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { PublicationAttempt, Ticket } from "@/lib/api/client";
+import { SourceActivityContext } from "./source-activity";
 import { TicketProperties } from "./TicketProperties";
 
 window.ResizeObserver = class {
@@ -77,12 +78,30 @@ const eligible = {
   attempt: null,
 };
 
+/** GitHub as the core reports it: connected, and able to create issues. */
+const githubEntry = {
+  connector: {
+    provider: "github",
+    name: "GitHub",
+    contract_version: 1,
+    capabilities: ["discover", "fetch", "comments", "publish"],
+    schema: { fields: [] },
+  },
+  saved: {
+    provider: "github",
+    config: { repositories: ["acme/api"] },
+    account: "octo",
+    saved_at: "2026-02-01T00:00:00Z",
+  },
+};
+
 /** Answers the bridge by command, rejecting `publish_ticket` when given a failure. */
 function bridgeAnswers(
   preview: unknown,
   publish?: { reject: { code: string; message: string } },
 ) {
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_sources") return [githubEntry];
     if (command === "preview_publication") return preview;
     if (command === "publish_ticket") {
       if (publish) throw { ...publish.reject, fields: [] };
@@ -149,9 +168,8 @@ test("an ineligible ticket says why and offers no Publish action", async () => {
     },
   });
   rail(ticket({ status: "Done" }));
-  await screen.findByText(
-    /Done, Canceled and Duplicate tickets are not published/,
-  );
+  // The core's own sentence states the rule; the rail adds none of its own.
+  await screen.findByText(/T-1 is Done; only Todo, In progress and In review/);
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
@@ -388,7 +406,10 @@ test("possible matches can be confirmed, and not-created is withheld while they 
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
-  fireEvent.click(within(dialog).getByRole("button", { name: "This is it" }));
+  // Each "This is it" names the issue it would attach.
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "This is acme/api#7" }),
+  );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("resolve_publication", {
       reference: "T-1",
@@ -408,4 +429,50 @@ test("a failed search is reported and never shown as nothing found", async () =>
   const dialog = await openReview();
   const note = await within(dialog).findByText(/could not be searched/);
   expect(note.textContent).toContain("does not mean nothing was created");
+});
+
+test("connecting the source in Settings makes a local ticket publishable without reopening it", async () => {
+  let connected = false;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return connected
+        ? eligible
+        : {
+            ...eligible,
+            eligibility: {
+              kind: "ineligible",
+              reason: "source_not_connected",
+              message: "connect GitHub in Settings before publishing",
+            },
+          };
+    return [];
+  });
+  const view = (entries: unknown[]) => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [],
+        entries: entries as never,
+        intervalSecs: null,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <TicketProperties
+        ticket={ticket()}
+        projects={[]}
+        efforts={[]}
+        onSaved={() => {}}
+        refresh={async () => {}}
+      />
+    </SourceActivityContext.Provider>
+  );
+  const { rerender } = render(view([{ ...githubEntry, saved: null }]));
+  // Not connected: the rail says why, and offers nothing.
+  await screen.findByText("connect GitHub in Settings before publishing");
+  expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
+  // The person connects the source and returns: the same ticket now shows Publish.
+  connected = true;
+  rerender(view([githubEntry]));
+  await screen.findByRole("button", { name: /Publish to GitHub/ });
 });

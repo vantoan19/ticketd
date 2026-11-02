@@ -58,6 +58,9 @@ function withActivity(activity: Partial<SourceActivity>, children: ReactNode) {
       value={{
         refreshing: false,
         sources: [],
+        entries: null,
+        intervalSecs: null,
+        openSettings: () => {},
         refreshAll: async () => {},
         ...activity,
       }}
@@ -129,6 +132,15 @@ test("the footer says Synced with a green dot, and nothing before a source exist
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).not.toBeNull();
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
+test("the footer's status line opens the source's settings", () => {
+  const openSettings = vi.fn();
+  render(
+    withActivity({ openSettings, sources: [status()] }, <SourceStatusFooter />),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /GitHub synced/ }));
+  expect(openSettings).toHaveBeenCalled();
 });
 
 test("the footer reads Refreshing GitHub… without a dot while a refresh runs", () => {

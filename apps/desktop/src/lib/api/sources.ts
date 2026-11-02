@@ -152,6 +152,8 @@ const sourceHealthSchema = z.object({
   /** A refresh is running now: startup, periodic, or explicit. */
   refreshing: z.boolean(),
   sources: z.array(sourceStatusSchema),
+  /** How often the periodic refresh runs while the app is open, in seconds. */
+  interval_secs: z.number().nullish(),
 });
 export type SourceHealth = z.infer<typeof sourceHealthSchema>;
 

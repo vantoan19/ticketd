@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -12,7 +13,7 @@ import { ago, providerName } from "@/features/tickets/ticket-source";
  * (orange dot) with Retry. Nothing renders until a source has a configuration.
  */
 export function SourceStatusFooter() {
-  const { refreshing, sources, refreshAll } = useSourceActivity();
+  const { refreshing, sources, refreshAll, openSettings } = useSourceActivity();
   if (sources.length === 0) return null;
   return (
     <div className="sidebar-sources" role="group" aria-label="Ticket sources">
@@ -22,27 +23,42 @@ export function SourceStatusFooter() {
         const synced = status.last_refreshed_at
           ? ago(status.last_refreshed_at)
           : null;
+        // The status line opens the source's settings, where its connection and
+        // rules live.
+        const line = (children: ReactNode) => (
+          <button
+            type="button"
+            className="sidebar-source-line"
+            title={`Open ${name} settings`}
+            onClick={openSettings}
+          >
+            {children}
+          </button>
+        );
         return (
           <div key={status.provider} className="sidebar-source">
-            {state === "refreshing" && <span>Refreshing {name}…</span>}
-            {state === "synced" && (
-              <span>
-                <StatusDot tone="positive" size={6} /> {name} synced {synced}
-              </span>
-            )}
-            {state === "waiting" && <span>{name} not synced yet</span>}
+            {state === "refreshing" && line(`Refreshing ${name}…`)}
+            {state === "synced" &&
+              line(
+                <>
+                  <StatusDot tone="positive" size={6} /> {name} synced {synced}
+                </>,
+              )}
+            {state === "waiting" && line(`${name} not synced yet`)}
             {(state === "unavailable" ||
               state === "delayed" ||
               state === "partial") && (
               <>
-                <span>
-                  <StatusDot tone="attention" size={6} />{" "}
-                  {state === "unavailable"
-                    ? `${name} unavailable`
-                    : state === "delayed"
-                      ? `${name} refresh delayed`
-                      : `${name} partly refreshed`}
-                </span>
+                {line(
+                  <>
+                    <StatusDot tone="attention" size={6} />{" "}
+                    {state === "unavailable"
+                      ? `${name} unavailable`
+                      : state === "delayed"
+                        ? `${name} refresh delayed`
+                        : `${name} partly refreshed`}
+                  </>,
+                )}
                 <small>
                   {status.error?.message ??
                     status.partial_message ??

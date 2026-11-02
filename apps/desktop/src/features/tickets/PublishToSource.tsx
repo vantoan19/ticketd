@@ -24,23 +24,47 @@ import {
   toSourceFailure,
   type PublicationPreview,
 } from "@/lib/api/sources";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { AttemptReview } from "./ResolvePublication";
 import { providerName } from "./ticket-source";
 import "./publication.css";
 
-/** GitHub is the only built-in source that can publish. */
-const PROVIDER = "github";
+/**
+ * The source a local ticket can be published to: the first connector that
+ * declares the publish capability, and when it was last saved, so connecting it in
+ * Settings makes the answer change.
+ */
+function usePublishTarget(): { provider: string; saved: string } | null {
+  const { entries } = useSources();
+  const entry = entries.find((item) =>
+    item.connector.capabilities.includes("publish"),
+  );
+  return entry
+    ? {
+        provider: entry.connector.provider,
+        saved: entry.saved?.saved_at ?? "",
+      }
+    : null;
+}
 
 /**
- * Whether and how a local ticket can be published, read from the core. Failure
- * to read leaves the rail without a Publish action rather than guessing.
+ * Whether and how a local ticket can be published, read from the core. It reads
+ * again whenever what decides the answer changes (the ticket's title, description,
+ * status, trash or attempt, or the source being saved). Failure to read leaves the
+ * rail without a Publish action rather than guessing.
  */
-function usePublicationPreview(ticket: Ticket): PublicationPreview | null {
+function usePublicationPreview(
+  ticket: Ticket,
+  target: { provider: string; saved: string } | null,
+): PublicationPreview | null {
   const [preview, setPreview] = useState<PublicationPreview | null>(null);
   const publication = ticket.publication?.state ?? "";
+  const provider = target?.provider;
+  const saved = target?.saved;
   useEffect(() => {
+    if (!provider) return;
     let active = true;
-    sourcesClient.previewPublication(ticket.reference, PROVIDER).then(
+    sourcesClient.previewPublication(ticket.reference, provider).then(
       (found) => {
         if (active) setPreview(found);
       },
@@ -51,8 +75,17 @@ function usePublicationPreview(ticket: Ticket): PublicationPreview | null {
     return () => {
       active = false;
     };
-  }, [ticket.reference, ticket.status, ticket.trashed, publication]);
-  return preview;
+  }, [
+    provider,
+    saved,
+    ticket.reference,
+    ticket.title,
+    ticket.body,
+    ticket.status,
+    ticket.trashed,
+    publication,
+  ]);
+  return provider ? preview : null;
 }
 
 /** The Source rail's content for a ticket that has never had an external identity. */
@@ -63,15 +96,14 @@ export function LocalPublication({
   ticket: Ticket;
   refresh: () => Promise<void>;
 }) {
-  const preview = usePublicationPreview(ticket);
+  const target = usePublishTarget();
+  const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const attempt = ticket.publication;
   if (attempt?.state === "in_flight")
     return (
-      <small className="rail-note" role="status">
-        Publishing to {attempt.destination}…
-      </small>
+      <small className="rail-note">Publishing to {attempt.destination}…</small>
     );
   if (attempt)
     return (
@@ -96,23 +128,18 @@ export function LocalPublication({
           <Send data-icon="inline-start" />
           Publish to {preview.provider_name}…
         </Button>
-        {publishing && (
+        {publishing && target && (
           <PublishDialog
             ticket={ticket}
+            provider={target.provider}
             onOpenChange={setPublishing}
             refresh={refresh}
           />
         )}
       </>
     );
-  const { reason, message } = preview.eligibility;
-  if (reason === "status")
-    return (
-      <small className="rail-note">
-        Done, Canceled and Duplicate tickets are not published. {message}
-      </small>
-    );
-  return null;
+  // The core states why, and what to do about it; the rail only shows it.
+  return <small className="rail-note">{preview.eligibility.message}</small>;
 }
 
 /** The warning at the top of a ticket whose publication outcome is not known. */
@@ -120,7 +147,7 @@ export function PublicationNotice({ ticket }: { ticket: Ticket }) {
   const attempt = ticket.publication;
   if (!attempt || attempt.state !== "unresolved") return null;
   return (
-    <p className="publication-notice" role="status">
+    <p className="publication-notice">
       <StatusDot tone="attention" size={8} />
       Publication unresolved: {providerName(attempt.provider)} may already have
       created the issue in {attempt.destination}. Publishing again is blocked.
@@ -137,7 +164,7 @@ function UnresolvedPublication({
   onReview: () => void;
 }) {
   return (
-    <div className="publication-unresolved" role="status">
+    <div className="publication-unresolved">
       <span className="rail-value">
         <StatusDot tone="attention" size={8} />
         Publication unresolved
@@ -168,10 +195,12 @@ type Phase =
  */
 export function PublishDialog({
   ticket,
+  provider,
   onOpenChange,
   refresh,
 }: {
   ticket: Ticket;
+  provider: string;
   onOpenChange: (open: boolean) => void;
   refresh: () => Promise<void>;
 }) {
@@ -183,7 +212,7 @@ export function PublishDialog({
   useEffect(() => {
     let active = true;
     sourcesClient
-      .previewPublication(ticket.reference, PROVIDER, destination)
+      .previewPublication(ticket.reference, provider, destination)
       .then(
         (preview) => {
           if (!active) return;
@@ -205,7 +234,7 @@ export function PublishDialog({
     return () => {
       active = false;
     };
-  }, [ticket.reference, destination, reloads]);
+  }, [ticket.reference, provider, destination, reloads]);
 
   const preview =
     phase.kind === "ready" || phase.kind === "publishing"
@@ -221,7 +250,7 @@ export function PublishDialog({
     try {
       await sourcesClient.publish(
         ticket.reference,
-        PROVIDER,
+        provider,
         chosen,
         preview.fingerprint,
       );
@@ -244,7 +273,7 @@ export function PublishDialog({
     }
   }
 
-  const name = preview?.provider_name ?? providerName(PROVIDER);
+  const name = preview?.provider_name ?? providerName(provider);
   return (
     <Dialog
       open

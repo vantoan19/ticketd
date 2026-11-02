@@ -76,7 +76,7 @@
   display: grid;
   gap: 12px;
 }
-.publication-facts h4 {
+.publication-facts h3 {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 500;

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,11 +65,18 @@ function MultiSelectField({
   const full = value.length >= field.max_items;
   const dynamic = field.options.source === "dynamic";
 
+  // The loader is recreated on every render and sees the current rules (the
+  // chosen repositories shape the label options), but typing, not a new
+  // loader, is what asks again.
+  const load = useEffectEvent((key: string, text: string) =>
+    loadOptions(key, text),
+  );
+  const optionsSource = field.options.source;
   useEffect(() => {
-    if (!open || field.options.source !== "dynamic") return;
+    if (!open || optionsSource !== "dynamic") return;
     const request = ++requests.current;
     const timer = window.setTimeout(() => {
-      loadOptions(field.key, query.trim())
+      load(field.key, query.trim())
         .then((options) => {
           if (request !== requests.current) return;
           setSuggestions(options);
@@ -89,9 +96,7 @@ function MultiSelectField({
         });
     }, SUGGESTION_DELAY_MS);
     return () => window.clearTimeout(timer);
-    // The options source and loader are stable for a field; re-query on typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, query, field.key]);
+  }, [open, query, field.key, optionsSource]);
 
   /** Opens the suggestions; a dynamic list shows a pending state until it loads. */
   function show() {

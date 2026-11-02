@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SettingsNav } from "@/features/settings/SettingsNav";
+import { SourceActivityContext } from "@/features/tickets/source-activity";
 import {
   SourceFailure,
   sourcesClient,
@@ -279,4 +280,47 @@ test("the section list offers a source only when its connector is available", as
   render(<SettingsNav onBack={() => {}} />);
   const group = await screen.findByRole("group", { name: "Sources" });
   expect(group.textContent).toContain("GitHub");
+});
+
+test("a saved source says how often it refreshes and when it last did", () => {
+  render(
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [
+          {
+            provider: "github",
+            health: "synced",
+            last_attempt_at: "2026-02-01T00:00:00Z",
+            last_refreshed_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+            error: null,
+            failing_since: null,
+            retry_after: null,
+            unavailable_tickets: 0,
+            partial_message: null,
+          },
+        ],
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          saved: {
+            provider: "github",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>,
+  );
+  expect(
+    screen.getByText(/Refreshes about every 5 minutes while ticketd is open/),
+  ).toBeTruthy();
+  expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
 });

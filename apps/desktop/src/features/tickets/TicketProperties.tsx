@@ -229,6 +229,7 @@ export function TicketProperties({
       restoreFocus();
     }
   }
+  const statusTrigger = useRef<HTMLButtonElement>(null);
   const disabled = ticket.trashed || !!pending;
   const owner = externalSource(ticket);
   const ownerName = owner ? owner.provider_name : "";
@@ -283,6 +284,7 @@ export function TicketProperties({
             }}
           >
             <SelectTrigger
+              ref={statusTrigger}
               size="sm"
               variant="ghost"
               readOnly={ticket.trashed}
@@ -336,7 +338,15 @@ export function TicketProperties({
         </>,
       )}
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
-        <DialogContent className="duplicate-dialog">
+        <DialogContent
+          className="duplicate-dialog"
+          onCloseAutoFocus={(event) => {
+            // The Status choice that opened this unmounts with its menu, so
+            // focus returns to the Status control explicitly.
+            event.preventDefault();
+            statusTrigger.current?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Mark as duplicate</DialogTitle>
             <DialogDescription>

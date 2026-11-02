@@ -948,6 +948,8 @@ struct SourceHealth {
     /// A refresh is running now (startup, periodic or explicit).
     refreshing: bool,
     sources: Vec<ticketd_core::source::SourceStatus>,
+    /// How often the periodic refresh runs while the app is open, in seconds.
+    interval_secs: u64,
 }
 
 /// What the interface needs to say how fresh each source is: persisted status plus
@@ -958,6 +960,7 @@ fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth,
     Ok(SourceHealth {
         refreshing: refresher.0.is_refreshing(),
         sources,
+        interval_secs: ticketd_core::source::RefreshPolicy::default().interval_secs,
     })
 }
 
