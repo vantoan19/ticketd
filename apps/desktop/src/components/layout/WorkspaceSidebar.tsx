@@ -144,6 +144,9 @@ export function WorkspaceSidebar({
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
+                {counts.total !== undefined && (
+                  <SidebarCount value={counts.total} />
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -177,7 +180,7 @@ export function WorkspaceSidebar({
                 label="Manage projects"
                 onClick={() => setView("projects")}
               >
-                <Settings2 size={15} />
+                <Settings2 size={16} />
               </IconButton>
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
@@ -189,7 +192,7 @@ export function WorkspaceSidebar({
                     }
                     onClick={() => scope("all", "unlinked")}
                   >
-                    <Folder size={15} /> Unlinked
+                    <Folder size={16} /> Unlinked
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 {projects.map((p) => (
@@ -200,7 +203,7 @@ export function WorkspaceSidebar({
                       }
                       onClick={() => scope("all", p.id)}
                     >
-                      <Folder size={15} /> {p.name}
+                      <Folder size={16} /> <span>{p.name}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -214,7 +217,7 @@ export function WorkspaceSidebar({
                 label="Manage Efforts"
                 onClick={() => setView("efforts")}
               >
-                <Settings2 size={15} />
+                <Settings2 size={16} />
               </IconButton>
             </div>
             <nav aria-label="Effort scopes" className="sidebar-nav">
@@ -229,7 +232,7 @@ export function WorkspaceSidebar({
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >
-                        <Layers size={15} /> {e.name}
+                        <Layers size={16} /> <span>{e.name}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
@@ -238,7 +241,7 @@ export function WorkspaceSidebar({
                     isActive={view === "archived-efforts"}
                     onClick={() => setView("archived-efforts")}
                   >
-                    <Archive size={15} /> Archived
+                    <Archive size={16} /> Archived Efforts
                     {archivedEfforts > 0 && (
                       <SidebarCount value={archivedEfforts} />
                     )}

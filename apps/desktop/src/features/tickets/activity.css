@@ -27,7 +27,7 @@
 .activity-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 6px;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -61,24 +61,23 @@
   line-height: 16px;
   overflow-wrap: anywhere;
 }
-.activity-history > span:first-child {
-  color: var(--foreground);
-}
 
 .activity-compact-composer {
   align-self: stretch;
   min-height: 40px;
   padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border: 0;
+  box-shadow: var(--shadow-border-base);
+  border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
-  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
   text-align: start;
   cursor: text;
 }
 .activity-compact-composer:hover {
-  border-color: var(--ring);
+  background: var(--recessed);
 }
 .activity-compact-composer:focus-visible {
   outline: 2px solid var(--ring);

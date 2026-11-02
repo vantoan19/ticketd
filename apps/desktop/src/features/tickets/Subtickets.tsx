@@ -13,7 +13,9 @@ import "./subtickets.css";
 export function Subtickets({
   work,
   select,
+  external = false,
 }: {
+  external?: boolean;
   work: LinkedWorkState;
   select: (reference: string) => void;
 }) {
@@ -31,12 +33,6 @@ export function Subtickets({
       Add subticket
     </Button>
   );
-  if (rows.length === 0)
-    return (
-      <div className="subtickets" data-empty>
-        {add}
-      </div>
-    );
   // Progress comes from the core over every subticket, not the page read.
   const { done, total } = links.children_progress;
   const partial = links.children.next_offset !== null;
@@ -45,15 +41,24 @@ export function Subtickets({
     <section className="subtickets" aria-labelledby={headingId}>
       <div className="detail-section-heading">
         <h3 id={headingId}>Subtickets</h3>
-        <progress
-          className="subtickets-progress"
-          aria-label="Subticket progress"
-          value={done}
-          max={total}
-        />
-        <span className="subtickets-summary">{summary}</span>
+        {total > 0 && (
+          <>
+            <progress
+              className="subtickets-progress"
+              aria-label="Subticket progress"
+              value={done}
+              max={total}
+            />
+            <span className="subtickets-summary">{summary}</span>
+          </>
+        )}
         {add}
       </div>
+      {external && (
+        <p className="source-caption">
+          Subtickets are local. Publishing never includes them.
+        </p>
+      )}
       <ul className="subtickets-rows">
         {rows.map((row) => (
           <li key={row.reference} className="subtickets-row">
@@ -64,7 +69,7 @@ export function Subtickets({
               className="subtickets-title"
               onClick={() => select(row.reference)}
             >
-              {row.title}
+              <span className="truncate">{row.title}</span>
             </Button>
             <span className="subtickets-status">
               {row.trashed ? `${row.status} · in trash` : row.status}

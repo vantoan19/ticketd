@@ -25,3 +25,21 @@ export function startOfLocalDay(date: Date): number {
     date.getDate(),
   ).getTime();
 }
+
+/** Compact reading time; a calendar date after a week, with exact time available in a tooltip. */
+export function relativeDateTime(timestamp: string, now = Date.now()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return timestamp;
+  const minutes = Math.max(0, Math.floor((now - then.getTime()) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} h ago`;
+  if (minutes < 10080) return `${Math.floor(minutes / 1440)} d ago`;
+  return then.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(then.getFullYear() !== new Date(now).getFullYear()
+      ? { year: "numeric" }
+      : {}),
+  });
+}

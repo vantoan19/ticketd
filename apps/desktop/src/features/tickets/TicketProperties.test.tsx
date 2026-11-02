@@ -129,7 +129,9 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
   fireEvent.keyDown(screen.getByRole("combobox", { name: "Status: Todo" }), {
     key: "Enter",
   });
-  fireEvent.click(await screen.findByRole("option", { name: "Duplicate" }));
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Mark as duplicate…" }),
+  );
   expect(
     await screen.findByRole("heading", { name: "Mark as duplicate" }),
   ).toBeTruthy();

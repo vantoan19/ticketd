@@ -1,3 +1,4 @@
+import { useNow } from "@/lib/use-now";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Command,
@@ -7,7 +8,13 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
+import {
+  Folder,
+  Layers,
+  MessageSquare,
+  Tag,
+  type LucideIcon,
+} from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -36,9 +43,13 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ago } from "./ticket-source";
+import { formatDateTime } from "@/lib/format";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
 import "./properties.css";
@@ -146,6 +157,7 @@ export function TicketProperties({
   onSaved,
   refresh,
   onOpenTicket,
+  onOpenNote,
   children,
 }: {
   ticket: Ticket;
@@ -155,9 +167,11 @@ export function TicketProperties({
   refresh: () => Promise<void>;
   /** Sections that follow Tags in the rail, such as Relationships and Attention. */
   children?: ReactNode;
+  onOpenNote?: (id: string) => void;
   /** Opens another ticket, such as the canonical ticket of a duplicate. */
   onOpenTicket?: (reference: string) => void;
 }) {
+  const now = useNow();
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -235,13 +249,11 @@ export function TicketProperties({
   const ownerName = owner ? owner.provider_name : "";
   // While the issue is open its Todo, In progress and In review are local;
   // closing states follow the source and cannot be chosen here.
-  const statusLocked = Boolean(owner?.status_locked);
+
   const target = externalDuplicateTarget(ticket);
   const resolvedTarget = target?.kind === "external" ? target.ticket : null;
   // The core says which statuses may be chosen; the current one is always shown.
-  const statusChoices = owner
-    ? [...new Set([ticket.status, ...owner.status_choices])]
-    : ticketStatuses;
+  const statusChoices = owner ? owner.status_choices : ticketStatuses;
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "Unlinked");
@@ -270,7 +282,7 @@ export function TicketProperties({
         <>
           <Select
             value={ticket.status}
-            disabled={disabled || statusLocked}
+            disabled={disabled}
             onValueChange={(status) => {
               if (status === ticket.status) return;
               // Duplicate needs a canonical ticket, so it opens the review.
@@ -292,16 +304,61 @@ export function TicketProperties({
               title="Status"
             >
               <StatusIcon status={ticket.status} decorative />
-              <SelectValue />
+              <SelectValue>{ticket.status}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent
+              position="popper"
+              align="end"
+              className="status-menu"
+              sideOffset={4}
+            >
               <SelectGroup>
-                {statusChoices.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ))}
+                {ticketStatuses
+                  .filter((status) => !owner || statusChoices.includes(status))
+                  .filter((status) => owner || status !== "Duplicate")
+                  .map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
               </SelectGroup>
+              {owner &&
+                ticketStatuses.some(
+                  (status) => !statusChoices.includes(status),
+                ) && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>
+                        {owner.status_locked
+                          ? `Closed on ${ownerName}`
+                          : `Set by ${ownerName} when the issue closes`}
+                      </SelectLabel>
+                      {ticketStatuses
+                        .filter((status) => !statusChoices.includes(status))
+                        .map((status) => (
+                          <SelectItem key={status} value={status} disabled>
+                            {status}
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
+                    <p className="status-menu-caption">
+                      {owner.status_locked
+                        ? `Reopen it on ${ownerName} to work on it again; it comes back as Todo.`
+                        : `Done, Canceled and Duplicate follow ${ownerName} when the issue closes.`}
+                    </p>
+                  </>
+                )}
+              {!owner && (
+                <>
+                  <SelectSeparator />
+                  <SelectGroup>
+                    <SelectItem value="Duplicate">
+                      Mark as duplicate…
+                    </SelectItem>
+                  </SelectGroup>
+                </>
+              )}
             </SelectContent>
           </Select>
           {/* The canonical link belongs beside the status, trashed or not. */}
@@ -315,7 +372,9 @@ export function TicketProperties({
               Duplicate of {ticket.duplicate_of}
             </Button>
           )}
-          {target && <small>{duplicateTargetText(target)}</small>}
+          {target && target.kind !== "unknown" && (
+            <small>{duplicateTargetText(target)}</small>
+          )}
           {resolvedTarget && (
             <Button
               variant="link"
@@ -332,10 +391,29 @@ export function TicketProperties({
                 ? `${ownerName} closed this issue with a reason ticketd does not recognize, so its status was not changed. Choose Done or Canceled here, or reopen it there.`
                 : owner.status_locked
                   ? `Closed on ${ownerName}. Reopen it there to return this ticket to Todo.`
-                  : `Progress is kept in ticketd and never sent to ${ownerName}. Closing follows ${ownerName}.`}
+                  : `Your progress, kept in ticketd. ${ownerName} ${owner.unavailable ? "showed Open at the last sync" : "still shows Open"}.`}
             </small>
           )}
         </>,
+      )}
+      {(ticket.status === "In progress" || ticket.status === "In review") && (
+        <RailSection label="Latest update">
+          {ticket.latest_update ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              title={formatDateTime(ticket.latest_update.reported_at)}
+              onClick={() => onOpenNote?.(ticket.latest_update!.note_id)}
+            >
+              <MessageSquare data-icon="inline-start" />
+              {ago(ticket.latest_update.reported_at, now)}
+              {ticket.latest_update.editing_agent &&
+                ` · ${ticket.latest_update.editing_agent}`}
+            </Button>
+          ) : (
+            <small className="rail-note">No update reported</small>
+          )}
+        </RailSection>
       )}
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent
@@ -411,30 +489,41 @@ export function TicketProperties({
       )}
       {property(
         "Tags",
-        <PropertyPicker
-          compact
-          align="end"
-          readOnly={ticket.trashed}
-          icon={Tag}
-          label="Tags"
-          value={ticket.tags.length ? ticket.tags.join(", ") : "No tags"}
-          disabled={disabled}
-          allowCreate
-          onSearch={setTagQuery}
-          choices={[...new Set([...vocabulary, ...ticket.tags])].map((tag) => ({
-            value: tag,
-            label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
-          }))}
-          onChoose={(tag) =>
-            void save("Tags", () =>
-              client.changeTag(
-                ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
-                ticket.reference,
-                tag,
-              ),
-            )
-          }
-        />,
+        <>
+          <div className="rail-tags">
+            {ticket.tags.map((tag) => (
+              <span className="rail-tag" key={tag}>
+                {tag}
+              </span>
+            ))}
+          </div>
+          <PropertyPicker
+            compact
+            align="end"
+            readOnly={ticket.trashed}
+            icon={Tag}
+            label="Tags"
+            value={ticket.tags.length ? "Edit tags" : "Add tags"}
+            disabled={disabled}
+            allowCreate
+            onSearch={setTagQuery}
+            choices={[...new Set([...vocabulary, ...ticket.tags])].map(
+              (tag) => ({
+                value: tag,
+                label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
+              }),
+            )}
+            onChoose={(tag) =>
+              void save("Tags", () =>
+                client.changeTag(
+                  ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
+                  ticket.reference,
+                  tag,
+                ),
+              )
+            }
+          />
+        </>,
       )}
       {vocabularyError && !ticket.trashed && (
         <small role="status">{vocabularyError}</small>

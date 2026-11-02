@@ -143,7 +143,9 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
   renderSection(base);
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
-  expect(screen.getByRole("heading").textContent).toBe("Relationships");
+  expect(
+    screen.getByRole("heading", { name: "Relationships" }).textContent,
+  ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
 });
@@ -187,10 +189,10 @@ test("builds every row from the one relationships read, including all dependents
   await screen.findByText("Sibling");
   const rows = screen.getAllByRole("listitem");
   expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
+    "parent",
     "blocked_by",
     "blocks",
     "blocks",
-    "parent",
     "related",
     "duplicate_of",
   ]);

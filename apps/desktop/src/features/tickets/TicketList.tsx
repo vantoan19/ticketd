@@ -1,5 +1,6 @@
+import { useNow } from "@/lib/use-now";
 import { useRef, type ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { Cloud, Plus } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -9,7 +10,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
-import { externalSource } from "./ticket-source";
+import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
@@ -17,6 +18,7 @@ import {
   rowContext,
   type RowScope,
 } from "./ticket-row";
+import { formatDateTime } from "@/lib/format";
 import type { StatusCounts, Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
 
@@ -181,9 +183,8 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
       <span className="sr-only">
         Owned by {source.provider_name}, {source.number}
       </span>
-      <span aria-hidden="true">
-        {source.provider_name} {source.number}
-      </span>
+      <Cloud aria-hidden="true" />
+      <span aria-hidden="true">{source.number}</span>
     </span>
   );
 }
@@ -197,41 +198,72 @@ function RowDetails({
   scope: RowScope;
   grouped: boolean;
 }) {
+  const now = useNow();
   const state = readiness(ticket);
   const context = rowContext(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   return (
     <span className="ticket-row-meta">
-      {/* A group header already names the status. */}
-      {unavailable ? (
-        // The source cannot be read: say so in place of Ready or Blocked, which
-        // would describe content that may no longer be current.
-        <span className="ticket-row-state">
-          <StatusDot tone="attention" size={8} />
-          {state.kind === "status" && !grouped
-            ? `${state.status} · Source unavailable`
-            : "Source unavailable"}
-        </span>
-      ) : (
-        (state.kind !== "status" || !grouped) && (
+      <span className="ticket-row-contextual">
+        {/* A group header already names the status. */}
+        {unavailable ? (
+          // The source cannot be read: say so in place of Ready or Blocked, which
+          // would describe content that may no longer be current.
           <span className="ticket-row-state">
-            {state.kind !== "status" && (
-              <StatusDot tone={state.kind} size={8} />
-            )}
-            {readinessLabel(state)}
+            <StatusDot tone="attention" size={10} />
+            {state.kind === "status" && !grouped
+              ? `${state.status} · Source unavailable`
+              : "Source unavailable"}
           </span>
-        )
-      )}
-      {context && <span className="ticket-row-context">{context}</span>}
-      {ticket.tags.length > 0 && (
-        <span className="ticket-row-tags">
-          {ticket.tags.map((tag) => (
-            <span key={tag} className="ticket-tag">
-              {tag}
+        ) : (
+          (state.kind !== "status" ||
+            (!grouped && !context?.startsWith("Duplicate"))) && (
+            <span className="ticket-row-state">
+              {state.kind !== "status" && (
+                <StatusDot tone={state.kind} size={10} />
+              )}
+              {readinessLabel(state)}
             </span>
-          ))}
-        </span>
-      )}
+          )
+        )}
+        {context && <span className="ticket-row-context">{context}</span>}
+        {ticket.tags.length > 0 && (
+          <span className="ticket-row-tags">
+            {ticket.tags.map((tag) => (
+              <span key={tag} className="ticket-tag">
+                {tag}
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+      <span className="ticket-row-time">
+        {ticket.status === "In progress" || ticket.status === "In review" ? (
+          ticket.latest_update ? (
+            <>
+              <time
+                dateTime={ticket.latest_update.reported_at}
+                title={formatDateTime(ticket.latest_update.reported_at)}
+              >
+                Reported {ago(ticket.latest_update.reported_at, now)}
+              </time>
+              {ticket.latest_update.editing_agent &&
+                ` · ${ticket.latest_update.editing_agent}`}
+            </>
+          ) : (
+            "No update reported"
+          )
+        ) : ticket.updated_at ? (
+          <time
+            dateTime={ticket.updated_at}
+            title={formatDateTime(ticket.updated_at)}
+          >
+            Updated {ago(ticket.updated_at, now)}
+          </time>
+        ) : (
+          "Update time unknown"
+        )}
+      </span>
     </span>
   );
 }

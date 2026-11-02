@@ -103,7 +103,7 @@ test("shows one context item and tags as pills", () => {
     }),
     ticket({ id: "2", reference: "T-2", effort_id: "e1", project_id: "p1" }),
   ]);
-  expect(screen.getByText("Parent T-7")).toBeTruthy();
+  expect(screen.getByText("Subticket of T-7")).toBeTruthy();
   expect(screen.getAllByText("Launch")).toHaveLength(1);
   expect(screen.queryByText("Website")).toBeNull();
   expect(screen.getByText("ui")).toBeTruthy();
@@ -205,4 +205,27 @@ test("a flat list has no group headers and names each status", () => {
   renderList([inStatus(4, "In progress")]);
   expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
   expect(screen.getByText("In progress", { selector: "span" })).toBeTruthy();
+});
+
+test("rows show core update times and authored progress instead of an empty second line", () => {
+  const when = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+  renderList([
+    ticket({ id: "updated", reference: "T-1", updated_at: when }),
+    ticket({
+      id: "reported",
+      reference: "T-2",
+      status: "In progress",
+      latest_update: {
+        note_id: "n1",
+        reported_at: when,
+        editing_agent: "agent",
+      },
+    }),
+    ticket({ id: "unreported", reference: "T-3", status: "In review" }),
+  ]);
+  expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
+  expect(
+    screen.getByText(/Reported 3 h ago/).parentElement?.textContent,
+  ).toContain("agent");
+  expect(screen.getByText("No update reported")).toBeTruthy();
 });

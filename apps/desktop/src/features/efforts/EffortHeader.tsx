@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,9 @@ export function EffortHeader({
   efforts,
   projects,
   state,
+  children,
 }: {
+  children?: ReactNode;
   effort: Effort;
   efforts: Effort[];
   projects: { id: string; name: string }[];
@@ -119,6 +121,7 @@ export function EffortHeader({
             )}
             {current.archived ? "Reactivate" : "Archive"}
           </Button>
+          {children}
         </div>
       </div>
       {renaming && (

@@ -14,15 +14,15 @@ export type LinkKind =
 
 /** Groups appear in this order. */
 export const linkKinds: { kind: LinkKind; label: string }[] = [
+  { kind: "parent", label: "Parent" },
   { kind: "blocked_by", label: "Blocked by" },
   { kind: "blocks", label: "Blocks" },
-  { kind: "parent", label: "Parent" },
   { kind: "subticket", label: "Subtickets" },
   { kind: "related", label: "Related to" },
   { kind: "discovered_while", label: "Discovered while working on" },
   { kind: "discoveries", label: "Discovered during this work" },
   { kind: "duplicate_of", label: "Duplicate of" },
-  { kind: "duplicates", label: "Duplicates" },
+  { kind: "duplicates", label: "Duplicates of this ticket" },
 ];
 
 export const linkLabel = (kind: LinkKind) =>
