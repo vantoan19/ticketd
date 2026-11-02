@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/** An external issue ticketd created or may have created. */
+const publishedIssueSchema = z.object({
+  identity: z.object({ provider: z.string(), id: z.string() }),
+  locator: z.string(),
+  display: z.string(),
+  url: z.string(),
+});
+
 /**
  * One try at creating an external issue for a local ticket. `in_flight` and
  * `unresolved` mean the issue may exist and block publishing again.
@@ -16,23 +24,9 @@ export const publicationAttemptSchema = z.object({
   updated_at: z.string(),
   failure: z.object({ code: z.string(), message: z.string() }).nullable(),
   /** The created issue, when ticketd saw it but could not attach it. */
-  issue: z
-    .object({
-      identity: z.object({ provider: z.string(), id: z.string() }),
-      locator: z.string(),
-      display: z.string(),
-      url: z.string(),
-    })
-    .nullable(),
+  issue: publishedIssueSchema.nullable(),
 });
 export type PublicationAttempt = z.infer<typeof publicationAttemptSchema>;
-
-const publishedIssueSchema = z.object({
-  identity: z.object({ provider: z.string(), id: z.string() }),
-  locator: z.string(),
-  display: z.string(),
-  url: z.string(),
-});
 
 /**
  * What the core knows about an unresolved attempt, what it cannot know, and the

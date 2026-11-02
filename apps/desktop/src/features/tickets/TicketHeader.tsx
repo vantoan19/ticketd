@@ -106,6 +106,7 @@ export function TicketHeader({
       setPending(false);
     }
   }
+  const owner = ticket ? externalSource(ticket) : null;
   const message = actionError || copyError;
   return (
     <div className="detail-header">
@@ -135,15 +136,10 @@ export function TicketHeader({
             {copied === "Reference" ? <Check /> : <Copy />}
           </IconButton>
         )}
-        {ticket && externalSource(ticket) && (
-          <SourceLink
-            url={externalSource(ticket)?.url ?? ""}
-            className="header-source-link"
-          >
-            <span className="sr-only">
-              Open on {externalSource(ticket)?.provider_name ?? ""}:{" "}
-            </span>
-            {sourceLocation(externalSource(ticket)!)}
+        {owner && (
+          <SourceLink url={owner.url} className="header-source-link">
+            <span className="sr-only">Open on {owner.provider_name}: </span>
+            {sourceLocation(owner)}
           </SourceLink>
         )}
       </div>
