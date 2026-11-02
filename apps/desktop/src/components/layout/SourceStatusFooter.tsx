@@ -64,7 +64,7 @@ export function SourceStatusFooter() {
                     status.partial_message ??
                     "Some tickets could not be refreshed."}{" "}
                   {synced
-                    ? `Showing content synced ${synced}.`
+                    ? `Showing content from the last sync, ${synced}.`
                     : "Showing saved content."}
                 </small>
                 <Button

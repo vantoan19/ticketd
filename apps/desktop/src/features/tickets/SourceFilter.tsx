@@ -67,13 +67,20 @@ export function SourceRefresh({
     .filter((time): time is string => Boolean(time))
     .sort()
     .at(-1);
+  // Only a source the core reads as synced may claim "Synced"; otherwise this is
+  // just when it last was.
+  const healthy = activity.sources.every(
+    (status) => status.health === "synced" || status.health === "waiting",
+  );
   const name = providers.map(providerName).join(", ");
   const failures = state.report?.failures ?? [];
   return (
     <div className="source-refresh">
       {running && <span>Refreshing {name}…</span>}
       {!running && !state.report && !state.error && synced && (
-        <span>Synced {ago(synced)}</span>
+        <span>
+          {healthy ? "Synced" : "Last synced"} {ago(synced)}
+        </span>
       )}
       {!running && state.report && failures.length === 0 && (
         <span role="status">

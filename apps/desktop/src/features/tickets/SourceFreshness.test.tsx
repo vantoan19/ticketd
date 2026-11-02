@@ -174,7 +174,9 @@ test("an unavailable source shows the failure, the last good sync and a working 
   );
   expect(screen.getByText("GitHub unavailable")).toBeTruthy();
   expect(
-    screen.getByText(/Network is down\. Showing content synced 4 min ago/),
+    screen.getByText(
+      /Network is down\. Showing content from the last sync, 4 min ago/,
+    ),
   ).toBeTruthy();
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="attention"]'),
@@ -371,6 +373,20 @@ test("the list header shows the last sync when idle", () => {
     ),
   );
   expect(screen.getByText("Synced 4 min ago")).toBeTruthy();
+});
+
+test("the list header says Last synced, never Synced, while the source is unavailable", () => {
+  render(
+    withActivity(
+      { sources: [status({ health: "unavailable" })] },
+      <SourceRefresh
+        providers={["github"]}
+        state={{ running: false, report: null, error: "" }}
+      />,
+    ),
+  );
+  expect(screen.getByText("Last synced 4 min ago")).toBeTruthy();
+  expect(screen.queryByText(/^Synced/)).toBeNull();
 });
 
 test("relative times degrade to the raw value only when unreadable", () => {

@@ -70,9 +70,14 @@ function PreviewPanel({ preview }: { preview: DiscoveryPreview }) {
 export function SourceCard({ entry }: { entry: SourceEntry }) {
   const { connector } = entry;
   const schedule = useSourceActivity();
-  const lastRefreshed = schedule.sources.find(
+  const health = schedule.sources.find(
     (item) => item.provider === connector.provider,
-  )?.last_refreshed_at;
+  );
+  const lastRefreshed = health?.last_refreshed_at;
+  const syncing =
+    health === undefined ||
+    health.health === "synced" ||
+    health.health === "waiting";
   const fields = connector.schema.fields;
   const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
   const [draft, setDraft] = useState<Draft>(() =>
@@ -175,20 +180,24 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
             ? `Refreshes about every ${Math.max(1, Math.round(schedule.intervalSecs / 60))} minutes while ticketd is open. `
             : "Refreshes while ticketd is open. "}
           {lastRefreshed
-            ? `Last refreshed ${ago(lastRefreshed)}.`
+            ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed)}.`
             : "Not refreshed yet."}
         </p>
       )}
+      {saved && health && !syncing && (
+        <p className="settings-label source-health" data-health={health.health}>
+          <StatusDot tone="attention" />{" "}
+          {health.health === "unavailable"
+            ? `${connector.name} is unavailable`
+            : health.health === "delayed"
+              ? `${connector.name} refresh is delayed`
+              : `${connector.name} is partly refreshed`}
+          {health.error ? `: ${health.error.message}` : ""}
+        </p>
+      )}
       <p className="settings-label source-status" data-status={status}>
-        <StatusDot
-          tone={
-            status === "saved"
-              ? "positive"
-              : status === "unsaved"
-                ? "attention"
-                : "neutral"
-          }
-        />{" "}
+        {/* Configuration state only: green is reserved for a source that is synced. */}
+        <StatusDot tone={status === "unsaved" ? "attention" : "neutral"} />{" "}
         {status === "saved" && "Saved configuration"}
         {status === "unsaved" && "Unsaved changes"}
         {status === "none" && "Not configured"}
