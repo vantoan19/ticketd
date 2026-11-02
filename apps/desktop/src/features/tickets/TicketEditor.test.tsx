@@ -446,3 +446,16 @@ test("a passage that is gone says so and lands on the description without guessi
   );
   expect(marked()).toBeNull();
 });
+
+test("an empty description has one add affordance", () => {
+  render(
+    <TicketEditor
+      ticket={{ ...initial, id: "empty-description", body: "" }}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Add a description…" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
+});

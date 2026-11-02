@@ -283,7 +283,7 @@ export function TicketEditor({
             >
               Done editing
             </Button>
-          ) : (
+          ) : draft.body ? (
             <Button
               ref={editButton}
               variant="ghost"
@@ -293,7 +293,7 @@ export function TicketEditor({
             >
               Edit description
             </Button>
-          )}
+          ) : null}
         </div>
         {bodyMode !== "unopened" && (
           <div hidden={!editingBody}>

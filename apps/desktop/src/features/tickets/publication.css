@@ -271,3 +271,13 @@
   flex: 1 1 180px;
   min-width: 0;
 }
+
+.rail-source .ui-button.rail-publish-link {
+  margin-left: 0;
+  padding: 0;
+}
+.rail-source-actions [data-variant="link"] {
+  color: var(--link-foreground);
+  text-decoration: none;
+  padding-inline: 0;
+}
