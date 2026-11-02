@@ -12,6 +12,7 @@ export const failureCodes = [
   "publication_still_running",
   "publication_unverified",
   "publication_mismatch",
+  "publication_different_content",
   "publication_candidates",
   "publication_settled",
   "publication_changed",

@@ -217,13 +217,9 @@ pub enum PublicationError {
     /// the issue's, which only a person who has seen the difference may accept
     /// ([`ResolveOptions::accept_different_content`]). Nothing was changed.
     #[error(
-        "{reference}: {} has {} from what ticketd sent; attaching it would replace this ticket's text with the issue's. Confirm only if it is the issue this publication created",
+        "{reference}: {} does not hold what ticketd sent: {}. Attaching it would replace this ticket's text with the issue's; confirm only if it is the issue this publication created",
         issue.display,
-        match (*title_differs, *body_differs) {
-            (true, true) => "a different title and description",
-            (true, false) => "a different title",
-            _ => "a different description",
-        }
+        difference(*title_differs, *body_differs, issue_title, sent_title)
     )]
     DifferentContent {
         reference: String,
@@ -231,8 +227,9 @@ pub enum PublicationError {
         issue: PublishedIssue,
         title_differs: bool,
         body_differs: bool,
-        /// What the issue holds now.
+        /// What the issue holds now, and the title that was sent.
         issue_title: String,
+        sent_title: String,
         issue_body: String,
     },
     /// Resolution was asked for a ticket with no uncertain attempt.
@@ -282,6 +279,20 @@ pub enum PublicationError {
         attempt_id: String,
         message: String,
     },
+}
+
+/// What differs between an issue and the sent text, for a person to read.
+fn difference(title: bool, body: bool, issue_title: &str, sent_title: &str) -> String {
+    let mut parts = Vec::new();
+    if title {
+        parts.push(format!(
+            "its title is \u{201c}{issue_title}\u{201d} where ticketd sent \u{201c}{sent_title}\u{201d}"
+        ));
+    }
+    if body {
+        parts.push("its description is not the one that was sent".to_owned());
+    }
+    parts.join(", and ")
 }
 
 impl PublicationError {
@@ -1603,6 +1614,7 @@ impl Workspace {
                 title_differs,
                 body_differs,
                 issue_title: issue.title.clone(),
+                sent_title: attempt.title.clone(),
                 issue_body: issue.body.clone(),
             }
             .into());

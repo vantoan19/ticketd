@@ -5,6 +5,7 @@ import {
   publicationAttemptSchema,
   publicationReviewSchema,
   type PublicationResolution,
+  type ResolveConfirmation,
 } from "./publication";
 
 const choiceOptionSchema = z.object({
@@ -263,15 +264,21 @@ export const sourcesClient = {
   /**
    * Settles an unresolved publication. Rejects, leaving it unresolved, with
    * `publication_unverified` (the source could not give evidence),
-   * `publication_candidates`, `publication_mismatch` or `publication_settled`.
+   * `publication_candidates`, `publication_mismatch`, `publication_settled` or
+   * `publication_different_content` (repeat with `acceptDifferentContent`).
    */
   async resolvePublication(
     reference: string,
     resolution: PublicationResolution,
+    confirmation: ResolveConfirmation = {},
   ) {
     return publishOutcomeSchema.parse(
       await structured(
-        invoke("resolve_publication", { reference, resolution }),
+        invoke("resolve_publication", {
+          reference,
+          resolution,
+          acceptDifferentContent: confirmation.acceptDifferentContent ?? false,
+        }),
       ),
     );
   },

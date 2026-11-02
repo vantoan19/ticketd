@@ -52,6 +52,13 @@ test("words subticket changes, and the Inbox shares the same sentences", () => {
   ).toBe("Added subticket T-7 · codex");
 });
 
+test("an attached issue reads apart from a publication", () => {
+  expect(sentence("source", "", "acme/api#7")).toBe("Published to acme/api#7");
+  expect(sentence("source", "attached", "acme/api#7")).toBe(
+    "Linked to acme/api#7 after an uncertain publication",
+  );
+});
+
 test("falls back to a generic sentence for unknown kinds", () => {
   expect(sentence("future:kind", "a", "b")).not.toContain("future:kind");
 });

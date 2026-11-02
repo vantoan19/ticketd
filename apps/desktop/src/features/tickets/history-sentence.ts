@@ -99,7 +99,9 @@ export function describeChange(
     case "ownership":
       return `Took ownership from ${from === "github" ? "GitHub" : from}; the ticket is now local`;
     case "source":
-      return `Published to ${to}`;
+      return from === "attached"
+        ? `Linked to ${to} after an uncertain publication`
+        : `Published to ${to}`;
     case "trash":
       return to === "trashed" ? "Moved to trash" : "Restored from trash";
     default:
