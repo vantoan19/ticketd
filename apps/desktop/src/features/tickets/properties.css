@@ -81,6 +81,8 @@
 }
 
 .rail-source {
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -91,6 +93,7 @@
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
+  overflow-wrap: anywhere;
 }
 .rail-warning {
   color: var(--secondary-foreground);
@@ -136,14 +139,24 @@
   justify-content: flex-start;
 }
 .rail-source-identity {
+  min-width: 0;
+  width: 100%;
   max-width: 100%;
 }
 .rail-source-identity .source-link {
-  display: block;
+  display: inline-flex;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.rail-source-place {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.rail-source-number {
+  flex: none;
 }
 
 .rail-attention {

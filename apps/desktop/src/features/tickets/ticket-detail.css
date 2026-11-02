@@ -57,12 +57,19 @@
 }
 .ticket-state-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 12px;
   margin: 0 0 24px;
   color: var(--secondary-foreground);
   font-size: 14px;
   line-height: 20px;
+}
+.ticket-source-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
 }
 .editor-title {
   margin-bottom: 8px;
@@ -221,6 +228,7 @@
 }
 .source-description-toggle {
   margin: 0 4px 8px;
+  color: var(--link-foreground);
 }
 .source-card-actions {
   margin-left: auto;

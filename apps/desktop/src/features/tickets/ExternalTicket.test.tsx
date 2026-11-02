@@ -116,6 +116,23 @@ test("an open external ticket offers only local progress and says progress stays
   ).toBeTruthy();
 });
 
+test("a long source identity keeps its number separate and exposes the complete issue address", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const place = "a-long-organization/a-long-repository";
+  properties(
+    ticket({
+      source: source({ place, number: "#12345", display: `${place}#12345` }),
+    }),
+  );
+  const rail = screen.getByRole("region", { name: "Source" });
+  const link = within(rail).getByRole("link", { name: `${place}#12345` });
+  expect(link.title).toBe(`${place}#12345`);
+  expect(within(link).getByText("#12345").textContent).toBe("#12345");
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/acme/api/issues/98",
+  );
+});
+
 test("a closed external ticket locks status and explains why", () => {
   bridge.invoke.mockResolvedValue([]);
   properties(
@@ -360,7 +377,10 @@ test("an externally owned description is a read-only source card without editing
   ).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: /title/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
-  expect(screen.getByText("Open on GitHub").textContent).toContain("#98");
+  expect(
+    screen.getByText("Open on GitHub").closest(".ticket-state-line")
+      ?.textContent,
+  ).toContain("#98");
   // The detail header and the rail's Source section both link to the issue.
   expect(screen.getAllByRole("link", { name: /acme.*api.*#98/ })).toHaveLength(
     2,

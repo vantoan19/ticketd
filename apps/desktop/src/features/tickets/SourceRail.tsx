@@ -35,8 +35,15 @@ export function SourceRail({
         <div className="rail-source">
           <span className="rail-value rail-source-identity">
             <Cloud aria-hidden="true" />
-            <SourceLink url={owner.url} icon={false}>
-              {owner.display}
+            <SourceLink url={owner.url} icon={false} title={owner.display}>
+              {owner.place && owner.number ? (
+                <>
+                  <span className="rail-source-place">{owner.place}</span>
+                  <span className="rail-source-number">{owner.number}</span>
+                </>
+              ) : (
+                owner.display
+              )}
             </SourceLink>
           </span>
           {owner.unavailable ? (
@@ -46,7 +53,8 @@ export function SourceRail({
                 Unavailable since {formatDateTime(owner.unavailable.since)}
               </span>
               <small className="rail-note">
-                Showing the last synced copy. Nothing was deleted or completed.
+                Showing the last synced copy. Nothing in ticketd was deleted or
+                completed.
               </small>
             </>
           ) : (

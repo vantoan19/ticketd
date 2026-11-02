@@ -68,8 +68,10 @@ export function TicketPage({
     <p className="ticket-state-line">
       {source && state ? (
         <>
-          {state.tone && <StatusDot tone={state.tone} size={10} />}
-          {state.text}
+          <span className="ticket-source-state">
+            {state.tone && <StatusDot tone={state.tone} size={10} />}
+            {state.text}
+          </span>
           {source.unavailable ? (
             <span>
               Last synced copy from{" "}

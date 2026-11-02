@@ -11,11 +11,13 @@ export function SourceLink({
   url,
   children,
   className,
+  title,
   icon = true,
 }: {
   url: string;
   children: ReactNode;
   className?: string;
+  title?: string;
   icon?: boolean;
 }) {
   const [error, setError] = useState("");
@@ -26,6 +28,7 @@ export function SourceLink({
           in the default browser because a webview cannot follow it itself. */}
       <a
         href={url}
+        title={title}
         className={cn("source-link", className)}
         onClick={(event) => {
           event.preventDefault();

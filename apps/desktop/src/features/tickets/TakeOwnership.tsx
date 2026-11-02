@@ -62,7 +62,7 @@ export function TakeOwnership({
         aria-labelledby={heading}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          cancel.current?.focus();
+          cancel.current?.focus({ preventScroll: true });
         }}
         onInteractOutside={(event) => {
           if (pending) event.preventDefault();

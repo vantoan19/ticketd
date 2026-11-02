@@ -86,7 +86,7 @@ export function unavailableNotice(
           : `${name} could not be reached for ${source.display}.`;
   return {
     title: "Source unavailable",
-    detail: `${cause} Nothing was deleted or completed.`,
+    detail: `${cause} Nothing in ticketd was deleted or completed.`,
     since: `Since ${since}`,
   };
 }

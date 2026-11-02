@@ -109,6 +109,12 @@
   }
 }
 .take-ownership-actions {
+  position: sticky;
+  bottom: -16px;
+  padding-block: 8px;
+  margin-bottom: -8px;
+  background: var(--popover);
+  z-index: 1;
   display: flex;
   justify-content: flex-end;
   gap: 8px;

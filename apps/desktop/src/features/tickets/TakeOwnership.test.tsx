@@ -28,6 +28,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
+  vi.restoreAllMocks();
 });
 
 const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
@@ -107,6 +108,27 @@ test("Take ownership asks first, explains the consequences, then applies once an
     reference: "T-1",
     requestId: expect.any(String),
   });
+});
+
+test("opening the ownership explanation focuses Cancel without scrolling past its heading", async () => {
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
+  render(
+    <SourceUnavailableNotice ticket={ticket()} refresh={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Take ownership/ }));
+  const dialog = screen.getByRole("dialog");
+  const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+  await waitFor(() => expect(document.activeElement).toBe(cancel));
+  expect(
+    focus.mock.calls.some(
+      ([options], index) =>
+        focus.mock.contexts[index] === cancel &&
+        options?.preventScroll === true,
+    ),
+  ).toBe(true);
+  expect(
+    within(dialog).getByRole("heading", { name: "Take ownership of T-1?" }),
+  ).toBeTruthy();
 });
 
 test("a failed takeover says why and a retry reuses the same request id", async () => {

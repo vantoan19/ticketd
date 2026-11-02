@@ -238,7 +238,9 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   );
   const notice = screen.getByRole("region", { name: "Source unavailable" });
   expect(within(notice).getByText(/Source unavailable/)).toBeTruthy();
-  expect(notice.textContent).toContain("Nothing was deleted or completed.");
+  expect(notice.textContent).toContain(
+    "Nothing in ticketd was deleted or completed.",
+  );
   expect(notice.textContent).toContain("the last synced copy from");
   expect(notice.querySelector("code")?.textContent).toBe("acme/api#98");
   expect(
@@ -316,7 +318,7 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
     within(section).getAllByText(/Unavailable since/).length,
   ).toBeGreaterThan(0);
   expect(
-    within(section).getByText(/Nothing was deleted or completed/),
+    within(section).getByText(/Nothing in ticketd was deleted or completed/),
   ).toBeTruthy();
   expect(within(section).getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(section.querySelectorAll('[data-slot="status-dot"]')).toHaveLength(1);
