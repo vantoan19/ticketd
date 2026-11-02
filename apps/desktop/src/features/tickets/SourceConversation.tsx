@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   CircleAlert,
   CircleCheck,
-  CircleDot,
+  LockKeyhole,
   CircleEqual,
   Circle,
   CircleSlash,
@@ -15,7 +15,8 @@ import { SourceLink } from "@/features/tickets/SourceLink";
 
 import { client } from "@/lib/api/client";
 import type { ConversationEntry, TicketSource } from "@/lib/api/client";
-import { formatDateTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
+import { relativeDateTime, formatDateTime } from "@/lib/format";
 import "./source-conversation.css";
 
 type EventEntry = Extract<ConversationEntry, { type: "event" }>;
@@ -37,13 +38,13 @@ function describeEvent(entry: EventEntry): {
       };
     case "closed_duplicate":
       return {
-        text: `${actor} closed this as a duplicate`,
+        text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
         icon: CircleEqual,
       };
     case "closed":
       return { text: `${actor} closed this`, icon: Circle };
     case "reopened":
-      return { text: `${actor} reopened this`, icon: CircleDot };
+      return { text: `${actor} reopened this`, icon: Circle };
     case "assigned":
       return {
         text:
@@ -83,6 +84,7 @@ export function SourceConversation({
   revision: number;
   select: (reference: string | null) => void;
 }) {
+  const now = useNow();
   const [entries, setEntries] = useState<ConversationEntry[] | null>(null);
   const [error, setError] = useState("");
   const refreshedAt = source.last_refreshed_at;
@@ -112,10 +114,24 @@ export function SourceConversation({
       className="source-conversation"
       aria-label={`Conversation on ${name}`}
     >
-      <h3>Conversation on {name}</h3>
+      <div className="source-conversation-heading">
+        <h3>{name} conversation</h3>
+        <span className="source-caption">
+          {owned
+            ? `${entries?.filter((entry) => entry.type === "comment").length ?? 0} comments · read-only`
+            : "archive · no longer refreshed"}
+        </span>
+        {owned && !source.unavailable && (
+          <SourceLink url={source.url}>Comment on {name}</SourceLink>
+        )}
+      </div>
       {error && <p role="alert">Could not load the conversation: {error}</p>}
       {entries && entries.length === 0 && !error && (
-        <p className="source-caption">No comments on {name} yet.</p>
+        <p className="source-caption">
+          {source.unavailable
+            ? "No comments in the last synced copy."
+            : `No comments on ${name} yet.`}
+        </p>
       )}
       {entries && entries.length > 0 && (
         <ol className="source-conversation-list">
@@ -127,10 +143,13 @@ export function SourceConversation({
                   aria-label={`Comment by ${entry.author} on ${name}, read-only`}
                 >
                   <header className="source-card-header">
-                    <span>
-                      <strong>{entry.author}</strong> commented ·{" "}
-                      <time dateTime={entry.created_at}>
-                        {formatDateTime(entry.created_at)}
+                    <span className="source-comment-meta">
+                      <strong>{entry.author}</strong> commented on {name} ·{" "}
+                      <time
+                        dateTime={entry.created_at}
+                        title={formatDateTime(entry.created_at)}
+                      >
+                        {relativeDateTime(entry.created_at, now)}
                       </time>
                       {entry.edited_at && (
                         <>
@@ -140,7 +159,10 @@ export function SourceConversation({
                       )}
                     </span>
                     <span className="source-card-actions">
-                      <span>Read-only</span>
+                      <span className="source-readonly-label">
+                        <LockKeyhole aria-hidden="true" />
+                        Read-only
+                      </span>
                       <SourceLink url={entry.url}>View on {name}</SourceLink>
                     </span>
                   </header>
@@ -153,32 +175,40 @@ export function SourceConversation({
                   </div>
                 </article>
               ) : (
-                <EventRow entry={entry} />
+                <EventRow entry={entry} name={name} now={now} />
               )}
             </li>
           ))}
         </ol>
       )}
-      {owned && (
-        <p className="source-caption">
-          Comments are read-only here.{" "}
-          <SourceLink url={source.url}>Comment on {name}</SourceLink>
-        </p>
-      )}
     </section>
   );
 }
 
-function EventRow({ entry }: { entry: EventEntry }) {
+function EventRow({
+  entry,
+  name,
+  now,
+}: {
+  entry: EventEntry;
+  name: string;
+  now: number;
+}) {
   const { text, icon: Icon } = describeEvent(entry);
   return (
     <div className="source-event">
       <span className="source-event-icon" aria-hidden="true">
-        <Icon size={14} />
+        <Icon size={16} />
       </span>
-      <span className="source-event-text">{text}</span>
-      <time dateTime={entry.created_at}>
-        {formatDateTime(entry.created_at)}
+      <span className="source-event-text">
+        <strong>{entry.actor ?? "Someone"}</strong>
+        {text.slice((entry.actor ?? "Someone").length)} on {name}
+      </span>
+      <time
+        dateTime={entry.created_at}
+        title={formatDateTime(entry.created_at)}
+      >
+        {relativeDateTime(entry.created_at, now)}
       </time>
     </div>
   );

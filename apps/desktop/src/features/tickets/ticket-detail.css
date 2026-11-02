@@ -40,9 +40,9 @@
    rail keeps its place beside it. */
 /* 420 + 264 is 684: the expanded tracks start only where they fit, so the
    view never scrolls sideways between 652px and 684px. */
-@container ticket-detail (min-width: 684px) {
+@container ticket-detail (min-width: 652px) {
   .ticket-detail[data-expanded] .detail-content {
-    grid-template-columns: minmax(420px, 1fr) 264px;
+    grid-template-columns: minmax(420px, 1fr) 232px;
   }
   .ticket-detail[data-expanded] .detail-document {
     width: 100%;
@@ -88,15 +88,18 @@
 }
 .source-link {
   padding: 0;
-  color: var(--secondary-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--link-foreground);
   font-size: 14px;
   line-height: 20px;
   text-align: left;
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 2px;
 }
 .source-link:hover {
-  color: var(--foreground);
+  text-decoration: underline;
 }
 .source-link:focus-visible {
   border-radius: 4px;
@@ -113,26 +116,30 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: nowrap;
+  gap: 8px;
   min-height: 40px;
-  padding: 0 16px;
-  background: var(--recessed);
+  padding: 4px 4px 4px 16px;
+  background: var(--background);
   color: var(--secondary-foreground);
   font-size: 12px;
   line-height: 16px;
 }
 .source-card .description-document {
+  margin-top: 0;
+  min-height: 0;
   padding: 16px;
 }
 .source-unavailable-notice {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 0 0 16px;
-  padding: 12px 16px;
-  border-radius: var(--radius-md, 8px);
+  gap: 12px;
+  margin: 0 0 24px;
+  padding: 16px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-border-base);
   background: var(--recessed);
-  color: var(--secondary-foreground);
+  color: var(--foreground);
   font-size: 14px;
   line-height: 20px;
 }
@@ -143,14 +150,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--foreground);
+  color: var(--secondary-foreground);
   font-weight: 500;
 }
 .source-unavailable-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: -12px;
+  margin-top: 0;
 }
 .take-ownership-effects {
   display: flex;
@@ -166,4 +175,90 @@
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
+}
+
+.source-link-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.source-number,
+.rail-source-identity .source-link {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.header-source-link {
+  max-width: 240px;
+}
+.source-title-trigger {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  letter-spacing: inherit;
+  border-radius: 6px;
+}
+.source-title-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-readonly-explanation {
+  display: grid;
+  gap: 8px;
+  box-shadow: var(--shadow-tooltip);
+  font-size: 14px;
+  line-height: 20px;
+}
+.source-readonly-explanation .source-caption {
+  margin: 0;
+}
+.source-card-header .source-link {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.source-description-clip[data-collapsed] {
+  max-height: 260px;
+  overflow: hidden;
+}
+.source-description-toggle {
+  margin: 0 4px 8px;
+}
+.source-card-actions {
+  margin-left: auto;
+}
+.source-card-actions .ui-button {
+  font-size: 12px;
+  gap: 4px;
+  padding: 0 4px;
+}
+.source-card-actions .ui-button svg {
+  width: 12px;
+  height: 12px;
+}
+.rail-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: -12px;
+}
+.rail-source > .ui-button {
+  margin-left: -12px;
+}
+.take-ownership-effects {
+  list-style: disc;
+  color: var(--secondary-foreground);
+}
+.take-ownership-popover {
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--shadow-large);
+}
+.take-ownership-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
 }

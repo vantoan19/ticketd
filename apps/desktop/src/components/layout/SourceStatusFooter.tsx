@@ -1,19 +1,16 @@
-import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
+import { Button } from "@/components/ui/button";
 import {
   sourceLine,
   useSourceActivity,
 } from "@/features/tickets/source-activity";
 import { ago, providerName } from "@/features/tickets/ticket-source";
+import { useNow } from "@/lib/use-now";
 
-/**
- * Each configured source's state at the foot of the sidebar: Refreshing GitHub…
- * (words only), synced time (green dot), or an unavailable or delayed warning
- * (orange dot) with Retry. Nothing renders until a source has a configuration.
- */
 export function SourceStatusFooter() {
-  const { refreshing, sources, refreshAll, openSettings } = useSourceActivity();
+  const now = useNow();
+  const { refreshing, sources, refreshAll, openSettings, intervalSecs } =
+    useSourceActivity();
   if (sources.length === 0) return null;
   return (
     <div className="sidebar-sources" role="group" aria-label="Ticket sources">
@@ -21,60 +18,66 @@ export function SourceStatusFooter() {
         const name = providerName(status.provider);
         const state = sourceLine(status, refreshing);
         const synced = status.last_refreshed_at
-          ? ago(status.last_refreshed_at)
+          ? ago(status.last_refreshed_at, now)
           : null;
-        // The status line opens the source's settings, where its connection and
-        // rules live.
-        const line = (children: ReactNode) => (
-          <button
-            type="button"
-            className="sidebar-source-line"
-            title={`Open ${name} settings`}
-            onClick={openSettings}
-          >
-            {children}
-          </button>
-        );
+        const warning =
+          state === "unavailable" || state === "partial" || state === "delayed";
+        const count = status.unavailable_tickets;
+        const label =
+          state === "refreshing"
+            ? `Refreshing ${name}…`
+            : state === "synced"
+              ? `${name} synced`
+              : count > 0
+                ? `${count} source ${count === 1 ? "issue" : "issues"}`
+                : state === "unavailable"
+                  ? `${name} unavailable`
+                  : state === "delayed"
+                    ? `${name} refresh delayed`
+                    : state === "partial"
+                      ? `${name} partly refreshed`
+                      : `${name} not synced yet`;
         return (
-          <div key={status.provider} className="sidebar-source">
-            {state === "refreshing" && line(`Refreshing ${name}…`)}
-            {state === "synced" &&
-              line(
-                <>
-                  <StatusDot tone="positive" size={6} /> {name} synced {synced}
-                </>,
-              )}
-            {state === "waiting" && line(`${name} not synced yet`)}
-            {(state === "unavailable" ||
-              state === "delayed" ||
-              state === "partial") && (
-              <>
-                {line(
-                  <>
-                    <StatusDot tone="attention" size={6} />{" "}
-                    {state === "unavailable"
-                      ? `${name} unavailable`
-                      : state === "delayed"
-                        ? `${name} refresh delayed`
-                        : `${name} partly refreshed`}
-                  </>,
+          <div className="sidebar-source" key={status.provider}>
+            <button
+              type="button"
+              className="sidebar-source-line"
+              onClick={openSettings}
+              title={`Open ${name} settings`}
+            >
+              <span className="sidebar-source-label">
+                {state !== "refreshing" && (
+                  <StatusDot
+                    tone={
+                      warning
+                        ? "attention"
+                        : state === "synced"
+                          ? "positive"
+                          : "neutral"
+                    }
+                    size={10}
+                  />
                 )}
-                <small>
-                  {status.error?.message ??
-                    status.partial_message ??
-                    "Some tickets could not be refreshed."}{" "}
-                  {synced
-                    ? `Showing content from the last sync, ${synced}.`
-                    : "Showing saved content."}
-                </small>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void refreshAll()}
-                >
-                  Retry
-                </Button>
-              </>
+                {label}
+              </span>
+              <small>
+                {state === "refreshing"
+                  ? `Checking ${name} tickets`
+                  : warning
+                    ? synced
+                      ? `${name} last synced ${synced}`
+                      : "Showing saved content"
+                    : `${synced ?? "Not synced yet"}${intervalSecs ? ` · every ${Math.round(intervalSecs / 60)} min` : ""}`}
+              </small>
+            </button>
+            {warning && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void refreshAll()}
+              >
+                Retry
+              </Button>
             )}
           </div>
         );
