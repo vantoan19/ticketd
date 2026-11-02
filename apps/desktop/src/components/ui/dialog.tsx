@@ -90,13 +90,35 @@ function DialogContent({
   );
 }
 
-function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+function DialogHeader({
+  className,
+  children,
+  showCloseButton = false,
+  ...props
+}: React.ComponentProps<"div"> & { showCloseButton?: boolean }) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-left", className)}
+      className={cn(
+        "relative flex flex-col gap-2 text-center sm:text-left",
+        className,
+      )}
       {...props}
-    />
+    >
+      {children}
+      {showCloseButton && (
+        <DialogPrimitive.Close asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="ui-dialog-header-close absolute -right-3 -top-3"
+          >
+            <XIcon />
+            <span className="sr-only">Close</span>
+          </Button>
+        </DialogPrimitive.Close>
+      )}
+    </div>
   );
 }
 

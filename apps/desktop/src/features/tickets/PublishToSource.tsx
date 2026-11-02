@@ -272,8 +272,11 @@ export function PublishDialog({
         if (!next && !publishing) onOpenChange(false);
       }}
     >
-      <DialogContent className="publication-dialog publish-dialog">
-        <DialogHeader>
+      <DialogContent
+        className="publication-dialog publish-dialog"
+        showCloseButton={false}
+      >
+        <DialogHeader showCloseButton>
           <DialogTitle>
             Publish{" "}
             <span className="publication-reference">{ticket.reference}</span> to{" "}

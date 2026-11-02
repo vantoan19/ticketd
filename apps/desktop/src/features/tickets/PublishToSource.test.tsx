@@ -166,6 +166,24 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
+test("the scrollable publication header keeps its own Close action and closes without sending", async () => {
+  bridgeAnswers(eligible);
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to GitHub/ }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: /Publish T-1 to GitHub/,
+  });
+  const close = within(dialog).getByRole("button", { name: "Close" });
+  expect(close.closest('[data-slot="dialog-header"]')).toBeTruthy();
+  fireEvent.click(close);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+});
+
 test("changing repositories waits for that destination's preview before publishing", async () => {
   const apiPreview = {
     ...eligible,

@@ -27,9 +27,16 @@
   position: sticky;
   top: -24px;
   margin-top: -24px;
+  margin-inline: -24px;
   padding-top: 24px;
   padding-bottom: 8px;
+  padding-inline: 24px 64px;
   background: var(--popover);
+  z-index: 2;
+}
+.publication-dialog .ui-dialog-header-close {
+  top: 12px;
+  right: 12px;
 }
 .publication-preview {
   display: flex;
@@ -145,6 +152,7 @@
   font-size: 15px;
 }
 .publication-repository {
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 13px;
 }

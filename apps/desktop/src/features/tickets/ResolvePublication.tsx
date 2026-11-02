@@ -38,8 +38,8 @@ export function AttemptReview({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="publication-dialog">
-        <DialogHeader>
+      <DialogContent className="publication-dialog" showCloseButton={false}>
+        <DialogHeader showCloseButton>
           <DialogTitle>Publication unresolved</DialogTitle>
           <DialogDescription>
             {attempt.reference} stays a local ticket. Nothing was attached to
