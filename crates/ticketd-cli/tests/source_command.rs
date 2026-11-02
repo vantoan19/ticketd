@@ -184,6 +184,7 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
     assert!(!stderr.contains("wrong-token"));
     let stderr = cli.fail(&["source", "test", "github"], None);
     assert!(stderr.contains("gh auth login"), "{stderr}");
+    assert!(stderr.contains("TICKETD_GITHUB_TOKEN"), "{stderr}");
 }
 
 #[test]

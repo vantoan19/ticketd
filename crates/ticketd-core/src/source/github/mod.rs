@@ -155,7 +155,7 @@ impl GithubConnector {
             }
             let token = self.credentials.token().ok_or_else(|| {
                 SourceError::Unauthenticated(
-                    "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can read issues".into(),
+                    "no GitHub credential found; run `gh auth login`, then use Check connection in Settings".into(),
                 )
             })?;
             let headers = request_headers(&token, body.is_some());
@@ -194,7 +194,7 @@ impl GithubConnector {
     ) -> Result<ExternalIssue, SourceError> {
         let token = self.credentials.token().ok_or_else(|| {
             SourceError::Unauthenticated(
-                "no GitHub credential found; run `gh auth login`, or set TICKETD_GITHUB_TOKEN to a token that can create issues".into(),
+                "no GitHub credential found; run `gh auth login`, then use Check connection in Settings".into(),
             )
         })?;
         let body = serde_json::json!({ "title": request.title, "body": request.body });
@@ -1021,7 +1021,7 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
     };
     match status {
         401 => Err(SourceError::Unauthenticated(detail(
-            "GitHub rejected the credential; run `gh auth login` or set TICKETD_GITHUB_TOKEN to a valid token",
+            "GitHub rejected the credential; run `gh auth login`, then use Check connection in Settings",
         ))),
         403 | 429 => {
             let limited = status == 429

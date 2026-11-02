@@ -971,10 +971,15 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             if let Some(failure) = report.failures.first() {
                 return Err(format!(
-                    "refresh failed for {} ({}): {}",
+                    "refresh failed for {} ({}): {}{}",
                     failure.reference.as_deref().unwrap_or(&failure.provider),
                     failure.code,
-                    failure.message
+                    failure.message,
+                    if failure.code == "unauthenticated" {
+                        TOKEN_HINT
+                    } else {
+                        ""
+                    }
                 )
                 .into());
             }
@@ -1189,9 +1194,18 @@ fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
     Err("refresh and publish are handled before source configuration commands".into())
 }
 
+/// The command line's own way to sign in; the desktop app's guidance leaves it out.
+const TOKEN_HINT: &str = " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
-        eprintln!("error: {error}");
+        let hint = match error.downcast_ref::<ticketd_core::Error>() {
+            Some(ticketd_core::Error::Source(ticketd_core::source::SourceError::Unauthenticated(
+                _,
+            ))) => TOKEN_HINT,
+            _ => "",
+        };
+        eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }
 }
