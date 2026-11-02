@@ -89,6 +89,25 @@ function properties(value: Ticket, refresh = vi.fn(async () => {})) {
   return refresh;
 }
 
+function DetailsFixture({ value }: { value: Ticket }) {
+  return (
+    <TicketDetails
+      selected={value.reference}
+      mention={null}
+      expanded={false}
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      setSelected={vi.fn()}
+      details={{ [value.reference]: value }}
+      projects={[]}
+      efforts={[]}
+      revision={0}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+    />
+  );
+}
+
 test("an open external ticket offers only local progress and says progress stays local", async () => {
   bridge.invoke.mockResolvedValue([]);
   properties(ticket());
@@ -351,22 +370,7 @@ test("a local ticket with retained provenance reads Local and names the issue it
 
 test("an externally owned description is a read-only source card without editing controls", () => {
   bridge.invoke.mockResolvedValue([]);
-  render(
-    <TicketDetails
-      selected="T-1"
-      mention={null}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ "T-1": ticket() }}
-      projects={[]}
-      efforts={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
-  );
+  render(<DetailsFixture value={ticket()} />);
   const card = screen.getByRole("region", {
     name: "Description from GitHub, read-only",
   });
@@ -393,6 +397,60 @@ test("an externally owned description is a read-only source card without editing
   fireEvent.keyDown(document, { key: "Escape" });
   fireEvent.click(within(card).getByText("Described on GitHub"));
   expect(screen.getByText("GitHub owns this description.")).toBeTruthy();
+});
+
+test("a closed state line uses the core's closure time and names its canonical issue", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();
+  const value = ticket({
+    status: "Duplicate",
+    source: source({
+      state: { state: "closed", reason: "duplicate" },
+      status_locked: true,
+      closed_at: closedAt,
+      duplicate_target: {
+        kind: "external",
+        identity: { provider: "github", id: "99" },
+        locator: "acme/api#99",
+        display: "acme/api#99",
+      },
+    }),
+  });
+  const { container, rerender } = render(<DetailsFixture value={value} />);
+  const line = container.querySelector(".ticket-state-line")!;
+  expect(line.textContent).toContain("Closed on GitHub as a duplicate of #99");
+  const time = line.querySelector("time")!;
+  expect(time.dateTime).toBe(closedAt);
+  expect(time.textContent).toBe("3 h ago");
+  rerender(
+    <DetailsFixture
+      value={ticket({
+        status: "Done",
+        source: source({
+          state: { state: "closed", reason: "completed" },
+          status_locked: true,
+          closed_at: null,
+        }),
+      })}
+    />,
+  );
+  // The last refresh time is never used as a substitute for an unknown closure.
+  expect(container.querySelector(".ticket-state-line time")).toBeNull();
+  rerender(
+    <DetailsFixture
+      value={{
+        ...value,
+        source: {
+          ...value.source!,
+          unavailable: { code: "not_found", message: "gone", since: closedAt },
+        },
+      }}
+    />,
+  );
+  expect(
+    container.querySelector(".ticket-state-line")?.textContent,
+  ).not.toContain("of #99");
+  expect(container.querySelector(".ticket-state-line time")).toBeNull();
 });
 
 test("a row shows the owner's pill and a local row shows none", () => {

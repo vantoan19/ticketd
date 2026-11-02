@@ -275,9 +275,9 @@ export function Activity({
     <section className="activity" aria-label="Activity">
       <div className="activity-heading">
         <h3>Notes and history</h3>
-        {sourceName && (
-          <span>Only in ticketd · never sent to {sourceName}</span>
-        )}
+        <span>
+          Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
+        </span>
       </div>
       {(error || loadError) && (
         <Alert variant="destructive">

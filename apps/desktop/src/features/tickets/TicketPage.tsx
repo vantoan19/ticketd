@@ -13,7 +13,8 @@ import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
 import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, relativeDateTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
@@ -53,6 +54,7 @@ export function TicketPage({
   mention: (MentionTarget & { key: number }) | null;
   onMention: (target: MentionTarget) => void;
 }) {
+  const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(
     ticket,
@@ -64,13 +66,36 @@ export function TicketPage({
   // backlinks, then notes and history.
   const source = externalSource(ticket);
   const state = source ? sourceState(source) : null;
+  const original =
+    source?.state.state === "closed" &&
+    !source.unavailable &&
+    source.state.reason === "duplicate" &&
+    source.duplicate_target?.kind === "external"
+      ? source.duplicate_target
+      : null;
+  const originalLabel =
+    original && source && original.display.startsWith(`${source.place}#`)
+      ? original.display.slice(source.place.length)
+      : original?.display;
   const stateLine = (
     <p className="ticket-state-line">
       {source && state ? (
         <>
           <span className="ticket-source-state">
             {state.tone && <StatusDot tone={state.tone} size={10} />}
-            {state.text}
+            <span>
+              {state.text}
+              {original && (
+                <>
+                  {" "}
+                  of{" "}
+                  <span className="source-number" title={original.display}>
+                    {originalLabel}
+                  </span>
+                  {original.last_known && " (last known)"}
+                </>
+              )}
+            </span>
           </span>
           {source.unavailable ? (
             <span>
@@ -80,7 +105,17 @@ export function TicketPage({
                 : "an earlier sync"}
             </span>
           ) : (
-            <span>{source.number}</span>
+            <>
+              {source.state.state === "open" && <span>{source.number}</span>}
+              {source.closed_at && (
+                <time
+                  dateTime={source.closed_at}
+                  title={formatDateTime(source.closed_at)}
+                >
+                  {relativeDateTime(source.closed_at, now)}
+                </time>
+              )}
+            </>
           )}
         </>
       ) : (

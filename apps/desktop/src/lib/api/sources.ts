@@ -141,6 +141,8 @@ const sourceStatusSchema = z.object({
   last_attempt_at: z.string().nullable(),
   /** The last run in which the source could be read. */
   last_refreshed_at: z.string().nullable(),
+  last_checked_tickets: z.number().int().nonnegative().nullish(),
+  tracked_tickets: z.number().int().nonnegative().optional(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   /** When the current streak of failed runs began. */
   failing_since: z.string().nullable(),

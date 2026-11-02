@@ -338,6 +338,16 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
 });
 
+test("the refreshing footer words the core's current tracked-ticket count", () => {
+  render(
+    withActivity(
+      { refreshing: true, sources: [status({ tracked_tickets: 7 })] },
+      <SourceStatusFooter />,
+    ),
+  );
+  expect(screen.getByText("Checking 7 GitHub tickets")).toBeTruthy();
+});
+
 test("the list header reads Refreshing GitHub… for a background refresh without announcing it", () => {
   render(
     withActivity(

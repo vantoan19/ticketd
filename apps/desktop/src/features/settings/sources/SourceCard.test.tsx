@@ -395,7 +395,7 @@ test("opening a source for the first time uses its latest saved configuration", 
   expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "after");
 });
 
-test("a saved source says how often it refreshes and when it last did", () => {
+test("a saved source says how often it refreshes, when it last did, and the core's checked-ticket total", () => {
   render(
     <SourceActivityContext.Provider
       value={{
@@ -406,6 +406,7 @@ test("a saved source says how often it refreshes and when it last did", () => {
             health: "synced",
             last_attempt_at: "2026-02-01T00:00:00Z",
             last_refreshed_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+            last_checked_tickets: 18,
             error: null,
             failing_since: null,
             retry_after: null,
@@ -434,6 +435,7 @@ test("a saved source says how often it refreshes and when it last did", () => {
   );
   expect(screen.getByText(/every 5 minutes while it is open/)).toBeTruthy();
   expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
+  expect(screen.getByText(/18 GitHub tickets checked/)).toBeTruthy();
 });
 
 test("rules equal to the saved configuration are not described as changed", async () => {

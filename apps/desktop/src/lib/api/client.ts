@@ -51,6 +51,8 @@ const ticketSourceSchema = z.object({
   /** Who may change the ticket's content now. Retained identity alone is not ownership. */
   ownership: z.enum(["external", "local"]),
   state: externalStateSchema,
+  /** The source's latest closure time, only when the core can confirm it. */
+  closed_at: z.string().nullish(),
   /** The source closed the issue with a reason ticketd does not recognize. */
   closure_unrecognized: z.boolean(),
   last_refreshed_at: z.string().nullable(),

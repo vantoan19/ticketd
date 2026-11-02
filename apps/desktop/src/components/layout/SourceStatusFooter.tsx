@@ -62,7 +62,9 @@ export function SourceStatusFooter() {
               </span>
               <small>
                 {state === "refreshing"
-                  ? `Checking ${name} tickets`
+                  ? !status.tracked_tickets
+                    ? `Checking ${name} tickets`
+                    : `Checking ${status.tracked_tickets} ${name} ${status.tracked_tickets === 1 ? "ticket" : "tickets"}`
                   : warning
                     ? synced
                       ? `${name} last synced ${synced}`

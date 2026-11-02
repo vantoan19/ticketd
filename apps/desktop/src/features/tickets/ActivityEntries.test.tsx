@@ -84,6 +84,7 @@ test("shows an editing agent only when one was recorded and words history as sen
   });
   render(<Activity {...props} reference="T-20" />);
   await screen.findByText("Status changed from Todo to In progress");
+  expect(screen.getByText("Only in ticketd")).toBeTruthy();
   expect(screen.getAllByText(/^Agent:/)).toHaveLength(1);
   expect(screen.queryByText(/status:/)).toBeNull();
 });

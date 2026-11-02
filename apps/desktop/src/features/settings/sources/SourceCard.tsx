@@ -388,7 +388,7 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
           {schedule.refreshing
             ? `Refreshing ${connector.name}…`
             : lastRefreshed
-              ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed, now)}.`
+              ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed, now)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}.`
               : "Not refreshed yet."}
         </p>
       </SettingsCard>
