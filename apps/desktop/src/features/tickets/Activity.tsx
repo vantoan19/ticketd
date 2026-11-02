@@ -2,6 +2,7 @@ import { useNow } from "@/lib/use-now";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -86,7 +87,7 @@ export function Activity({
       current = false;
     };
   }, [active, reference, targetId, targetKey]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (active && targetId !== undefined && targetNote?.id === targetId) {
       targetRef.current?.scrollIntoView?.({ block: "center" });
       targetRef.current?.focus({ preventScroll: true });

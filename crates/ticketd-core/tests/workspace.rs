@@ -1,3 +1,4 @@
+use ticketd_core::FORMAT_VERSION;
 use ticketd_core::{Status, TicketPatch, Workspace};
 
 #[test]
@@ -2186,7 +2187,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, FORMAT_VERSION);
     assert!(
         db.prepare("SELECT editing_agent FROM inbox_entries")
             .is_ok()
@@ -2764,7 +2765,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     let version: i64 = db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 27);
+    assert_eq!(version, FORMAT_VERSION);
     assert!(db.prepare("SELECT * FROM contextual_relationships").is_ok());
 }
 
@@ -2992,7 +2993,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
     assert_eq!(info.active_efforts, 1);
-    assert_eq!(info.format_version, 27);
+    assert_eq!(info.format_version, FORMAT_VERSION);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
 }
