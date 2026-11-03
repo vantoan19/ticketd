@@ -10,6 +10,7 @@ import {
   Folder,
   Layers,
   Archive,
+  FileText,
 } from "lucide-react";
 import {
   Sidebar,
@@ -46,9 +47,16 @@ function SidebarCount({ value }: { value: number }) {
 }
 
 type View =
-  "tickets" | "projects" | "plans" | "archived-plans" | "settings" | "inbox";
+  | "tickets"
+  | "projects"
+  | "plans"
+  | "archived-plans"
+  | "settings"
+  | "inbox"
+  | "documents";
 export function WorkspaceSidebar({
   view,
+  onCapture,
   counts,
   setView,
   projects,
@@ -64,6 +72,7 @@ export function WorkspaceSidebar({
     plan: string;
   };
   view: View;
+  onCapture: () => void;
   counts: SidebarCounts;
   setView: (view: View) => void;
   projects: Project[];
@@ -111,6 +120,19 @@ export function WorkspaceSidebar({
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={onCapture}>
+                <Plus size={16} /> Capture a thought
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "documents"}
+                onClick={() => setView("documents")}
+              >
+                <FileText size={16} /> Documents
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}

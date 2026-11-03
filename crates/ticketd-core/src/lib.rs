@@ -8,6 +8,8 @@ pub use backup_review::{
     BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
 };
 mod context;
+mod documents;
+pub use documents::{Document, DocumentPatch};
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
@@ -57,10 +59,12 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 30;
+pub const FORMAT_VERSION: i64 = 31;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("document '{0}' was not found")]
+    DocumentNotFound(String),
     #[error("backup or restore failed: {0}")]
     Backup(String),
     #[error(
@@ -477,6 +481,9 @@ impl Workspace {
         if version < 30 {
             transaction.execute_batch("CREATE INDEX IF NOT EXISTS dependencies_dependent ON dependencies(dependent_id, blocker_id); PRAGMA user_version = 30;")?;
         }
+        if version < 31 {
+            documents::migrate(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -814,6 +821,11 @@ pub use batch::{BatchOperation, TicketChange};
 
 /// Where the default workspace lives, without creating anything.
 fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {
+    // Development builds can exercise the desktop against a disposable workspace.
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("TICKETD_TEST_WORKSPACE") {
+        return Ok(path.into());
+    }
     let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
     Ok(dirs.data_dir().join("workspace.sqlite3"))
 }

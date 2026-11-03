@@ -2,10 +2,10 @@
 mod cli_status;
 
 use ticketd_core::{
-    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, Note, NotePatch, Plan, PlanView, Project, SafetyBackup,
-    SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch,
-    Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Document, DocumentPatch,
+    Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Plan, PlanView, Project,
+    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
+    TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -53,6 +53,54 @@ impl From<ticketd_core::Error> for BridgeFailure {
                 message: other.to_string(),
             },
         }
+    }
+}
+
+#[tauri::command]
+fn recent_documents() -> Result<Vec<Document>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.recent_documents())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn show_document(id: String) -> Result<Document, String> {
+    Workspace::open_default()
+        .and_then(|w| w.show_document(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn open_document(id: String) -> Result<Document, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.open_document(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn save_document(
+    id: Option<String>,
+    title: Option<String>,
+    body: Option<String>,
+    title_changed: bool,
+    request_id: String,
+) -> Result<Document, String> {
+    let request = match id {
+        Some(id) => WriteRequest::ChangeDocument {
+            id,
+            patch: DocumentPatch {
+                title: title_changed.then_some(title),
+                body,
+            },
+        },
+        None => WriteRequest::CreateDocument {
+            title,
+            body: body.unwrap_or_default(),
+        },
+    };
+    match Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), request))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Document(document) => Ok(document),
+        _ => Err("Unexpected save result".into()),
     }
 }
 
@@ -1018,6 +1066,10 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            recent_documents,
+            show_document,
+            open_document,
+            save_document,
             backup_workspace,
             list_sources,
             refresh_sources,
