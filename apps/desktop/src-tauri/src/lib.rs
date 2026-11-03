@@ -2,9 +2,9 @@
 mod cli_status;
 
 use ticketd_core::{
-    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Document, DocumentPatch,
-    Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Plan, PlanView, Project,
-    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
+    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph,
+    Document, DocumentPatch, Evidence, EvidenceInput, HistoryEntry, InboxEntry, Plan, PlanView,
+    Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
     TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
@@ -248,6 +248,13 @@ fn edit_project(id: String, name: String, path: String) -> Result<Project, Strin
 fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
     Workspace::open_default()
         .and_then(|w| w.dependency_graph(&reference))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn plan_dependency_graph(id: String) -> Result<DependencyGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| w.plan_dependency_graph(&id))
         .map_err(|e| e.to_string())
 }
 
@@ -510,37 +517,47 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn list_notes(reference: String, limit: u32, offset: u32) -> Result<Vec<Note>, String> {
+fn activity_feed(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
     Workspace::open_default()
-        .and_then(|workspace| workspace.notes(&reference, limit, offset))
+        .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn get_note(reference: String, id: String) -> Result<Option<Note>, String> {
+fn list_activities(reference: String, limit: u32, offset: u32) -> Result<Vec<Activity>, String> {
     Workspace::open_default()
-        .and_then(|workspace| match workspace.note(&reference, &id) {
+        .and_then(|workspace| workspace.activities(&reference, limit, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn get_activity(reference: String, id: String) -> Result<Option<Activity>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| match workspace.activity(&reference, &id) {
             Ok(note) => Ok(Some(note)),
-            Err(ticketd_core::Error::NoteNotFound(_)) => Ok(None),
+            Err(ticketd_core::Error::ActivityNotFound(_)) => Ok(None),
             Err(error) => Err(error),
         })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn add_note(reference: String, content: String) -> Result<Note, String> {
+fn add_activity(reference: String, brief: String) -> Result<Activity, String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.add_note(&reference, &content, None))
+        .and_then(|mut workspace| workspace.add_activity(&reference, &brief, None))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn edit_note(reference: String, id: String, patch: NotePatch) -> Result<Note, String> {
+fn edit_activity(reference: String, id: String, patch: ActivityPatch) -> Result<Activity, String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.edit_note(&reference, &id, patch))
+        .and_then(|mut workspace| workspace.edit_activity(&reference, &id, patch))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn delete_note(reference: String, id: String) -> Result<(), String> {
+fn delete_activity(reference: String, id: String) -> Result<(), String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.delete_note(&reference, &id))
+        .and_then(|mut workspace| workspace.delete_activity(&reference, &id))
         .map_err(|e| e.to_string())
 }
 
@@ -1155,6 +1172,7 @@ pub fn run() -> Result<(), tauri::Error> {
             find_tickets,
             count_tickets,
             dependency_graph,
+            plan_dependency_graph,
             list_trash,
             set_trashed,
             create_ticket,
@@ -1175,11 +1193,12 @@ pub fn run() -> Result<(), tauri::Error> {
             delete_evidence,
             ticket_backlinks,
             source_conversation,
-            list_notes,
-            get_note,
-            add_note,
-            edit_note,
-            delete_note,
+            activity_feed,
+            list_activities,
+            get_activity,
+            add_activity,
+            edit_activity,
+            delete_activity,
             search_tags,
             add_tag,
             remove_tag,

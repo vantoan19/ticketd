@@ -216,7 +216,7 @@ test("rows show core update times and authored progress instead of an empty seco
       reference: "T-2",
       status: "In progress",
       latest_update: {
-        note_id: "n1",
+        activity_id: "n1",
         reported_at: when,
         editing_agent: "agent",
       },

@@ -46,7 +46,7 @@ use super::{
     PublishRequest, SourceError, SourceFailure, clock,
     tracking::{self, Origin, failure_of},
 };
-use crate::{Error, Status, Ticket, Workspace, history, notes, transaction_write_lock};
+use crate::{Error, Status, Ticket, Workspace, activities, history, transaction_write_lock};
 
 /// How long an `in_flight` attempt is trusted to still be running. The HTTP
 /// transport gives up after 30 seconds, so a live create finishes well inside it.
@@ -138,7 +138,7 @@ pub enum Eligibility {
 /// Local context explicitly excluded from publication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicationLocalData {
-    pub notes: u64,
+    pub activities: u64,
     pub plan: Option<String>,
     pub tags: Vec<String>,
     pub subtickets: Vec<String>,
@@ -887,7 +887,7 @@ impl Workspace {
             title: ticket.title,
             body: ticket.body,
             local: PublicationLocalData {
-                notes: self.connection.query_row("SELECT COUNT(*) FROM notes WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
+                activities: self.connection.query_row("SELECT COUNT(*) FROM activities WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
                 plan: self.connection.query_row("SELECT e.name FROM tickets t JOIN plans e ON e.id = t.plan_id WHERE t.id = ?1", [&ticket.id], |row| row.get(0)).optional()?,
                 tags: crate::tags::for_ticket(&self.connection, &ticket.id)?,
                 subtickets: {
@@ -2053,7 +2053,7 @@ fn complete_attempt(
                 sent.destination
             )
         };
-        notes::add(transaction, sent.ticket_id, &note, sent.agent)?;
+        activities::add(transaction, sent.ticket_id, &note, sent.agent)?;
         transaction.execute(
             "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
             params![sent.ticket_id, new_title, new_body],

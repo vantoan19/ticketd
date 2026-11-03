@@ -194,7 +194,7 @@ const publicationPreviewSchema = z.object({
   fingerprint: z.string(),
   local: z
     .object({
-      notes: z.number().int().nonnegative(),
+      activities: z.number().int().nonnegative(),
       plan: z.string().nullable(),
       tags: z.array(z.string()),
       subtickets: z.array(z.string()),

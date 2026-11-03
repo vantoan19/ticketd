@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { graphSchema } from "./client";
 const planSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -29,6 +30,9 @@ const viewSchema = z.object({
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
 export const plansClient = {
+  async graph(id: string) {
+    return graphSchema.parse(await invoke("plan_dependency_graph", { id }));
+  },
   async show(id: string) {
     return viewSchema.parse(await invoke("show_plan", { id }));
   },

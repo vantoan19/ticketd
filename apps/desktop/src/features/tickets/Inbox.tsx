@@ -55,7 +55,7 @@ async function fetchEntries(
 
 function EntryIcon({ entry }: { entry: Entry }) {
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
-  if (entry.kind === "note") return <MessageSquare aria-hidden="true" />;
+  if (entry.kind === "activity") return <MessageSquare aria-hidden="true" />;
   if (entry.kind === "status")
     return <StatusIcon status={entry.to_value} decorative />;
   return entry.kind.startsWith("relationship:") ||
@@ -223,7 +223,7 @@ export function Inbox({
                   <button
                     className="inbox-ticket"
                     onClick={() =>
-                      e.kind === "note"
+                      e.kind === "activity"
                         ? select(e.reference, e.from_value)
                         : select(e.reference)
                     }

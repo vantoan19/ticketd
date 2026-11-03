@@ -100,12 +100,18 @@ fn settings_quick_reference_commands_run() {
     );
     run(
         dir.path(),
-        &["context", "T-1", "--relationships", "--notes", "--evidence"],
+        &[
+            "context",
+            "T-1",
+            "--relationships",
+            "--activities",
+            "--evidence",
+        ],
     );
     run(
         dir.path(),
         &[
-            "note",
+            "activity",
             "add",
             "T-1",
             "--file",

@@ -21,7 +21,7 @@ export type BackupRecord = NonNullable<z.infer<typeof lastBackupSchema>>;
 const workspaceSummarySchema = z.object({
   last_change: z.string().nullable(),
   tickets: z.number(),
-  notes: z.number(),
+  activities: z.number(),
   evidence: z.number(),
   projects: z.number(),
   plans: z.number(),

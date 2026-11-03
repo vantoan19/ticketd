@@ -78,7 +78,7 @@ impl Workspace {
         let mut sql = String::new();
         let mut values: Vec<Value> = Vec::new();
         if !filter.query.is_empty() {
-            sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM notes n WHERE n.ticket_id = t.id AND instr(lower(n.content), lower(?)) > 0))");
+            sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?)) > 0))");
             for _ in 0..3 {
                 values.push(filter.query.clone().into());
             }
@@ -164,7 +164,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
-            crate::notes::populate_update(&self.connection, ticket)?;
+            crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -213,7 +213,7 @@ impl Workspace {
             self.show_project(id)?;
         }
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM notes n WHERE n.ticket_id = t.id AND instr(lower(n.content), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
+            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
         )?;
         let mut tickets = statement
             .query_map(
@@ -227,7 +227,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
-            crate::notes::populate_update(&self.connection, ticket)?;
+            crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }

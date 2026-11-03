@@ -13,10 +13,10 @@ fn populated(path: &std::path::Path) -> Workspace {
     workspace.create_ticket("Trashed").unwrap();
     workspace.set_trashed("T-3", true, None).unwrap();
     workspace
-        .add_note(&first.reference, "A note", None)
+        .add_activity(&first.reference, "A note", None)
         .unwrap();
     workspace
-        .add_note(&second.reference, "Another", None)
+        .add_activity(&second.reference, "Another", None)
         .unwrap();
     workspace
         .add_evidence(
@@ -56,7 +56,7 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     assert_eq!(
         (
             summary.tickets,
-            summary.notes,
+            summary.activities,
             summary.evidence,
             summary.projects,
             summary.plans
@@ -81,7 +81,7 @@ fn an_empty_workspace_has_no_last_change() {
     let expected = WorkspaceSummary {
         last_change: None,
         tickets: 0,
-        notes: 0,
+        activities: 0,
         evidence: 0,
         projects: 0,
         plans: 0,

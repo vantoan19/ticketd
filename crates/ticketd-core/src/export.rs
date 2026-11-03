@@ -24,8 +24,8 @@ impl Workspace {
                 "number, id, title, status, body, project_id, plan_id, trashed, updated_at",
             ),
             (
-                "notes",
-                "number, id, ticket_id, content, created_at, updated_at, editing_agent",
+                "activities",
+                "number, id, ticket_id, brief, reported_at, updated_at, editing_agent",
             ),
             (
                 "ticket_history",

@@ -79,7 +79,7 @@ export function TakeOwnership({
         <ul className="take-ownership-effects">
           <li>
             Kept: the last synced title, description and status; subtickets,
-            dependencies, relationships and notes.
+            dependencies, relationships and activities.
           </li>
           <li>
             Changes: the owner becomes Local. You can edit the title,

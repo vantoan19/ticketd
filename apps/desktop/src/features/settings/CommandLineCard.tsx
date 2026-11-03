@@ -17,12 +17,12 @@ const QUICK_REFERENCE = [
     command: "ticketd list --project PROJECT_ID --availability ready",
   },
   {
-    label: "Read a ticket with relationships, notes, and evidence",
-    command: "ticketd context TICKET --relationships --notes --evidence",
+    label: "Read a ticket with relationships, activities, and evidence",
+    command: "ticketd context TICKET --relationships --activities --evidence",
   },
   {
-    label: "Add a note from a file, attributed to an agent",
-    command: "ticketd note add TICKET --file note.md --agent AGENT",
+    label: "Post an update from a file, attributed to an agent",
+    command: "ticketd activity add TICKET --file brief.md --agent AGENT",
   },
 ] as const;
 
