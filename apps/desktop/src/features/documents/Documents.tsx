@@ -225,9 +225,17 @@ export function Documents({
         </>
       )}
       {selected && (
-        <>
+        <DocumentEditor
+          key={selected.id}
+          initial={selected}
+          onClose={() => {
+            setSelected(null);
+            refresh();
+          }}
+        >
           <section aria-label="Document tags">
             <h2>Tags</h2>
+            {error && <p role="alert">{error}</p>}
             <ul>
               {tags.map((tag) => (
                 <li key={tag}>
@@ -272,15 +280,7 @@ export function Documents({
               <Button type="submit">Add tag</Button>
             </form>
           </section>
-          <DocumentEditor
-            key={selected.id}
-            initial={selected}
-            onClose={() => {
-              setSelected(null);
-              refresh();
-            }}
-          />
-        </>
+        </DocumentEditor>
       )}
       {capture && (
         <DocumentEditor

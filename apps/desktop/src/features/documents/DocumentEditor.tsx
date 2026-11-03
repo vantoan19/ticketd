@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -18,9 +18,11 @@ type Pending = {
 export function DocumentEditor({
   initial,
   onClose,
+  children,
 }: {
   initial: Document | null;
   onClose: () => void;
+  children?: ReactNode;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
@@ -212,6 +214,7 @@ export function DocumentEditor({
             />
           </Field>
         </FieldGroup>
+        {children}
         <LazyMarkdownEditor
           value={body}
           onChange={(value) => {
