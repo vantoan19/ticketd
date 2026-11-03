@@ -80,7 +80,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
 }
 
 // Limit headings in list results even when a document has a very long first line.
-const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 1, 200), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
+pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 1, 200), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {

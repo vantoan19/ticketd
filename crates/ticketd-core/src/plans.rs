@@ -135,7 +135,7 @@ impl Workspace {
             members.push(ticket);
         }
         let documents = {
-            let mut stmt = tx.prepare("SELECT d.id, coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim(d.body), 1, 200), ''), 'Untitled'), d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id")?;
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id", crate::documents::HEADING))?;
             stmt.query_map([id], |row| {
                 Ok(PlanDocument {
                     id: row.get(0)?,
@@ -176,7 +176,7 @@ impl Workspace {
             stmt.query_map([id], |r| Ok(serde_json::json!({"blocker": format!("T-{}", r.get::<_, i64>(0)?), "dependent": format!("T-{}", r.get::<_, i64>(1)?)})))?.collect::<Result<Vec<_>, _>>()?
         };
         let documents = {
-            let mut stmt = tx.prepare("SELECT d.id, coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim(d.body), 1, 200), ''), 'Untitled'), d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21")?;
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
             stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document show {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
         };
         tx.commit()?;

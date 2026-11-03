@@ -79,6 +79,10 @@ fn designating_activity_details_promotes_and_preserves_support_and_replay() {
             .iter()
             .any(|d| d.id == id)
     );
+    assert_eq!(
+        workspace.show_plan(&plan.id).unwrap().documents[0].heading,
+        "Update"
+    );
     let document = workspace.show_document(&id).unwrap();
     assert_eq!(document.origin_brief.as_deref(), Some("Update"));
     assert!(document.kept);
