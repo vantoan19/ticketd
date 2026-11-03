@@ -59,7 +59,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 31;
+pub const FORMAT_VERSION: i64 = 34;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -483,6 +483,17 @@ impl Workspace {
         }
         if version < 31 {
             documents::migrate(&transaction)?;
+        }
+        if version < 34 {
+            let has_trashed: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'trashed')",
+                [],
+                |row| row.get(0),
+            )?;
+            if !has_trashed {
+                transaction.execute_batch("ALTER TABLE documents ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0 CHECK(trashed IN (0, 1));")?;
+            }
+            transaction.execute_batch("PRAGMA user_version = 34;")?;
         }
         transaction.commit()?;
         Ok(())

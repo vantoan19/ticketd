@@ -63,6 +63,27 @@ fn recent_documents() -> Result<Vec<Document>, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn trashed_documents() -> Result<Vec<Document>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.trashed_documents())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_document_trashed(id: String, trashed: bool, request_id: String) -> Result<Document, String> {
+    let request = if trashed {
+        WriteRequest::TrashDocument { id }
+    } else {
+        WriteRequest::RestoreDocument { id }
+    };
+    match Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), request))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Document(document) => Ok(document),
+        _ => Err("Unexpected document result".into()),
+    }
+}
+#[tauri::command]
 fn show_document(id: String) -> Result<Document, String> {
     Workspace::open_default()
         .and_then(|w| w.show_document(&id))
@@ -1067,6 +1088,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             recent_documents,
+            trashed_documents,
+            set_document_trashed,
             show_document,
             open_document,
             save_document,

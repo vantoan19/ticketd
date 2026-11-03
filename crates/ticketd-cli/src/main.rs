@@ -37,6 +37,13 @@ enum DocumentCommand {
         id: String,
     },
     Recent,
+    TrashList,
+    Trash {
+        id: String,
+    },
+    Restore {
+        id: String,
+    },
     Change {
         id: String,
         #[arg(long, conflicts_with = "clear_title")]
@@ -673,6 +680,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
             DocumentCommand::Recent => serde_json::to_string(&workspace.recent_documents()?)?,
+            DocumentCommand::TrashList => serde_json::to_string(&workspace.trashed_documents()?)?,
+            DocumentCommand::Trash { id } => {
+                serde_json::to_string(&workspace.write(None, WriteRequest::TrashDocument { id })?)?
+            }
+            DocumentCommand::Restore { id } => serde_json::to_string(
+                &workspace.write(None, WriteRequest::RestoreDocument { id })?,
+            )?,
             DocumentCommand::Change {
                 id,
                 title,

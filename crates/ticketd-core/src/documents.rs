@@ -10,6 +10,8 @@ pub struct Document {
     pub body: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub trashed: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -69,7 +71,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                "SELECT id, title, body, created_at, updated_at FROM documents WHERE id = ?1",
+                "SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(Document {
@@ -78,6 +80,7 @@ impl Workspace {
                         body: row.get(2)?,
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
+                        trashed: row.get(5)?,
                     })
                 },
             )
@@ -92,7 +95,7 @@ impl Workspace {
     }
 
     pub fn recent_documents(&self) -> Result<Vec<Document>, Error> {
-        let mut statement = self.connection.prepare("SELECT d.id, d.title, d.body, d.created_at, d.updated_at FROM document_opens o JOIN documents d ON d.id = o.document_id ORDER BY o.sequence DESC")?;
+        let mut statement = self.connection.prepare("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed FROM document_opens o JOIN documents d ON d.id = o.document_id WHERE d.trashed = 0 ORDER BY o.sequence DESC")?;
         let rows = statement.query_map([], |row| {
             Ok(Document {
                 id: row.get(0)?,
@@ -100,19 +103,49 @@ impl Workspace {
                 body: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                trashed: row.get(5)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn change_document(&mut self, id: &str, patch: DocumentPatch) -> Result<Document, Error> {
-        self.show_document(id)?;
-        match (patch.title, patch.body) {
-            (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, title, body])?,
-            (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, title])?,
-            (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, body])?,
+        if self.show_document(id)?.trashed {
+            return Err(Error::Trashed(id.to_owned()));
+        }
+        let changes = match (patch.title, patch.body) {
+            (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
+            (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
+            (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,
             (None, None) => 0,
         };
+        let document = self.show_document(id)?;
+        if changes == 0 && document.trashed {
+            return Err(Error::Trashed(id.to_owned()));
+        }
+        Ok(document)
+    }
+    pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
+        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
+        let rows = statement.query_map([], |row| {
+            Ok(Document {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                body: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                trashed: row.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn set_document_trashed(&mut self, id: &str, trashed: bool) -> Result<Document, Error> {
+        self.show_document(id)?;
+        self.connection.execute(
+            "UPDATE documents SET trashed = ?2 WHERE id = ?1",
+            params![id, trashed],
+        )?;
         self.show_document(id)
     }
 }

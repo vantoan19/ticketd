@@ -10,7 +10,9 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentEditor } from "./DocumentEditor";
 import { documents } from "./api";
-vi.mock("./api", () => ({ documents: { save: vi.fn(), show: vi.fn() } }));
+vi.mock("./api", () => ({
+  documents: { save: vi.fn(), show: vi.fn(), setTrashed: vi.fn() },
+}));
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({
     value,
@@ -46,6 +48,7 @@ it("keeps a failed capture open and retries the same request before returning", 
       body: "A thought",
       created_at: "now",
       updated_at: "now",
+      trashed: false,
     });
   const close = vi.fn();
   render(<DocumentEditor initial={null} onClose={close} />);
@@ -72,6 +75,7 @@ it("defers external refresh while the editor has focus", async () => {
     body: "Original",
     created_at: "now",
     updated_at: "now",
+    trashed: false,
   };
   vi.mocked(documents.show).mockResolvedValue({
     ...original,
@@ -95,4 +99,36 @@ it("defers external refresh while the editor has focus", async () => {
     "Changed externally",
   );
   vi.useRealTimers();
+});
+
+it("opens a trashed Document readably and restores it", async () => {
+  const original = {
+    id: "d1",
+    title: "Context",
+    body: "Preserved",
+    created_at: "now",
+    updated_at: "now",
+    trashed: true,
+  };
+  vi.mocked(documents.setTrashed).mockResolvedValue({
+    ...original,
+    trashed: false,
+  });
+  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  expect(screen.getByText("This Document is in Trash.")).toBeTruthy();
+  expect(screen.getByLabelText("Optional title")).toHaveProperty(
+    "readOnly",
+    true,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await screen.findByRole("button", { name: "Move to Trash" });
+  expect(documents.setTrashed).toHaveBeenCalledWith(
+    "d1",
+    false,
+    expect.any(String),
+  );
+  expect(screen.getByLabelText("Your thought")).toHaveProperty(
+    "value",
+    "Preserved",
+  );
 });
