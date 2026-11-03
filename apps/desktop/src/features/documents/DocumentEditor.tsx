@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -22,6 +22,7 @@ export function DocumentEditor({
   onOpenDocument,
   onOpenTicket,
   onOpenPlan,
+  children,
 }: {
   initial: Document | null;
   onClose: () => void;
@@ -29,6 +30,7 @@ export function DocumentEditor({
   onOpenDocument?: (id: string) => void;
   onOpenTicket?: (reference: string) => void;
   onOpenPlan?: (id: string) => void;
+  children?: ReactNode;
 }) {
   const [linkTarget, setLinkTarget] = useState("");
   const [ticketTitle, setTicketTitle] = useState("");
@@ -290,6 +292,7 @@ export function DocumentEditor({
             </Button>
           </p>
         )}
+        {children}
         <LazyMarkdownEditor
           value={body}
           onChange={(value) => {

@@ -58,7 +58,41 @@ enum DocumentCommand {
     Open {
         id: String,
     },
-    Recent,
+    Recent {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    Search {
+        query: String,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    Pins {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    Pin {
+        id: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    Tags {
+        id: String,
+    },
+    Tag {
+        id: String,
+        tag: String,
+        #[arg(long)]
+        remove: bool,
+    },
     TrashList,
     Trash {
         id: String,
@@ -721,7 +755,32 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             )?)?,
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
-            DocumentCommand::Recent => serde_json::to_string(&workspace.recent_documents()?)?,
+            DocumentCommand::Recent { limit, offset } => {
+                serde_json::to_string(&workspace.recent_documents_page(limit, offset)?)?
+            }
+            DocumentCommand::Search {
+                query,
+                tag,
+                limit,
+                offset,
+            } => serde_json::to_string(&workspace.search_documents(
+                &query,
+                tag.as_deref(),
+                limit,
+                offset,
+            )?)?,
+            DocumentCommand::Pins { limit, offset } => {
+                serde_json::to_string(&workspace.pinned_documents(limit, offset)?)?
+            }
+            DocumentCommand::Pin { id, remove } => {
+                workspace.set_document_pin(&id, !remove)?;
+                "ok".into()
+            }
+            DocumentCommand::Tags { id } => serde_json::to_string(&workspace.document_tags(&id)?)?,
+            DocumentCommand::Tag { id, tag, remove } => {
+                workspace.set_document_tag(&id, &tag, !remove)?;
+                "ok".into()
+            }
             DocumentCommand::TrashList => serde_json::to_string(&workspace.trashed_documents()?)?,
             DocumentCommand::Trash { id } => {
                 serde_json::to_string(&workspace.write(None, WriteRequest::TrashDocument { id })?)?

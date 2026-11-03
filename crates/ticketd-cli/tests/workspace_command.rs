@@ -174,3 +174,25 @@ fn document_ticket_and_backlinks_are_available_to_agents() {
         serde_json::from_str(&run(dir.path(), &["document", "backlinks", id])).unwrap();
     assert_eq!(links[0]["source_reference"], ticket["reference"]);
 }
+
+#[test]
+fn documents_can_be_searched_pinned_and_tagged_via_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let created: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "A compass in the forest"],
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    run(dir.path(), &["document", "pin", id]);
+    run(dir.path(), &["document", "tag", id, "research"]);
+    let results: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "search", "compass", "--tag", "research"],
+    ))
+    .unwrap();
+    assert_eq!(results[0]["id"], id);
+    let pins: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "pins"])).unwrap();
+    assert_eq!(pins[0]["id"], id);
+}

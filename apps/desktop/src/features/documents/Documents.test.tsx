@@ -15,6 +15,11 @@ vi.mock("./api", () => ({
     links: vi.fn().mockResolvedValue([[], []]),
     recent: vi.fn(),
     trash: vi.fn(),
+    pins: vi.fn().mockResolvedValue([]),
+    tags: vi.fn().mockResolvedValue([]),
+    search: vi.fn(),
+    pin: vi.fn(),
+    tag: vi.fn(),
     open: vi.fn(),
     show: vi.fn(),
     setTrashed: vi.fn(),
@@ -26,7 +31,7 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
 }));
 afterEach(() => {
   cleanup();
-  vi.resetAllMocks();
+  vi.clearAllMocks();
 });
 it("moves a Document to Trash and restores it from Trash navigation", async () => {
   const doc = {
@@ -39,7 +44,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   };
   let trashed = false;
   vi.mocked(documents.recent).mockImplementation(async () =>
-    trashed ? [] : [doc],
+    trashed ? [] : [{ id: doc.id, heading: doc.title }],
   );
   vi.mocked(documents.trash).mockImplementation(async () =>
     trashed ? [{ ...doc, trashed }] : [],
@@ -75,4 +80,39 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await screen.findByRole("button", { name: "Move to Trash" });
+});
+
+it("searches and opens a result using keyboard accessible controls", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.trash).mockResolvedValue([]);
+  vi.mocked(documents.search).mockResolvedValue([
+    { id: "1", heading: "Compass", snippet: "a compass" },
+  ]);
+  vi.mocked(documents.open).mockResolvedValue({
+    id: "1",
+    title: "Compass",
+    body: "a compass",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Search Documents"), {
+    target: { value: "compass" },
+  });
+  const result = await screen.findByRole("button", { name: "Compass" });
+  result.focus();
+  expect(document.activeElement).toBe(result);
+  fireEvent.click(result);
+  await waitFor(() => expect(documents.open).toHaveBeenCalledWith("1"));
 });

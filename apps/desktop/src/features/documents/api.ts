@@ -21,7 +21,7 @@ const linkSchema = z.object({
   source_trashed: z.boolean(),
   target_trashed: z.boolean(),
 });
-export const documents = {
+const linkDocuments = {
   linkMarkdown: async (reference: string) =>
     z.string().parse(await invoke("context_link_markdown", { reference })),
   links: async (id: string) =>
@@ -32,7 +32,27 @@ export const documents = {
     z
       .object({ reference: z.string() })
       .parse(await invoke("ticket_from_document", { id, title, requestId })),
-  recent: async () => z.array(schema).parse(await invoke("recent_documents")),
+};
+const summary = z.object({ id: z.string(), heading: z.string() });
+const searchResult = summary.extend({ snippet: z.string() });
+export type DocumentSummary = z.infer<typeof summary>;
+export type DocumentSearchResult = z.infer<typeof searchResult>;
+export const documents = {
+  ...linkDocuments,
+  recent: async (offset: number) =>
+    z.array(summary).parse(await invoke("recent_documents", { offset })),
+  pins: async (offset: number) =>
+    z.array(summary).parse(await invoke("pinned_documents", { offset })),
+  search: async (query: string, tag: string | null, offset: number) =>
+    z
+      .array(searchResult)
+      .parse(await invoke("search_documents", { query, tag, offset })),
+  pin: async (id: string, pinned: boolean) =>
+    invoke("set_document_pin", { id, pinned }),
+  tags: async (id: string) =>
+    z.array(z.string()).parse(await invoke("document_tags", { id })),
+  tag: async (id: string, tag: string, present: boolean) =>
+    invoke("set_document_tag", { id, tag, present }),
   trash: async () => z.array(schema).parse(await invoke("trashed_documents")),
   setTrashed: async (id: string, trashed: boolean, requestId: string) =>
     schema.parse(

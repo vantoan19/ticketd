@@ -24,6 +24,15 @@ pub enum WriteRequest {
         id: String,
         patch: DocumentPatch,
     },
+    SetDocumentPin {
+        id: String,
+        pinned: bool,
+    },
+    SetDocumentTag {
+        id: String,
+        tag: String,
+        present: bool,
+    },
     TrashDocument {
         id: String,
     },
@@ -266,6 +275,14 @@ impl Workspace {
             }
             WriteRequest::ChangeDocument { id, patch } => {
                 WriteResult::Document(self.change_document(&id, patch)?)
+            }
+            WriteRequest::SetDocumentPin { id, pinned } => {
+                self.set_document_pin(&id, pinned)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetDocumentTag { id, tag, present } => {
+                self.set_document_tag(&id, &tag, present)?;
+                WriteResult::Deleted
             }
             WriteRequest::TrashDocument { id } => {
                 WriteResult::Document(self.set_document_trashed(&id, true)?)
