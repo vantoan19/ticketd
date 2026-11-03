@@ -58,9 +58,9 @@ impl From<ticketd_core::Error> for BridgeFailure {
 }
 
 #[tauri::command]
-fn recent_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
+fn recent_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
     Workspace::open_default()
-        .and_then(|w| w.recent_documents_page(50, offset))
+        .and_then(|w| w.recent_documents_including_support(50, offset, include_support))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -74,10 +74,29 @@ fn search_documents(
     query: String,
     tag: Option<String>,
     offset: u32,
+    include_support: bool,
 ) -> Result<Vec<DocumentSearchResult>, String> {
     Workspace::open_default()
-        .and_then(|w| w.search_documents(&query, tag.as_deref(), 50, offset))
+        .and_then(|w| {
+            w.search_documents_including_support(
+                &query,
+                tag.as_deref(),
+                50,
+                offset,
+                include_support,
+            )
+        })
         .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn keep_document(id: String, request_id: String) -> Result<Document, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::KeepDocument { id }))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Document(document) => Ok(document),
+        _ => Err("Unexpected document result".into()),
+    }
 }
 #[tauri::command]
 fn set_document_pin(id: String, pinned: bool) -> Result<(), String> {
@@ -1212,6 +1231,7 @@ pub fn run() -> Result<(), tauri::Error> {
             document_context_links,
             ticket_from_document,
             recent_documents,
+            keep_document,
             pinned_documents,
             search_documents,
             set_document_pin,

@@ -15,7 +15,7 @@ impl Workspace {
             ("entities", "id, kind"),
             (
                 "documents",
-                "id, title, body, created_at, updated_at, trashed, originating_activity_id",
+                "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
             ),
             ("context_mentions", "source_id, target_id, passage"),
             ("document_opens", "sequence, document_id"),

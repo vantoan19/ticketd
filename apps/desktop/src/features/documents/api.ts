@@ -9,6 +9,7 @@ const schema = z.object({
   updated_at: z.string(),
   trashed: z.boolean(),
   origin_brief: z.string().nullable().optional(),
+  kept: z.boolean().optional(),
 });
 export type Document = z.infer<typeof schema>;
 const linkSchema = z.object({
@@ -34,20 +35,38 @@ const linkDocuments = {
       .object({ reference: z.string() })
       .parse(await invoke("ticket_from_document", { id, title, requestId })),
 };
-const summary = z.object({ id: z.string(), heading: z.string() });
+const summary = z.object({
+  id: z.string(),
+  heading: z.string(),
+  origin_ticket: z.string().nullable().optional(),
+});
 const searchResult = summary.extend({ snippet: z.string() });
 export type DocumentSummary = z.infer<typeof summary>;
 export type DocumentSearchResult = z.infer<typeof searchResult>;
 export const documents = {
   ...linkDocuments,
-  recent: async (offset: number) =>
-    z.array(summary).parse(await invoke("recent_documents", { offset })),
+  recent: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("recent_documents", { offset, includeSupport })),
   pins: async (offset: number) =>
     z.array(summary).parse(await invoke("pinned_documents", { offset })),
-  search: async (query: string, tag: string | null, offset: number) =>
-    z
-      .array(searchResult)
-      .parse(await invoke("search_documents", { query, tag, offset })),
+  search: async (
+    query: string,
+    tag: string | null,
+    offset: number,
+    includeSupport = false,
+  ) =>
+    z.array(searchResult).parse(
+      await invoke("search_documents", {
+        query,
+        tag,
+        offset,
+        includeSupport,
+      }),
+    ),
+  keep: async (id: string, requestId: string) =>
+    schema.parse(await invoke("keep_document", { id, requestId })),
   pin: async (id: string, pinned: boolean) =>
     invoke("set_document_pin", { id, pinned }),
   tags: async (id: string) =>
