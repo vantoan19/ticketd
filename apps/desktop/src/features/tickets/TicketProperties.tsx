@@ -1,4 +1,4 @@
-import { useNow } from "@/lib/use-now";
+import { LatestUpdate } from "./LatestUpdate";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Command,
@@ -8,13 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Folder,
-  Layers,
-  MessageSquare,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
+import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -48,8 +42,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ago } from "./ticket-source";
-import { formatDateTime } from "@/lib/format";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import "./properties.css";
@@ -159,7 +151,11 @@ export function TicketProperties({
   onOpenTicket,
   onOpenNote,
   children,
+  active = true,
+  revision = 0,
 }: {
+  active?: boolean;
+  revision?: number;
   ticket: Ticket;
   projects: Project[];
   plans: Plan[];
@@ -171,7 +167,6 @@ export function TicketProperties({
   /** Opens another ticket, such as the canonical ticket of a duplicate. */
   onOpenTicket?: (reference: string) => void;
 }) {
-  const now = useNow();
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -400,25 +395,12 @@ export function TicketProperties({
           )}
         </>,
       )}
-      {(ticket.status === "In progress" || ticket.status === "In review") && (
-        <RailSection label="Latest update">
-          {ticket.latest_update ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              title={formatDateTime(ticket.latest_update.reported_at)}
-              onClick={() => onOpenNote?.(ticket.latest_update!.activity_id)}
-            >
-              <MessageSquare data-icon="inline-start" />
-              {ago(ticket.latest_update.reported_at, now)}
-              {ticket.latest_update.editing_agent &&
-                ` · ${ticket.latest_update.editing_agent}`}
-            </Button>
-          ) : (
-            <small className="rail-note">No update reported</small>
-          )}
-        </RailSection>
-      )}
+      <LatestUpdate
+        reference={ticket.reference}
+        active={active}
+        revision={revision}
+        onOpen={onOpenNote}
+      />
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent
           className="duplicate-dialog"

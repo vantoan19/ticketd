@@ -1,0 +1,40 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { LatestUpdate } from "./LatestUpdate";
+
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => bridge);
+afterEach(() => {
+  cleanup();
+  bridge.invoke.mockReset();
+});
+
+test("shows the reported brief and opens its exact Activity", async () => {
+  bridge.invoke.mockResolvedValue({
+    activity_id: "a-1",
+    brief: { text: "Made progress", truncated: false },
+    reported_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+    editing_agent: "Agent",
+    supporting_document_id: null,
+  });
+  const open = vi.fn();
+  render(<LatestUpdate reference="T-1" active revision={0} onOpen={open} />);
+  await screen.findByText("Made progress");
+  expect(screen.getByText(/Agent/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open update" }));
+  expect(open).toHaveBeenCalledWith("a-1");
+});
+
+test("distinguishes an absent update from a failed read and allows retry", async () => {
+  bridge.invoke
+    .mockRejectedValueOnce(new Error("Database unavailable"))
+    .mockResolvedValueOnce(null);
+  render(<LatestUpdate reference="T-1" active revision={0} />);
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Database unavailable",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("No update reported");
+});
