@@ -261,8 +261,6 @@ function RowDetails({
               >
                 Reported {ago(ticket.progress_summary.reported_at, now)}
               </time>
-              {ticket.progress_summary.editing_agent &&
-                ` · ${ticket.progress_summary.editing_agent}`}
             </>
           ) : ticket.progress_summary === null ? (
             "No update reported"

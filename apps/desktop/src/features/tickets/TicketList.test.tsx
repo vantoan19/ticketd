@@ -237,9 +237,7 @@ test("rows show core update times and authored progress instead of an empty seco
     }),
   ]);
   expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
-  expect(
-    screen.getByText(/Reported 3 h ago/).parentElement?.textContent,
-  ).toContain("agent");
+  expect(screen.getByText(/Reported 3 h ago/)).toBeTruthy();
   expect(screen.getByText("Verified the fix")).toBeTruthy();
   expect(screen.getByText("No update reported")).toBeTruthy();
 });
