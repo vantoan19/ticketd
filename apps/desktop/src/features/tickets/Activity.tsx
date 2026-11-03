@@ -102,6 +102,7 @@ export function Activity({
 }) {
   const now = useNow();
   const [loadError, setLoadError] = useState("");
+  const [targetMissing, setTargetMissing] = useState<string | null>(null);
   const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
   const targetRef = useRef<HTMLLIElement>(null);
@@ -116,7 +117,10 @@ export function Activity({
     void client
       .activity(reference, targetId)
       .then((note) => {
-        if (current && targetRequest.current === request) setTargetNote(note);
+        if (current && targetRequest.current === request) {
+          setTargetNote(note);
+          setTargetMissing(note === null ? targetId : null);
+        }
       })
       .catch((reason: unknown) => {
         if (current && targetRequest.current === request)
@@ -429,6 +433,24 @@ export function Activity({
         </span>
       </div>
       {feedback && <p role="status">{feedback}</p>}
+      {targetMissing === targetId && targetId !== undefined && (
+        <Alert>
+          <AlertDescription>
+            This update is no longer available. Refresh updates to see the
+            current activity.
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => {
+                setTargetMissing(null);
+                void onChanged?.();
+              }}
+            >
+              Refresh updates
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {(error || loadError) && (
         <Alert variant="destructive">
           <AlertDescription>{error || loadError}</AlertDescription>
@@ -613,11 +635,23 @@ export function Activity({
                 key={`note-${item.note.id}`}
                 className="activity-entry"
                 ref={
-                  active && item.note.id === targetId ? targetRef : undefined
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
+                    ? targetRef
+                    : undefined
                 }
-                tabIndex={active && item.note.id === targetId ? -1 : undefined}
+                tabIndex={
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
+                    ? -1
+                    : undefined
+                }
                 aria-label={
-                  active && item.note.id === targetId
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
                     ? "Selected update"
                     : undefined
                 }

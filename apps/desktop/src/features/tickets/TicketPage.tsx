@@ -226,6 +226,8 @@ export function TicketPage({
       </div>
       <TicketProperties
         ticket={ticket}
+        active={active}
+        revision={revision}
         projects={projects}
         plans={plans}
         onSaved={updateTicket}

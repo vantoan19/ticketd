@@ -733,3 +733,27 @@ test("opens the exact supporting Document from its update", async () => {
     id: "doc-exact",
   });
 });
+
+test("offers refresh when the requested update was removed", async () => {
+  const refresh = vi.fn().mockResolvedValue(undefined);
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "get_activity") return Promise.resolve(null);
+    if (command === "activity_feed") return Promise.resolve([]);
+    throw new Error(`Unexpected command: ${command}`);
+  });
+  render(
+    <Activity
+      reference="T-1"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+      target={{ id: "removed", key: 1 }}
+      onChanged={refresh}
+    />,
+  );
+  await screen.findByText(/update is no longer available/i);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh updates" }));
+  expect(refresh).toHaveBeenCalled();
+});

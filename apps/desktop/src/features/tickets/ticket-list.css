@@ -388,3 +388,15 @@
 .ticket-row-meta:has(.ticket-row-time) {
   flex-wrap: nowrap;
 }
+
+.ticket-row-brief {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Active rows use the full second line for the source warning and report. */
+.ticket-row-meta-active {
+  grid-column: 1 / -1;
+}

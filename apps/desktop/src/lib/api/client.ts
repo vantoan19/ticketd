@@ -1,3 +1,4 @@
+import { latestUpdateSchema } from "./progress";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
@@ -85,6 +86,7 @@ const ticketSchema = z.object({
   status: z.string(),
   body: z.string(),
   updated_at: z.string().nullish(),
+  progress_summary: latestUpdateSchema.nullable().optional(),
   latest_update: z
     .object({
       activity_id: z.string(),
@@ -612,9 +614,18 @@ export const client = {
     return ticketSchema.parse(await invoke("show_ticket", { reference }));
   },
   async findTickets(filter: FindFilter) {
-    return z
-      .array(ticketSchema)
-      .parse(await invoke("find_tickets", { filter }));
+    const page = z
+      .array(
+        z.object({
+          ticket: ticketSchema,
+          latest_update: latestUpdateSchema.nullable(),
+        }),
+      )
+      .parse(await invoke("find_tickets_with_updates", { filter }));
+    return page.map(({ ticket, latest_update }) => ({
+      ...ticket,
+      progress_summary: latest_update,
+    }));
   },
   /** Counts the whole filtered result by status, ignoring its paging. */
   async countTickets(filter: FindFilter) {
