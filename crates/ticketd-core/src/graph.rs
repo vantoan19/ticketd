@@ -17,6 +17,7 @@ pub struct GraphNode {
     pub title: String,
     pub status: Status,
     pub availability: Option<String>,
+    pub boundary: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct GraphEdge {
@@ -116,63 +117,7 @@ impl Workspace {
             frontier = next;
         }
         omitted_neighbors |= incomplete;
-        let ids_json = serde_json::to_string(&ids)?;
-        let sql = format!(
-            "SELECT t.id, t.number, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}) FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
-            crate::source::held_sql("t.id"),
-            crate::history::unresolved_blocker_sql("b")
-        );
-        let mut statement = tx.prepare(&sql)?;
-        let rows = statement
-            .query_map([ids_json], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, bool>(4)?,
-                    row.get::<_, bool>(5)?,
-                    row.get::<_, bool>(6)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let mut metadata = HashMap::new();
-        for (id, number, title, status, trashed, held, blocked) in rows {
-            let status: Status = status.parse().map_err(|e| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    3,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                )
-            })?;
-            let availability = if held || trashed || status != Status::Todo {
-                None
-            } else if blocked {
-                Some("Blocked".into())
-            } else {
-                Some("Ready".into())
-            };
-            metadata.insert(
-                id.clone(),
-                GraphNode {
-                    id,
-                    trashed,
-                    reference: format!("T-{number}"),
-                    title,
-                    status,
-                    availability,
-                },
-            );
-        }
-        let mut nodes = Vec::new();
-        let mut references = HashMap::new();
-        for id in &ids {
-            if let Some(node) = metadata.remove(id) {
-                references.insert(id.clone(), node.reference.clone());
-                nodes.push(node);
-            }
-        }
+        let (nodes, references) = graph_nodes(&tx, &ids, &BTreeSet::new())?;
         let mut edges = Vec::new();
         let mut omitted_edges = incomplete;
         for (blocker, dependent) in candidates {
@@ -202,4 +147,147 @@ impl Workspace {
             truncated: omitted_neighbors || omitted_edges,
         })
     }
+    /// A bounded Plan scope, including prerequisites just outside that scope.
+    pub fn plan_dependency_graph(&self, plan: &str) -> Result<DependencyGraph, Error> {
+        let tx = self.connection.unchecked_transaction()?;
+        crate::plans::get(&tx, plan)?;
+        let mut stmt = tx.prepare(
+            "SELECT id FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT ?2",
+        )?;
+        let mut ids = stmt
+            .query_map(rusqlite::params![plan, MAX_NODES + 1], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        let mut omitted_neighbors = ids.len() > MAX_NODES;
+        ids.truncate(MAX_NODES);
+        let members = ids.clone();
+        let mut boundaries = BTreeSet::new();
+        let mut candidates = BTreeSet::new();
+        let mut incomplete = false;
+        let quota = MAX_WORK / members.len().max(1);
+        if !members.is_empty() {
+            let terms = members.iter().map(|_| format!("SELECT ? AS dependent, blocker_id FROM (SELECT blocker_id FROM dependencies WHERE dependent_id = ? ORDER BY blocker_id LIMIT {})", quota + 1)).collect::<Vec<_>>();
+            let parameters = members.iter().flat_map(|id| [id, id]).collect::<Vec<_>>();
+            let mut stmt = tx.prepare(&terms.join(" UNION ALL "))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(parameters), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+            let mut counts = HashMap::<String, usize>::new();
+            for (dependent, blocker) in rows {
+                let count = counts.entry(dependent.clone()).or_default();
+                *count += 1;
+                if *count > quota {
+                    incomplete = true;
+                    continue;
+                }
+                if !ids.contains(&blocker) {
+                    if ids.len() == MAX_NODES {
+                        omitted_neighbors = true;
+                        continue;
+                    }
+                    boundaries.insert(blocker.clone());
+                    ids.push(blocker.clone());
+                }
+                candidates.insert((blocker, dependent));
+            }
+        }
+        let (nodes, references) = graph_nodes(&tx, &ids, &boundaries)?;
+        let mut edges = Vec::new();
+        let mut omitted_edges = incomplete;
+        for (blocker, dependent) in candidates {
+            if edges.len() == MAX_EDGES {
+                omitted_edges = true;
+                break;
+            }
+            if let (Some(blocker), Some(dependent)) =
+                (references.get(&blocker), references.get(&dependent))
+            {
+                edges.push(GraphEdge {
+                    blocker: blocker.clone(),
+                    dependent: dependent.clone(),
+                });
+            }
+        }
+        omitted_neighbors |= incomplete;
+        tx.commit()?;
+        Ok(DependencyGraph {
+            nodes,
+            edges,
+            max_nodes: MAX_NODES,
+            max_depth: 1,
+            max_edges: MAX_EDGES,
+            max_work: MAX_WORK,
+            omitted_neighbors,
+            omitted_edges,
+            truncated: omitted_neighbors || omitted_edges,
+        })
+    }
+}
+
+fn graph_nodes(
+    tx: &rusqlite::Connection,
+    ids: &[String],
+    boundaries: &BTreeSet<String>,
+) -> Result<(Vec<GraphNode>, HashMap<String, String>), Error> {
+    let ids_json = serde_json::to_string(&ids)?;
+    let sql = format!(
+        "SELECT t.id, t.number, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}) FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
+        crate::source::held_sql("t.id"),
+        crate::history::unresolved_blocker_sql("b")
+    );
+    let mut statement = tx.prepare(&sql)?;
+    let rows = statement
+        .query_map([ids_json], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, bool>(4)?,
+                row.get::<_, bool>(5)?,
+                row.get::<_, bool>(6)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    let mut metadata = HashMap::new();
+    for (id, number, title, status, trashed, held, blocked) in rows {
+        let status: Status = status.parse().map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
+        })?;
+        let availability = if held || trashed || status != Status::Todo {
+            None
+        } else if blocked {
+            Some("Blocked".into())
+        } else {
+            Some("Ready".into())
+        };
+        metadata.insert(
+            id.clone(),
+            GraphNode {
+                id,
+                trashed,
+                reference: format!("T-{number}"),
+                title,
+                status,
+                availability,
+                boundary: false,
+            },
+        );
+    }
+    let mut nodes = Vec::new();
+    let mut references = HashMap::new();
+    for id in ids {
+        if let Some(mut node) = metadata.remove(id) {
+            node.boundary = boundaries.contains(id);
+            references.insert(id.clone(), node.reference.clone());
+            nodes.push(node);
+        }
+    }
+    Ok((nodes, references))
 }

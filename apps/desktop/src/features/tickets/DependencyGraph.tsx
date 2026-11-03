@@ -72,6 +72,9 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
           <span className="graph-node-status">{ticket.status}</span>{" "}
           {ticket.trashed && <span className="graph-node-status">Trashed</span>}{" "}
           {origin && <span className="graph-node-origin">Opened from</span>}
+          {ticket.boundary && (
+            <span className="graph-node-status">Outside Plan</span>
+          )}
         </span>{" "}
         <span className="graph-node-title">{ticket.title}</span>{" "}
         <AvailabilityMark availability={ticket.availability} />
@@ -108,7 +111,7 @@ function Toolbar() {
   );
 }
 
-function Canvas({
+export function Canvas({
   graph,
   origin,
   selected,

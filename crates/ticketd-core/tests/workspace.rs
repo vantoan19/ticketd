@@ -4261,3 +4261,100 @@ fn activity_feed_interleaves_reports_and_automatic_events_with_bounded_pages() {
         matches!(&older[0], ActivityFeedEntry::Automatic { event, .. } if event.to_value == "In progress")
     );
 }
+
+#[test]
+fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("plan-graph.sqlite")).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    let first = workspace.create_project("First", "/first").unwrap();
+    let second = workspace.create_project("Second", "/second").unwrap();
+    let member = workspace
+        .create_ticket_in_project("Member", Some(&first.id))
+        .unwrap();
+    let other = workspace
+        .create_ticket_in_project("Other member", Some(&second.id))
+        .unwrap();
+    let outside = workspace.create_ticket("Outside").unwrap();
+    workspace
+        .set_plan(&member.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace
+        .set_plan(&other.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace
+        .add_dependency(&outside.reference, &member.reference, None)
+        .unwrap();
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert_eq!(graph.nodes.len(), 3);
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|n| n.reference == outside.reference && n.boundary)
+    );
+    assert!(graph.nodes.iter().any(|n| n.reference == member.reference
+        && !n.boundary
+        && n.availability.as_deref() == Some("Blocked")));
+    assert_eq!(workspace.show_plan(&plan.id).unwrap().counts.todo, 2);
+    assert!(
+        workspace
+            .add_dependency(&member.reference, &outside.reference, None)
+            .is_err()
+    );
+    workspace
+        .change_ticket(
+            &outside.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|n| n.reference == member.reference && n.availability.as_deref() == Some("Ready"))
+    );
+    workspace
+        .change_ticket(
+            &other.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let counts = workspace.show_plan(&plan.id).unwrap().counts;
+    assert_eq!((counts.todo, counts.done), (1, 1));
+}
+
+#[test]
+fn plan_graph_discloses_omissions_and_cycle_validation_uses_full_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bounded-plan.sqlite")).unwrap();
+    let plan = workspace.create_plan("Large Plan").unwrap();
+    let mut tickets: Vec<String> = Vec::new();
+    for i in 0..55 {
+        let ticket = workspace.create_ticket(&format!("Ticket {i}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+        if let Some(previous) = tickets.last() {
+            workspace
+                .add_dependency(previous, &ticket.reference, None)
+                .unwrap();
+        }
+        tickets.push(ticket.reference);
+    }
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert!(graph.omitted_neighbors);
+    assert_eq!(graph.nodes.len(), 50);
+    assert!(
+        workspace
+            .add_dependency(&tickets[54], &tickets[0], None)
+            .is_err()
+    );
+}

@@ -59,7 +59,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 32;
+pub const FORMAT_VERSION: i64 = 33;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -488,6 +488,9 @@ impl Workspace {
         }
         if version < 32 {
             transaction.execute_batch("ALTER TABLE notes RENAME TO activities; ALTER TABLE activities RENAME COLUMN content TO brief; ALTER TABLE activities RENAME COLUMN created_at TO reported_at; UPDATE inbox_entries SET kind = 'activity' WHERE kind = 'note'; CREATE INDEX IF NOT EXISTS activities_feed ON activities(ticket_id, reported_at DESC, number DESC); CREATE INDEX IF NOT EXISTS ticket_history_feed ON ticket_history(ticket_id, timestamp DESC, number DESC); PRAGMA user_version = 32;")?;
+        }
+        if version < 33 {
+            transaction.execute_batch("CREATE INDEX IF NOT EXISTS tickets_plan_scope ON tickets(plan_id, trashed, number); PRAGMA user_version = 33;")?;
         }
         transaction.commit()?;
         Ok(())
