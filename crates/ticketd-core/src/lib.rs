@@ -1,4 +1,5 @@
 //! Shared ticket workflows for the desktop and CLI.
+pub use search::TicketWithUpdate;
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
@@ -55,7 +56,9 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
-pub use activities::{Activity, ActivityFeedEntry, ActivityPatch, ReportedUpdate};
+pub use activities::{
+    Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
+};
 pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
 
@@ -816,6 +819,12 @@ impl Workspace {
         tx.commit()?;
         Ok(())
     }
+    /// Read the latest authored Activity without loading its history.
+    pub fn latest_update(&self, reference: &str) -> Result<Option<LatestUpdate>, Error> {
+        let id = relationships::id(&self.connection, reference)?;
+        activities::latest(&self.connection, &id)
+    }
+
     pub fn activity_feed(
         &self,
         reference: &str,

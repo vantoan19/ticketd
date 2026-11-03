@@ -14,6 +14,8 @@ pub struct ContextOptions {
     pub relationships: bool,
     pub activities: bool,
     #[serde(default)]
+    pub latest_update: bool,
+    #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
     /// The source's comments and events for an externally sourced ticket.
@@ -130,6 +132,8 @@ pub struct TicketContext {
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activities: Option<ContextPage<ContextActivity>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_update: Option<Option<crate::LatestUpdate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -376,6 +380,11 @@ impl Workspace {
         } else {
             None
         };
+        let latest_update = if options.latest_update {
+            Some(crate::activities::latest(&tx, &id)?)
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -392,6 +401,7 @@ impl Workspace {
             plan,
             relationships,
             activities,
+            latest_update,
             evidence,
             backlinks,
             source_conversation,

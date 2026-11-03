@@ -53,3 +53,74 @@ fn list_and_detail_report_the_latest_authored_note_apart_from_other_changes() {
     );
     assert_eq!(workspace.sidebar_counts().unwrap().total, 1);
 }
+
+#[test]
+fn latest_progress_is_bounded_and_follows_insertion_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("updates.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Progress").unwrap();
+    assert!(
+        workspace
+            .latest_update(&ticket.reference)
+            .unwrap()
+            .is_none()
+    );
+    let older = workspace
+        .add_activity(&ticket.reference, "Older", None)
+        .unwrap();
+    let latest = workspace
+        .add_activity(&ticket.reference, &"é".repeat(1025), Some("agent"))
+        .unwrap();
+    workspace
+        .edit_activity(
+            &ticket.reference,
+            &older.id,
+            ActivityPatch {
+                brief: Some("Edited".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let summary = workspace.latest_update(&ticket.reference).unwrap().unwrap();
+    assert_eq!(summary.activity_id, latest.id);
+    assert_eq!(summary.brief.text.chars().count(), 1024);
+    assert!(summary.brief.truncated);
+    assert_eq!(summary.reported_at, latest.reported_at);
+    assert_eq!(summary.updated_at, latest.updated_at);
+    assert_eq!(summary.editing_agent.as_deref(), Some("agent"));
+}
+
+#[test]
+fn filtered_page_and_reopened_workspace_preserve_latest_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.create_ticket("Other").unwrap();
+    let ticket = workspace.create_ticket("Matching").unwrap();
+    let activity = workspace
+        .add_activity(&ticket.reference, "Checkpoint", None)
+        .unwrap();
+    let filter = TicketFilter {
+        query: "Matching".into(),
+        limit: 1,
+        ..Default::default()
+    };
+    let page = workspace.find_tickets_with_updates(&filter).unwrap();
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].ticket.reference, ticket.reference);
+    assert_eq!(
+        page[0].latest_update.as_ref().unwrap().activity_id,
+        activity.id
+    );
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .latest_update(&ticket.reference)
+            .unwrap()
+            .unwrap()
+            .brief
+            .text,
+        "Checkpoint"
+    );
+}

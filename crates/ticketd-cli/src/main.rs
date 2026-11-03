@@ -286,6 +286,8 @@ enum Command {
     List {
         #[command(flatten)]
         filters: FindArgs,
+        #[arg(long)]
+        latest_update: bool,
     },
     /// List incoming ticket references with passage context
     Backlinks {
@@ -307,6 +309,8 @@ enum Command {
         #[arg(long)]
         activities: bool,
         #[arg(long)]
+        latest_update: bool,
+        #[arg(long)]
         evidence: bool,
         #[arg(long)]
         backlinks: bool,
@@ -321,6 +325,8 @@ enum Command {
         query: String,
         #[command(flatten)]
         filters: FindArgs,
+        #[arg(long)]
+        latest_update: bool,
     },
     /// View a bounded dependency graph around a ticket
     Graph {
@@ -1150,11 +1156,28 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.set_plan(&reference, None, agent.as_deref())?)?
             }
         },
-        Command::List { filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new())?)?)?
+        Command::List {
+            filters,
+            latest_update,
+        } => {
+            let filter = filters.filter(String::new())?;
+            if latest_update {
+                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+            } else {
+                serde_json::to_string(&workspace.find_tickets(&filter)?)?
+            }
         }
-        Command::Search { query, filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(query)?)?)?
+        Command::Search {
+            query,
+            filters,
+            latest_update,
+        } => {
+            let filter = filters.filter(query)?;
+            if latest_update {
+                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+            } else {
+                serde_json::to_string(&workspace.find_tickets(&filter)?)?
+            }
         }
         Command::Backlinks {
             reference,
@@ -1167,6 +1190,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             relationships,
             activities,
+            latest_update,
             evidence,
             backlinks,
             conversation,
@@ -1178,6 +1202,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 plan,
                 relationships,
                 activities,
+                latest_update,
                 evidence,
                 backlinks,
                 conversation,

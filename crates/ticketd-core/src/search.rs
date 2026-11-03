@@ -1,3 +1,9 @@
+#[derive(Debug, Serialize)]
+pub struct TicketWithUpdate {
+    pub ticket: crate::Ticket,
+    pub latest_update: Option<crate::LatestUpdate>,
+}
+
 use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, ticket_from_row};
 use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
@@ -167,6 +173,27 @@ impl Workspace {
             crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
+    }
+
+    /// Return the same filtered ticket page with bounded authored progress.
+    pub fn find_tickets_with_updates(
+        &self,
+        filter: &TicketFilter,
+    ) -> Result<Vec<TicketWithUpdate>, Error> {
+        let tx = self.connection.unchecked_transaction()?;
+        let tickets = self.find_tickets(filter)?;
+        let result = tickets
+            .into_iter()
+            .map(|ticket| {
+                let latest_update = crate::activities::latest(&tx, &ticket.id)?;
+                Ok(TicketWithUpdate {
+                    ticket,
+                    latest_update,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        tx.commit()?;
+        Ok(result)
     }
 
     /// Count the tickets of the whole filtered result set by status, ignoring its paging.
