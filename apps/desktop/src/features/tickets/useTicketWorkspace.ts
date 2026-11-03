@@ -16,7 +16,7 @@ import {
 import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
-type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
+type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
  * fetched after the selection, so it is judged against the stored text rather than
@@ -37,19 +37,19 @@ export function useTicketWorkspace(
   setCreating: (value: boolean) => void,
 ) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [efforts, setEfforts] = useState<
-    { id: string; name: string; archived: boolean }[]
+  const [plans, setPlans] = useState<
+    { id: string; name: string; archived: boolean; purpose: string }[]
   >([]);
   const [filter, setFilter] = useState("all");
   const [navigation, setNavigation] = useState<{
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
-    effort: string;
-  }>({ kind: "all", project: "all", effort: "" });
+    plan: string;
+  }>({ kind: "all", project: "all", plan: "" });
   const [queryError, setQueryError] = useState(false);
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
-  const [effort, setEffort] = useState("");
+  const [plan, setPlan] = useState("");
   const [status, setStatus] = useState("");
   const [tags, setTags] = useState("");
   const [availability, setAvailability] = useState("");
@@ -114,7 +114,7 @@ export function useTicketWorkspace(
         query,
         project: filter === "all" || filter === "unlinked" ? null : filter,
         unlinked: filter === "unlinked",
-        effort: effort || null,
+        plan: plan || null,
         status: status || null,
         tags: tags
           .split(",")
@@ -136,7 +136,7 @@ export function useTicketWorkspace(
         Promise.all([
           trash ? client.listTrash() : client.findTickets(filterArgs),
           client.listProjects(),
-          client.listEfforts(),
+          client.listPlans(),
           trash ? Promise.resolve(null) : client.countTickets(filterArgs),
           // Source counts only decorate the filter, so they never fail the list.
           trash
@@ -169,7 +169,7 @@ export function useTicketWorkspace(
       setCounts(result[3]);
       setSourceCounts(result[4]);
       setProjects(result[1]);
-      setEfforts(result[2]);
+      setPlans(result[2]);
       setRevision((value) => value + 1);
       setError("");
     } catch (reason) {
@@ -187,7 +187,7 @@ export function useTicketWorkspace(
     query,
     filter,
     offset,
-    effort,
+    plan,
     status,
     tags,
     availability,
@@ -303,7 +303,7 @@ export function useTicketWorkspace(
     body: string,
     status: string,
     project: string | null,
-    effortId: string | null,
+    planId: string | null,
     tags: string[],
     keepOpen = false,
   ) {
@@ -312,7 +312,7 @@ export function useTicketWorkspace(
       body,
       status,
       project,
-      effortId,
+      planId,
       tags,
       loadPreferences().followCreated,
     );
@@ -366,9 +366,8 @@ export function useTicketWorkspace(
         : navigation.project !== "all"
           ? (projects.find((p) => p.id === navigation.project)?.name ??
             "Project")
-          : navigation.effort
-            ? (efforts.find((e) => e.id === navigation.effort)?.name ??
-              "Effort")
+          : navigation.plan
+            ? (plans.find((e) => e.id === navigation.plan)?.name ?? "Plan")
             : navigation.kind === "ready"
               ? "Ready"
               : navigation.kind === "progress"
@@ -376,7 +375,7 @@ export function useTicketWorkspace(
                 : "All tickets";
   function clearFilters() {
     setQuery("");
-    setEffort(navigation.effort);
+    setPlan(navigation.plan);
     setStatus(navigation.kind === "progress" ? "In progress" : "");
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
@@ -387,13 +386,13 @@ export function useTicketWorkspace(
   function scope(
     next: "all" | "ready" | "progress" | "trash",
     project = "all",
-    effortId = "",
+    planId = "",
   ) {
-    setNavigation({ kind: next, project, effort: effortId });
+    setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");
     setFilter(project);
-    setEffort(effortId);
+    setPlan(planId);
     setStatus(next === "progress" ? "In progress" : "");
     setAvailability(next === "ready" ? "Ready" : "");
     setTags("");
@@ -412,15 +411,15 @@ export function useTicketWorkspace(
     sourceHealth,
     refreshSources,
     projects,
-    efforts,
+    plans,
     filter,
     setFilter,
     query,
     setQuery,
     offset,
     setOffset,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,

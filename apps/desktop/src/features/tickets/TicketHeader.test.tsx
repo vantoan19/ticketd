@@ -30,7 +30,7 @@ const ticket: Ticket = {
   status: "Todo",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   trashed: false,
   availability: null,
   parent: null,

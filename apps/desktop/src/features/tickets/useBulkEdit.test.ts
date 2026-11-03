@@ -32,7 +32,7 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
   );
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.selectAll(["T-1", "T-2", "T-3"]));
-  await act(() => result.current.applyOrganization({ effort_id: "e1" }, "ok"));
+  await act(() => result.current.applyOrganization({ plan_id: "e1" }, "ok"));
   expect(result.current.failure).toEqual({
     reference: "T-2",
     message: "Nothing changed. T-2 could not be updated: ticket is trashed.",
@@ -49,8 +49,8 @@ test("changing the selection after a failure uses a new request ID", async () =>
     .mockResolvedValue(undefined as never);
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.selectAll(["T-1", "T-2"]));
-  await act(() => result.current.applyOrganization({ effort_id: null }, "ok"));
+  await act(() => result.current.applyOrganization({ plan_id: null }, "ok"));
   act(() => result.current.toggle("T-2"));
-  await act(() => result.current.applyOrganization({ effort_id: null }, "ok"));
+  await act(() => result.current.applyOrganization({ plan_id: null }, "ok"));
   expect(bulkChange.mock.calls[1]?.[2]).not.toBe(bulkChange.mock.calls[0]?.[2]);
 });

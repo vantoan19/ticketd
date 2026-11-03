@@ -62,7 +62,7 @@ beforeEach(() => {
         body: "",
         tags: [],
         project_id: "p1",
-        effort_id: null,
+        plan_id: null,
         parent: null,
         children: [],
         // Links beyond the drawn graph still show in the panel.
@@ -124,7 +124,7 @@ function renderGraph(onBack = vi.fn(), onOpen = vi.fn()) {
       reference="T-2"
       revision={0}
       projects={[{ id: "p1", name: "Core", path: "/core", paths: [] }]}
-      efforts={[]}
+      plans={[]}
       onBack={onBack}
       onOpen={onOpen}
     />,

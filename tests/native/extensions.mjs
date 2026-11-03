@@ -22,7 +22,7 @@ const source = run("create", "Extension source");
 const target = run("create", "Extension target");
 const dependent = run("create", "Extension dependent");
 const project = run("project", "create", "Extension project", process.cwd());
-const effort = run("effort", "create", "Extension effort");
+const plan = run("plan", "create", "Extension plan");
 run(
   "change",
   source.reference,
@@ -337,12 +337,12 @@ try {
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();
   await (await browser.$(`[aria-label="Select ${target.reference}"]`)).click();
   await click(await browser.$('[aria-label="Organize selected tickets"]'));
-  await chooseFromSubmenu("Set Effort", `[role="menuitem"]*=${effort.name}`);
+  await chooseFromSubmenu("Set Plan", `[role="menuitem"]*=${plan.name}`);
   await waitFor(
     () =>
-      run("show", source.reference).effort_id === effort.id &&
-      run("show", target.reference).effort_id === effort.id,
-    "Bulk Effort did not persist",
+      run("show", source.reference).plan_id === plan.id &&
+      run("show", target.reference).plan_id === plan.id,
+    "Bulk Plan did not persist",
   );
   await waitForSelectionReset();
   await (await browser.$(`[aria-label="Select ${source.reference}"]`)).click();

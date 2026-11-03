@@ -16,9 +16,9 @@ const command = (args, input) =>
   execFileSync(cli, args, { cwd: checkout, encoding: "utf8", input });
 const run = (...args) => JSON.parse(command(args));
 const project = run("project", "create", "ticketd", checkout);
-const effort = run("effort", "create", "Validate native workflow");
+const plan = run("plan", "create", "Validate native workflow");
 // This plan describes the real repository change that adds this workflow harness.
-const plan = [
+const batch = [
   {
     operation: "create",
     name: "outcome",
@@ -52,10 +52,10 @@ const plan = [
     change: { parent: "$outcome", add_blockers: ["$harness"] },
   },
 ];
-const results = JSON.parse(command(["batch", "-"], JSON.stringify(plan)));
+const results = JSON.parse(command(["batch", "-"], JSON.stringify(batch)));
 const [outcome, harness, evidence] = results;
-run("effort", "add", effort.id, harness.reference);
-run("effort", "add", effort.id, evidence.reference);
+run("plan", "add", plan.id, harness.reference);
+run("plan", "add", plan.id, evidence.reference);
 assert.equal(run("show", evidence.reference).availability, "Blocked");
 assert(
   run("list", "--availability", "ready").some(
@@ -66,13 +66,13 @@ const context = run(
   "context",
   harness.reference,
   "--project",
-  "--effort",
+  "--plan",
   "--relationships",
   "--notes",
 );
 assert.equal(context.relationships.parent.reference, outcome.reference);
 assert.equal(context.project.id, project.id);
-assert.equal(context.effort.id, effort.id);
+assert.equal(context.plan.id, plan.id);
 console.log(
   `Bounded context: ${Buffer.byteLength(JSON.stringify(context))} bytes in one CLI call`,
 );

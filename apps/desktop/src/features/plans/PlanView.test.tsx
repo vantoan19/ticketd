@@ -28,8 +28,9 @@ Object.defineProperty(window, "matchMedia", {
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 
-type Fake = { id: string; reference: string; status: string; effort: string };
-let efforts: { id: string; name: string; archived: boolean }[] = [];
+type Fake = { id: string; reference: string; status: string; plan: string };
+let plans: { id: string; name: string; archived: boolean; purpose: string }[] =
+  [];
 let tickets: Fake[] = [];
 const calls: [string, unknown][] = [];
 
@@ -42,7 +43,7 @@ const ticket = (item: Fake) => ({
   trashed: false,
   tags: [] as string[],
   project_id: null,
-  effort_id: item.effort || null,
+  plan_id: item.plan || null,
   availability: null,
   prerequisites: [],
   parent: null,
@@ -50,25 +51,25 @@ const ticket = (item: Fake) => ({
 });
 
 beforeEach(() => {
-  efforts = [{ id: "e1", name: "Launch", archived: false }];
+  plans = [{ id: "e1", name: "Launch", archived: false, purpose: "" }];
   tickets = [
-    { id: "1", reference: "T-1", status: "Todo", effort: "e1" },
-    { id: "2", reference: "T-2", status: "Done", effort: "e1" },
-    { id: "3", reference: "T-3", status: "Todo", effort: "" },
+    { id: "1", reference: "T-1", status: "Todo", plan: "e1" },
+    { id: "2", reference: "T-2", status: "Done", plan: "e1" },
+    { id: "3", reference: "T-3", status: "Todo", plan: "" },
   ];
   calls.length = 0;
   bridge.invoke.mockImplementation(async (command: string, args: never) => {
     const input = args as Record<string, never> | undefined;
     calls.push([command, input]);
     switch (command) {
-      case "list_efforts":
-        return efforts;
-      case "show_effort": {
-        const members = tickets.filter((item) => item.effort === input?.id);
+      case "list_plans":
+        return plans;
+      case "show_plan": {
+        const members = tickets.filter((item) => item.plan === input?.id);
         const count = (status: string) =>
           members.filter((item) => item.status === status).length;
         return {
-          effort: efforts.find((item) => item.id === input?.id),
+          plan: plans.find((item) => item.id === input?.id),
           members: members.map(ticket),
           counts: {
             todo: count("Todo"),
@@ -81,22 +82,26 @@ beforeEach(() => {
         };
       }
       case "find_tickets": {
-        const effort = (input?.filter as unknown as { effort: string | null })
-          .effort;
+        const plan = (input?.filter as unknown as { plan: string | null }).plan;
         return tickets
-          .filter((item) => !effort || item.effort === effort)
+          .filter((item) => !plan || item.plan === plan)
           .map(ticket);
       }
-      case "set_effort": {
+      case "set_plan_purpose": {
+        const target = plans.find((item) => item.id === input?.id);
+        if (target) target.purpose = input?.purpose ?? "";
+        return target;
+      }
+      case "set_plan": {
         const target = tickets.find(
           (item) => item.reference === input?.reference,
         );
         if (target)
-          target.effort = (input?.effort as unknown as string | null) ?? "";
+          target.plan = (input?.plan as unknown as string | null) ?? "";
         return target ? ticket(target) : null;
       }
-      case "change_effort": {
-        const target = efforts.find((item) => item.id === input?.id);
+      case "change_plan": {
+        const target = plans.find((item) => item.id === input?.id);
         if (target) {
           if (input?.name) target.name = input.name;
           if (input?.archived !== null && input?.archived !== undefined)
@@ -123,19 +128,19 @@ async function openLaunch() {
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
   return screen.findByRole("heading", { name: "Launch" });
 }
-test("shows status counts and members for the Effort, and updates both when a member is removed", async () => {
+test("shows status counts and members for the Plan, and updates both when a member is removed", async () => {
   tickets.push({
     id: "4",
     reference: "T-4",
     status: "Duplicate",
-    effort: "e1",
+    plan: "e1",
   });
   await openLaunch();
   const group = await screen.findByLabelText("Tickets by status");
   await waitFor(() => expect(group.textContent).toContain("Done1"));
   expect(group.textContent).toContain("Todo1");
   expect(group.textContent).toContain("Duplicate1");
-  expect(screen.getByText("Effort · 3 tickets")).toBeTruthy();
+  expect(screen.getByText("Plan · 3 tickets")).toBeTruthy();
   expect(screen.getByText("Active")).toBeTruthy();
 
   fireEvent.click(
@@ -145,12 +150,9 @@ test("shows status counts and members for the Effort, and updates both when a me
     expect(screen.queryByRole("button", { name: /^T-1/ })).toBeNull(),
   );
   await waitFor(() =>
-    expect(screen.getByText("Effort · 2 tickets")).toBeTruthy(),
+    expect(screen.getByText("Plan · 2 tickets")).toBeTruthy(),
   );
-  expect(calls).toContainEqual([
-    "set_effort",
-    { reference: "T-1", effort: null },
-  ]);
+  expect(calls).toContainEqual(["set_plan", { reference: "T-1", plan: null }]);
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
     "Todo0",
   );
@@ -159,53 +161,54 @@ test("shows status counts and members for the Effort, and updates both when a me
 test("an empty name shows an inline error and changes nothing", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Rename" }));
-  fireEvent.change(screen.getByLabelText("Effort name"), {
+  fireEvent.change(screen.getByLabelText("Plan name"), {
     target: { value: "   " },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Enter a name",
   );
-  expect(calls.some(([command]) => command === "change_effort")).toBe(false);
+  expect(calls.some(([command]) => command === "change_plan")).toBe(false);
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
 });
 
-test("renames the Effort", async () => {
+test("renames the Plan", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Rename" }));
-  fireEvent.change(screen.getByLabelText("Effort name"), {
+  fireEvent.change(screen.getByLabelText("Plan name"), {
     target: { value: "Release" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
   await screen.findByRole("heading", { name: "Release" });
   expect(calls).toContainEqual([
-    "change_effort",
+    "change_plan",
     { id: "e1", name: "Release", archived: null },
   ]);
 });
 
-test("archiving moves the Effort to Archived, where it can be reactivated", async () => {
+test("archiving moves the Plan to Archived, where it can be reactivated", async () => {
   await openLaunch();
-  expect(screen.getByText(/Archiving hides this Effort/)).toBeTruthy();
+  expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-  await screen.findByText("Archived", { selector: ".effort-state" });
+  await screen.findByText("Archived", { selector: ".plan-state" });
   await waitFor(() =>
     expect(
       within(
-        screen.getByRole("navigation", { name: "Effort scopes" }),
+        screen.getByRole("navigation", { name: "Plan scopes" }),
       ).queryByRole("button", { name: "Launch" }),
     ).toBeNull(),
   );
   expect(tickets.map((item) => item.status)).toEqual(["Todo", "Done", "Todo"]);
 
   fireEvent.click(screen.getByRole("button", { name: /^Archived/ }));
-  await screen.findByRole("heading", { name: "Archived Efforts" });
+  await screen.findByRole("heading", { name: "Archived Plans" });
   fireEvent.click(screen.getByRole("button", { name: "Reactivate Launch" }));
   await waitFor(() =>
     expect(
-      within(
-        screen.getByRole("navigation", { name: "Effort scopes" }),
-      ).getByRole("button", { name: "Launch" }),
+      within(screen.getByRole("navigation", { name: "Plan scopes" })).getByRole(
+        "button",
+        { name: "Launch" },
+      ),
     ).toBeTruthy(),
   );
 });
@@ -218,8 +221,8 @@ test("adds an existing ticket from search", async () => {
   );
   await waitFor(() =>
     expect(calls).toContainEqual([
-      "set_effort",
-      { reference: "T-3", effort: "e1" },
+      "set_plan",
+      { reference: "T-3", plan: "e1" },
     ]),
   );
   await waitFor(() =>
@@ -227,4 +230,14 @@ test("adds an existing ticket from search", async () => {
       screen.queryByRole("button", { name: "Add T-3 to Launch" }),
     ).toBeNull(),
   );
+});
+
+test("edits a Plan purpose", async () => {
+  await openLaunch();
+  fireEvent.click(screen.getByRole("button", { name: "Add purpose" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
+    target: { value: "Ship safely" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save purpose" }));
+  await waitFor(() => expect(screen.getByText("Ship safely")).toBeTruthy());
 });

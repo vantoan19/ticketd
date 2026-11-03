@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import { CreateTicketDialog } from "./CreateTicketDialog";
 
 // The description editor loads lazily. Load it once up front so no test waits on
@@ -61,22 +61,22 @@ afterEach(() => {
 
 function Harness({
   create,
-  navigation = { project: "all", effort: "" },
+  navigation = { project: "all", plan: "" },
   projects = [],
-  efforts = [],
+  plans = [],
 }: {
   create: (
     title: string,
     body: string,
     status: string,
     project: string | null,
-    effort: string | null,
+    plan: string | null,
     tags: string[],
     keepOpen: boolean,
   ) => Promise<string>;
-  navigation?: { project: string; effort: string };
+  navigation?: { project: string; plan: string };
   projects?: Project[];
-  efforts?: Effort[];
+  plans?: Plan[];
 }) {
   const [open, setOpen] = useState(true);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -91,7 +91,7 @@ function Harness({
         triggerRef={triggerRef}
         navigation={navigation}
         projects={projects}
-        efforts={efforts}
+        plans={plans}
         create={create}
       />
     </>
@@ -154,7 +154,7 @@ test("opening from a project scope preselects that project", () => {
   render(
     <Harness
       create={vi.fn()}
-      navigation={{ project: "p", effort: "" }}
+      navigation={{ project: "p", plan: "" }}
       projects={[{ id: "p", name: "Desktop app", path: "/w", paths: ["/w"] }]}
     />,
   );
@@ -244,8 +244,8 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   render(
     <Harness
       create={create}
-      navigation={{ project: "all", effort: "e1" }}
-      efforts={[{ id: "e1", name: "Sprint 1", archived: false }]}
+      navigation={{ project: "all", plan: "e1" }}
+      plans={[{ id: "e1", name: "Sprint 1", archived: false, purpose: "" }]}
     />,
   );
   fireEvent.click(screen.getByRole("switch", { name: "Create more" }));
@@ -258,7 +258,7 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);
-  expect(screen.getByRole("button", { name: "Effort: Sprint 1" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Plan: Sprint 1" })).toBeTruthy();
   fireEvent.change(title, { target: { value: "Second" } });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(2));

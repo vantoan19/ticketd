@@ -21,7 +21,7 @@ The interface should feel composed, legible, and predictable. A person should id
 Use three levels of emphasis:
 
 1. **Work content:** ticket titles, descriptions, notes, and meaningful results. These have the strongest text contrast and the largest share of the screen.
-2. **Context:** status, project, Effort, relationships, and evidence. These stay readable and close to the content they describe.
+2. **Context:** status, project, Plan, relationships, and evidence. These stay readable and close to the content they describe.
 3. **Operations:** follow, reminder configuration, filters, editing controls, and administrative actions. These have compact triggers and reveal their forms when requested.
 
 Visual simplicity must not erase useful information. Existing prerequisites, duplicate links, evidence, and scheduled reminders need visible summaries. Hiding everything behind accordions is not an acceptable substitute for hierarchy.
@@ -221,9 +221,9 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 │ All tickets  │ ├─────────────────────────┤ Ticket title              │ Status      │ │
 │ Ready     4  │ │ ◐ In progress  2     +  │ ● Open on GitHub · #98    │ Source      │ │
 │ In progress  │ │ ◐ T-42 Selected     #98 │ ┌ GitHub · Read-only ──┐  │ Project     │ │
-│              │ │ ◐ T-43 Ticket title     │ │ Description          │  │ Effort      │ │
+│              │ │ ◐ T-43 Ticket title     │ │ Description          │  │ Plan        │ │
 │ Projects  ⚙  │ │ ◌ In review    1     +  │ └──────────────────────┘  │ Tags        │ │
-│ Efforts   ⚙  │ │ ◌ T-44 Ticket title  #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
+│ Plans     ⚙  │ │ ◌ T-44 Ticket title  #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
 │ Archived …   │ │ ○ Todo         3     +  │ GitHub conversation       │ Attention   │ │
 │              │ │ ○ T-45 Ticket title     │ Notes and history         │             │ │
 │ ● GitHub     │ └─────────────────────────┴───────────────────────────┴─────────────┘ │
@@ -274,7 +274,7 @@ The sidebar sits on the canvas surface, top to bottom:
 
 - **Brand:** the product name in plain type beside a 32px New ticket icon button with an accessible name and tooltip. Do not use a full-width primary creation button in persistent navigation.
 - **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count.
-- **Projects and Efforts:** two groups, each with manage actions in its heading, plus an Archived Efforts entry under Efforts.
+- **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
 
 Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
@@ -286,13 +286,13 @@ Use stable columns: selection, status, reference, title, then the source pill of
 - Group rows by status in workflow order: In progress, In review, Todo, Done, Canceled, Duplicate. Each group has a 32px header on the canvas surface with the status icon, the status name in the subsection role, a 12px count, and an Add ticket action for that status. Omit empty groups. A status change moves the ticket to its new group without animating the reorder.
 - Once an external source is configured, a source filter below the list header offers All, GitHub, and Local with counts. It narrows the groups; it does not regroup the list by source.
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
-- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Effort relevant to the current view), tag pills, and the 12px updated time. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
+- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
 - Row hover uses a quieter fill than selection. Hover actions also appear on focus; essential actions cannot be hover-only.
 
-There is no permanent “0 selected” bar. When tickets are selected, show a compact action bar with the count, Change status, Organize, and Clear selection. Organize exposes project, Effort, and explicit tag addition/removal choices. Do not display four inline forms and their submit buttons at once. Keep the count visible after validation errors; show which ticket prevents the batch and state that nothing changed.
+There is no permanent “0 selected” bar. When tickets are selected, show a compact action bar with the count, Change status, Organize, and Clear selection. Organize exposes project, Plan, and explicit tag addition/removal choices. Do not display four inline forms and their submit buttons at once. Keep the count visible after validation errors; show which ticket prevents the batch and state that nothing changed.
 
 Search retains its query while opening details. Filter controls show active constraints and an obvious clear action. A zero-result search displays the query context and a way to clear filters; an empty workspace offers New ticket.
 
@@ -311,7 +311,7 @@ Search retains its query while opening details. Filter controls show active cons
 
 For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored note, with its relative reporting time and supplied editing agent, and opens that note; with none it says “No update reported”. Editing an older note does not make it the latest report.
 
-The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Effort, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
+The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
 
 In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
 
@@ -321,21 +321,21 @@ A save state belongs next to the edited content, in 12px supporting text. Stable
 
 ### Visibility and action placement
 
-| Information/action         | Default presentation                                               | Editing surface                                      |
-| -------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
-| Follow                     | Labeled toggle in the rail’s Attention section                     | Immediate action with pending/error feedback         |
-| Reminder                   | Remind me trigger, or a short scheduled-time summary, in Attention | Focused popover; expand to sheet when space requires |
-| Status/project/Effort/tags | Labeled values in the property rail                                | Anchored picker; explicit clear/add/remove choices   |
-| Source                     | Rail Source section: identity link, freshness, ownership, actions  | Explicit Refresh, Publish, Retry, or Take ownership  |
-| Description                | Rendered document, or an unobtrusive Add description action        | In-place rich editor for local tickets only          |
-| Parent/subtickets          | Subtickets with progress under the description; parent in the rail | Search/select action near the group heading          |
-| Blocking dependencies      | Rail Relationships with each blocker’s status; reason in the row   | Focused add/remove workflow and graph access         |
-| Related/discovered work    | Rail Relationships grouped by relationship meaning                 | Add relationship action with explicit direction      |
-| Duplicate                  | Duplicate status, with the canonical ticket in Relationships       | Mark as duplicate workflow in the actions menu       |
-| Evidence                   | Named records with type, value/link, and date                      | Add evidence or Edit opens a focused form            |
-| Backlinks                  | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                       |
-| Source conversation        | External comments and events in source order, read-only            | Comment at the source                                |
-| Activity                   | Notes and history readable in one chronological area               | Add note; edit/delete beside the relevant note       |
+| Information/action       | Default presentation                                               | Editing surface                                      |
+| ------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| Follow                   | Labeled toggle in the rail’s Attention section                     | Immediate action with pending/error feedback         |
+| Reminder                 | Remind me trigger, or a short scheduled-time summary, in Attention | Focused popover; expand to sheet when space requires |
+| Status/project/Plan/tags | Labeled values in the property rail                                | Anchored picker; explicit clear/add/remove choices   |
+| Source                   | Rail Source section: identity link, freshness, ownership, actions  | Explicit Refresh, Publish, Retry, or Take ownership  |
+| Description              | Rendered document, or an unobtrusive Add description action        | In-place rich editor for local tickets only          |
+| Parent/subtickets        | Subtickets with progress under the description; parent in the rail | Search/select action near the group heading          |
+| Blocking dependencies    | Rail Relationships with each blocker’s status; reason in the row   | Focused add/remove workflow and graph access         |
+| Related/discovered work  | Rail Relationships grouped by relationship meaning                 | Add relationship action with explicit direction      |
+| Duplicate                | Duplicate status, with the canonical ticket in Relationships       | Mark as duplicate workflow in the actions menu       |
+| Evidence                 | Named records with type, value/link, and date                      | Add evidence or Edit opens a focused form            |
+| Backlinks                | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                       |
+| Source conversation      | External comments and events in source order, read-only            | Comment at the source                                |
+| Activity                 | Notes and history readable in one chronological area               | Add note; edit/delete beside the relevant note       |
 
 Relationships are one flat rail section, grouped by meaning: parent, blocked by, blocks, related, discovered while, and duplicate of. Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
 
@@ -396,9 +396,9 @@ Use a dialog or expanded review pane, not a small popover. Show the duplicate an
 
 Each edge has an explicit retain, remove, or replace choice where valid. The final action states what will be applied. A stale preview or cycle error keeps the review visible and requests a fresh preview; no partial success presentation is allowed. Removing a duplicate designation must explain that dependency replacements are reviewed separately. Preserve access to the duplicate's description and history.
 
-## 10. Projects, Efforts, graph, and settings
+## 10. Projects, Plans, graph, and settings
 
-Project and Effort views reuse list typography, filters, row density, and selection behavior. Use the compact 24px/32px application title and a short context line. Effort status counts are simple labeled counts, not large dashboard cards or a productivity score. Archive/reactivate actions remain distinct from completing tickets.
+Project and Plan views reuse list typography, filters, row density, and selection behavior. Use the compact 24px/32px application title and a short context line. Plan status counts are simple labeled counts, not large dashboard cards or a productivity score. Archive/reactivate actions remain distinct from completing tickets.
 
 The dependency graph uses a neutral canvas, readable reference/title nodes, and explicit edge direction with a legend explaining which ticket blocks which. Selection and keyboard focus remain visible without relying on colored edges. Keep zoom, fit, and return controls in one compact toolbar. Node selection opens ticket context; graph navigation must retain a way back to the prior ticket. Large graphs need bounded loading and a clear explanation when the displayed scope is limited.
 

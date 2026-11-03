@@ -195,7 +195,7 @@ const publicationPreviewSchema = z.object({
   local: z
     .object({
       notes: z.number().int().nonnegative(),
-      effort: z.string().nullable(),
+      plan: z.string().nullable(),
       tags: z.array(z.string()),
       subtickets: z.array(z.string()),
     })

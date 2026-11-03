@@ -83,8 +83,8 @@ standard input. A create names a ticket for later operations using `$name`:
 ```
 
 Changes also accept `title`, `body`, `status`, `editing_agent`, `project_id`,
-`effort_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
-`effort_id` to null to clear it; omit a field to leave it unchanged. Results are
+`plan_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
+`plan_id` to null to clear it; omit a field to leave it unchanged. Results are
 JSON ticket snapshots in operation order. Failures identify the zero-based
 operation index and roll back the entire request. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
@@ -93,11 +93,11 @@ between operations.
 ### Bounded ticket context
 
 `ticketd context T-1` returns JSON with the ticket, derived availability, and
-its tags. Add `--project`, `--effort`, `--relationships`, or `--notes` to
+its tags. Add `--project`, `--plan`, `--relationships`, or `--notes` to
 select those scopes. An omitted scope is absent; a selected but unlinked project,
-Effort, or parent is `null`. Related tickets include status and `trashed`; only
+Plan, or parent is `null`. Related tickets include status and `trashed`; only
 Done satisfies a prerequisite. A missing root or a missing linked project or
-Effort produces an error on stderr and a nonzero exit code, with no JSON on
+Plan produces an error on stderr and a nonzero exit code, with no JSON on
 stdout.
 
 Each list is ordered by ticket reference number, tag name, or note insertion

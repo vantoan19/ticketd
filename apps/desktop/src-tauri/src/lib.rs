@@ -3,8 +3,8 @@ mod cli_status;
 
 use ticketd_core::{
     BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Document, DocumentPatch,
-    Effort, EffortView, Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch,
-    Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
+    Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Plan, PlanView, Project,
+    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
     TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
@@ -297,7 +297,7 @@ fn create_ticket(
     body: String,
     status: Status,
     project_id: Option<String>,
-    effort_id: Option<String>,
+    plan_id: Option<String>,
     tags: Vec<String>,
     follow: bool,
 ) -> Result<Ticket, String> {
@@ -318,7 +318,7 @@ fn create_ticket(
                             patch: TicketPatch {
                                 body: Some(body),
                                 status: Some(status),
-                                effort_id: effort_id.map(Some),
+                                plan_id: plan_id.map(Some),
                                 ..Default::default()
                             },
                             add_tags: tags,
@@ -730,37 +730,39 @@ fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, Strin
 }
 
 #[tauri::command]
-fn list_efforts() -> Result<Vec<Effort>, String> {
+fn list_plans() -> Result<Vec<Plan>, String> {
     Workspace::open_default()
-        .and_then(|w| w.list_efforts(true))
+        .and_then(|w| w.list_plans(true))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn show_effort(id: String) -> Result<EffortView, String> {
+fn show_plan(id: String) -> Result<PlanView, String> {
     Workspace::open_default()
-        .and_then(|w| w.show_effort(&id))
+        .and_then(|w| w.show_plan(&id))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn create_effort(name: String) -> Result<Effort, String> {
+fn create_plan(name: String) -> Result<Plan, String> {
     Workspace::open_default()
-        .and_then(|mut w| w.create_effort(&name))
+        .and_then(|mut w| w.create_plan(&name))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn change_effort(
-    id: String,
-    name: Option<String>,
-    archived: Option<bool>,
-) -> Result<Effort, String> {
+fn change_plan(id: String, name: Option<String>, archived: Option<bool>) -> Result<Plan, String> {
     Workspace::open_default()
-        .and_then(|mut w| w.change_effort(&id, name.as_deref(), archived))
+        .and_then(|mut w| w.change_plan(&id, name.as_deref(), archived))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn set_effort(reference: String, effort: Option<String>) -> Result<Ticket, String> {
+fn set_plan_purpose(id: String, purpose: String) -> Result<Plan, String> {
     Workspace::open_default()
-        .and_then(|mut w| w.set_effort(&reference, effort.as_deref(), None))
+        .and_then(|mut w| w.set_plan_purpose(&id, &purpose))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.set_plan(&reference, plan.as_deref(), None))
         .map_err(|e| e.to_string())
 }
 
@@ -1088,11 +1090,12 @@ pub fn run() -> Result<(), tauri::Error> {
             inspect_backup,
             safety_backups,
             export_workspace,
-            list_efforts,
-            show_effort,
-            create_effort,
-            change_effort,
-            set_effort,
+            list_plans,
+            show_plan,
+            create_plan,
+            change_plan,
+            set_plan_purpose,
+            set_plan,
             cli_status::check_cli,
             list_projects,
             register_checkout,

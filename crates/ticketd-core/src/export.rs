@@ -17,10 +17,10 @@ impl Workspace {
             ("document_opens", "sequence, document_id"),
             ("projects", "id, name, path"),
             ("project_checkouts", "project_id, path"),
-            ("efforts", "id, name, archived"),
+            ("plans", "id, name, archived, purpose"),
             (
                 "tickets",
-                "number, id, title, status, body, project_id, effort_id, trashed, updated_at",
+                "number, id, title, status, body, project_id, plan_id, trashed, updated_at",
             ),
             (
                 "notes",

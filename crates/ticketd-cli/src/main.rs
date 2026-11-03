@@ -96,6 +96,8 @@ enum Command {
         title: String,
         #[arg(long)]
         project: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
     },
     /// Patch ticket content; use --body-file - to read stdin
     Change {
@@ -204,10 +206,10 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Manage Efforts
-    Effort {
+    /// Manage Plans
+    Plan {
         #[command(subcommand)]
-        command: EffortCommand,
+        command: PlanCommand,
     },
     /// List tickets with combined filters
     List {
@@ -228,7 +230,7 @@ enum Command {
         #[arg(long)]
         project: bool,
         #[arg(long)]
-        effort: bool,
+        plan: bool,
         #[arg(long)]
         relationships: bool,
         #[arg(long)]
@@ -381,7 +383,7 @@ struct FindArgs {
     #[arg(long)]
     unlinked: bool,
     #[arg(long)]
-    effort: Option<String>,
+    plan: Option<String>,
     #[arg(long)]
     status: Option<Status>,
     /// Require every supplied tag (AND); repeat --tag for multiple tags
@@ -421,7 +423,7 @@ impl FindArgs {
             query,
             project: self.project,
             unlinked: self.unlinked,
-            effort: self.effort,
+            plan: self.plan,
             status: self.status,
             tags: self.tag,
             availability: self.availability.map(|a| match a {
@@ -444,7 +446,7 @@ impl FindArgs {
 }
 
 #[derive(Subcommand)]
-enum EffortCommand {
+enum PlanCommand {
     Create {
         name: String,
     },
@@ -458,6 +460,10 @@ enum EffortCommand {
     Rename {
         id: String,
         name: String,
+    },
+    Purpose {
+        id: String,
+        purpose: String,
     },
     Archive {
         id: String,
@@ -759,7 +765,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
         },
-        Command::Create { title, project } => {
+        Command::Create {
+            title,
+            project,
+            plan,
+        } => {
             let inferred = if project.is_none() {
                 workspace.resolve_project(&std::env::current_dir()?)?
             } else {
@@ -768,7 +778,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             let project = project
                 .as_deref()
                 .or_else(|| inferred.as_ref().map(|p| p.id.as_str()));
-            serde_json::to_string(&workspace.create_ticket_in_project(&title, project)?)?
+            serde_json::to_string(&workspace.create_ticket_in_context(
+                &title,
+                project,
+                plan.as_deref(),
+            )?)?
         }
         Command::Change {
             reference,
@@ -796,7 +810,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     body,
                     status,
                     editing_agent: agent,
-                    effort_id: None,
+                    plan_id: None,
                     project_id: if clear_project {
                         Some(None)
                     } else {
@@ -956,32 +970,33 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             parent.as_deref(),
             agent.as_deref(),
         )?)?,
-        Command::Effort { command } => match command {
-            EffortCommand::Create { name } => {
-                serde_json::to_string(&workspace.create_effort(&name)?)?
+        Command::Plan { command } => match command {
+            PlanCommand::Create { name } => serde_json::to_string(&workspace.create_plan(&name)?)?,
+            PlanCommand::List { all } => serde_json::to_string(&workspace.list_plans(all)?)?,
+            PlanCommand::Show { id } => serde_json::to_string(&workspace.show_plan(&id)?)?,
+            PlanCommand::Rename { id, name } => {
+                serde_json::to_string(&workspace.change_plan(&id, Some(&name), None)?)?
             }
-            EffortCommand::List { all } => serde_json::to_string(&workspace.list_efforts(all)?)?,
-            EffortCommand::Show { id } => serde_json::to_string(&workspace.show_effort(&id)?)?,
-            EffortCommand::Rename { id, name } => {
-                serde_json::to_string(&workspace.change_effort(&id, Some(&name), None)?)?
+            PlanCommand::Purpose { id, purpose } => {
+                serde_json::to_string(&workspace.set_plan_purpose(&id, &purpose)?)?
             }
-            EffortCommand::Archive { id } => {
-                serde_json::to_string(&workspace.change_effort(&id, None, Some(true))?)?
+            PlanCommand::Archive { id } => {
+                serde_json::to_string(&workspace.change_plan(&id, None, Some(true))?)?
             }
-            EffortCommand::Reactivate { id } => {
-                serde_json::to_string(&workspace.change_effort(&id, None, Some(false))?)?
+            PlanCommand::Reactivate { id } => {
+                serde_json::to_string(&workspace.change_plan(&id, None, Some(false))?)?
             }
-            EffortCommand::Add {
+            PlanCommand::Add {
                 id,
                 reference,
                 agent,
-            } => serde_json::to_string(&workspace.set_effort(
+            } => serde_json::to_string(&workspace.set_plan(
                 &reference,
                 Some(&id),
                 agent.as_deref(),
             )?)?,
-            EffortCommand::Remove { reference, agent } => {
-                serde_json::to_string(&workspace.set_effort(&reference, None, agent.as_deref())?)?
+            PlanCommand::Remove { reference, agent } => {
+                serde_json::to_string(&workspace.set_plan(&reference, None, agent.as_deref())?)?
             }
         },
         Command::List { filters } => {
@@ -998,7 +1013,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Context {
             reference,
             project,
-            effort,
+            plan,
             relationships,
             notes,
             evidence,
@@ -1009,7 +1024,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             &reference,
             ContextOptions {
                 project,
-                effort,
+                plan,
                 relationships,
                 notes,
                 evidence,

@@ -66,7 +66,7 @@ const TABLES: [(&str, i64); 29] = [
     ("dependencies", 6),
     ("contextual_relationships", 19),
     ("projects", 7),
-    ("efforts", 8),
+    ("plans", 8),
     ("ticket_parents", 9),
     ("project_checkouts", 10),
     ("request_outcomes", 12),

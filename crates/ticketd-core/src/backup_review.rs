@@ -20,7 +20,7 @@ pub struct WorkspaceSummary {
     pub notes: u64,
     pub evidence: u64,
     pub projects: u64,
-    pub efforts: u64,
+    pub plans: u64,
 }
 
 /// The result of checking a backup file.
@@ -124,7 +124,7 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
         notes: count(connection, "notes")?,
         evidence: count(connection, "evidence")?,
         projects: count(connection, "projects")?,
-        efforts: count(connection, "efforts")?,
+        plans: count(connection, "plans")?,
     })
 }
 

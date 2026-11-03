@@ -39,7 +39,7 @@ const current = {
   notes: 361,
   evidence: 54,
   projects: 4,
-  efforts: 3,
+  plans: 3,
 };
 const valid: BackupInspection = {
   path: BACKUP,
@@ -53,7 +53,7 @@ const valid: BackupInspection = {
       notes: 342,
       evidence: 50,
       projects: 4,
-      efforts: 3,
+      plans: 3,
     },
   },
 };
@@ -63,7 +63,7 @@ beforeEach(() => {
     path: "/w/workspace.sqlite3",
     tickets: 1,
     projects: 1,
-    active_efforts: 1,
+    active_plans: 1,
     size_bytes: 10,
     format_version: 20,
   });
@@ -119,7 +119,7 @@ test("a valid backup shows both sides' counts and what replacing means", async (
   expect(row("Notes")).toEqual(["361", "342"]);
   expect(row("Implementation evidence")).toEqual(["54", "50"]);
   expect(row("Projects")).toEqual(["4", "4"]);
-  expect(row("Efforts")).toEqual(["3", "3"]);
+  expect(row("Plans")).toEqual(["3", "3"]);
   expect(dialog.textContent).toContain(
     "The backup has 7 fewer tickets, 19 fewer notes and 4 fewer evidence items.",
   );

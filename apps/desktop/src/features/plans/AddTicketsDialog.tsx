@@ -11,22 +11,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { client, type Ticket } from "@/lib/api/client";
-import { effortsClient, type Effort } from "@/lib/api/efforts";
-import type { EffortViewState } from "./useEffortView";
+import { plansClient, type Plan } from "@/lib/api/plans";
+import type { PlanViewState } from "./usePlanView";
 
-/** Searches existing tickets and adds them to an Effort; a ticket belongs to one Effort. */
+/** Searches existing tickets and adds them to an Plan; a ticket belongs to one Plan. */
 export function AddTicketsDialog({
-  effort,
-  efforts,
+  plan,
+  plans,
   open,
   onOpenChange,
   state,
 }: {
-  effort: Effort;
-  efforts: Effort[];
+  plan: Plan;
+  plans: Plan[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  state: EffortViewState;
+  state: PlanViewState;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Ticket[] | null>(null);
@@ -42,7 +42,7 @@ export function AddTicketsDialog({
           query,
           project: null,
           unlinked: false,
-          effort: null,
+          plan: null,
           status: null,
           tags: [],
           availability: null,
@@ -54,7 +54,7 @@ export function AddTicketsDialog({
           (found) => {
             if (!active) return;
             setSearchError("");
-            setResults(found.filter((item) => item.effort_id !== effort.id));
+            setResults(found.filter((item) => item.plan_id !== plan.id));
           },
           (reason: unknown) => {
             if (active) setSearchError(String(reason));
@@ -65,19 +65,19 @@ export function AddTicketsDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, query, searches, effort.id]);
-  const nameOf = (id: string) => efforts.find((item) => item.id === id)?.name;
+  }, [open, query, searches, plan.id]);
+  const nameOf = (id: string) => plans.find((item) => item.id === id)?.name;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add tickets to {effort.name}</DialogTitle>
+          <DialogTitle>Add tickets to {plan.name}</DialogTitle>
           <DialogDescription>
-            Search for existing tickets. A ticket already in another Effort
-            moves here.
+            Search for existing tickets. A ticket already in another Plan moves
+            here.
           </DialogDescription>
         </DialogHeader>
-        <label className="effort-add-search">
+        <label className="plan-add-search">
           <Search size={16} aria-hidden="true" />
           <span className="sr-only">Search tickets to add</span>
           <Input
@@ -89,21 +89,21 @@ export function AddTicketsDialog({
           />
         </label>
         {(searchError || actionError) && (
-          <p role="alert" className="effort-add-error">
+          <p role="alert" className="plan-add-error">
             {searchError || actionError}
           </p>
         )}
         {results && results.length === 0 && !searchError && (
-          <p className="effort-note">No tickets to add match this search.</p>
+          <p className="plan-note">No tickets to add match this search.</p>
         )}
-        <ul className="effort-add-results" aria-label="Tickets to add">
+        <ul className="plan-add-results" aria-label="Tickets to add">
           {(results ?? []).map((ticket) => {
-            const from = ticket.effort_id ? nameOf(ticket.effort_id) : null;
+            const from = ticket.plan_id ? nameOf(ticket.plan_id) : null;
             return (
               <li key={ticket.id}>
                 <StatusIcon status={ticket.status} />
                 <span className="ticket-ref">{ticket.reference}</span>
-                <span className="effort-add-title" title={ticket.title}>
+                <span className="plan-add-title" title={ticket.title}>
                   {ticket.title}
                   {from && <small>In {from}</small>}
                 </span>
@@ -111,10 +111,10 @@ export function AddTicketsDialog({
                   variant="outline"
                   size="sm"
                   disabled={pending}
-                  aria-label={`Add ${ticket.reference} to ${effort.name}`}
+                  aria-label={`Add ${ticket.reference} to ${plan.name}`}
                   onClick={() =>
                     void run(() =>
-                      effortsClient.setMember(ticket.reference, effort.id),
+                      plansClient.setMember(ticket.reference, plan.id),
                     ).then((added) => {
                       if (added) setSearches((value) => value + 1);
                     })

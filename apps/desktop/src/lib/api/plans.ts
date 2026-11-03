@@ -1,12 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
-const effortSchema = z.object({
+const planSchema = z.object({
   id: z.string(),
   name: z.string(),
   archived: z.boolean(),
+  purpose: z.string().default(""),
 });
 const viewSchema = z.object({
-  effort: effortSchema,
+  plan: planSchema,
   counts: z.object({
     todo: z.number(),
     in_progress: z.number(),
@@ -25,19 +26,22 @@ const viewSchema = z.object({
   ),
 });
 
-export type Effort = z.infer<typeof effortSchema>;
+export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
-export const effortsClient = {
+export const plansClient = {
   async show(id: string) {
-    return viewSchema.parse(await invoke("show_effort", { id }));
+    return viewSchema.parse(await invoke("show_plan", { id }));
   },
   async create(name: string) {
-    return effortSchema.parse(await invoke("create_effort", { name }));
+    return planSchema.parse(await invoke("create_plan", { name }));
   },
   async change(id: string, name: string | null, archived: boolean | null) {
-    await invoke("change_effort", { id, name, archived });
+    await invoke("change_plan", { id, name, archived });
   },
-  async setMember(reference: string, effort: string | null) {
-    await invoke("set_effort", { reference, effort });
+  async setPurpose(id: string, purpose: string) {
+    await invoke("set_plan_purpose", { id, purpose });
+  },
+  async setMember(reference: string, plan: string | null) {
+    await invoke("set_plan", { reference, plan });
   },
 };

@@ -7,7 +7,7 @@ const workspaceInfoSchema = z.object({
   path: z.string(),
   tickets: z.number(),
   projects: z.number(),
-  active_efforts: z.number(),
+  active_plans: z.number(),
   size_bytes: z.number(),
   format_version: z.number(),
 });
@@ -24,7 +24,7 @@ const workspaceSummarySchema = z.object({
   notes: z.number(),
   evidence: z.number(),
   projects: z.number(),
-  efforts: z.number(),
+  plans: z.number(),
 });
 export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
 

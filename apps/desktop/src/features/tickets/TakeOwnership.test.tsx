@@ -67,7 +67,7 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   body: "Described on GitHub",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -164,7 +164,7 @@ test("the rail offers Take ownership only while the source is unavailable, and l
   bridge.invoke.mockResolvedValue([]);
   const props = {
     projects: [],
-    efforts: [],
+    plans: [],
     onSaved: () => {},
     refresh: async () => {},
   };
