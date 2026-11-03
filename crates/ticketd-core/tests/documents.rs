@@ -90,3 +90,46 @@ fn replayed_patch_can_clear_title_without_replacing_body() {
     assert_eq!(updated.title, None);
     assert_eq!(updated.body, "Keep this");
 }
+
+#[test]
+fn trash_and_restore_preserve_document_across_restart_and_backup() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let doc = workspace
+        .create_document(Some("Context"), "# Original\n")
+        .unwrap();
+    let request = || WriteRequest::TrashDocument { id: doc.id.clone() };
+    let first = workspace.write(Some("trash"), request()).unwrap();
+    assert_eq!(first, workspace.write(Some("trash"), request()).unwrap());
+    assert!(workspace.recent_documents().unwrap().is_empty());
+    assert!(workspace.open_document(&doc.id).unwrap().trashed);
+    assert!(
+        workspace
+            .change_document(
+                &doc.id,
+                DocumentPatch {
+                    title: None,
+                    body: Some("lost".into())
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(workspace.trashed_documents().unwrap()[0].id, doc.id);
+    assert_eq!(workspace.export().unwrap()["documents"][0]["trashed"], 1);
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&backup).unwrap();
+    assert!(workspace.show_document(&doc.id).unwrap().trashed);
+    let WriteResult::Document(restored) = workspace
+        .write(None, WriteRequest::RestoreDocument { id: doc.id.clone() })
+        .unwrap()
+    else {
+        panic!("expected document")
+    };
+    assert!(!restored.trashed);
+    assert_eq!(restored.body, "# Original\n");
+    assert_eq!(workspace.recent_documents().unwrap()[0].id, doc.id);
+}

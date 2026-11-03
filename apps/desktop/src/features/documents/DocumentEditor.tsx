@@ -25,6 +25,11 @@ export function DocumentEditor({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [status, setStatus] = useState("Start writing. We’ll save as you go.");
+  const [trashed, setTrashed] = useState(initial?.trashed ?? false);
+  const [transitioning, setTransitioning] = useState(false);
+  const transition = useRef<{ trashed: boolean; requestId: string } | null>(
+    null,
+  );
   const [failed, setFailed] = useState(false);
   const draft = useRef<Snapshot>({ title, body });
   const saved = useRef<Snapshot>({ title, body });
@@ -36,13 +41,34 @@ export function DocumentEditor({
   useEffect(() => {
     close.current = onClose;
   }, [onClose]);
+  const finishTransition = async () => {
+    if (!transition.current || !id.current) return;
+    setTransitioning(true);
+    try {
+      const result = await documents.setTrashed(
+        id.current,
+        transition.current.trashed,
+        transition.current.requestId,
+      );
+      setTrashed(result.trashed);
+      transition.current = null;
+      setFailed(false);
+      setStatus(result.trashed ? "Moved to Trash" : "Restored");
+    } catch (error) {
+      setFailed(true);
+      setStatus(`Could not update Trash: ${String(error)}`);
+    } finally {
+      setTransitioning(false);
+    }
+  };
   const save = async () => {
     if (saving.current) return;
     const snapshot = draft.current;
     const titleChanged = snapshot.title !== saved.current.title;
     const bodyChanged = snapshot.body !== saved.current.body;
     if (!pending.current && !titleChanged && !bodyChanged) {
-      if (closeRequested.current) close.current();
+      if (transition.current) void finishTransition();
+      else if (closeRequested.current) close.current();
       return;
     }
     if (
@@ -84,6 +110,7 @@ export function DocumentEditor({
         draft.current.body !== saved.current.body
       )
         void save();
+      else if (transition.current) void finishTransition();
       else if (closeRequested.current) close.current();
     } catch (error) {
       saving.current = false;
@@ -130,6 +157,7 @@ export function DocumentEditor({
             draft.current.body !== saved.current.body
           )
             return;
+          setTrashed(document.trashed);
           const next = { title: document.title ?? "", body: document.body };
           saved.current = next;
           draft.current = next;
@@ -175,6 +203,7 @@ export function DocumentEditor({
             <Input
               id="document-title"
               placeholder="Untitled"
+              readOnly={trashed || transitioning}
               value={title}
               onChange={(event) => {
                 draft.current = { ...draft.current, title: event.target.value };
@@ -190,10 +219,27 @@ export function DocumentEditor({
             setBody(value);
           }}
           label="Your thought"
+          readOnly={trashed || transitioning}
           autoFocus
         />
         <footer>
           <span role="status">{status}</span>
+          {trashed && <span>This Document is in Trash.</span>}
+          {initial && (
+            <Button
+              variant="outline"
+              disabled={transitioning}
+              onClick={() => {
+                transition.current = {
+                  trashed: !trashed,
+                  requestId: crypto.randomUUID(),
+                };
+                void save();
+              }}
+            >
+              {trashed ? "Restore" : "Move to Trash"}
+            </Button>
+          )}
           {failed && (
             <Button variant="outline" onClick={() => void save()}>
               Retry
