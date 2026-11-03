@@ -46,6 +46,7 @@ export function Documents({
   const [selected, setSelected] = useState<Document | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
+  const [includeSupport, setIncludeSupport] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("");
   const [results, setResults] = useState<DocumentSearchResult[]>([]);
@@ -55,7 +56,7 @@ export function Documents({
   const [error, setError] = useState("");
   const refresh = useCallback(() => {
     void Promise.all([
-      documents.recent(recentOffset),
+      documents.recent(recentOffset, includeSupport),
       documents.pins(pinOffset),
       documents.trash(),
     ])
@@ -65,7 +66,7 @@ export function Documents({
         setTrash(t);
       })
       .catch((e: unknown) => setError(String(e)));
-  }, [recentOffset, pinOffset]);
+  }, [recentOffset, pinOffset, includeSupport]);
   useEffect(() => {
     if (target)
       void Promise.all([documents.open(target.id), documents.tags(target.id)])
@@ -86,7 +87,7 @@ export function Documents({
     if (!query.trim() && !filter.trim()) return;
     const search = () => {
       void documents
-        .search(query, filter.trim() || null, offset)
+        .search(query, filter.trim() || null, offset, includeSupport)
         .then((r) => {
           if (current) setResults(r);
         })
@@ -100,7 +101,7 @@ export function Documents({
       current = false;
       window.clearInterval(timer);
     };
-  }, [query, filter, offset]);
+  }, [query, filter, offset, includeSupport]);
   const open = (id: string) => {
     void Promise.all([documents.open(id), documents.tags(id)])
       .then(([doc, values]) => {
@@ -117,6 +118,7 @@ export function Documents({
           <Button variant="ghost" onClick={() => open(doc.id)}>
             {doc.heading}
           </Button>
+          {doc.origin_ticket && <p>Activity details · {doc.origin_ticket}</p>}
           {"snippet" in doc && typeof doc.snippet === "string" && (
             <p>{doc.snippet}</p>
           )}
@@ -159,6 +161,18 @@ export function Documents({
         </section>
       ) : (
         <>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeSupport}
+              onChange={(e) => {
+                setIncludeSupport(e.target.checked);
+                setOffset(0);
+                setRecentOffset(0);
+              }}
+            />{" "}
+            Include Activity details
+          </label>
           <label htmlFor="document-search">Search Documents</label>
           <Input
             id="document-search"
@@ -265,6 +279,21 @@ export function Documents({
             refresh();
           }}
         >
+          {selected.origin_brief && !selected.kept && (
+            <Button
+              onClick={() =>
+                void documents
+                  .keep(selected.id, crypto.randomUUID())
+                  .then((doc) => {
+                    setSelected(doc);
+                    refresh();
+                  })
+                  .catch((e: unknown) => setError(String(e)))
+              }
+            >
+              Keep in Documents
+            </Button>
+          )}
           <section aria-label="Document tags">
             <h2>Tags</h2>
             {error && <p role="alert">{error}</p>}

@@ -591,3 +591,59 @@ fn activity_support_is_searchable_when_included_and_indexes_references() {
         Some(id.as_str())
     );
 }
+
+#[test]
+fn keeping_activity_details_preserves_identity_and_makes_them_visible() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut w = Workspace::open(&path).unwrap();
+    let ticket = w.create_ticket("Outcome").unwrap();
+    let activity = w
+        .add_activity_with_details(
+            &ticket.reference,
+            "Update",
+            None,
+            Some("unique detail"),
+            None,
+        )
+        .unwrap();
+    let id = activity.supporting_document_id.unwrap();
+    w.open_document(&id).unwrap();
+    assert!(
+        w.search_documents("unique", None, 50, 0)
+            .unwrap()
+            .is_empty()
+    );
+    let included = w
+        .search_documents_including_support("unique", None, 50, 0, true)
+        .unwrap();
+    assert_eq!(
+        included[0].origin_ticket.as_deref(),
+        Some(ticket.reference.as_str())
+    );
+    assert_eq!(
+        w.recent_documents_including_support(50, 0, true).unwrap()[0].id,
+        id
+    );
+    let request = || WriteRequest::KeepDocument { id: id.clone() };
+    assert_eq!(
+        w.write(Some("keep"), request()).unwrap(),
+        w.write(Some("keep"), request()).unwrap()
+    );
+    drop(w);
+    let mut w = Workspace::open(&path).unwrap();
+    assert_eq!(w.search_documents("unique", None, 50, 0).unwrap()[0].id, id);
+    assert_eq!(w.recent_documents().unwrap()[0].id, id);
+    assert_eq!(w.export().unwrap()["documents"][0]["kept"], 1);
+    let backup = dir.path().join("backup.sqlite3");
+    w.backup(&backup).unwrap();
+    let restored = Workspace::open(&backup).unwrap();
+    assert_eq!(
+        restored.search_documents("unique", None, 50, 0).unwrap()[0].id,
+        id
+    );
+    drop(restored);
+    w.delete_activity(&ticket.reference, &activity.id).unwrap();
+    assert_eq!(w.show_document(&id).unwrap().body, "unique detail");
+}

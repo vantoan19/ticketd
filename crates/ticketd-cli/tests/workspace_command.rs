@@ -212,3 +212,38 @@ fn document_read_returns_bounded_text_and_continuation() {
     assert_eq!(result["next_offset"], 3);
     assert_eq!(result["id"], id);
 }
+
+#[test]
+fn activity_details_can_be_found_and_kept_through_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    run(dir.path(), &["create", "Outcome"]);
+    let details = dir.path().join("details.md");
+    std::fs::write(&details, "distinct findings").unwrap();
+    let activity: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "activity",
+            "add",
+            "T-1",
+            "--brief",
+            "Update",
+            "--details-file",
+            details.to_str().unwrap(),
+        ],
+    ))
+    .unwrap();
+    let id = activity["supporting_document_id"].as_str().unwrap();
+    let hidden: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "search", "distinct"])).unwrap();
+    assert_eq!(hidden.as_array().unwrap().len(), 0);
+    let included: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "search", "distinct", "--include-support"],
+    ))
+    .unwrap();
+    assert_eq!(included[0]["origin_ticket"], "T-1");
+    run(dir.path(), &["document", "keep", id]);
+    let found: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "search", "distinct"])).unwrap();
+    assert_eq!(found[0]["id"], id);
+}
