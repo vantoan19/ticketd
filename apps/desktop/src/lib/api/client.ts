@@ -166,6 +166,10 @@ const graphSchema = z.object({
   edges: z.array(z.object({ blocker: z.string(), dependent: z.string() })),
   max_nodes: z.number(),
   max_depth: z.number(),
+  max_edges: z.number(),
+  max_work: z.number(),
+  omitted_neighbors: z.boolean(),
+  omitted_edges: z.boolean(),
   truncated: z.boolean(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;

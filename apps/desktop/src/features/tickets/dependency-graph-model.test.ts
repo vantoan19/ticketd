@@ -18,6 +18,10 @@ const graph: DependencyGraph = {
   ],
   max_nodes: 50,
   max_depth: 5,
+  max_edges: 300,
+  max_work: 3000,
+  omitted_neighbors: false,
+  omitted_edges: false,
   truncated: false,
 };
 
