@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { ExternalLink } from "lucide-react";
+import { cn } from "cn";
 import { workspaceClient } from "@/lib/api/workspace";
 
 /**
@@ -9,10 +11,14 @@ export function SourceLink({
   url,
   children,
   className,
+  title,
+  icon = true,
 }: {
   url: string;
   children: ReactNode;
   className?: string;
+  title?: string;
+  icon?: boolean;
 }) {
   const [error, setError] = useState("");
   if (!url.startsWith("https://")) return <span>{children}</span>;
@@ -22,7 +28,8 @@ export function SourceLink({
           in the default browser because a webview cannot follow it itself. */}
       <a
         href={url}
-        className={`source-link ${className ?? ""}`.trim()}
+        title={title}
+        className={cn("source-link", className)}
         onClick={(event) => {
           event.preventDefault();
           void workspaceClient.openLink(url).then(
@@ -33,6 +40,9 @@ export function SourceLink({
         }}
       >
         {children}
+        {icon && (
+          <ExternalLink className="source-link-icon" aria-hidden="true" />
+        )}
       </a>
       {error && <small role="alert">{error}</small>}
     </>

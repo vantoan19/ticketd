@@ -12,7 +12,7 @@ import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
-const NARROW_QUERY = "(max-width: 1063px)";
+const NARROW_QUERY = "(max-width: 1071px)";
 
 /**
  * Arranges the list and detail panes and the split, expanded, and narrow
@@ -85,7 +85,7 @@ export function TicketWorkspaceView({
       <ResizablePanel
         id="list"
         minSize={360}
-        defaultSize={480}
+        defaultSize={400}
         className="list-panel"
       >
         <TicketListPane

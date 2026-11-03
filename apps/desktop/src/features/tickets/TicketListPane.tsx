@@ -132,6 +132,24 @@ export function TicketListPane({
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
+  const filterProps = {
+    query,
+    setQuery,
+    effort,
+    setEffort,
+    status,
+    setStatus,
+    tags,
+    setTags,
+    availability,
+    setAvailability,
+    family,
+    setFamily,
+    efforts,
+    setOffset,
+    navigation,
+    clearFilters,
+  };
   return (
     <section
       className="ticket-list"
@@ -145,7 +163,9 @@ export function TicketListPane({
           efforts={efforts}
           projects={projects}
           state={effortState}
-        />
+        >
+          <TicketFilters part="controls" {...filterProps} />
+        </EffortHeader>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
@@ -164,6 +184,14 @@ export function TicketListPane({
           >
             <RefreshCw />
           </IconButton>
+          {!trash && <TicketFilters part="controls" {...filterProps} />}
+          {configuredSources.length > 0 && (
+            <SourceRefresh
+              providers={configuredSources}
+              state={sourceRefresh}
+              tickets={tickets}
+            />
+          )}
         </div>
       )}
       {!trash && (configuredSources.length > 0 || source !== "all") && (
@@ -174,37 +202,9 @@ export function TicketListPane({
             counts={sourceCounts}
             providers={configuredSources}
           />
-          {configuredSources.length > 0 && (
-            <SourceRefresh
-              providers={configuredSources}
-              state={sourceRefresh}
-              tickets={tickets}
-            />
-          )}
         </>
       )}
-      {!trash && (
-        <TicketFilters
-          {...{
-            query,
-            setQuery,
-            effort,
-            setEffort,
-            status,
-            setStatus,
-            tags,
-            setTags,
-            availability,
-            setAvailability,
-            family,
-            setFamily,
-            efforts,
-            setOffset,
-            navigation,
-            clearFilters,
-          }}
-        />
-      )}
+      {!trash && <TicketFilters part="chips" {...filterProps} />}
 
       {queryError ? (
         <div className="empty-state" role="alert">
@@ -235,7 +235,14 @@ export function TicketListPane({
                 <p>Nothing matches the current filters.</p>
               )}
               <Button variant="outline" onClick={clearFilters}>
-                Clear filters
+                {query &&
+                !tags &&
+                !status &&
+                !availability &&
+                !family &&
+                !effort
+                  ? "Clear search"
+                  : "Clear filters"}
               </Button>
             </>
           ) : effortScope ? (
@@ -328,8 +335,9 @@ export function TicketListPane({
       )}
       {!trash && (offset > 0 || total > PAGE_SIZE) && (
         <div className="pagination">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             ref={previousButton}
             disabled={offset === 0}
             onClick={() => {
@@ -338,13 +346,14 @@ export function TicketListPane({
             }}
           >
             Previous
-          </button>
+          </Button>
           <span>
             {" "}
             Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
           </span>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             ref={nextButton}
             disabled={offset + tickets.length >= total}
             onClick={() => {
@@ -353,7 +362,7 @@ export function TicketListPane({
             }}
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
       <MarkDuplicateDialog

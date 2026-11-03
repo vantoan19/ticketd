@@ -244,6 +244,117 @@ impl Fixture {
 }
 
 #[test]
+fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen() {
+    let mut f = Fixture::new();
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (None, 0)
+    );
+    f.publish(issue(1, T0));
+    f.publish(issue(2, T0));
+    f.remote(|remote| remote.matching.push(1));
+    f.refresh_at(T0);
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (Some(2), 2)
+    );
+
+    // One discovered issue is also tracked; another leaves discovery and its
+    // direct read fails. A newly discovered issue counts once as well.
+    f.publish(issue(3, T0));
+    f.remote(|remote| {
+        remote.matching.retain(|id| *id != 2);
+        remote.deleted.push(2);
+    });
+    f.refresh_at(T1);
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.health, SourceHealth::Partial);
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (Some(3), 3)
+    );
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
+    assert_eq!(
+        f.workspace.export().unwrap()["source_status"][0]["last_checked_tickets"],
+        3
+    );
+
+    // A single-ticket read is not a whole-provider run.
+    f.workspace
+        .refresh_sources(
+            &f.engine,
+            &RefreshOptions {
+                ticket: Some("T-1".into()),
+                now: Some(T2.into()),
+            },
+        )
+        .unwrap();
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(
+        (
+            status.last_checked_tickets,
+            status.last_refreshed_at.as_deref()
+        ),
+        (Some(3), Some(T1))
+    );
+    f.workspace.take_ownership("T-2", None).unwrap();
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (Some(3), 2)
+    );
+
+    f.remote(|remote| remote.outage = Some(Failure::Unavailable));
+    f.refresh_at(T3);
+    let reopened = f.open_workspace().unwrap();
+    let status = reopened.source_statuses().unwrap().remove(0);
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (Some(3), 2)
+    );
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
+    assert!(status.error.is_some());
+}
+
+#[test]
+fn older_serialized_source_status_defaults_the_added_fields() {
+    let f = Fixture::new();
+    let mut value = serde_json::to_value(&f.workspace.source_statuses().unwrap()[0]).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.remove("last_checked_tickets");
+    object.remove("tracked_tickets");
+    let status: ticketd_core::source::SourceStatus = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (None, 0)
+    );
+}
+
+#[test]
+fn migration_from_28_keeps_freshness_but_does_not_invent_a_count() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    let path = f.dir.path().join("workspace.sqlite3");
+    drop(f.workspace);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "ALTER TABLE source_status DROP COLUMN last_checked_tickets; PRAGMA user_version = 28;",
+    )
+    .unwrap();
+    drop(db);
+    let migrated = Workspace::open(path).unwrap();
+    let status = migrated.source_statuses().unwrap().remove(0);
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T0));
+    assert_eq!(
+        (status.last_checked_tickets, status.tracked_tickets),
+        (None, 1)
+    );
+}
+
+#[test]
 fn an_outage_marks_tickets_unavailable_since_the_first_failure_and_keeps_everything() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
@@ -468,6 +579,7 @@ fn a_failure_from_a_run_that_started_earlier_never_overwrites_a_newer_confirmati
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
     f.refresh_at(T0);
+    f.publish(issue(2, T0));
     // The run that started at T2 confirms the ticket and commits first.
     f.refresh_at(T2);
     // The slower run, which started at T1 and failed, commits last.
@@ -480,6 +592,7 @@ fn a_failure_from_a_run_that_started_earlier_never_overwrites_a_newer_confirmati
     assert!(status.error.is_none() && status.failing_since.is_none());
     assert_eq!(status.last_attempt_at.as_deref(), Some(T2));
     assert_eq!(status.health, SourceHealth::Synced);
+    assert_eq!(status.last_checked_tickets, Some(2));
 }
 
 #[test]

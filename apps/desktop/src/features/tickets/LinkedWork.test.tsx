@@ -143,7 +143,9 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
   renderSection(base);
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
-  expect(screen.getByRole("heading").textContent).toBe("Relationships");
+  expect(
+    screen.getByRole("heading", { name: "Relationships" }).textContent,
+  ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
 });
@@ -187,14 +189,26 @@ test("builds every row from the one relationships read, including all dependents
   await screen.findByText("Sibling");
   const rows = screen.getAllByRole("listitem");
   expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
+    "parent",
     "blocked_by",
     "blocks",
     "blocks",
-    "parent",
     "related",
     "duplicate_of",
   ]);
   expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
+  const blocker = screen
+    .getByRole("button", { name: "Blocker" })
+    .closest("li")!;
+  expect(
+    within(blocker).getByRole("img", {
+      name: "In progress · not done · in trash",
+    }),
+  ).toBeTruthy();
+  const dependent = screen
+    .getByRole("button", { name: "Waiting" })
+    .closest("li")!;
+  expect(within(dependent).getByRole("img", { name: "Todo" })).toBeTruthy();
   const commands = vi.mocked(invoke).mock.calls.map((call) => call[0]);
   expect(commands).not.toContain("dependency_graph");
   expect(commands).not.toContain("show_ticket");

@@ -128,7 +128,11 @@ external state and freshness). Imported title and description live in the
 ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
 with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and
-closure-owned status edits to externally owned tickets.
+closure-owned status edits to externally owned tickets. The same write re-reads
+the saved configuration. If it changed during the network work, successful reads
+of existing tickets can still apply, while discovery imports, membership, failures
+and source-run health from the replaced rules are discarded. Saving changed rules
+invalidates match membership until the next complete discovery walk.
 
 The source conversation (an external ticket's comments and timeline events) is
 a read-only mirror in `source_conversation`, keyed by ticket and the source's
@@ -144,6 +148,11 @@ last run, current error and any rate-limit hold. A ticket reads _Source
 unavailable_ exactly when its latest recorded attempt failed with an unreachable,
 unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
 limit is delayed, not unavailable. Neither changes content, status or ownership.
+A successful or partial whole-source run persists its distinct checked-issue
+count with its refresh time; a failed or single-ticket run does not replace it.
+The current tracked-ticket count is read separately. A source closure time comes
+only from the latest close event in a conversation retrieved for the currently
+observed source update; missing or stale evidence remains unknown.
 A refresh ignores an observation older than the one it holds, so a slower
 overlapping run cannot move confirmed state backwards. The desktop starts
 refreshing on launch and periodically through one in-process

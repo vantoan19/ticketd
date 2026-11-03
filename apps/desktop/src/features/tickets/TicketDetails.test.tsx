@@ -7,6 +7,30 @@ import type { Ticket } from "@/lib/api/client";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => []) }));
 afterEach(cleanup);
 
+test("relationship navigation replaces the reference and focuses it outside the scrolling document", () => {
+  const props = {
+    mention: null,
+    expanded: false,
+    onExpand: vi.fn(),
+    onReturn: vi.fn(),
+    setSelected: vi.fn(),
+    projects: [],
+    efforts: [],
+    revision: 0,
+    refresh: vi.fn(async () => {}),
+    updateTicket: vi.fn(),
+    details: {},
+  };
+  const { rerender } = render(<TicketDetails {...props} selected="T-39" />);
+  const previous = screen.getByRole("heading", { name: "T-39" });
+  previous.focus();
+  rerender(<TicketDetails {...props} selected="T-21" />);
+  const heading = screen.getByRole("heading", { name: "T-21" });
+  expect(document.activeElement).toBe(heading);
+  expect(heading.closest(".detail-scroll")).toBeNull();
+  expect(document.querySelector(".detail-scroll")).toBeTruthy();
+});
+
 test("trashed ticket descriptions remain readable without editing controls", () => {
   const ticket: Ticket = {
     id: "trash",

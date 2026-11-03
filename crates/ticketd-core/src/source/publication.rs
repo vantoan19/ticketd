@@ -135,6 +135,15 @@ pub enum Eligibility {
     },
 }
 
+/// Local context explicitly excluded from publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationLocalData {
+    pub notes: u64,
+    pub effort: Option<String>,
+    pub tags: Vec<String>,
+    pub subtickets: Vec<String>,
+}
+
 /// What publishing would send, shown before anything is created.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicationPreview {
@@ -151,6 +160,7 @@ pub struct PublicationPreview {
     /// Identifies this title, description and destination. Hand it back in
     /// [`PublishOptions::expected_fingerprint`] to publish exactly this.
     pub fingerprint: String,
+    pub local: PublicationLocalData,
     pub eligibility: Eligibility,
     /// The open attempt blocking publication, if any.
     pub attempt: Option<PublicationAttempt>,
@@ -876,6 +886,15 @@ impl Workspace {
             destinations,
             title: ticket.title,
             body: ticket.body,
+            local: PublicationLocalData {
+                notes: self.connection.query_row("SELECT COUNT(*) FROM notes WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
+                effort: self.connection.query_row("SELECT e.name FROM tickets t JOIN efforts e ON e.id = t.effort_id WHERE t.id = ?1", [&ticket.id], |row| row.get(0)).optional()?,
+                tags: crate::tags::for_ticket(&self.connection, &ticket.id)?,
+                subtickets: {
+                    let mut statement = self.connection.prepare("SELECT 'T-' || t.number FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1 ORDER BY t.number")?;
+                    statement.query_map([&ticket.id], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?
+                },
+            },
             eligibility,
             attempt: open_attempt(&self.connection, &ticket.id, None)?,
         })
@@ -1177,6 +1196,11 @@ impl Workspace {
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
         let now = clock(&transaction, now)?;
+        let first_unknown: Option<(String, String)> = if status == AttemptState::Unresolved {
+            transaction.query_row("SELECT ticket_id, destination FROM publication_attempts WHERE id = ?1 AND status = 'in_flight'", [attempt_id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?
+        } else {
+            None
+        };
         transaction.execute(
             "UPDATE publication_attempts SET status = ?2, updated_at = ?3, failure_code = ?4, failure_message = ?5, \
              external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url) \
@@ -1197,6 +1221,16 @@ impl Workspace {
                 RULED_OUT,
             ],
         )?;
+        if let Some((ticket, destination)) = first_unknown {
+            history::record(
+                &transaction,
+                &ticket,
+                "publication_unresolved",
+                attempt_id,
+                &destination,
+                None,
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }

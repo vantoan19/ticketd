@@ -1,18 +1,16 @@
-import { HardDrive, Link2, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
-import type { Ticket } from "@/lib/api/client";
+import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
 import { RailSection } from "./RailSection";
 import { SourceLink } from "./SourceLink";
 import { TakeOwnership } from "./TakeOwnership";
 import { useSourceActivity } from "./source-activity";
-import {
-  externalSource,
-  freshness,
-  sourceLocation,
-  sourceState,
-} from "./ticket-source";
+import { externalSource, freshness } from "./ticket-source";
+import { useNow } from "@/lib/use-now";
+import { formatDateTime } from "@/lib/format";
 import { useTicketRefresh } from "./useTicketRefresh";
 
 /**
@@ -26,6 +24,7 @@ export function SourceRail({
   ticket: Ticket;
   refresh: () => Promise<void>;
 }) {
+  const now = useNow();
   const owner = externalSource(ticket);
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
@@ -34,52 +33,91 @@ export function SourceRail({
     <RailSection label="Source">
       {owner ? (
         <div className="rail-source">
-          <span className="rail-value">
-            <Link2 aria-hidden="true" />
-            <SourceLink url={owner.url}>{sourceLocation(owner)}</SourceLink>
-          </span>
-          <span className="rail-value">
-            {(() => {
-              const state = sourceState(owner);
-              return (
+          <span className="rail-value rail-source-identity">
+            <Cloud aria-hidden="true" />
+            <SourceLink url={owner.url} icon={false} title={owner.display}>
+              {owner.place && owner.number ? (
                 <>
-                  {state.tone && <StatusDot tone={state.tone} size={8} />}
-                  {state.text}
+                  <span className="rail-source-place">{owner.place}</span>
+                  <span className="rail-source-number">{owner.number}</span>
                 </>
-              );
-            })()}
+              ) : (
+                owner.display
+              )}
+            </SourceLink>
           </span>
-          <small className="rail-note">
-            {sync.running || activity.refreshing ? (
-              <span>Refreshing {ownerName}…</span>
-            ) : (
-              <>
-                {!owner.last_error && owner.last_refreshed_at && (
-                  <StatusDot tone="positive" size={6} />
-                )}{" "}
-                {freshness(owner)}
-              </>
-            )}
-          </small>
-          {owner.last_error && (
-            <small className="rail-note rail-warning">
-              <StatusDot tone="attention" size={6} /> The last refresh failed:{" "}
-              {owner.last_error.message} Showing content synced earlier.
+          {owner.unavailable ? (
+            <>
+              <span className="rail-value">
+                <StatusDot tone="attention" size={10} />
+                Unavailable since {formatDateTime(owner.unavailable.since)}
+              </span>
+              <small className="rail-note">
+                Showing the last synced copy. Nothing in ticketd was deleted or
+                completed.
+              </small>
+            </>
+          ) : (
+            <>
+              <span className="rail-value">
+                {sync.running || activity.refreshing ? (
+                  `Refreshing ${ownerName}…`
+                ) : (
+                  <>
+                    {owner.last_refreshed_at && (
+                      <StatusDot
+                        tone={owner.last_error ? "attention" : "positive"}
+                        size={10}
+                      />
+                    )}
+                    {freshness(owner, now)}
+                  </>
+                )}
+              </span>
+              <small className="rail-note">
+                {ownerName} owns the title, description and comments.
+              </small>
+            </>
+          )}
+          {!owner.unavailable && owner.last_error && (
+            <small className="rail-note">
+              The last refresh failed: {owner.last_error.message}
             </small>
           )}
-          <small className="rail-note">
-            {ownerName} owns the title and description. Edit them there.
-          </small>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={sync.running}
-            onClick={() => void sync.run()}
-          >
-            <RefreshCw data-icon="inline-start" />
-            Refresh
-          </Button>
-          <TakeOwnership ticket={ticket} refresh={refresh} variant="ghost" />
+          {owner.origin === "imported" && (
+            <small className="rail-note">
+              {owner.discovery_matches === false ? (
+                "No longer matches discovery. It keeps syncing while you have access."
+              ) : (
+                <>
+                  Found by discovery in{" "}
+                  <span className="source-number">{owner.place}</span>.
+                </>
+              )}
+            </small>
+          )}
+          <div className="rail-source-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={sync.running}
+              onClick={() => void sync.run()}
+            >
+              <RefreshCw data-icon="inline-start" />
+              {owner.unavailable ? "Retry" : "Refresh"}
+            </Button>
+            {owner.unavailable ? (
+              <TakeOwnership
+                ticket={ticket}
+                refresh={refresh}
+                variant="ghost"
+              />
+            ) : (
+              <Button variant="link" size="sm" onClick={activity.openSettings}>
+                Discovery
+              </Button>
+            )}
+          </div>
           {sync.failure && !sync.running && (
             <small role="alert">
               Could not refresh: {sync.failure} Saved content is unchanged.
@@ -92,20 +130,61 @@ export function SourceRail({
             className="rail-value"
             title="Owned in ticketd; the external issue is kept as provenance"
           >
-            <HardDrive aria-hidden="true" />
+            <LaptopMinimal aria-hidden="true" />
             Local
           </span>
-          <small className="rail-note">was {ticket.source.display}</small>
+          <small className="rail-note">
+            was <span className="source-number">{ticket.source.display}</span>
+          </small>
+          <small className="rail-note">
+            {ticket.source.ownership_changed_at
+              ? `Taken over ${formatDateTime(ticket.source.ownership_changed_at)}. `
+              : ""}
+            Not syncing.
+          </small>
         </div>
       ) : (
         <div className="rail-source">
           <span className="rail-value" title="Created and edited in ticketd">
-            <HardDrive aria-hidden="true" />
+            <LaptopMinimal aria-hidden="true" />
             Local
           </span>
+          <small className="rail-note">
+            Created in ticketd. Everything here is editable.
+          </small>
+          <LocalParentNote ticket={ticket} />
           <LocalPublication ticket={ticket} refresh={refresh} />
         </div>
       )}
     </RailSection>
   );
+}
+
+function LocalParentNote({ ticket }: { ticket: Ticket }) {
+  const reference = ticket.parent?.reference;
+  const [parent, setParent] = useState<Ticket | null>(null);
+  useEffect(() => {
+    if (!reference) return;
+    let active = true;
+    void client.showTicket(reference).then(
+      (found) => {
+        if (active) setParent(found);
+      },
+      () => {
+        if (active) setParent(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [reference]);
+  const owner =
+    parent && parent.reference === reference ? externalSource(parent) : null;
+  return owner ? (
+    <small className="rail-note">
+      Its parent <span className="source-number">{reference}</span> belongs to{" "}
+      {owner.provider_name}; this ticket stays local unless you publish it on
+      its own.
+    </small>
+  ) : null;
 }

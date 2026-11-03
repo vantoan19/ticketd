@@ -10,6 +10,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { Ticket, TicketSource } from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
+import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
 import { TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
@@ -88,6 +89,25 @@ function properties(value: Ticket, refresh = vi.fn(async () => {})) {
   return refresh;
 }
 
+function DetailsFixture({ value }: { value: Ticket }) {
+  return (
+    <TicketDetails
+      selected={value.reference}
+      mention={null}
+      expanded={false}
+      onExpand={vi.fn()}
+      onReturn={vi.fn()}
+      setSelected={vi.fn()}
+      details={{ [value.reference]: value }}
+      projects={[]}
+      efforts={[]}
+      revision={0}
+      refresh={vi.fn(async () => {})}
+      updateTicket={vi.fn()}
+    />
+  );
+}
+
 test("an open external ticket offers only local progress and says progress stays local", async () => {
   bridge.invoke.mockResolvedValue([]);
   properties(ticket());
@@ -95,10 +115,41 @@ test("an open external ticket offers only local progress and says progress stays
   const options = (await screen.findAllByRole("option")).map(
     (option) => option.textContent,
   );
-  expect(options).toEqual(["Todo", "In progress", "In review"]);
+  expect(options).toEqual([
+    "Todo",
+    "In progress",
+    "In review",
+    "Done",
+    "Canceled",
+    "Duplicate",
+  ]);
   expect(
-    screen.getByText(/Progress is kept in ticketd and never sent to GitHub/),
+    screen
+      .getAllByRole("option")
+      .filter((option) => option.getAttribute("aria-disabled") === "true")
+      .map((option) => option.textContent),
+  ).toEqual(["Done", "Canceled", "Duplicate"]);
+  expect(screen.getByText("Set by GitHub when the issue closes")).toBeTruthy();
+  expect(
+    screen.getByText(/Your progress, kept in ticketd. GitHub still shows Open/),
   ).toBeTruthy();
+});
+
+test("a long source identity keeps its number separate and exposes the complete issue address", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const place = "a-long-organization/a-long-repository";
+  properties(
+    ticket({
+      source: source({ place, number: "#12345", display: `${place}#12345` }),
+    }),
+  );
+  const rail = screen.getByRole("region", { name: "Source" });
+  const link = within(rail).getByRole("link", { name: `${place}#12345` });
+  expect(link.title).toBe(`${place}#12345`);
+  expect(within(link).getByText("#12345").textContent).toBe("#12345");
+  expect(link.getAttribute("href")).toBe(
+    "https://github.com/acme/api/issues/98",
+  );
 });
 
 test("a closed external ticket locks status and explains why", () => {
@@ -116,19 +167,20 @@ test("a closed external ticket locks status and explains why", () => {
     (
       screen.getByRole("combobox", { name: /Status: Done/ }) as HTMLElement
     ).getAttribute("data-disabled"),
-  ).not.toBeNull();
+  ).toBeNull();
   expect(
     screen.getByText(/Reopen it there to return this ticket to Todo/),
   ).toBeTruthy();
 });
 
-test("an unrecognized closure is flagged instead of guessed", () => {
+test("an unrecognized closure is flagged instead of guessed", async () => {
   bridge.invoke.mockResolvedValue([]);
   properties(
     ticket({
       source: source({
         state: { state: "closed", reason: "unknown" },
-        status_locked: true,
+        status_locked: false,
+        status_choices: ["Done", "Canceled"],
         closure_unrecognized: true,
       }),
     }),
@@ -138,7 +190,19 @@ test("an unrecognized closure is flagged instead of guessed", () => {
       /reason ticketd does not recognize, so its status was not/,
     ),
   ).toBeTruthy();
-  expect(screen.getByText(/the reason is not recognized/)).toBeTruthy();
+  expect(screen.queryByText("Agent: github")).toBeNull();
+  fireEvent.click(screen.getByRole("combobox", { name: "Status: Todo" }));
+  expect(
+    await screen.findByText(
+      "Choose Done or Canceled here, or reopen it on GitHub.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen
+      .getAllByRole("option")
+      .filter((option) => option.getAttribute("aria-disabled") !== "true")
+      .map((option) => option.textContent),
+  ).toEqual(["Done", "Canceled"]);
 });
 
 test("a closed duplicate names the source's canonical issue or says it is unknown", () => {
@@ -169,7 +233,7 @@ test("a closed duplicate names the source's canonical issue or says it is unknow
       source: source({ ...closed, duplicate_target: { kind: "unknown" } }),
     }),
   );
-  expect(screen.getByText(/did not name an accessible original/)).toBeTruthy();
+  expect(screen.queryByText(/original unknown/)).toBeNull();
 });
 
 test("a resolved canonical issue opens its local ticket, and a loop is not followed", () => {
@@ -236,21 +300,21 @@ test("the Source section shows the owner, the state, freshness and refreshes one
     .getByRole("heading", { name: "Source" })
     .closest("section")!;
   expect(
-    within(section).getByRole("link", { name: "acme / api #98" }),
+    within(section).getByRole("link", { name: "acme/api#98" }),
   ).toBeTruthy();
-  expect(within(section).getByText("Open on GitHub")).toBeTruthy();
+  expect(within(section).queryByText("Open on GitHub")).toBeNull();
   expect(within(section).getByText(/^Synced|Synced/)).toBeTruthy();
   expect(
-    within(section).getByText(/GitHub owns the title and description/),
+    within(section).getByText(
+      /GitHub owns the title, description and comments/,
+    ),
   ).toBeTruthy();
   fireEvent.click(within(section).getByRole("button", { name: "Refresh" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: "T-1",
   });
-  fireEvent.click(
-    within(section).getByRole("link", { name: "acme / api #98" }),
-  );
+  fireEvent.click(within(section).getByRole("link", { name: "acme/api#98" }));
   await waitFor(() =>
     expect(opener.openUrl).toHaveBeenCalledWith(
       "https://github.com/acme/api/issues/98",
@@ -300,44 +364,93 @@ test("a local ticket with retained provenance reads Local and names the issue it
     }),
   );
   expect(screen.getByText("Local")).toBeTruthy();
-  expect(screen.getByText("was acme/api#98")).toBeTruthy();
+  expect(screen.getByText("acme/api#98").closest("small")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 });
 
 test("an externally owned description is a read-only source card without editing controls", () => {
   bridge.invoke.mockResolvedValue([]);
-  render(
-    <TicketDetails
-      selected="T-1"
-      mention={null}
-      expanded={false}
-      onExpand={vi.fn()}
-      onReturn={vi.fn()}
-      setSelected={vi.fn()}
-      details={{ "T-1": ticket() }}
-      projects={[]}
-      efforts={[]}
-      revision={0}
-      refresh={vi.fn(async () => {})}
-      updateTicket={vi.fn()}
-    />,
-  );
+  render(<DetailsFixture value={ticket()} />);
   const card = screen.getByRole("region", {
     name: "Description from GitHub, read-only",
   });
-  expect(within(card).getByText("GitHub · Read-only")).toBeTruthy();
+  expect(within(card).getByText("Read-only")).toBeTruthy();
   expect(within(card).getByText("Described on GitHub")).toBeTruthy();
   expect(
     within(card).getByRole("link", { name: "Edit on GitHub" }),
   ).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: /title/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
-  expect(screen.getByText("Open on GitHub · #98")).toBeTruthy();
+  expect(
+    screen.getByText("Open on GitHub").closest(".ticket-state-line")
+      ?.textContent,
+  ).toContain("#98");
   // The detail header and the rail's Source section both link to the issue.
-  expect(screen.getAllByRole("link", { name: /acme \/ api #98/ })).toHaveLength(
+  expect(screen.getAllByRole("link", { name: /acme.*api.*#98/ })).toHaveLength(
     2,
   );
-  expect(screen.getByText(/Notes stay in ticketd/)).toBeTruthy();
+  expect(
+    screen.getByText(/Only in ticketd · never sent to GitHub/),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: ticket().title }));
+  expect(screen.getByText("GitHub owns this title.")).toBeTruthy();
+  fireEvent.keyDown(document, { key: "Escape" });
+  fireEvent.click(within(card).getByText("Described on GitHub"));
+  expect(screen.getByText("GitHub owns this description.")).toBeTruthy();
+});
+
+test("a closed state line uses the core's closure time and names its canonical issue", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();
+  const value = ticket({
+    status: "Duplicate",
+    source: source({
+      state: { state: "closed", reason: "duplicate" },
+      status_locked: true,
+      closed_at: closedAt,
+      duplicate_target: {
+        kind: "external",
+        identity: { provider: "github", id: "99" },
+        locator: "acme/api#99",
+        display: "acme/api#99",
+      },
+    }),
+  });
+  const { container, rerender } = render(<DetailsFixture value={value} />);
+  const line = container.querySelector(".ticket-state-line")!;
+  expect(line.textContent).toContain("Closed on GitHub as a duplicate of #99");
+  const time = line.querySelector("time")!;
+  expect(time.dateTime).toBe(closedAt);
+  expect(time.textContent).toBe("3 h ago");
+  rerender(
+    <DetailsFixture
+      value={ticket({
+        status: "Done",
+        source: source({
+          state: { state: "closed", reason: "completed" },
+          status_locked: true,
+          closed_at: null,
+        }),
+      })}
+    />,
+  );
+  // The last refresh time is never used as a substitute for an unknown closure.
+  expect(container.querySelector(".ticket-state-line time")).toBeNull();
+  rerender(
+    <DetailsFixture
+      value={{
+        ...value,
+        source: {
+          ...value.source!,
+          unavailable: { code: "not_found", message: "gone", since: closedAt },
+        },
+      }}
+    />,
+  );
+  expect(
+    container.querySelector(".ticket-state-line")?.textContent,
+  ).not.toContain("of #99");
+  expect(container.querySelector(".ticket-state-line time")).toBeNull();
 });
 
 test("a row shows the owner's pill and a local row shows none", () => {
@@ -365,9 +478,7 @@ test("a row shows the owner's pill and a local row shows none", () => {
   // Read once: the visible words are hidden from assistive technology and the
   // screen-reader text says the same thing in one sentence.
   expect(within(pills[0]!).getByText("Owned by GitHub, #98")).toBeTruthy();
-  expect(pills[0]?.querySelector("[aria-hidden]")?.textContent).toBe(
-    "GitHub #98",
-  );
+  expect(pills[0]?.querySelector("span[aria-hidden]")?.textContent).toBe("#98");
 });
 
 test("the source filter offers All, GitHub and Local with counts and reports the choice", () => {
@@ -415,5 +526,55 @@ test("source wording: location, state and freshness", () => {
       }),
       { showEffort: false, showProject: false, efforts: [], projects: [] },
     ),
-  ).toBe("Duplicate; original unknown");
+  ).toBe("Duplicate · target unknown");
+});
+
+test("a local child explains its independent ownership when its parent belongs to GitHub", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "show_ticket" ? ticket({ reference: "T-2" }) : [],
+  );
+  properties(
+    ticket({
+      source: null,
+      parent: { reference: "T-2", title: "Parent", trashed: false },
+    }),
+  );
+  expect(
+    screen.getByText("Created in ticketd. Everything here is editable."),
+  ).toBeTruthy();
+  expect(
+    await screen.findByText(
+      /belongs to GitHub; this ticket stays local unless you publish it on its own/,
+    ),
+  ).toBeTruthy();
+});
+
+test("a long source description can expand without making the field editable", () => {
+  const height = vi
+    .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+    .mockReturnValue(400);
+  try {
+    render(
+      <SourceDescription
+        ticket={ticket({ body: "## Scope\n\nA long source document." })}
+        source={source()}
+        revision={0}
+        select={vi.fn()}
+      />,
+    );
+    const expand = screen.getByRole("button", {
+      name: "Show full description",
+    });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(expand);
+    expect(
+      screen
+        .getByRole("button", { name: "Show less" })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(screen.getByRole("heading", { name: "Scope" })).toBeTruthy();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  } finally {
+    height.mockRestore();
+  }
 });

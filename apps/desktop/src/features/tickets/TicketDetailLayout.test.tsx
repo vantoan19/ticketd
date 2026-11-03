@@ -113,7 +113,7 @@ test("the property rail holds Status, Source, Project, Effort, Tags, Relationshi
   ]);
   // A local ticket reads Local, with no GitHub mark, in the rail and the state line.
   expect(within(rail).getByText("Local")).toBeTruthy();
-  expect(screen.queryByText(/GitHub/)).toBeNull();
+  expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
   expect(screen.getByText("Local ticket")).toBeTruthy();
   expect(
     within(rail).getByRole("combobox", { name: "Status: Todo" }),
@@ -193,4 +193,34 @@ test("the header shows the list position with Previous and Next", async () => {
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
+});
+
+test("Latest update jumps to its note and tags appear as separate chips", async () => {
+  const note = {
+    id: "latest",
+    content: "Reported progress",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    editing_agent: "agent",
+  };
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "get_note") return note;
+    return bridgeDefault(command, args as { reference?: string });
+  });
+  renderDetails({
+    ...ticket,
+    status: "In progress",
+    tags: ["frontend", "urgent"],
+    latest_update: {
+      note_id: note.id,
+      reported_at: note.created_at,
+      editing_agent: "agent",
+    },
+  });
+  const heading = screen.getByRole("heading", { name: "Latest update" });
+  fireEvent.click(
+    within(heading.closest("section")!).getByRole("button", { name: /agent/ }),
+  );
+  expect(await screen.findByText("Reported progress")).toBeTruthy();
+  expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
 });

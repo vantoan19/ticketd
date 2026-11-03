@@ -35,9 +35,9 @@ pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use publication::{
     ActionKind, AttemptState, CandidateReason, ContentDifference, Eligibility, IneligibleReason,
-    PublicationAttempt, PublicationCandidate, PublicationError, PublicationPreview,
-    PublicationReview, PublishOptions, PublishOutcome, PublishedIssue, Resolution,
-    ResolutionAction, ResolveOptions,
+    PublicationAttempt, PublicationCandidate, PublicationError, PublicationLocalData,
+    PublicationPreview, PublicationReview, PublishOptions, PublishOutcome, PublishedIssue,
+    Resolution, ResolutionAction, ResolveOptions,
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
@@ -90,11 +90,16 @@ pub(crate) fn migrate_conversation(connection: &rusqlite::Connection) -> Result<
     conversation::migrate(connection)
 }
 
-pub(crate) use conversation::load as conversation_entries;
+pub(crate) use conversation::present as conversation_entries;
 
 /// Step 25: failure streaks and per-source status.
 pub(crate) fn migrate_freshness(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate(connection)
+}
+
+/// Step 29: preserve the count belonging to the last accepted provider run.
+pub(crate) fn migrate_run_counts(connection: &rusqlite::Connection) -> Result<(), Error> {
+    freshness::migrate_run_counts(connection)
 }
 
 /// Step 26: publication attempts.
@@ -211,6 +216,23 @@ impl Workspace {
         rows.into_iter().map(into_saved).collect()
     }
 
+    /// Previews discovery against the workspace's stable external identities.
+    /// Retained identities and trashed tickets are already here as well.
+    pub fn preview_source(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<DiscoveryPreview, Error> {
+        let mut statement = self.connection.prepare("SELECT i.external_id, 'T-' || t.number FROM external_identities i JOIN tickets t ON t.id = i.ticket_id WHERE i.provider = ?1")?;
+        let known = statement
+            .query_map([provider], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+        Ok(engine.preview_with(provider, raw, |identity| known.get(&identity.id).cloned())?)
+    }
+
     /// Validates `raw`, previews discovery against the provider, and only then
     /// saves the configuration. A configuration that cannot be validated or
     /// previewed (bad fields, failed credentials, provider outage) is not
@@ -223,10 +245,23 @@ impl Workspace {
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
         let config = engine.validate(provider, raw)?;
-        let preview = engine.preview(provider, &config)?;
+        let preview = self.preview_source(engine, provider, &config)?;
         let configuration = serde_json::to_string(&config)?;
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
+        let previous: Option<String> = transaction
+            .query_row(
+                "SELECT configuration FROM source_configurations WHERE provider = ?1",
+                [provider],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let previous = previous
+            .map(|raw| serde_json::from_str::<ConfigValues>(&raw))
+            .transpose()?;
+        if previous.as_ref() != Some(&config) {
+            transaction.execute("UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external')", [provider])?;
+        }
         transaction.execute(
             "INSERT INTO source_configurations (provider, configuration, account, contract_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
             params![provider, configuration, preview.account, CONTRACT_VERSION],

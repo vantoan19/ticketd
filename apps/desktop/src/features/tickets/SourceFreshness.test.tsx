@@ -127,7 +127,7 @@ test("the footer says Synced with a green dot, and nothing before a source exist
   );
   expect(container.textContent).toBe("");
   rerender(withActivity({ sources: [status()] }, <SourceStatusFooter />));
-  expect(screen.getByText(/GitHub synced 4 min ago/)).toBeTruthy();
+  expect(screen.getByText(/GitHub synced/)).toBeTruthy();
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).not.toBeNull();
@@ -172,12 +172,8 @@ test("an unavailable source shows the failure, the last good sync and a working 
       <SourceStatusFooter />,
     ),
   );
-  expect(screen.getByText("GitHub unavailable")).toBeTruthy();
-  expect(
-    screen.getByText(
-      /Network is down\. Showing content from the last sync, 4 min ago/,
-    ),
-  ).toBeTruthy();
+  expect(screen.getByText("3 source issues")).toBeTruthy();
+  expect(screen.getByText(/GitHub last synced 4 min ago/)).toBeTruthy();
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="attention"]'),
   ).not.toBeNull();
@@ -210,7 +206,7 @@ test("one deleted issue reads partly refreshed, never GitHub unavailable", () =>
       <SourceStatusFooter />,
     ),
   );
-  expect(screen.getByText("GitHub partly refreshed")).toBeTruthy();
+  expect(screen.getByText("1 source issue")).toBeTruthy();
   expect(screen.queryByText("GitHub unavailable")).toBeNull();
 });
 
@@ -241,20 +237,16 @@ test("the unavailable notice says what failed, since when, that nothing was lost
     />,
   );
   const notice = screen.getByRole("region", { name: "Source unavailable" });
-  expect(
-    within(notice).getByText(/Source unavailable · Since 12 min ago/),
-  ).toBeTruthy();
-  expect(
-    within(notice).getByText(
-      /GitHub could not be reached for .*\. Nothing was deleted or completed\./,
-    ),
-  ).toBeTruthy();
-  expect(within(notice).queryByText(/Network is down/)).toBeNull();
-  expect(within(notice).getByText(/Synced 30 min ago/)).toBeTruthy();
+  expect(within(notice).getByText(/Source unavailable/)).toBeTruthy();
+  expect(notice.textContent).toContain(
+    "Nothing in ticketd was deleted or completed.",
+  );
+  expect(notice.textContent).toContain("the last synced copy from");
+  expect(notice.querySelector("code")?.textContent).toBe("acme/api#98");
   expect(
     within(notice).getByRole("button", { name: /Take ownership/ }),
   ).toBeTruthy();
-  fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
+  fireEvent.click(within(notice).getByRole("button", { name: "Retry now" }));
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: "T-1",
@@ -323,10 +315,14 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
     .getByRole("heading", { name: "Source" })
     .closest("section")!;
   expect(
-    within(section).getAllByText(/Source unavailable/).length,
+    within(section).getAllByText(/Unavailable since/).length,
   ).toBeGreaterThan(0);
-  expect(within(section).getByText(/Network is down\./)).toBeTruthy();
-  expect(within(section).getByRole("button", { name: "Refresh" })).toBeTruthy();
+  expect(
+    within(section).getByText(/Nothing in ticketd was deleted or completed/),
+  ).toBeTruthy();
+  expect(within(section).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(section.querySelectorAll('[data-slot="status-dot"]')).toHaveLength(1);
+  expect(within(section).queryByText(/Edit them there/)).toBeNull();
   rerender(
     withActivity(
       { refreshing: true },
@@ -340,6 +336,16 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
     ),
   );
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
+});
+
+test("the refreshing footer words the core's current tracked-ticket count", () => {
+  render(
+    withActivity(
+      { refreshing: true, sources: [status({ tracked_tickets: 7 })] },
+      <SourceStatusFooter />,
+    ),
+  );
+  expect(screen.getByText("Checking 7 GitHub tickets")).toBeTruthy();
 });
 
 test("the list header reads Refreshing GitHub… for a background refresh without announcing it", () => {
@@ -362,7 +368,7 @@ test("the list header reads Refreshing GitHub… for a background refresh withou
   );
   // A background run is shown, not announced to screen readers.
   expect(screen.getByText("Refreshing GitHub…")).toBeTruthy();
-  expect(screen.queryByRole("status")).toBeNull();
+  expect(screen.getByRole("status").textContent).toContain("Refreshing GitHub");
 });
 
 test("the list header shows the last sync when idle", () => {
@@ -375,7 +381,7 @@ test("the list header shows the last sync when idle", () => {
       />,
     ),
   );
-  expect(screen.getByText("Synced 4 min ago")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("");
 });
 
 test("the list header says Last synced, never Synced, while the source is unavailable", () => {
@@ -388,8 +394,37 @@ test("the list header says Last synced, never Synced, while the source is unavai
       />,
     ),
   );
-  expect(screen.getByText("Last synced 4 min ago")).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("");
   expect(screen.queryByText(/^Synced/)).toBeNull();
+});
+
+test("a refresh command failure is visible until a newer source attempt supersedes it", async () => {
+  const state = {
+    running: false,
+    report: null,
+    error: "workspace is busy",
+    errorAt: "2026-02-02T10:00:00Z",
+  };
+  const { rerender } = render(
+    withActivity(
+      { sources: [status({ last_attempt_at: "2026-02-02T09:59:00Z" })] },
+      <SourceRefresh providers={["github"]} state={state} />,
+    ),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "GitHub refresh failed" }),
+  );
+  expect(await screen.findByText("workspace is busy")).toBeTruthy();
+  rerender(
+    withActivity(
+      { sources: [status({ last_attempt_at: "2026-02-02T10:01:00Z" })] },
+      <SourceRefresh providers={["github"]} state={state} />,
+    ),
+  );
+  expect(
+    screen.queryByRole("button", { name: "GitHub refresh failed" }),
+  ).toBeNull();
+  expect(screen.queryByText("workspace is busy")).toBeNull();
 });
 
 test("the unavailable notice is worded by the failure, not by the provider's text", () => {
@@ -441,7 +476,7 @@ test("a refresh failure about a ticket that was taken over no longer shows", () 
       />,
     ),
   );
-  expect(screen.getByRole("alert").textContent).toContain("Could not refresh");
+  expect(screen.queryByRole("alert")).toBeNull();
   rerender(
     withActivity(
       {},
@@ -461,4 +496,26 @@ test("relative times degrade to the raw value only when unreadable", () => {
   expect(ago("2026-02-01T00:00:00Z", now)).toBe("1 h ago");
   expect(ago("2026-01-30T00:00:00Z", now)).toBe("2 d ago");
   expect(ago("garbage", now)).toBeNull();
+});
+
+test("discovery provenance follows the core's match flag and links to its settings", () => {
+  bridge.invoke.mockResolvedValue([]);
+  const openSettings = vi.fn();
+  render(
+    withActivity(
+      { openSettings },
+      <TicketProperties
+        ticket={ticket({ source: source({ discovery_matches: false }) })}
+        projects={[]}
+        efforts={[]}
+        onSaved={vi.fn()}
+        refresh={async () => {}}
+      />,
+    ),
+  );
+  expect(
+    screen.getByText(/No longer matches discovery. It keeps syncing/),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Discovery" }));
+  expect(openSettings).toHaveBeenCalledOnce();
 });

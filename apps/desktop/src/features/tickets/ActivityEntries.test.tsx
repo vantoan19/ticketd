@@ -84,6 +84,7 @@ test("shows an editing agent only when one was recorded and words history as sen
   });
   render(<Activity {...props} reference="T-20" />);
   await screen.findByText("Status changed from Todo to In progress");
+  expect(screen.getByText("Only in ticketd")).toBeTruthy();
   expect(screen.getAllByText(/^Agent:/)).toHaveLength(1);
   expect(screen.queryByText(/status:/)).toBeNull();
 });
@@ -117,4 +118,33 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
   cleanup();
   render(<Activity {...props} reference="T-21" />);
   expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+});
+
+test("Notes and history puts the composer before labelled notes and quiet relative history", async () => {
+  const recent = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "list_notes" ? [{ ...note, created_at: recent }] : [],
+  );
+  render(
+    <Activity
+      {...props}
+      reference="T-50"
+      sourceName="GitHub"
+      latestNoteId="n"
+    />,
+  );
+  const body = await screen.findByText("Body");
+  expect(
+    screen.getByRole("heading", { name: "Notes and history" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Only in ticketd · never sent to GitHub"),
+  ).toBeTruthy();
+  expect(screen.getByText("Latest update")).toBeTruthy();
+  expect(screen.getByText("2 h ago")).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Add a note" })
+      .compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });

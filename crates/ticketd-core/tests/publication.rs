@@ -421,6 +421,7 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
 
     assert_eq!(preview.title, "Escalate the cache bug");
     assert_eq!(preview.body, "Cache entries never expire.");
+    assert_eq!(preview.local.notes, 1);
     assert_eq!(preview.destination.as_deref(), Some("o/r"));
     assert_eq!(preview.destinations, vec!["o/r".to_owned()]);
     assert_eq!(preview.provider_name, "Fake");
@@ -638,6 +639,22 @@ fn a_lost_response_is_unresolved_durably_and_blocks_another_create() {
         assert!(attempt.issue.is_none());
     };
     check(&f);
+    let history = f.workspace.ticket_history(&ticket.reference).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .filter(|entry| entry.kind == "publication_unresolved")
+            .count(),
+        1
+    );
+    assert_eq!(
+        history
+            .iter()
+            .find(|entry| entry.kind == "publication_unresolved")
+            .unwrap()
+            .to_value,
+        "o/r"
+    );
 
     // Blocked, however it is asked, and across a restart.
     f.mode(Mode::Create);

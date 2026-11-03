@@ -60,9 +60,10 @@
 }
 .rail-attention {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 0;
+  gap: 4px;
 }
 .rail-section small {
   color: var(--secondary-foreground);
@@ -80,6 +81,8 @@
 }
 
 .rail-source {
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -90,7 +93,77 @@
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
+  overflow-wrap: anywhere;
 }
 .rail-warning {
   color: var(--secondary-foreground);
+}
+
+.rail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rail-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  background: var(--accent);
+  font-size: 12px;
+  line-height: 16px;
+}
+.status-menu {
+  width: 240px;
+}
+.status-menu [data-slot="select-item"] {
+  min-height: 36px;
+}
+.status-menu [data-slot="select-label"],
+.status-menu-caption {
+  white-space: normal;
+  padding: 8px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+.rail-section [data-slot="select-trigger"] > svg:last-child {
+  display: none;
+}
+
+.ticket-properties .ui-select[data-variant="ghost"] {
+  width: calc(100% + 12px);
+  max-width: calc(100% + 12px);
+  justify-content: flex-start;
+}
+.rail-source-identity {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+.rail-source-identity .source-link {
+  display: inline-flex;
+  gap: 0;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.rail-source-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-source-number {
+  flex: none;
+}
+
+.rail-attention {
+  margin-left: -12px;
+  width: calc(100% + 12px);
+}
+.rail-attention > button {
+  margin-left: 0;
+  max-width: 100%;
 }

@@ -1,6 +1,8 @@
+import { useNow } from "@/lib/use-now";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -28,7 +30,8 @@ import type { Effort } from "@/lib/api/efforts";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
 import { attribution } from "./ticket-source";
-import { formatDateTime } from "@/lib/format";
+import { relativeDateTime, formatDateTime } from "@/lib/format";
+import { revealInDetail } from "./detail-scroll";
 import "./activity.css";
 
 /**
@@ -47,7 +50,13 @@ export function Activity({
   select,
   target,
   efforts = [],
+  sourceName,
+  latestNoteId,
+  onChanged,
 }: {
+  sourceName?: string | undefined;
+  latestNoteId?: string | undefined;
+  onChanged?: () => Promise<void>;
   reference: string;
   status: string;
   revision: number;
@@ -58,32 +67,32 @@ export function Activity({
   target?: { id: string; key: number } | null;
   efforts?: Effort[];
 }) {
+  const now = useNow();
   const [loadError, setLoadError] = useState("");
   const [targetNote, setTargetNote] = useState<Note | null>(null);
-  const targetRef = useRef<HTMLDivElement>(null);
+  const targetRequest = useRef<{ id: string } | null>(null);
+  const targetRef = useRef<HTMLLIElement>(null);
+  const revealedTarget = useRef<{ id: string; key: number } | null>(null);
   const targetId = target?.id;
   const targetKey = target?.key;
   useEffect(() => {
     if (!active || targetId === undefined) return;
     let current = true;
+    const request = { id: targetId };
+    targetRequest.current = request;
     void client
       .note(reference, targetId)
       .then((note) => {
-        if (current) setTargetNote(note);
+        if (current && targetRequest.current === request) setTargetNote(note);
       })
       .catch((reason: unknown) => {
-        if (current) setLoadError(String(reason));
+        if (current && targetRequest.current === request)
+          setLoadError(String(reason));
       });
     return () => {
       current = false;
     };
-  }, [active, reference, targetId, targetKey]);
-  useEffect(() => {
-    if (active && targetId !== undefined && targetNote?.id === targetId) {
-      targetRef.current?.scrollIntoView?.({ block: "center" });
-      targetRef.current?.focus({ preventScroll: true });
-    }
-  }, [active, targetId, targetKey, targetNote]);
+  }, [active, reference, revision, targetId, targetKey]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,14 +160,25 @@ export function Activity({
     setPending(true);
     setError("");
     try {
-      if (edit) await client.editNote(reference, edit.id, edit.content);
-      else await client.addNote(reference, draft);
+      if (edit) {
+        const savedNote = await client.editNote(
+          reference,
+          edit.id,
+          edit.content,
+        );
+        if (targetRequest.current?.id === savedNote.id)
+          targetRequest.current = null;
+        setTargetNote((previous) =>
+          previous?.id === savedNote.id ? savedNote : previous,
+        );
+      } else await client.addNote(reference, draft);
       if (edit) setEdit(null);
       else {
         setDraft("");
         setComposing(false);
       }
       await loadNotes();
+      await onChanged?.();
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -173,7 +193,10 @@ export function Activity({
     setError("");
     try {
       await client.deleteNote(reference, id);
+      if (targetRequest.current?.id === id) targetRequest.current = null;
+      setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
+      await onChanged?.();
     } catch (reason) {
       setError(String(reason));
     } finally {
@@ -198,13 +221,39 @@ export function Activity({
       setPending(false);
     }
   }
+  // A note reached from elsewhere may be older than the loaded page. Add it to
+  // the same chronological list, and replace it with the paged copy when loaded.
+  const displayedNotes =
+    active &&
+    targetNote !== null &&
+    targetId !== undefined &&
+    targetNote.id === targetId &&
+    !notes.some((note) => note.id === targetId)
+      ? [...notes, targetNote]
+      : notes;
   const changed =
     edit &&
-    !notes.some(
+    !displayedNotes.some(
       (note) => note.id === edit.id && note.content === edit.original,
     );
+  useLayoutEffect(() => {
+    if (!active || targetId === undefined || targetKey === undefined) {
+      revealedTarget.current = null;
+      return;
+    }
+    if (
+      revealedTarget.current?.id === targetId &&
+      revealedTarget.current.key === targetKey
+    )
+      return;
+    const element = targetRef.current;
+    if (!element) return;
+    revealInDetail(element);
+    element.focus({ preventScroll: true });
+    revealedTarget.current = { id: targetId, key: targetKey };
+  }, [active, targetId, targetKey, notes, targetNote]);
   const entries = [
-    ...notes.map((note) => ({
+    ...displayedNotes.map((note) => ({
       type: "note" as const,
       timestamp: note.created_at,
       note,
@@ -224,119 +273,16 @@ export function Activity({
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
-      {active && target && targetNote?.id === target.id && (
-        <div ref={targetRef} tabIndex={-1} aria-label="Selected note">
-          <strong>Selected note</strong>
-          <MarkdownDocument
-            source={targetNote.content}
-            select={select}
-            revision={revision}
-          />
-        </div>
-      )}
       <div className="activity-heading">
-        <h3>Activity</h3>
+        <h3>Notes and history</h3>
+        <span>
+          Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
+        </span>
       </div>
       {(error || loadError) && (
         <Alert variant="destructive">
           <AlertDescription>{error || loadError}</AlertDescription>
         </Alert>
-      )}
-      {loading && entries.length === 0 ? (
-        <p className="activity-muted" role="status">
-          Loading activity…
-        </p>
-      ) : entries.length === 0 && !error && !loadError ? (
-        <Empty className="activity-empty">
-          <EmptyHeader>
-            <EmptyDescription>
-              No notes or recorded changes yet.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <ol className="activity-list">
-          {entries.map((item) =>
-            item.type === "note" ? (
-              <li key={`note-${item.note.id}`} className="activity-entry">
-                <div className="activity-meta">
-                  <time dateTime={item.note.created_at}>
-                    {formatDateTime(item.note.created_at)}
-                  </time>
-                  {item.note.updated_at !== item.note.created_at && (
-                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
-                  )}
-                  {item.note.editing_agent && (
-                    <span>Agent: {item.note.editing_agent}</span>
-                  )}
-                  {!trashed && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="activity-menu"
-                          disabled={pending}
-                          aria-label={`Actions for note from ${formatDateTime(item.note.created_at)}`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            setEdit({
-                              id: item.note.id,
-                              original: item.note.content,
-                              content: item.note.content,
-                            })
-                          }
-                        >
-                          Edit note
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => void remove(item.note.id)}
-                        >
-                          Delete note
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-                <div className="markdown-preview activity-note">
-                  <MarkdownDocument
-                    source={item.note.content}
-                    select={select}
-                    revision={revision}
-                  />
-                </div>
-              </li>
-            ) : (
-              <li key={`history-${item.index}`} className="activity-history">
-                <span>{historySentence(item.entry, lookups)}</span>
-                <time dateTime={item.entry.timestamp}>
-                  {formatDateTime(item.entry.timestamp)}
-                </time>
-                {item.entry.editing_agent && (
-                  <span>{attribution(item.entry.editing_agent)}</span>
-                )}
-              </li>
-            ),
-          )}
-        </ol>
-      )}
-      {more && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={pending}
-          onClick={() => void loadMore()}
-        >
-          Load more notes
-        </Button>
       )}
       {!trashed && !composing && !edit && (
         <button
@@ -409,6 +355,123 @@ export function Activity({
             )}
           </div>
         </form>
+      )}
+      {loading && entries.length === 0 ? (
+        <p className="activity-muted" role="status">
+          Loading activity…
+        </p>
+      ) : entries.length === 0 && !error && !loadError ? (
+        <Empty className="activity-empty">
+          <EmptyHeader>
+            <EmptyDescription>
+              No notes or recorded changes yet.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <ol className="activity-list">
+          {entries.map((item) =>
+            item.type === "note" ? (
+              <li
+                key={`note-${item.note.id}`}
+                className="activity-entry"
+                ref={
+                  active && item.note.id === targetId ? targetRef : undefined
+                }
+                tabIndex={active && item.note.id === targetId ? -1 : undefined}
+                aria-label={
+                  active && item.note.id === targetId
+                    ? "Selected note"
+                    : undefined
+                }
+              >
+                <div className="activity-meta">
+                  <strong>
+                    {item.note.id === latestNoteId ? "Latest update" : "Note"}
+                  </strong>
+                  <time
+                    dateTime={item.note.created_at}
+                    title={formatDateTime(item.note.created_at)}
+                  >
+                    {relativeDateTime(item.note.created_at, now)}
+                  </time>
+                  {item.note.updated_at !== item.note.created_at && (
+                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
+                  )}
+                  {item.note.editing_agent && (
+                    <span>Agent: {item.note.editing_agent}</span>
+                  )}
+                  {!trashed && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="activity-menu"
+                          disabled={pending}
+                          aria-label={`Actions for note from ${formatDateTime(item.note.created_at)}`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            setEdit({
+                              id: item.note.id,
+                              original: item.note.content,
+                              content: item.note.content,
+                            })
+                          }
+                        >
+                          Edit note
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => void remove(item.note.id)}
+                        >
+                          Delete note
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+                <div className="markdown-preview activity-note">
+                  <MarkdownDocument
+                    source={item.note.content}
+                    select={select}
+                    revision={revision}
+                  />
+                </div>
+              </li>
+            ) : (
+              <li key={`history-${item.index}`} className="activity-history">
+                <span>{historySentence(item.entry, lookups)}</span>
+                <time
+                  dateTime={item.entry.timestamp}
+                  title={formatDateTime(item.entry.timestamp)}
+                >
+                  {relativeDateTime(item.entry.timestamp, now)}
+                </time>
+                {item.entry.editing_agent && (
+                  <span>{attribution(item.entry.editing_agent)}</span>
+                )}
+              </li>
+            ),
+          )}
+        </ol>
+      )}
+      {more && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={() => void loadMore()}
+        >
+          Load more notes
+        </Button>
       )}
     </section>
   );

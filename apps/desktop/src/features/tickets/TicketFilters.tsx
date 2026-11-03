@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -25,6 +26,7 @@ import { ticketStatuses } from "@/lib/statuses";
 import "./ticket-filters.css";
 
 type Props = {
+  part?: "controls" | "chips";
   query: string;
   setQuery: (value: string) => void;
   effort: string;
@@ -89,104 +91,122 @@ export function TicketFilters(p: Props) {
   );
   return (
     <>
-      <div className="list-controls">
-        <label className="search">
-          <Search size={16} />
-          <span className="sr-only">Search tickets</span>
-          <Input
-            aria-label="Search tickets"
-            placeholder="Search tickets..."
-            value={p.query}
-            onChange={(event) => update(p.setQuery, event.target.value)}
-          />
-        </label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={
-                chips.length ? `Filters, ${chips.length} active` : "Filters"
-              }
+      {p.part !== "chips" && (
+        <div className="list-controls">
+          <Popover>
+            <PopoverTrigger asChild>
+              <IconButton
+                label={
+                  p.query ? `Search tickets: ${p.query}` : "Search tickets"
+                }
+              >
+                <Search />
+              </IconButton>
+            </PopoverTrigger>
+            <PopoverContent align="end" aria-label="Search tickets">
+              <label className="search">
+                <Search size={16} />
+                <span className="sr-only">Search tickets</span>
+                <Input
+                  aria-label="Search tickets"
+                  placeholder="Search tickets…"
+                  value={p.query}
+                  onChange={(event) => update(p.setQuery, event.target.value)}
+                />
+              </label>
+            </PopoverContent>
+          </Popover>
+          <Popover>
+            <PopoverTrigger asChild>
+              <IconButton
+                label={
+                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                }
+                aria-label={
+                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                }
+              >
+                <SlidersHorizontal />
+                {chips.length > 0 && (
+                  <span className="filter-count">{chips.length}</span>
+                )}
+              </IconButton>
+            </PopoverTrigger>
+            <PopoverContent
+              className="filters-content"
+              align="end"
+              aria-label="Ticket filters"
             >
-              <SlidersHorizontal data-icon="inline-start" /> Filters
-              {chips.length > 0 && (
-                <span className="filter-count">{chips.length}</span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="filters-content"
-            align="end"
-            aria-label="Ticket filters"
-          >
-            <FieldSet>
-              <FieldLegend>Filters</FieldLegend>
-              <FieldGroup>
-                {!p.navigation.effort && (
-                  <FilterSelect
-                    label="Effort"
-                    value={p.effort}
-                    onChange={(value) => update(p.setEffort, value)}
-                    all="All Efforts"
-                    options={p.efforts.map((item) => ({
-                      value: item.id,
-                      label: `${item.name}${item.archived ? " (archived)" : ""}`,
-                    }))}
-                  />
-                )}
-                {p.navigation.kind !== "progress" && (
-                  <FilterSelect
-                    label="Status"
-                    value={p.status}
-                    onChange={(value) => update(p.setStatus, value)}
-                    all="All statuses"
-                    options={ticketStatuses.map((value) => ({
-                      value,
-                      label: value,
-                    }))}
-                  />
-                )}
-                <Field>
-                  <FieldLabel htmlFor="filter-tags">
-                    Tags (comma separated; all tags required)
-                  </FieldLabel>
-                  <Input
-                    id="filter-tags"
-                    value={p.tags}
-                    onChange={(event) => update(p.setTags, event.target.value)}
-                  />
-                </Field>
-                {p.navigation.kind !== "ready" && (
-                  <FilterSelect
-                    label="Availability"
-                    value={p.availability}
-                    onChange={(value) => update(p.setAvailability, value)}
-                    all="All availability"
-                    options={["Ready", "Blocked"].map((value) => ({
-                      value,
-                      label: value,
-                    }))}
-                  />
-                )}
-                <Field>
-                  <FieldLabel htmlFor="filter-family">
-                    Parent family reference
-                  </FieldLabel>
-                  <Input
-                    id="filter-family"
-                    value={p.family}
-                    onChange={(event) =>
-                      update(p.setFamily, event.target.value)
-                    }
-                  />
-                </Field>
-              </FieldGroup>
-            </FieldSet>
-          </PopoverContent>
-        </Popover>
-      </div>
-      {(chips.length > 0 || p.query) && (
+              <FieldSet>
+                <FieldLegend>Filters</FieldLegend>
+                <FieldGroup>
+                  {!p.navigation.effort && (
+                    <FilterSelect
+                      label="Effort"
+                      value={p.effort}
+                      onChange={(value) => update(p.setEffort, value)}
+                      all="All Efforts"
+                      options={p.efforts.map((item) => ({
+                        value: item.id,
+                        label: `${item.name}${item.archived ? " (archived)" : ""}`,
+                      }))}
+                    />
+                  )}
+                  {p.navigation.kind !== "progress" && (
+                    <FilterSelect
+                      label="Status"
+                      value={p.status}
+                      onChange={(value) => update(p.setStatus, value)}
+                      all="All statuses"
+                      options={ticketStatuses.map((value) => ({
+                        value,
+                        label: value,
+                      }))}
+                    />
+                  )}
+                  <Field>
+                    <FieldLabel htmlFor="filter-tags">
+                      Tags (comma separated; all tags required)
+                    </FieldLabel>
+                    <Input
+                      id="filter-tags"
+                      value={p.tags}
+                      onChange={(event) =>
+                        update(p.setTags, event.target.value)
+                      }
+                    />
+                  </Field>
+                  {p.navigation.kind !== "ready" && (
+                    <FilterSelect
+                      label="Availability"
+                      value={p.availability}
+                      onChange={(value) => update(p.setAvailability, value)}
+                      all="All availability"
+                      options={["Ready", "Blocked"].map((value) => ({
+                        value,
+                        label: value,
+                      }))}
+                    />
+                  )}
+                  <Field>
+                    <FieldLabel htmlFor="filter-family">
+                      Parent family reference
+                    </FieldLabel>
+                    <Input
+                      id="filter-family"
+                      value={p.family}
+                      onChange={(event) =>
+                        update(p.setFamily, event.target.value)
+                      }
+                    />
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+      {p.part !== "controls" && chips.length > 0 && (
         <div className="filter-chips" aria-label="Active filters">
           <span>Filters</span>
           {chips.map((chip, index) => (

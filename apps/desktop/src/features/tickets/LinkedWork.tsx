@@ -22,6 +22,7 @@ import { linkLabel, type LinkRow } from "@/features/tickets/linked-work";
 import {
   duplicateTargetParts,
   externalDuplicateTarget,
+  externalSource,
 } from "@/features/tickets/ticket-source";
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
@@ -161,22 +162,34 @@ export function LinkedWork({
       >
         {linkLabel(row.kind)}
       </span>
-      <StatusIcon
-        status={row.status}
-        size={14}
-        decorative
+      <span
         className="linked-work-icon"
-      />
+        role="img"
+        aria-label={statusText(row)}
+      >
+        <StatusIcon status={row.status} size={16} decorative />
+      </span>
       <span className="linked-work-reference">{row.reference}</span>
       <Button
         variant="link"
         className="linked-work-title"
         onClick={() => select(row.reference)}
       >
-        {row.title}
+        <span className="truncate">{row.title}</span>
       </Button>
-      <span className="linked-work-status">{statusText(row)}</span>
-      {isDuplicateKind(row.kind) ? (
+      <span
+        className="linked-work-status"
+        aria-hidden="true"
+        data-qualified={
+          (row.kind === "blocked_by" && row.unresolved) ||
+          row.trashed ||
+          undefined
+        }
+      >
+        {statusText(row)}
+      </span>
+      {isDuplicateKind(row.kind) &&
+      !externalSource(work.ticket)?.status_locked ? (
         <RemoveDuplicate
           row={row}
           ticket={reference}

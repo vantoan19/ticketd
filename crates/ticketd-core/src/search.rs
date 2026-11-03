@@ -164,6 +164,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
+            crate::notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -226,6 +227,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
+            crate::notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }

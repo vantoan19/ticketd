@@ -253,6 +253,9 @@ fn takeover_keeps_the_ticket_and_work_and_reads_local_with_provenance() {
     // Same reference, content, status, relationships and notes.
     let mut expected = before.clone();
     expected.source = taken.source.clone();
+    // Ownership is a recorded change; content and local work stay identical.
+    assert!(taken.updated_at >= before.updated_at);
+    expected.updated_at = taken.updated_at.clone();
     assert_eq!(taken, expected);
     assert_eq!(taken.title, "Imported title");
     assert_eq!(taken.status, Status::InProgress);

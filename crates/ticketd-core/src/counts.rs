@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SidebarCounts {
     pub unread_inbox: u32,
+    pub total: u32,
     pub ready: u32,
     pub in_progress: u32,
 }
@@ -26,7 +27,7 @@ impl Workspace {
                   AND NOT {held} \
                   AND NOT EXISTS (SELECT 1 FROM dependencies d JOIN tickets blocker ON blocker.id = d.blocker_id \
                                   WHERE d.dependent_id = t.id AND {unresolved})), \
-               (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress')"
+               (SELECT COUNT(*) FROM tickets WHERE trashed = 0 AND status = 'In progress'), (SELECT COUNT(*) FROM tickets WHERE trashed = 0)"
             ),
             [crate::inbox::LOCAL_PERSON],
             |row| {
@@ -34,6 +35,7 @@ impl Workspace {
                     unread_inbox: row.get(0)?,
                     ready: row.get(1)?,
                     in_progress: row.get(2)?,
+                    total: row.get(3)?,
                 })
             },
         )?;

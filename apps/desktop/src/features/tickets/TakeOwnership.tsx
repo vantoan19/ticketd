@@ -1,13 +1,10 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { client, type Ticket } from "@/lib/api/client";
 import { externalSource } from "./ticket-source";
 
@@ -20,12 +17,14 @@ import { externalSource } from "./ticket-source";
 export function TakeOwnership({
   ticket,
   refresh,
-  variant = "outline",
+  variant = "ghost",
 }: {
   ticket: Ticket;
   refresh: () => Promise<void>;
   variant?: "outline" | "ghost";
 }) {
+  const heading = useId();
+  const cancel = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState("");
@@ -49,61 +48,68 @@ export function TakeOwnership({
     }
   }
   return (
-    <>
-      <Button
-        variant={variant}
-        size="sm"
-        onClick={() => {
-          setFailure("");
-          setOpen(true);
+    <Popover open={open} onOpenChange={(next) => !pending && setOpen(next)}>
+      <PopoverTrigger asChild>
+        <Button variant={variant} size="sm" onClick={() => setFailure("")}>
+          Take ownership…
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="take-ownership-popover"
+        align="start"
+        side="bottom"
+        sideOffset={8}
+        aria-labelledby={heading}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          cancel.current?.focus({ preventScroll: true });
+        }}
+        onInteractOutside={(event) => {
+          if (pending) event.preventDefault();
         }}
       >
-        Take ownership…
-      </Button>
-      <Dialog open={open} onOpenChange={(next) => !pending && setOpen(next)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Take ownership of {ticket.reference}?</DialogTitle>
-            <DialogDescription>
-              {ticket.reference} becomes a Local ticket. Nothing is deleted and
-              nothing is sent to {name}.
-            </DialogDescription>
-          </DialogHeader>
-          <ul className="take-ownership-effects">
-            <li>
-              Kept: the title, description and status as last synced from {name}
-              .
-            </li>
-            <li>
-              Changes: you can edit the title, description and status here.
-            </li>
-            <li>
-              Stops: {name} changes no longer reach this ticket, even if{" "}
-              {source.display} becomes reachable again.
-            </li>
-            <li>
-              Remembered: {source.display} stays as “was {source.display}”, not
-              as the owner. Reconnecting later needs an explicit choice.
-            </li>
-            <li>
-              Unchanged: subtickets, dependencies, relationships and notes.
-            </li>
-          </ul>
-          {failure && <p role="alert">Could not take ownership: {failure}</p>}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              disabled={pending}
-              onClick={() => setOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button disabled={pending} onClick={() => void confirm()}>
-              {pending ? "Taking ownership…" : "Take ownership"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+        <h3 id={heading} className="take-ownership-title">
+          Take ownership of{" "}
+          <span className="source-number">{ticket.reference}</span>?
+        </h3>
+        <p className="source-caption">
+          This becomes a Local ticket. Nothing is deleted and nothing is sent to{" "}
+          {name}.
+        </p>
+        <ul className="take-ownership-effects">
+          <li>
+            Kept: the last synced title, description and status; subtickets,
+            dependencies, relationships and notes.
+          </li>
+          <li>
+            Changes: the owner becomes Local. You can edit the title,
+            description and status here.
+          </li>
+          <li>
+            Stops: {name} changes no longer reach this ticket. It never
+            reconnects by itself.
+          </li>
+        </ul>
+        <p className="source-caption">
+          <span className="source-number">{source.display}</span> stays as
+          provenance. GitHub comments stay as a read-only archive.
+        </p>
+        {failure && <p role="alert">Could not take ownership: {failure}</p>}
+        <div className="take-ownership-actions">
+          <Button
+            ref={cancel}
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button size="sm" disabled={pending} onClick={() => void confirm()}>
+            {pending ? "Taking ownership…" : "Take ownership"}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::{ClosureReason, Conversation, ExternalEventKind};
@@ -154,6 +154,90 @@ pub(crate) fn load(
     Ok(rows)
 }
 
+/// A closure time is evidence from the latest lifecycle event, never a sync time.
+/// A retained conversation may be stale after an issue changes or a read fails.
+fn latest_lifecycle(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Option<(String, String, String)>, Error> {
+    let mut statement = connection.prepare(
+            "SELECT c.entry_id, c.event, c.created_at FROM source_sync s \
+             JOIN source_conversation c ON c.ticket_id = s.ticket_id \
+             WHERE s.ticket_id = ?1 AND s.external_state = 'closed' \
+               AND s.external_updated_at <> '' AND s.conversation_updated_at = s.external_updated_at \
+               AND c.kind = 'event' AND c.event IN ('closed', 'closed_completed', 'closed_not_planned', 'closed_duplicate', 'reopened') \
+             ORDER BY c.position, c.rowid",
+        )?;
+    let rows = statement.query_map([ticket_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut latest = None;
+    for row in rows {
+        let (id, kind, at) = row?;
+        // An invalid lifecycle timestamp means we cannot establish which event
+        // is latest. Compare instants, since offsets need not sort as strings.
+        let Ok(time) = chrono::DateTime::parse_from_rfc3339(&at) else {
+            return Ok(None);
+        };
+        if latest
+            .as_ref()
+            .is_none_or(|(previous, _, _, _)| time >= *previous)
+        {
+            latest = Some((time, id, kind, at));
+        }
+    }
+    Ok(latest.map(|(_, id, kind, at)| (id, kind, at)))
+}
+
+pub(crate) fn closed_at(connection: &Connection, ticket_id: &str) -> Result<Option<String>, Error> {
+    Ok(latest_lifecycle(connection, ticket_id)?
+        .and_then(|(_, kind, at)| (kind != "reopened").then_some(at)))
+}
+
+/// Present legacy conversations using only current, fresh source evidence. The
+/// stored timeline stays untouched, and no earlier closure borrows today's state.
+pub(crate) fn present(
+    connection: &Connection,
+    ticket_id: &str,
+) -> Result<Vec<ConversationEntry>, Error> {
+    let mut entries = load(connection, ticket_id)?;
+    let current: Option<(Option<String>, Option<String>)> = connection
+        .query_row(
+            "SELECT s.closure_reason, CASE WHEN d.last_known = 0 THEN d.locator ELSE NULL END \
+             FROM source_sync s LEFT JOIN external_duplicate_targets d ON d.ticket_id = s.ticket_id \
+             WHERE s.ticket_id = ?1 AND s.external_state = 'closed' \
+               AND s.external_updated_at <> '' AND s.conversation_updated_at = s.external_updated_at",
+            [ticket_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let latest = latest_lifecycle(connection, ticket_id)?;
+    if let (Some((reason, target)), Some((latest_id, kind, _))) = (current, latest)
+        && kind != "reopened"
+        && let Some(ConversationEntry::Event { event, subject, .. }) = entries
+            .iter_mut()
+            .find(|entry| matches!(entry, ConversationEntry::Event { id, .. } if id == &latest_id))
+    {
+        if event == "closed" {
+            *event = match reason.as_deref() {
+                Some("completed") => "closed_completed",
+                Some("not_planned") => "closed_not_planned",
+                Some("duplicate") => "closed_duplicate",
+                _ => "closed",
+            }
+            .to_owned();
+        }
+        if event == "closed_duplicate" && subject.is_none() {
+            *subject = target.filter(|value| !value.is_empty());
+        }
+    }
+    Ok(entries)
+}
+
 /// Makes the stored conversation of `ticket_id` equal `conversation`, and notes
 /// the issue update time it was read at. Entries the source no longer lists are
 /// removed; entries already stored are left as they are. Returns whether
@@ -236,7 +320,6 @@ pub(crate) fn needs_reading(
     external_id: &str,
     issue_updated_at: &str,
 ) -> Result<bool, Error> {
-    use rusqlite::OptionalExtension;
     let row: Option<(Option<String>, Option<String>)> = connection
         .query_row(
             "SELECT o.authority, s.conversation_updated_at FROM external_identities i \
@@ -262,6 +345,6 @@ impl Workspace {
     /// Retained when the source is unavailable or ownership was taken.
     pub fn source_conversation(&self, reference: &str) -> Result<Vec<ConversationEntry>, Error> {
         let id = crate::relationships::id(&self.connection, reference)?;
-        load(&self.connection, &id)
+        present(&self.connection, &id)
     }
 }

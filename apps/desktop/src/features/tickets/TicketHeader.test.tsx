@@ -136,7 +136,7 @@ test("a reminder whose time has passed says it is due, not scheduled", () => {
 
 test("the actions menu opens the graph, the duplicate dialog, and trash", async () => {
   const props = header();
-  await chooseAction("Open dependency graph");
+  await chooseAction("Show in dependency graph");
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
@@ -147,7 +147,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Ticket actions" }),
   );
-  await chooseAction("Move to trash");
+  await chooseAction("Trash ticket");
   await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
     reference: "T-1",
@@ -166,9 +166,9 @@ test("a trashed ticket offers Restore without graph or duplicate actions", async
     },
   );
   expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: "Move to trash" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Trash ticket" })).toBeNull();
   expect(
-    screen.queryByRole("menuitem", { name: "Open dependency graph" }),
+    screen.queryByRole("menuitem", { name: "Show in dependency graph" }),
   ).toBeNull();
 });
 

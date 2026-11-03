@@ -17,7 +17,7 @@
 //! [`FailureCode::is_unavailable`] is true, and it stays so until a later attempt confirms the ticket. The state
 //! is derived from `source_sync.last_error_code` and is never stored as its own
 //! flag, so it cannot drift from the error that caused it. It never changes the
-//! ticket's content, status, ownership or history, and it has no grace period.
+//! ticket's content, status or ownership, and it has no grace period.
 //! A rate limit is *delayed*, not unavailable.
 
 use rusqlite::{Connection, params};
@@ -63,6 +63,13 @@ pub struct SourceStatus {
     pub last_attempt_at: Option<String>,
     /// The last run in which the source could be read.
     pub last_refreshed_at: Option<String>,
+    /// Unique issues checked in the last accepted whole-provider read. Unknown
+    /// for older workspaces or until the first successful or partial run.
+    #[serde(default)]
+    pub last_checked_tickets: Option<u32>,
+    /// Tickets currently owned by this source, including tickets in the trash.
+    #[serde(default)]
+    pub tracked_tickets: u32,
     /// Why the last run could not read the source, if it could not.
     pub error: Option<SourceFailure>,
     /// When the current streak of failed runs began.
@@ -93,6 +100,20 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn migrate_run_counts(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_status') WHERE name = 'last_checked_tickets')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection
+            .execute_batch("ALTER TABLE source_status ADD COLUMN last_checked_tickets INTEGER")?;
+    }
+    connection.execute_batch("PRAGMA user_version = 29;")?;
+    Ok(())
+}
+
 /// What one provider's run found, for [`record_run`].
 pub(crate) struct ProviderRun {
     pub provider: String,
@@ -100,6 +121,7 @@ pub(crate) struct ProviderRun {
     pub retry_after_secs: Option<u64>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
+    pub checked_tickets: u32,
 }
 
 /// Records each provider's run in the refresh write transaction. A run that
@@ -113,11 +135,11 @@ pub(crate) fn record_run(
         None => {
             let partial = (!run.skipped.is_empty()).then(|| run.skipped.join("; "));
             connection.execute(
-                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message) VALUES (?1, ?2, ?2, ?3) \
+                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets) VALUES (?1, ?2, ?2, ?3, ?4) \
                  ON CONFLICT(provider) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
-                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3 \
+                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4 \
                  WHERE source_status.last_attempt_at IS NULL OR source_status.last_attempt_at <= ?2",
-                params![run.provider, now, partial],
+                params![run.provider, now, partial, run.checked_tickets],
             )?;
         }
         Some(failure) => {
@@ -194,7 +216,10 @@ impl Workspace {
                        JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
                        JOIN source_sync y ON y.ticket_id = i.ticket_id \
                       WHERE i.provider = p.provider AND y.last_error_code IN ({})), \
-                    s.partial_message \
+                    s.partial_message, s.last_checked_tickets, \
+                    (SELECT COUNT(*) FROM external_identities i \
+                       JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
+                      WHERE i.provider = p.provider) \
              FROM (SELECT provider FROM source_configurations UNION SELECT provider FROM source_status \
                    UNION SELECT provider FROM external_identities) p \
              LEFT JOIN source_status s ON s.provider = p.provider \
@@ -222,6 +247,8 @@ impl Workspace {
                     ),
                     last_attempt_at: attempted,
                     last_refreshed_at: row.get(2)?,
+                    last_checked_tickets: row.get(9)?,
+                    tracked_tickets: row.get(10)?,
                     error,
                     failing_since: row.get(5)?,
                     retry_after: row.get(6)?,

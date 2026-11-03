@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
-        DiscoveryRequest, ExternalIssue, ExternalRef, ExternalState, PublicationCandidates,
-        PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+        DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -38,6 +38,8 @@ pub struct PreviewIssue {
     pub display: String,
     pub url: String,
     pub title: String,
+    /// Existing ticket with this external identity, including retained provenance.
+    pub ticket: Option<String>,
     pub state: ExternalState,
     pub assignees: Vec<String>,
     pub labels: Vec<String>,
@@ -53,6 +55,8 @@ pub struct DiscoveryPreview {
     pub issues: Vec<PreviewIssue>,
     /// Matches counted so far.
     pub matched: usize,
+    pub new: usize,
+    pub already_here: usize,
     /// False when counting stopped at the scan limit, so more matches exist.
     pub complete: bool,
 }
@@ -246,14 +250,27 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, SourceError> {
+        self.preview_with(provider, raw, |_| None)
+    }
+
+    pub(crate) fn preview_with(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        mut existing: impl FnMut(&ExternalIdentity) -> Option<String>,
+    ) -> Result<DiscoveryPreview, SourceError> {
         let config = self.validate(provider, raw)?;
         let account = self.check_connection(provider, &config)?.account;
         let mut issues = Vec::new();
         let mut matched = 0;
+        let mut already_here = 0;
         let summary = self.discover(provider, &config, |issue| {
             matched += 1;
+            let ticket = existing(&issue.reference.identity);
+            already_here += usize::from(ticket.is_some());
             if issues.len() < PREVIEW_LIST_LIMIT {
                 issues.push(PreviewIssue {
+                    ticket,
                     display: issue.display,
                     url: issue.url,
                     title: issue.title,
@@ -294,6 +311,8 @@ impl Engine {
             account,
             issues,
             matched,
+            new: matched - already_here,
+            already_here,
             complete,
         })
     }

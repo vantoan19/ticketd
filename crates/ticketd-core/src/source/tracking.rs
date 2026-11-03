@@ -119,9 +119,17 @@ pub struct TicketSource {
     pub display: String,
     pub url: String,
     pub origin: Origin,
+    /// Last complete discovery membership observation; unknown until a full walk succeeds.
+    #[serde(default)]
+    pub discovery_matches: Option<bool>,
+    #[serde(default)]
+    pub ownership_changed_at: Option<String>,
     pub ownership: Ownership,
     /// The external state last observed.
     pub state: ExternalState,
+    /// The latest source closure time, only when the matching conversation is fresh.
+    #[serde(default)]
+    pub closed_at: Option<String>,
     /// The source closed the issue with a reason ticketd does not recognize, so
     /// the closure was flagged and no outcome was guessed.
     pub closure_unrecognized: bool,
@@ -407,6 +415,8 @@ struct SourceRow {
     url: String,
     origin: String,
     authority: String,
+    discovery_matches: Option<bool>,
+    ownership_changed_at: Option<String>,
     state: String,
     reason: Option<String>,
     refreshed: Option<String>,
@@ -424,7 +434,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
-                    s.conversation_error_code, s.conversation_error_message \
+                    s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at \
              FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id \
              JOIN source_sync s ON s.ticket_id = i.ticket_id \
@@ -448,6 +458,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     failing_since: row.get(13)?,
                     conversation_error_code: row.get(14)?,
                     conversation_error_message: row.get(15)?,
+                    discovery_matches: row.get(16)?,
+                    ownership_changed_at: row.get(17)?,
                 })
             },
         )
@@ -481,6 +493,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         Vec::new()
     };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
+    let closed_at = conversation::closed_at(connection, &ticket.id)?;
     let unavailable = match &row.error_code {
         Some(code)
             if external && FailureCode::parse(code).is_some_and(FailureCode::is_unavailable) =>
@@ -514,6 +527,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
             Origin::Imported
         },
         ownership,
+        discovery_matches: row.discovery_matches,
+        ownership_changed_at: row.ownership_changed_at,
         closure_unrecognized: matches!(
             state,
             ExternalState::Closed {
@@ -523,6 +538,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         status_locked: external && status_choices.is_empty(),
         status_choices,
         state,
+        closed_at,
         last_refreshed_at: row.refreshed,
         last_attempt_at: row.attempted,
         unavailable,
@@ -692,6 +708,8 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
+    configurations: HashMap<String, super::ConfigValues>,
+    discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
     /// here keeps the conversation it already has.
@@ -755,6 +773,8 @@ impl Workspace {
             conversations: HashMap::new(),
             failures: Vec::new(),
             runs: Vec::new(),
+            discovery: Vec::new(),
+            configurations: HashMap::new(),
         };
         let saved = self.saved_sources()?;
         let providers: Vec<String> = if options.ticket.is_some() {
@@ -775,6 +795,11 @@ impl Workspace {
         };
         for provider in providers {
             let config = saved.iter().find(|s| s.provider == provider);
+            if let Some(source) = config {
+                gathered
+                    .configurations
+                    .insert(provider.clone(), source.config.clone());
+            }
             let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
             // Set when the source as a whole cannot be read, so asking for more
@@ -791,6 +816,9 @@ impl Workspace {
                 });
                 match result {
                     Ok(summary) => {
+                        if summary.complete && summary.skipped.is_empty() {
+                            gathered.discovery.push((provider.clone(), seen.clone()));
+                        }
                         for part in summary.skipped {
                             skipped.push(part.message.clone());
                             gathered.failures.push(Found {
@@ -864,6 +892,9 @@ impl Workspace {
                     },
                     locator: ticket.locator.clone(),
                 };
+                // Count an issue once whether it was discovered or fetched, and
+                // include attempted reads that returned a ticket-level failure.
+                seen.insert(ticket.external_id.clone());
                 match engine.fetch(&provider, &source.config, &external) {
                     Ok(issue) => gathered.issues.push(issue),
                     Err(error) => {
@@ -896,6 +927,7 @@ impl Workspace {
                     failure: discovery_failed.or(blocked),
                     retry_after_secs,
                     skipped,
+                    checked_tickets: u32::try_from(seen.len()).unwrap_or(u32::MAX),
                 });
             }
         }
@@ -928,7 +960,47 @@ impl Workspace {
                 continue;
             }
             match engine.conversation(&identity.provider, config, &issue.reference) {
-                Ok(Some(read)) => {
+                Ok(Some(mut read)) => {
+                    // REST timeline closes may omit a reason. Only the latest
+                    // state event can borrow the issue's currently observed closure.
+                    // An unreadable time makes the latest event unknown, and
+                    // offsets must be compared as instants, not text.
+                    let latest = read
+                        .events
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, event)| {
+                            matches!(
+                                event.kind,
+                                super::ExternalEventKind::Closed(_)
+                                    | super::ExternalEventKind::Reopened
+                            )
+                        })
+                        .map(|(index, event)| {
+                            chrono::DateTime::parse_from_rfc3339(&event.created_at)
+                                .map(|time| (index, time))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .ok()
+                        .and_then(|events| events.into_iter().max_by(|a, b| a.1.cmp(&b.1)))
+                        .map(|(index, _)| index);
+                    if let ExternalState::Closed { reason } = issue.state
+                        && let Some(index) = latest
+                        && let Some(event) = read.events.get_mut(index)
+                        && matches!(event.kind, super::ExternalEventKind::Closed(_))
+                    {
+                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
+                            event.kind = super::ExternalEventKind::Closed(reason);
+                        }
+                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
+                            && event.subject.is_none()
+                        {
+                            event.subject = issue
+                                .duplicate_of
+                                .as_ref()
+                                .map(|target| target.locator.clone());
+                        }
+                    }
                     gathered
                         .conversations
                         .insert((identity.provider.clone(), identity.id.clone()), read);
@@ -1010,8 +1082,32 @@ impl Workspace {
     ) -> Result<RefreshReport, Error> {
         let transaction = self.connection.savepoint()?;
         transaction_write_lock(&transaction)?;
+        // Configuration can change while the connector is on the network.
+        // Re-read it under the same write lock as the results: old discovery
+        // cannot import new tickets or describe the rules saved afterwards.
+        let mut replaced = HashSet::new();
+        for (provider, used) in &gathered.configurations {
+            let stored: Option<String> = transaction
+                .query_row(
+                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
+                    [provider],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let current = stored
+                .map(|raw| serde_json::from_str::<super::ConfigValues>(&raw))
+                .transpose()?;
+            if current.as_ref() != Some(used) {
+                replaced.insert(provider.clone());
+            }
+        }
         let mut applied = Applied::default();
         for issue in &gathered.issues {
+            if replaced.contains(&issue.reference.identity.provider)
+                && ticket_for_identity(&transaction, &issue.reference.identity)?.is_none()
+            {
+                continue;
+            }
             let key = (
                 issue.reference.identity.provider.clone(),
                 issue.reference.identity.id.clone(),
@@ -1024,10 +1120,27 @@ impl Workspace {
                 &mut applied,
             )?;
         }
+        for (provider, seen) in &gathered.discovery {
+            if replaced.contains(provider) {
+                continue;
+            }
+            let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
+            let identities = statement
+                .query_map([provider], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (id, external_id) in identities {
+                transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
+            }
+        }
         let by_reference: HashMap<&str, &Tracked> =
             tracked.iter().map(|t| (t.reference.as_str(), t)).collect();
         let mut failures = Vec::new();
         for found in &gathered.failures {
+            if replaced.contains(&found.provider) {
+                continue;
+            }
             let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
             if let Some(ticket) = ticket {
                 match found.scope {
@@ -1044,6 +1157,21 @@ impl Workspace {
                         // the last successful refresh and saved content are not touched.
                         // An attempt that started before the ticket was last confirmed
                         // is older news and records nothing.
+                        if FailureCode::parse(&found.failure.code)
+                            .is_some_and(FailureCode::is_unavailable)
+                        {
+                            let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
+                            if first {
+                                history::record(
+                                    &transaction,
+                                    &ticket.ticket_id,
+                                    "source_unavailable",
+                                    "",
+                                    &found.failure.code,
+                                    Some(&found.provider),
+                                )?;
+                            }
+                        }
                         transaction.execute(
                             "UPDATE source_sync SET last_attempt_at = ?2, last_error_code = ?3, last_error_message = ?4, \
                              failing_since = COALESCE(failing_since, ?2) WHERE ticket_id = ?1 \
@@ -1072,6 +1200,9 @@ impl Workspace {
             });
         }
         for run in &gathered.runs {
+            if replaced.contains(&run.provider) {
+                continue;
+            }
             freshness::record_run(&transaction, run, now)?;
         }
         transaction.commit()?;
@@ -1164,6 +1295,14 @@ fn apply_issue(
             )?;
             let number = connection.last_insert_rowid();
             link(connection, &id, issue, Origin::Imported, now)?;
+            history::record(
+                connection,
+                &id,
+                "source_import",
+                &status.to_string(),
+                &issue.display,
+                Some(&issue.reference.identity.provider),
+            )?;
             if status == Status::Duplicate {
                 set_duplicate_target(connection, &id, issue)?;
             }

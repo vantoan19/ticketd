@@ -87,12 +87,15 @@ const previewSchema = z.object({
       display: z.string(),
       url: z.string(),
       title: z.string(),
+      ticket: z.string().nullish(),
       assignees: z.array(z.string()),
       labels: z.array(z.string()),
       updated_at: z.string(),
     }),
   ),
   matched: z.number(),
+  new: z.number().optional(),
+  already_here: z.number().optional(),
   complete: z.boolean(),
 });
 export type DiscoveryPreview = z.infer<typeof previewSchema>;
@@ -138,6 +141,8 @@ const sourceStatusSchema = z.object({
   last_attempt_at: z.string().nullable(),
   /** The last run in which the source could be read. */
   last_refreshed_at: z.string().nullable(),
+  last_checked_tickets: z.number().int().nonnegative().nullish(),
+  tracked_tickets: z.number().int().nonnegative().optional(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   /** When the current streak of failed runs began. */
   failing_since: z.string().nullable(),
@@ -187,6 +192,14 @@ const publicationPreviewSchema = z.object({
   body: z.string(),
   /** Identifies this title, description and destination; handed back to publish exactly this. */
   fingerprint: z.string(),
+  local: z
+    .object({
+      notes: z.number().int().nonnegative(),
+      effort: z.string().nullable(),
+      tags: z.array(z.string()),
+      subtickets: z.array(z.string()),
+    })
+    .optional(),
   eligibility: eligibilitySchema,
   attempt: publicationAttemptSchema.nullable(),
 });

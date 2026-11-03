@@ -38,8 +38,8 @@ export function AttemptReview({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="publication-dialog">
-        <DialogHeader>
+      <DialogContent className="publication-dialog" showCloseButton={false}>
+        <DialogHeader showCloseButton>
           <DialogTitle>Publication unresolved</DialogTitle>
           <DialogDescription>
             {attempt.reference} stays a local ticket. Nothing was attached to
@@ -64,13 +64,15 @@ type Load =
   | { kind: "ready"; review: PublicationReview }
   | { kind: "failed"; message: string };
 
-function ReviewBody({
+export function ReviewBody({
   attempt,
   close,
   refresh,
+  inline = false,
 }: {
+  inline?: boolean;
   attempt: PublicationAttempt;
-  close: () => void;
+  close: (kind?: PublicationResolution["kind"]) => void;
   refresh: () => Promise<void>;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -84,6 +86,13 @@ function ReviewBody({
     message: string;
   } | null>(null);
   const [round, setRound] = useState(0);
+  const [linking, setLinking] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  function checkAgain() {
+    setDismissed([]);
+    setLoad({ kind: "loading" });
+    setRound((n) => n + 1);
+  }
 
   useEffect(() => {
     let active = true;
@@ -113,7 +122,7 @@ function ReviewBody({
         acceptDifferentContent,
       });
       await refresh();
-      close();
+      close(resolution.kind);
     } catch (reason) {
       // The attempt is unchanged: show why, keep the review open.
       const failure = toFailure(reason);
@@ -135,6 +144,9 @@ function ReviewBody({
     return (
       <p className="publication-error" role="alert">
         {load.message}
+        <Button variant="ghost" size="sm" onClick={checkAgain}>
+          Check again
+        </Button>
       </p>
     );
 
@@ -143,6 +155,151 @@ function ReviewBody({
   const known = review.attempt.issue;
   const attach = review.actions.find((a) => a.kind === "attach");
   const notCreated = review.actions.find((a) => a.kind === "not_created");
+  if (inline)
+    return (
+      <>
+        <div className="publication-candidate-panel">
+          <p className="publication-detail">
+            {review.lookup_failure
+              ? `GitHub could not be checked: ${review.lookup_failure.message}`
+              : `Checked GitHub just now · ${review.candidates.length} possible ${review.candidates.length === 1 ? "match" : "matches"}`}
+          </p>
+          {review.candidates
+            .filter((candidate) => !dismissed.includes(candidate.identity.id))
+            .map((candidate) => (
+              <article
+                key={candidate.identity.id}
+                className="publication-candidate-card"
+              >
+                <SourceLink url={candidate.url} className="source-number">
+                  {candidate.display}
+                </SourceLink>
+                <h4>{candidate.title}</h4>
+                <div className="publication-inline-actions">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !attach?.available}
+                    onClick={() =>
+                      void resolve({ kind: "attach", issue: candidate.locator })
+                    }
+                  >
+                    This is it — link it
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() =>
+                      setDismissed((current) => [
+                        ...current,
+                        candidate.identity.id,
+                      ])
+                    }
+                  >
+                    Not this one
+                  </Button>
+                  <SourceLink url={candidate.url}>Open on GitHub</SourceLink>
+                </div>
+              </article>
+            ))}
+          {known && (
+            <p>
+              <SourceLink url={known.url} className="source-number">
+                {known.display}
+              </SourceLink>{" "}
+              was created for this attempt.{" "}
+              <Button
+                size="sm"
+                disabled={busy || !attach?.available}
+                onClick={() => void resolve({ kind: "attach", issue: null })}
+              >
+                Link this issue
+              </Button>
+            </p>
+          )}
+        </div>
+        <div className="publication-inline-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={checkAgain}
+          >
+            Check again
+          </Button>
+          <Button
+            variant="link"
+            size="sm"
+            disabled={busy || !attach?.available}
+            onClick={() => setLinking(!linking)}
+          >
+            Link a different issue…
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy || !notCreated?.available}
+            title={notCreated?.detail}
+            aria-describedby={`publication-retry-${attempt.id}`}
+            onClick={() => void resolve({ kind: "not_created" })}
+          >
+            Publish again
+          </Button>
+        </div>
+        <p
+          id={`publication-retry-${attempt.id}`}
+          className="publication-detail"
+        >
+          {notCreated?.detail ??
+            "Publish again unlocks once a check finds no matching issue."}
+        </p>
+        {linking && (
+          <form
+            className="publication-attach"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (issue.trim())
+                void resolve({ kind: "attach", issue: issue.trim() });
+            }}
+          >
+            <Input
+              aria-label="Issue number or link"
+              placeholder="Issue number or link"
+              value={issue}
+              onChange={(event) => setIssue(event.target.value)}
+            />
+            <Button size="sm" disabled={busy || !issue.trim()}>
+              Link issue
+            </Button>
+          </form>
+        )}
+        {different && (
+          <div className="publication-error" role="alert">
+            <p>{different.message}</p>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => void resolve(different.resolution, true)}
+            >
+              Attach anyway
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setDifferent(null)}
+            >
+              Do not attach
+            </Button>
+          </div>
+        )}
+        {error && (
+          <p className="publication-error" role="alert">
+            {error}
+          </p>
+        )}
+      </>
+    );
   return (
     <>
       <div className="publication-facts">
@@ -150,14 +307,25 @@ function ReviewBody({
           <h3>What is known</h3>
           <ul>
             {review.known.map((line) => (
-              <li key={line}>{line}</li>
+              <li key={line}>
+                {known && line.includes(known.url) ? (
+                  <>
+                    <SourceLink url={known.url}>{known.display}</SourceLink> was
+                    created for this attempt.
+                  </>
+                ) : (
+                  line
+                )}
+              </li>
             ))}
           </ul>
         </section>
         <section aria-label="Unknown">
           <h3>What is not known</h3>
           <ul>
-            <li>{review.unknown}</li>
+            <li>
+              {review.unknown.charAt(0).toUpperCase() + review.unknown.slice(1)}
+            </li>
           </ul>
         </section>
       </div>
@@ -169,20 +337,12 @@ function ReviewBody({
       )}
       {review.candidates_complete === false && (
         <p className="publication-detail" role="status">
-          Nothing can be ruled out yet.{" "}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              setLoad({ kind: "loading" });
-              setRound((n) => n + 1);
-            }}
-          >
-            Look again
-          </Button>
+          Nothing can be ruled out yet.
         </p>
       )}
+      <Button variant="ghost" size="sm" disabled={busy} onClick={checkAgain}>
+        Check again
+      </Button>
       <Candidates
         label={`Issues in ${attempt.destination} that match what was sent`}
         candidates={review.candidates}
@@ -266,7 +426,6 @@ function ReviewBody({
       )}
       {notCreated && (
         <section aria-label="Nothing was created" className="publication-field">
-          <span className="publication-label">{notCreated.label}</span>
           <Button
             variant="outline"
             disabled={busy || !notCreated.available}

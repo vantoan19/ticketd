@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Send, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,75 +17,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StatusDot } from "@/components/ui/status-dot";
-import type { PublicationAttempt, Ticket } from "@/lib/api/client";
+import type { Ticket } from "@/lib/api/client";
 import {
   sourcesClient,
   toSourceFailure,
   type PublicationPreview,
 } from "@/lib/api/sources";
-import { useSources } from "@/features/settings/sources/use-sources";
-import { AttemptReview } from "./ResolvePublication";
+import {
+  usePublishTarget,
+  usePublicationPreview,
+  publicationReason,
+} from "./use-publication-preview";
+import { AttemptReview, ReviewBody } from "./ResolvePublication";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { useSourceActivity } from "./source-activity";
+import { formatDateTime } from "@/lib/format";
 import { providerName } from "./ticket-source";
 import "./publication.css";
-
-/**
- * The source a local ticket can be published to: the first connector that
- * declares the publish capability, and when it was last saved, so connecting it in
- * Settings makes the answer change.
- */
-function usePublishTarget(): { provider: string; saved: string } | null {
-  const { entries } = useSources();
-  const entry = entries.find((item) =>
-    item.connector.capabilities.includes("publish"),
-  );
-  return entry
-    ? {
-        provider: entry.connector.provider,
-        saved: entry.saved?.saved_at ?? "",
-      }
-    : null;
-}
-
-/**
- * Whether and how a local ticket can be published, read from the core. It reads
- * again whenever what decides the answer changes (the ticket's title, description,
- * status, trash or attempt, or the source being saved). Failure to read leaves the
- * rail without a Publish action rather than guessing.
- */
-function usePublicationPreview(
-  ticket: Ticket,
-  target: { provider: string; saved: string } | null,
-): PublicationPreview | null {
-  const [preview, setPreview] = useState<PublicationPreview | null>(null);
-  const publication = ticket.publication?.state ?? "";
-  const provider = target?.provider;
-  const saved = target?.saved;
-  useEffect(() => {
-    if (!provider) return;
-    let active = true;
-    sourcesClient.previewPublication(ticket.reference, provider).then(
-      (found) => {
-        if (active) setPreview(found);
-      },
-      () => {
-        if (active) setPreview(null);
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [
-    provider,
-    saved,
-    ticket.reference,
-    ticket.title,
-    ticket.body,
-    ticket.status,
-    ticket.trashed,
-    publication,
-  ]);
-  return provider ? preview : null;
-}
 
 /** The Source rail's content for a ticket that has never had an external identity. */
 export function LocalPublication({
@@ -97,6 +44,7 @@ export function LocalPublication({
   refresh: () => Promise<void>;
 }) {
   const target = usePublishTarget();
+  const activity = useSourceActivity();
   const preview = usePublicationPreview(ticket, target);
   const [publishing, setPublishing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
@@ -108,10 +56,7 @@ export function LocalPublication({
   if (attempt)
     return (
       <>
-        <UnresolvedPublication
-          attempt={attempt}
-          onReview={() => setReviewing(true)}
-        />
+        <UnresolvedPublication onReview={() => setReviewing(true)} />
         <AttemptReview
           attempt={attempt}
           open={reviewing}
@@ -124,8 +69,12 @@ export function LocalPublication({
   if (preview.eligibility.kind === "eligible")
     return (
       <>
-        <Button variant="ghost" size="sm" onClick={() => setPublishing(true)}>
-          <Send data-icon="inline-start" />
+        <Button
+          variant="link"
+          size="sm"
+          className="rail-publish-link"
+          onClick={() => setPublishing(true)}
+        >
           Publish to {preview.provider_name}…
         </Button>
         {publishing && target && (
@@ -139,43 +88,83 @@ export function LocalPublication({
       </>
     );
   // The core states why, and what to do about it; the rail only shows it.
-  return <small className="rail-note">{preview.eligibility.message}</small>;
+  return (
+    <small className="rail-note">
+      {publicationReason(preview)}
+      {preview.eligibility.reason === "source_not_connected" && (
+        <>
+          {" "}
+          <Button variant="link" size="sm" onClick={activity.openSettings}>
+            Settings
+          </Button>
+        </>
+      )}
+    </small>
+  );
 }
 
 /** The warning at the top of a ticket whose publication outcome is not known. */
-export function PublicationNotice({ ticket }: { ticket: Ticket }) {
+export function PublicationNotice({
+  ticket,
+  refresh,
+}: {
+  ticket: Ticket;
+  refresh: () => Promise<void>;
+}) {
+  const [publishing, setPublishing] = useState<string | null>(null);
   const attempt = ticket.publication;
+  if (publishing)
+    return (
+      <PublishDialog
+        ticket={ticket}
+        provider={publishing}
+        onOpenChange={(open) => {
+          if (!open) setPublishing(null);
+        }}
+        refresh={refresh}
+      />
+    );
   if (!attempt || attempt.state !== "unresolved") return null;
   return (
-    <p className="publication-notice">
-      <StatusDot tone="attention" size={8} />
-      Publication unresolved: {providerName(attempt.provider)} may already have
-      created the issue in {attempt.destination}. Publishing again is blocked.
-    </p>
+    <section
+      className="publication-notice"
+      aria-label="Publish outcome unknown"
+    >
+      <h3>
+        <StatusDot tone="attention" size={10} />
+        Publish outcome unknown
+      </h3>
+      <p>
+        {providerName(attempt.provider)} may have created an issue in{" "}
+        <span className="source-number">{attempt.destination}</span> when you
+        published <span className="source-number">{attempt.reference}</span> at{" "}
+        {formatDateTime(attempt.started_at)}. This ticket stays Local until the
+        outcome is settled.
+      </p>
+      <ReviewBody
+        inline
+        attempt={attempt}
+        close={(kind) => {
+          if (kind === "not_created") setPublishing(attempt.provider);
+        }}
+        refresh={refresh}
+      />
+    </section>
   );
 }
 
 /** The recessed warning for a publication whose outcome is not known. */
-function UnresolvedPublication({
-  attempt,
-  onReview,
-}: {
-  attempt: PublicationAttempt;
-  onReview: () => void;
-}) {
+function UnresolvedPublication({ onReview }: { onReview: () => void }) {
   return (
     <div className="publication-unresolved">
       <span className="rail-value">
-        <StatusDot tone="attention" size={8} />
-        Publication unresolved
+        <StatusDot tone="attention" size={10} />
+        Publish outcome unknown
       </span>
       <small className="rail-note">
-        ticketd could not confirm whether {providerName(attempt.provider)}{" "}
-        created the issue in {attempt.destination}. It may already exist.
-        Publishing again is blocked until this is resolved.
+        Stays Local until the outcome is settled.
       </small>
       <Button variant="ghost" size="sm" onClick={onReview}>
-        <TriangleAlert data-icon="inline-start" />
         Review details
       </Button>
     </div>
@@ -183,7 +172,7 @@ function UnresolvedPublication({
 }
 
 type Phase =
-  | { kind: "loading" }
+  | { kind: "loading"; preview?: PublicationPreview }
   | { kind: "ready"; preview: PublicationPreview }
   | { kind: "publishing"; preview: PublicationPreview }
   | { kind: "unresolved"; message: string }
@@ -236,15 +225,12 @@ export function PublishDialog({
     };
   }, [ticket.reference, provider, destination, reloads]);
 
-  const preview =
-    phase.kind === "ready" || phase.kind === "publishing"
-      ? phase.preview
-      : null;
+  const preview = "preview" in phase ? (phase.preview ?? null) : null;
   const publishing = phase.kind === "publishing";
   const chosen = destination ?? preview?.destination ?? "";
 
   async function publish() {
-    if (!preview || !chosen) return;
+    if (phase.kind !== "ready" || !preview || !chosen) return;
     setError("");
     setPhase({ kind: "publishing", preview });
     try {
@@ -265,7 +251,12 @@ export function PublishDialog({
       }
       // A refusal proves nothing was created, so trying again is safe. A ticket
       // that changed since the preview sent nothing: show what it holds now.
-      setError(failure.message);
+      setError(
+        failure.code === "publication_failed" &&
+          !/nothing was created/i.test(failure.message)
+          ? `${failure.message.replace(/[.!?]$/, "")}. Nothing was created.`
+          : failure.message,
+      );
       if (failure.code === "publication_changed") {
         setPhase({ kind: "loading" });
         setReloads((count) => count + 1);
@@ -281,15 +272,19 @@ export function PublishDialog({
         if (!next && !publishing) onOpenChange(false);
       }}
     >
-      <DialogContent className="publication-dialog">
-        <DialogHeader>
+      <DialogContent
+        className="publication-dialog publish-dialog"
+        showCloseButton={false}
+      >
+        <DialogHeader showCloseButton>
           <DialogTitle>
-            Publish {ticket.reference} to {name}
+            Publish{" "}
+            <span className="publication-reference">{ticket.reference}</span> to{" "}
+            {name}
           </DialogTitle>
           <DialogDescription>
-            This creates one ordinary issue. {ticket.reference} keeps its
-            reference, notes, relationships and subtickets; afterwards {name}{" "}
-            owns the title and description.
+            Creates an ordinary open issue. Afterwards {name} owns the title and
+            description, and they become read-only here.
           </DialogDescription>
         </DialogHeader>
         {phase.kind === "loading" && <p role="status">Preparing preview…</p>}
@@ -313,15 +308,23 @@ export function PublishDialog({
           <div className="publication-preview">
             <div className="publication-field">
               <span className="publication-label" id="publication-destination">
-                Destination
+                Repository
               </span>
-              {preview.destinations.length > 1 ? (
+              {preview.destinations.length > 0 ? (
                 <Select
                   value={chosen}
-                  onValueChange={setDestination}
-                  disabled={publishing}
+                  onValueChange={(value) => {
+                    setDestination(value);
+                    setPhase({ kind: "loading", preview });
+                    setError("");
+                  }}
+                  disabled={publishing || preview.destinations.length === 1}
                 >
-                  <SelectTrigger aria-labelledby="publication-destination">
+                  <SelectTrigger
+                    className="publication-repository"
+                    readOnly={preview.destinations.length === 1}
+                    aria-labelledby="publication-destination"
+                  >
                     <SelectValue placeholder="Choose a repository" />
                   </SelectTrigger>
                   <SelectContent>
@@ -340,40 +343,74 @@ export function PublishDialog({
                 </span>
               )}
             </div>
-            <div className="publication-field">
-              <span className="publication-label">Title</span>
-              <p className="publication-title">{preview.title}</p>
-            </div>
-            <div className="publication-field">
-              <span className="publication-label">Description</span>
-              {preview.body ? (
-                <pre
-                  className="publication-body"
-                  tabIndex={0}
+            <section className="publication-field" aria-label="Issue preview">
+              <h3>Issue preview</h3>
+              <div className="publication-issue-card">
+                <h4>{preview.title}</h4>
+                <div
+                  className="markdown-preview"
                   aria-label="Description as it will be sent"
                 >
-                  {preview.body}
-                </pre>
-              ) : (
-                <p className="publication-detail">No description.</p>
-              )}
-            </div>
-            <p className="publication-detail">
-              Nothing else is sent: no notes, Efforts, dependencies, subtickets,
-              labels or comments, and nothing that mentions ticketd.
-            </p>
+                  <MarkdownDocument
+                    source={preview.body || "No description."}
+                  />
+                </div>
+              </div>
+              <p className="publication-detail">
+                Sent exactly as shown. No ticketd labels, fields or comments are
+                added.
+              </p>
+            </section>
+            <section className="publication-field">
+              <h3>Stays in ticketd</h3>
+              <ul className="publication-local-list">
+                <li>
+                  Reference{" "}
+                  <span className="source-number">{ticket.reference}</span> and
+                  status {ticket.status}
+                </li>
+                <li>
+                  {preview.local
+                    ? `${preview.local.notes} ${preview.local.notes === 1 ? "note" : "notes"}, `
+                    : "Notes, "}
+                  Effort, tags and relationships — never sent to GitHub
+                </li>
+                {(preview.local?.subtickets.length
+                  ? preview.local.subtickets
+                  : ticket.children.map((child) => child.reference)
+                ).length > 0 ? (
+                  (
+                    preview.local?.subtickets ??
+                    ticket.children.map((child) => child.reference)
+                  ).map((reference) => (
+                    <li key={reference}>
+                      Subticket{" "}
+                      <span className="source-number">{reference}</span> stays
+                      local unless you publish it separately
+                    </li>
+                  ))
+                ) : (
+                  <li>
+                    Subtickets stay local unless you publish them separately.
+                  </li>
+                )}
+              </ul>
+            </section>
           </div>
         )}
         {error && (
           <p className="publication-error" role="alert">
-            {/[.!?]$/.test(error) ? error : `${error}.`} {ticket.reference}{" "}
-            remains a local ticket and nothing was created.
+            {/[.!?]$/.test(error) ? error : `${error}.`}
           </p>
         )}
         {publishing && <p role="status">Publishing to {name}…</p>}
-        <DialogFooter>
+        <DialogFooter className="publication-footer">
+          <p className="publication-detail">
+            Nothing is sent until you publish.
+          </p>
           <Button
-            variant="outline"
+            variant="ghost"
+            size="sm"
             disabled={publishing}
             onClick={() => onOpenChange(false)}
           >
@@ -381,10 +418,13 @@ export function PublishDialog({
           </Button>
           {phase.kind !== "unresolved" && (
             <Button
-              disabled={!preview || publishing || !chosen}
+              size="sm"
+              disabled={
+                phase.kind !== "ready" || !preview || publishing || !chosen
+              }
               onClick={() => void publish()}
             >
-              {publishing ? "Publishing…" : `Publish to ${chosen || name}`}
+              {publishing ? "Publishing…" : "Publish issue"}
             </Button>
           )}
         </DialogFooter>

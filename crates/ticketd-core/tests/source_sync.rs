@@ -6,7 +6,7 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex, mpsc},
 };
 
 use serde_json::json;
@@ -27,6 +27,8 @@ struct Remote {
     issues: BTreeMap<u64, ExternalIssue>,
     /// Ids the discovery rules match (only open ones are listed, like GitHub).
     matching: Vec<u64>,
+    matching_by_repository: BTreeMap<String, Vec<u64>>,
+    pause_next_discovery: Option<DiscoveryPause>,
     page_size: usize,
     outage: Option<String>,
     discover_calls: usize,
@@ -35,6 +37,23 @@ struct Remote {
     conversation_outage: Option<String>,
     conversation_calls: Vec<u64>,
     revision: u32,
+}
+
+#[derive(Clone)]
+struct DiscoveryPause {
+    entered: mpsc::SyncSender<()>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl DiscoveryPause {
+    fn wait(self) {
+        self.entered.send(()).unwrap();
+        let (released, changed) = &*self.release;
+        let mut released = released.lock().unwrap();
+        while !*released {
+            released = changed.wait(released).unwrap();
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -90,14 +109,24 @@ impl Connector for Fake {
         if let Some(message) = remote.outage.clone() {
             return Err(SourceError::Unavailable(message));
         }
-        let listed: Vec<ExternalIssue> = remote
-            .matching
+        let repositories = request.config["repositories"].as_array().unwrap();
+        let matching = repositories
+            .first()
+            .and_then(|repository| repository.as_str())
+            .and_then(|repository| remote.matching_by_repository.get(repository))
+            .unwrap_or(&remote.matching);
+        let listed: Vec<ExternalIssue> = matching
             .iter()
             .filter_map(|id| remote.issues.get(id))
             .filter(|issue| issue.state == ExternalState::Open)
             .cloned()
             .collect();
         let size = remote.page_size.max(1);
+        let pause = remote.pause_next_discovery.take();
+        drop(remote);
+        if let Some(pause) = pause {
+            pause.wait();
+        }
         let start: usize = request.cursor.map_or(0, |c| c.parse().unwrap());
         let end = (start + size).min(listed.len());
         Ok(DiscoveryPage {
@@ -1417,4 +1446,446 @@ fn a_withdrawn_target_clears_to_unknown_but_a_missing_answer_keeps_the_last_know
         history_of(&f, "T-1", "external_duplicate").last(),
         Some(&("o/r#2".to_owned(), "".to_owned()))
     );
+}
+
+#[test]
+fn preview_reports_existing_stable_identities_and_discovery_membership_survives_restart() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Already imported"), true);
+    let imported = f.refresh().imported.remove(0);
+    assert_eq!(
+        f.workspace
+            .show_ticket(&imported)
+            .unwrap()
+            .source
+            .unwrap()
+            .discovery_matches,
+        Some(true)
+    );
+    f.publish(issue(2, "New match"), true);
+    let config = f.workspace.saved_source("fake").unwrap().unwrap().config;
+    let preview = f
+        .workspace
+        .preview_source(&f.engine, "fake", &config)
+        .unwrap();
+    assert_eq!((preview.new, preview.already_here), (1, 1));
+    assert_eq!(preview.issues[0].ticket.as_deref(), Some(imported.as_str()));
+    assert_eq!(preview.issues[1].ticket, None);
+    f.remote(|r| r.matching.retain(|id| *id != 1));
+    f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(
+        f.workspace
+            .show_ticket(&imported)
+            .unwrap()
+            .source
+            .unwrap()
+            .discovery_matches,
+        Some(false)
+    );
+    let path = f.path();
+    drop(f.workspace);
+    let reopened = Workspace::open(path).unwrap();
+    let source = reopened.show_ticket(&imported).unwrap().source.unwrap();
+    assert_eq!(source.discovery_matches, Some(false));
+    assert_eq!(
+        source.last_refreshed_at.as_deref(),
+        Some("2026-02-02T00:00:00Z")
+    );
+    let updated_before = reopened.show_ticket(&imported).unwrap().updated_at;
+    drop(reopened);
+    let path = f.dir.path().join("workspace.sqlite3");
+    let legacy = rusqlite::Connection::open(&path).unwrap();
+    legacy
+        .execute(
+            "DELETE FROM ticket_history WHERE kind = 'source_import'",
+            [],
+        )
+        .unwrap();
+    legacy.pragma_update(None, "user_version", 27).unwrap();
+    drop(legacy);
+    let migrated = Workspace::open(path).unwrap();
+    assert_eq!(
+        migrated.show_ticket(&imported).unwrap().updated_at,
+        updated_before
+    );
+    assert_eq!(
+        migrated
+            .ticket_history(&imported)
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.kind == "source_import")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Tracked in A"), false);
+    f.publish(issue(2, "Only in A"), false);
+    f.publish(issue(3, "Only in B"), false);
+    f.remote(|remote| {
+        remote.matching_by_repository.insert("o/a".into(), vec![1]);
+        remote.matching_by_repository.insert("o/b".into(), vec![3]);
+    });
+    let config_a = json!({"repositories": ["o/a"]});
+    f.workspace
+        .save_source(&f.engine, "fake", config_a.as_object().unwrap())
+        .unwrap();
+    assert_eq!(f.refresh().imported, ["T-1"]);
+    f.remote(|remote| {
+        remote
+            .matching_by_repository
+            .insert("o/a".into(), vec![1, 2]);
+    });
+
+    let (entered_tx, entered_rx) = mpsc::sync_channel(0);
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    f.remote(|remote| {
+        remote.pause_next_discovery = Some(DiscoveryPause {
+            entered: entered_tx,
+            release: release.clone(),
+        });
+    });
+    let path = f.path();
+    let fake = f.fake.clone();
+    let refresh = std::thread::spawn(move || {
+        let mut engine = Engine::new();
+        engine.register(Box::new(fake)).unwrap();
+        let mut workspace = Workspace::open(path).unwrap();
+        workspace
+            .refresh_sources(
+                &engine,
+                &RefreshOptions {
+                    ticket: None,
+                    now: Some("2026-02-02T00:00:00Z".into()),
+                },
+            )
+            .unwrap()
+    });
+    entered_rx.recv().unwrap();
+
+    let config_b = json!({"repositories": ["o/b"]});
+    let mut second_workspace = Workspace::open(f.path()).unwrap();
+    second_workspace
+        .save_source(&f.engine, "fake", config_b.as_object().unwrap())
+        .unwrap();
+    drop(second_workspace);
+    {
+        let (released, changed) = &*release;
+        *released.lock().unwrap() = true;
+        changed.notify_all();
+    }
+
+    let stale_report = refresh.join().unwrap();
+    let stale_membership = f.ticket(1).source.as_ref().unwrap().discovery_matches;
+    let stale_status = f.workspace.source_statuses().unwrap();
+    assert_eq!(
+        stale_membership, None,
+        "membership must be unknown until a complete refresh under config B; stale run={stale_report:?}; source status={stale_status:?}"
+    );
+    assert!(
+        stale_report.imported.is_empty(),
+        "the in-flight run used config A after config B was saved: {stale_report:?}"
+    );
+    assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(
+        stale_status[0].last_refreshed_at.as_deref(),
+        Some("2026-02-01T00:00:00Z"),
+        "the rejected A discovery must not advance accepted provider health"
+    );
+    assert_eq!(stale_status[0].last_checked_tickets, Some(1));
+
+    f.publish(issue(1, "Still syncing outside B"), false);
+    let b_report = f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(b_report.imported, ["T-2"]);
+    assert_eq!(f.ticket(2).title, "Only in B");
+    assert_eq!(f.ticket(1).title, "Still syncing outside B");
+    assert_eq!(
+        f.workspace.source_statuses().unwrap()[0].last_checked_tickets,
+        Some(2)
+    );
+    assert_eq!(
+        f.ticket(1).source.as_ref().unwrap().discovery_matches,
+        Some(false)
+    );
+}
+
+#[test]
+fn only_the_latest_closure_borrows_the_current_issues_reason() {
+    let mut f = Fixture::new();
+    let mut closed = issue(1, "Closed with a reason");
+    closed.state = ExternalState::Closed {
+        reason: ClosureReason::Completed,
+    };
+    f.publish(closed, true);
+    f.remote(|remote| {
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: Vec::new(),
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    // Closed issues are not discovered, so first import it open, then observe closure.
+    f.remote(|remote| remote.issues.get_mut(&1).unwrap().state = ExternalState::Open);
+    f.refresh();
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = ExternalState::Closed {
+            reason: ClosureReason::Completed,
+        };
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    let events = f.workspace.source_conversation("T-1").unwrap();
+    assert!(matches!(&events[0], ConversationEntry::Event {event, ..} if event == "closed"));
+    assert!(
+        matches!(&events[2], ConversationEntry::Event {event, ..} if event == "closed_completed")
+    );
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-03T00:00:00Z")
+    );
+}
+
+#[test]
+fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Lifecycle"), true);
+    f.refresh();
+    assert_eq!(f.ticket(1).source.unwrap().closed_at, None);
+    let mut legacy = serde_json::to_value(f.ticket(1).source.unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("closed_at");
+    let source: ticketd_core::source::TicketSource = serde_json::from_value(legacy).unwrap();
+    assert_eq!(source.closed_at, None);
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Completed),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-03T00:00:00Z")
+    );
+    f.remote(|remote| {
+        remote.issues.get_mut(&1).unwrap().updated_at = "2026-02-04T00:00:00Z".into();
+        remote.conversation_outage = Some("offline".into());
+    });
+    f.refresh_at("2026-02-05T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "stale conversation"
+    );
+
+    f.remote(|remote| {
+        remote.conversation_outage = None;
+        remote.conversations.get_mut(&1).unwrap().events.push(event(
+            "later-reopen",
+            ExternalEventKind::Reopened,
+            "octo",
+            "2026-01-04T00:00:00Z",
+        ));
+    });
+    f.refresh_at("2026-02-06T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "latest lifecycle event is reopened"
+    );
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = ExternalState::Open;
+        issue.updated_at = "2026-02-07T00:00:00Z".into();
+    });
+    f.refresh_at("2026-02-08T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "the issue reopened"
+    );
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-09T00:00:00Z".into();
+        remote.conversations.get_mut(&1).unwrap().events.push(event(
+            "invalid",
+            ExternalEventKind::Closed(ClosureReason::Completed),
+            "octo",
+            "not-a-time",
+        ));
+    });
+    f.refresh_at("2026-02-10T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at,
+        None,
+        "invalid source timestamp"
+    );
+}
+
+#[test]
+fn legacy_latest_closure_is_enriched_only_while_the_conversation_is_fresh() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Duplicate"), true);
+    f.refresh();
+    let mut duplicate = duplicate_of(1, "Duplicate", Some(9));
+    duplicate.updated_at = "2026-02-02T00:00:00Z".into();
+    f.publish(duplicate, true);
+    f.remote(|remote| {
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "old",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T00:00:00Z",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                    event(
+                        "latest",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-03T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    // Simulate a row saved by an older version without reason or subject.
+    let db = rusqlite::Connection::open(f.path()).unwrap();
+    db.execute(
+        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        [],
+    )
+    .unwrap();
+    let entries = f.conversation(1);
+    assert!(matches!(&entries[0], ConversationEntry::Event { event, .. } if event == "closed"));
+    assert!(
+        matches!(&entries[2], ConversationEntry::Event { event, subject, .. } if event == "closed_duplicate" && subject.as_deref() == Some("o/r#9"))
+    );
+    // Reading is an overlay, not a mutation of stored historical source data.
+    let stored: (String, Option<String>) = db
+        .query_row(
+            "SELECT event, subject FROM source_conversation WHERE entry_id = 'latest'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, ("closed".into(), None));
+    db.execute("UPDATE source_conversation SET event = 'closed_duplicate', subject = 'o/r#7' WHERE entry_id = 'latest'", []).unwrap();
+    let explicit = f.conversation(1);
+    assert!(
+        matches!(&explicit[2], ConversationEntry::Event { subject, .. } if subject.as_deref() == Some("o/r#7"))
+    );
+    db.execute(
+        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE source_sync SET external_updated_at = '2026-02-04T00:00:00Z'",
+        [],
+    )
+    .unwrap();
+    let stale = f.conversation(1);
+    assert!(
+        matches!(&stale[2], ConversationEntry::Event { event, subject, .. } if event == "closed" && subject.is_none())
+    );
+    assert_eq!(f.ticket(1).source.unwrap().closed_at, None);
+}
+
+#[test]
+fn lifecycle_events_compare_instants_not_timestamp_text() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Offsets"), true);
+    f.refresh();
+    f.remote(|remote| {
+        let issue = remote.issues.get_mut(&1).unwrap();
+        issue.state = closed(ClosureReason::Completed);
+        issue.updated_at = "2026-02-02T00:00:00Z".into();
+        remote.conversations.insert(
+            1,
+            Conversation {
+                comments: vec![],
+                events: vec![
+                    event(
+                        "close",
+                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        "octo",
+                        "2026-01-01T23:00:00-02:00",
+                    ),
+                    event(
+                        "reopen",
+                        ExternalEventKind::Reopened,
+                        "octo",
+                        "2026-01-02T00:00:00Z",
+                    ),
+                ],
+            },
+        );
+    });
+    f.refresh_at("2026-02-03T00:00:00Z");
+    assert_eq!(
+        f.ticket(1).source.unwrap().closed_at.as_deref(),
+        Some("2026-01-01T23:00:00-02:00")
+    );
+    assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, .. } if id == "close" && event == "closed_completed")));
 }

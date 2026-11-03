@@ -40,9 +40,9 @@ export function rowContext(ticket: Ticket, scope: RowScope): string | null {
   if (target)
     return target.kind === "external"
       ? `Duplicate of ${target.ticket ?? target.display}`
-      : "Duplicate; original unknown";
+      : "Duplicate · target unknown";
   if (ticket.parent)
-    return `Parent ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
+    return `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
   const effort =
     scope.showEffort && ticket.effort_id
       ? scope.efforts.find((item) => item.id === ticket.effort_id)

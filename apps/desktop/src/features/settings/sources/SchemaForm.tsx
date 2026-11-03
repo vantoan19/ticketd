@@ -149,6 +149,7 @@ function MultiSelectField({
     <div
       ref={container}
       className="source-field"
+      data-field={field.key}
       onKeyDown={(event) => {
         // Escape closes only the foremost surface: this list, not the page.
         if (event.key === "Escape" && open) {
@@ -163,52 +164,56 @@ function MultiSelectField({
     >
       <Label htmlFor={id}>
         {field.label}
-        {field.required && <span className="source-required"> (required)</span>}
+        {!field.required && (
+          <span className="source-required"> (optional)</span>
+        )}
       </Label>
-      {value.length > 0 && (
-        <ul className="source-chips" aria-label={`Selected ${field.label}`}>
-          {value.map((item) => (
-            <li key={item} className="source-chip">
-              <span>{item}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${item}`}
-                disabled={disabled}
-                onClick={() => onChange(value.filter((v) => v !== item))}
-              >
-                <X aria-hidden="true" size={12} />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <Input
-        id={id}
-        value={query}
-        disabled={disabled || full}
-        placeholder={
-          field.allow_custom
-            ? dynamic
-              ? "Search or type, then press Enter"
-              : "Type, then press Enter"
-            : "Search"
-        }
-        aria-describedby={field.help ? `${id}-help` : undefined}
-        aria-invalid={errors.length > 0 || undefined}
-        onFocus={() => {
-          if (!open) show();
-        }}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          show();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            if (field.allow_custom) add(query);
+      <div className="source-chip-input">
+        {value.length > 0 && (
+          <ul className="source-chips" aria-label={`Selected ${field.label}`}>
+            {value.map((item) => (
+              <li key={item} className="source-chip">
+                <span>{item}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${item}`}
+                  disabled={disabled}
+                  onClick={() => onChange(value.filter((v) => v !== item))}
+                >
+                  <X aria-hidden="true" size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Input
+          id={id}
+          value={query}
+          disabled={disabled || full}
+          placeholder={
+            field.key === "repositories"
+              ? "Add a repository…"
+              : field.key === "labels"
+                ? "Any label"
+                : "Search or type, then press Enter"
           }
-        }}
-      />
+          aria-describedby={field.help ? `${id}-help` : undefined}
+          aria-invalid={errors.length > 0 || undefined}
+          onFocus={() => {
+            if (!open) show();
+          }}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            show();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (field.allow_custom) add(query);
+            }
+          }}
+        />
+      </div>
       {full && (
         <p className="settings-hint">
           {`Up to ${field.max_items} ${field.label.toLowerCase()} can be selected.`}
@@ -331,16 +336,20 @@ function TextField({
 }) {
   const id = useId();
   return (
-    <div className="source-field">
+    <div className="source-field" data-field={field.key}>
       <Label htmlFor={id}>
         {field.label}
-        {field.required && <span className="source-required"> (required)</span>}
+        {!field.required && (
+          <span className="source-required"> (optional)</span>
+        )}
       </Label>
       <Input
         id={id}
         value={value}
         disabled={disabled}
-        placeholder={field.placeholder ?? undefined}
+        placeholder={
+          field.key === "assignee" ? "Anyone" : (field.placeholder ?? undefined)
+        }
         aria-describedby={field.help ? `${id}-help` : undefined}
         aria-invalid={errors.length > 0 || undefined}
         onChange={(event) => onChange(event.target.value)}

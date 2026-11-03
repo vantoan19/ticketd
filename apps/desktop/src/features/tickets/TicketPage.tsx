@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
@@ -11,7 +12,9 @@ import { Activity } from "@/features/tickets/Activity";
 import { SourceConversation } from "@/features/tickets/SourceConversation";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { StatusDot } from "@/components/ui/status-dot";
-import { SourceLink } from "@/features/tickets/SourceLink";
+import { ReadOnlyTitle, SourceDescription } from "./ReadOnlySource";
+import { formatDateTime, relativeDateTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
 import { SourceUnavailableNotice } from "@/features/tickets/SourceUnavailableNotice";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
@@ -51,6 +54,8 @@ export function TicketPage({
   mention: (MentionTarget & { key: number }) | null;
   onMention: (target: MentionTarget) => void;
 }) {
+  const now = useNow();
+  const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(
     ticket,
     revision,
@@ -61,12 +66,57 @@ export function TicketPage({
   // backlinks, then notes and history.
   const source = externalSource(ticket);
   const state = source ? sourceState(source) : null;
+  const original =
+    source?.state.state === "closed" &&
+    !source.unavailable &&
+    source.state.reason === "duplicate" &&
+    source.duplicate_target?.kind === "external"
+      ? source.duplicate_target
+      : null;
+  const originalLabel =
+    original && source && original.display.startsWith(`${source.place}#`)
+      ? original.display.slice(source.place.length)
+      : original?.display;
   const stateLine = (
     <p className="ticket-state-line">
       {source && state ? (
         <>
-          {state.tone && <StatusDot tone={state.tone} size={8} />}
-          {state.text} · {source.number}
+          <span className="ticket-source-state">
+            {state.tone && <StatusDot tone={state.tone} size={10} />}
+            <span>
+              {state.text}
+              {original && (
+                <>
+                  {" "}
+                  of{" "}
+                  <span className="source-number" title={original.display}>
+                    {originalLabel}
+                  </span>
+                  {original.last_known && " (last known)"}
+                </>
+              )}
+            </span>
+          </span>
+          {source.unavailable ? (
+            <span>
+              Last synced copy from{" "}
+              {source.last_refreshed_at
+                ? formatDateTime(source.last_refreshed_at)
+                : "an earlier sync"}
+            </span>
+          ) : (
+            <>
+              {source.state.state === "open" && <span>{source.number}</span>}
+              {source.closed_at && (
+                <time
+                  dateTime={source.closed_at}
+                  title={formatDateTime(source.closed_at)}
+                >
+                  {relativeDateTime(source.closed_at, now)}
+                </time>
+              )}
+            </>
+          )}
         </>
       ) : (
         "Local ticket"
@@ -85,31 +135,23 @@ export function TicketPage({
         {active && (
           <SourceUnavailableNotice ticket={ticket} refresh={refresh} />
         )}
-        <PublicationNotice ticket={ticket} />
+        {active && <PublicationNotice ticket={ticket} refresh={refresh} />}
         {ticket.trashed || contentLocked ? (
           <>
-            <h3 className="detail-title">{ticket.title}</h3>
+            {source && contentLocked ? (
+              <ReadOnlyTitle title={ticket.title} source={source} />
+            ) : (
+              <h3 className="detail-title">{ticket.title}</h3>
+            )}
             {stateLine}
             <div className="editor-body">
               {source && contentLocked ? (
-                <section
-                  className="source-card"
-                  aria-label={`Description from ${source.provider_name}, read-only`}
-                >
-                  <header className="source-card-header">
-                    <span>{source.provider_name} · Read-only</span>
-                    <SourceLink url={source.url}>
-                      Edit on {source.provider_name}
-                    </SourceLink>
-                  </header>
-                  <div className="markdown-preview description-document">
-                    <MarkdownDocument
-                      source={ticket.body}
-                      select={select}
-                      revision={revision}
-                    />
-                  </div>
-                </section>
+                <SourceDescription
+                  ticket={ticket}
+                  source={source}
+                  select={select}
+                  revision={revision}
+                />
               ) : (
                 <>
                   <p className="description-heading">Description</p>
@@ -136,13 +178,7 @@ export function TicketPage({
           </TicketEditor>
         )}
         {active && !ticket.trashed && (
-          <Subtickets work={work} select={select} />
-        )}
-        {active && !ticket.trashed && source && (
-          <p className="source-caption">
-            Subtickets stay in ticketd; publishing this ticket never publishes
-            them.
-          </p>
+          <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
           <Evidence
@@ -167,14 +203,13 @@ export function TicketPage({
             select={select}
           />
         )}
-        {source && (
-          <p className="source-caption">
-            Notes stay in ticketd and are never sent to {source.provider_name}.
-          </p>
-        )}
         <Activity
           reference={ticket.reference}
-          target={noteTarget}
+          target={
+            updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
+              ? updateTarget
+              : noteTarget
+          }
           projects={projects}
           efforts={efforts}
           status={ticket.status}
@@ -182,6 +217,9 @@ export function TicketPage({
           active={active}
           trashed={ticket.trashed}
           select={select}
+          latestNoteId={ticket.latest_update?.note_id}
+          sourceName={source?.provider_name}
+          onChanged={refresh}
         />
       </div>
       <TicketProperties
@@ -191,6 +229,7 @@ export function TicketPage({
         onSaved={updateTicket}
         refresh={refresh}
         onOpenTicket={select}
+        onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
       >
         {active && !ticket.trashed && (
           <>

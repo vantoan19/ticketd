@@ -6,10 +6,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SettingsNav } from "@/features/settings/SettingsNav";
+import { SettingsView } from "@/features/settings/SettingsView";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 import {
   SourceFailure,
@@ -122,7 +124,7 @@ test("preview lists matches, then Save turns discovery on without importing at o
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
-  expect(panel.textContent).toContain("1 matching issue");
+  expect(panel.textContent).toContain("1 issue matches");
   expect(panel.textContent).toContain("First issue");
   expect(panel.textContent).toContain("nothing has been imported");
   expect(sourcesClient.preview).toHaveBeenCalledWith("github", {
@@ -143,7 +145,7 @@ test("editing after a preview makes the preview stale and blocks Save", async ()
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByRole("region", { name: "Preview" });
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "octo" },
   });
   expect(screen.queryByRole("region", { name: "Preview" })).toBeNull();
@@ -193,7 +195,7 @@ test("a partial count is labeled as a minimum", async () => {
   await addRepository("o/r");
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   const panel = await screen.findByRole("region", { name: "Preview" });
-  expect(panel.textContent).toContain("At least 200 matching issues");
+  expect(panel.textContent).toContain("at least 200 issues match");
   expect(panel.textContent).toContain("Showing the first 1");
 });
 
@@ -205,12 +207,12 @@ test("field problems from the core appear beside their fields", async () => {
   );
   render(<SourceCard entry={entry} />);
   await addRepository("o/r");
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "-x-" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText("Assignee must be a username");
-  expect(screen.getByLabelText("Assignee").getAttribute("aria-invalid")).toBe(
+  expect(screen.getByLabelText(/Assignee/).getAttribute("aria-invalid")).toBe(
     "true",
   );
 });
@@ -230,10 +232,10 @@ test("a saved configuration is shown as saved until edited", () => {
     />,
   );
   expect(screen.getByText("Saved configuration")).toBeTruthy();
-  expect((screen.getByLabelText("Assignee") as HTMLInputElement).value).toBe(
+  expect((screen.getByLabelText(/Assignee/) as HTMLInputElement).value).toBe(
     "octo",
   );
-  fireEvent.change(screen.getByLabelText("Assignee"), {
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
     target: { value: "someone" },
   });
   expect(screen.getByText("Unsaved changes")).toBeTruthy();
@@ -282,7 +284,118 @@ test("the section list offers a source only when its connector is available", as
   expect(group.textContent).toContain("GitHub");
 });
 
-test("a saved source says how often it refreshes and when it last did", () => {
+test("opening a source keeps its page heading visible and focuses it for keyboard navigation", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
+  const frame = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+  try {
+    const { container } = render(
+      <>
+        <SettingsNav onBack={() => {}} onSelect={() => {}} />
+        <div className="settings-page">
+          <h1 id="settings-heading" tabIndex={-1}>
+            GitHub settings
+          </h1>
+          <div id="settings-source-github">Connection card</div>
+        </div>
+      </>,
+    );
+    const page = container.querySelector(".settings-page")!;
+    page.scrollTop = 200;
+    const scrollCard = vi.fn();
+    document.getElementById("settings-source-github")!.scrollIntoView =
+      scrollCard;
+    fireEvent.click(await screen.findByRole("button", { name: "GitHub" }));
+    expect(page.scrollTop).toBe(0);
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "GitHub settings" }),
+    );
+    expect(scrollCard).not.toHaveBeenCalled();
+  } finally {
+    frame.mockRestore();
+  }
+});
+
+test("switching settings sections retains the source draft and its preview", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  const props = { onRestore: async () => {}, onOpenInbox: () => {} };
+  const { rerender, unmount } = render(
+    <SettingsView {...props} selected="source-github" />,
+  );
+  await screen.findByRole("heading", { name: "Discovery" });
+  await addRepository("o/r");
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
+    target: { value: "octo" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByRole("region", { name: "Preview" });
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+
+  rerender(<SettingsView {...props} selected="appearance" />);
+  expect(screen.queryByRole("heading", { name: "Discovery" })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: /Assignee/ })).toBeNull();
+  rerender(<SettingsView {...props} selected="source-github" />);
+  expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "octo");
+  expect(screen.getByRole("region", { name: "Preview" }).textContent).toContain(
+    "First issue",
+  );
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
+  expect(screen.queryByRole("region", { name: "Preview" })).toBeNull();
+
+  // Drafts belong to this Settings visit, not a later workspace or visit.
+  unmount();
+  render(<SettingsView {...props} selected="source-github" />);
+  expect(await screen.findByLabelText(/Assignee/)).toHaveProperty("value", "");
+});
+
+test("opening a source for the first time uses its latest saved configuration", () => {
+  const saved = (assignee: string): SourceEntry => ({
+    ...entry,
+    saved: {
+      provider: "github",
+      config: { repositories: ["o/r"], assignee },
+      account: "octo",
+      saved_at: "2026-02-01T00:00:00Z",
+    },
+  });
+  const view = (assignee: string, selected: "appearance" | "source-github") => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [],
+        entries: [saved(assignee)],
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SettingsView
+        selected={selected}
+        onRestore={async () => {}}
+        onOpenInbox={() => {}}
+      />
+    </SourceActivityContext.Provider>
+  );
+  const { rerender } = render(view("before", "appearance"));
+  rerender(view("after", "appearance"));
+  rerender(view("after", "source-github"));
+  expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "after");
+});
+
+test("a saved source says how often it refreshes, when it last did, and the core's checked-ticket total", () => {
   render(
     <SourceActivityContext.Provider
       value={{
@@ -293,6 +406,7 @@ test("a saved source says how often it refreshes and when it last did", () => {
             health: "synced",
             last_attempt_at: "2026-02-01T00:00:00Z",
             last_refreshed_at: new Date(Date.now() - 4 * 60_000).toISOString(),
+            last_checked_tickets: 18,
             error: null,
             failing_since: null,
             retry_after: null,
@@ -319,10 +433,9 @@ test("a saved source says how often it refreshes and when it last did", () => {
       />
     </SourceActivityContext.Provider>,
   );
-  expect(
-    screen.getByText(/Refreshes about every 5 minutes while ticketd is open/),
-  ).toBeTruthy();
+  expect(screen.getByText(/every 5 minutes while it is open/)).toBeTruthy();
   expect(screen.getByText(/Last refreshed 4 min ago/)).toBeTruthy();
+  expect(screen.getByText(/18 GitHub tickets checked/)).toBeTruthy();
 });
 
 test("rules equal to the saved configuration are not described as changed", async () => {
@@ -392,9 +505,53 @@ test("an unavailable source never claims a fresh sync or a green configuration",
   expect(screen.getByText(/Last synced 4 min ago/)).toBeTruthy();
   expect(screen.queryByText(/Last refreshed/)).toBeNull();
   expect(screen.getByText(/GitHub is unavailable/)).toBeTruthy();
+  expect(screen.getByText("Connected as octo")).toBeTruthy();
   // The saved configuration is a separate fact and is not shown as healthy.
   expect(screen.getByText("Saved configuration")).toBeTruthy();
   expect(
     container.querySelector('[data-slot="status-dot"][data-tone="positive"]'),
   ).toBeNull();
+});
+
+test("discovery uses the core's imported references and Discard restores saved rules", async () => {
+  vi.mocked(sourcesClient.preview).mockResolvedValue({
+    ...preview,
+    new: 0,
+    already_here: 1,
+    issues: [{ ...preview.issues[0]!, ticket: "T-142" }],
+  });
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-01-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
+  for (const name of ["Connection", "Discovery", "Sync"])
+    expect(screen.getByRole("heading", { name })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Assignee/), {
+    target: { value: "someone" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  const table = await screen.findByRole("table");
+  expect(
+    within(table)
+      .getAllByRole("columnheader")
+      .map((cell) => cell.textContent),
+  ).toEqual(["Issue", "Title", "In ticketd"]);
+  expect(screen.getByText("0 new · 1 already here")).toBeTruthy();
+  expect(table.textContent).toContain("Already T-142");
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(screen.getByLabelText(/Assignee/)).toHaveProperty("value", "");
+  expect(screen.getByText("Saved configuration")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save" })).toHaveProperty(
+    "disabled",
+    true,
+  );
 });

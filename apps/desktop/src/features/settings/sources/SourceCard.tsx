@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { SettingsCard } from "@/features/settings/SettingsCard";
@@ -15,6 +14,8 @@ import {
   draftFromConfig,
   type Draft,
 } from "@/features/settings/sources/config-values";
+import { SourceLink } from "@/features/tickets/SourceLink";
+import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
 import {
   sourcesClient,
@@ -34,33 +35,74 @@ function fieldErrors(failure: SourceFailure | null) {
   return grouped;
 }
 
-function PreviewPanel({ preview }: { preview: DiscoveryPreview }) {
-  const count = preview.complete
-    ? `${preview.matched} matching ${preview.matched === 1 ? "issue" : "issues"}`
-    : `At least ${preview.matched} matching issues`;
+function PreviewPanel({
+  preview,
+  refresh,
+  busy,
+}: {
+  preview: DiscoveryPreview;
+  refresh: () => void;
+  busy: boolean;
+}) {
   return (
     <div className="source-preview" role="region" aria-label="Preview">
-      <p className="settings-label">
-        {preview.matched === 0 ? "No open issues match these rules" : count}
-      </p>
+      <div className="source-preview-heading">
+        <h3>
+          Preview · {preview.complete ? "" : "at least "}
+          {preview.matched}{" "}
+          {preview.matched === 1 ? "issue matches" : "issues match"}
+        </h3>
+        {preview.new !== undefined && (
+          <span className="settings-hint">
+            {preview.new} new · {preview.already_here} already here
+          </span>
+        )}
+        <Button variant="ghost" size="sm" disabled={busy} onClick={refresh}>
+          Refresh preview
+        </Button>
+      </div>
       <p className="settings-hint">
         {preview.matched === 0
-          ? "You can still save these rules; matching issues will appear once they exist. Pull requests are never included."
-          : `Checked as ${preview.account}. Pull requests are not included, and nothing has been imported.${
-              preview.issues.length < preview.matched
-                ? ` Showing the first ${preview.issues.length}.`
-                : ""
-            }`}
+          ? "No open issues match these rules. You can still save them."
+          : `Checked as ${preview.account}; nothing has been imported.`}{" "}
+        Pull requests are not included.
+        {preview.issues.length < preview.matched &&
+          ` Showing the first ${preview.issues.length}.`}
       </p>
       {preview.issues.length > 0 && (
-        <ul className="source-preview-list">
-          {preview.issues.map((issue) => (
-            <li key={issue.display}>
-              <span className="source-preview-ref">{issue.display}</span>
-              <span className="source-preview-title">{issue.title}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="source-preview-table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>Title</th>
+                <th>In ticketd</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.issues.map((issue) => (
+                <tr key={issue.display}>
+                  <td>
+                    <SourceLink url={issue.url} className="source-preview-ref">
+                      {issue.display.split("/").at(-1)}
+                    </SourceLink>
+                  </td>
+                  <td>{issue.title}</td>
+                  <td>
+                    {issue.ticket ? (
+                      <>
+                        Already{" "}
+                        <span className="source-number">{issue.ticket}</span>
+                      </>
+                    ) : (
+                      "New · Todo"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -68,6 +110,7 @@ function PreviewPanel({ preview }: { preview: DiscoveryPreview }) {
 
 /** One available source: connection check, schema-driven rules, preview, then save. */
 export function SourceCard({ entry }: { entry: SourceEntry }) {
+  const now = useNow();
   const { connector } = entry;
   const schedule = useSourceActivity();
   const health = schedule.sources.find(
@@ -168,117 +211,187 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
     saved === null ? (dirty ? "unsaved" : "none") : dirty ? "unsaved" : "saved";
 
   return (
-    <SettingsCard id={`source-${connector.provider}`} title={connector.name}>
-      <p className="settings-hint">
-        Choose which issues ticketd discovers. Saving turns discovery on:
-        matching issues are imported as tickets on the next refresh and then
-        refreshed automatically. Nothing is changed in {connector.name}.
-      </p>
-      {saved && (
+    <div className="source-settings" aria-label={`${connector.name} settings`}>
+      <SettingsCard
+        id={`source-${connector.provider}`}
+        title="Connection"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={working}
+            onClick={checkConnection}
+          >
+            {busy === "checking" ? "Checking…" : "Check connection"}
+          </Button>
+        }
+        footer={
+          <p className="settings-hint">
+            Uses your own {connector.name} permissions. Routine sync only reads;
+            ticketd writes to {connector.name} only when you publish a ticket.
+          </p>
+        }
+      >
+        <div className="source-connection-health">
+          {connection ? (
+            <p role="status">{connection}</p>
+          ) : (
+            <p className="settings-label source-health">
+              <StatusDot
+                tone={saved && syncing ? "positive" : "neutral"}
+                size={10}
+              />
+              {saved ? `Connected as ${saved.account}` : "Not connected"}
+            </p>
+          )}
+          {saved && health && !syncing && (
+            <p
+              className="settings-label source-health"
+              data-health={health.health}
+            >
+              <StatusDot tone="attention" size={10} />
+              {health.health === "unavailable"
+                ? `${connector.name} is unavailable`
+                : health.health === "delayed"
+                  ? `${connector.name} refresh is delayed`
+                  : `${connector.name} is partly refreshed`}
+              {health.error ? `: ${health.error.message}` : ""}
+            </p>
+          )}
+        </div>
+      </SettingsCard>
+      <SettingsCard
+        id={`source-${connector.provider}-discovery`}
+        title="Discovery"
+        actions={
+          <span className="settings-hint source-status" data-status={status}>
+            <StatusDot tone={status === "unsaved" ? "attention" : "neutral"} />
+            {status === "saved"
+              ? "Saved configuration"
+              : status === "unsaved"
+                ? "Unsaved changes"
+                : "Not configured"}
+          </span>
+        }
+        footer={
+          <>
+            <p className="settings-hint">
+              Runs when ticketd opens
+              {schedule.intervalSecs
+                ? ` and every ${Math.max(1, Math.round(schedule.intervalSecs / 60))} minutes while it is open`
+                : " and periodically while it is open"}
+              . An issue that stops matching stays in your workspace and keeps
+              syncing.
+            </p>
+            <div className="settings-actions">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={working || !dirty}
+                onClick={() => {
+                  latest.current += 1;
+                  setDraft(draftFromConfig(fields, saved?.config));
+                  setPreviewed(null);
+                  setFailure(null);
+                  setNotice("");
+                }}
+              >
+                Discard changes
+              </Button>
+              <Button size="sm" disabled={!canSave} onClick={save}>
+                {busy === "saving" ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </>
+        }
+      >
         <p className="settings-hint">
-          {schedule.intervalSecs
-            ? `Refreshes about every ${Math.max(1, Math.round(schedule.intervalSecs / 60))} minutes while ticketd is open. `
-            : "Refreshes while ticketd is open. "}
-          {lastRefreshed
-            ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed)}.`
-            : "Not refreshed yet."}
+          Choose the open issues to discover. Matching issues are imported as
+          tickets on the next refresh. Nothing is changed in {connector.name}.
         </p>
-      )}
-      {saved && health && !syncing && (
-        <p className="settings-label source-health" data-health={health.health}>
-          <StatusDot tone="attention" />{" "}
-          {health.health === "unavailable"
-            ? `${connector.name} is unavailable`
-            : health.health === "delayed"
-              ? `${connector.name} refresh is delayed`
-              : `${connector.name} is partly refreshed`}
-          {health.error ? `: ${health.error.message}` : ""}
-        </p>
-      )}
-      <p className="settings-label source-status" data-status={status}>
-        {/* Configuration state only: green is reserved for a source that is synced. */}
-        <StatusDot tone={status === "unsaved" ? "attention" : "neutral"} />{" "}
-        {status === "saved" && "Saved configuration"}
-        {status === "unsaved" && "Unsaved changes"}
-        {status === "none" && "Not configured"}
-      </p>
-      {saved && (
-        <p className="settings-hint">
-          {status === "unsaved"
-            ? `The saved configuration from ${formatDateTime(saved.saved_at)} still applies until you save.`
-            : `Validated as ${saved.account}, saved ${formatDateTime(saved.saved_at)}.`}
-        </p>
-      )}
-      <SchemaForm
-        fields={fields}
-        draft={draft}
-        errors={fieldErrors(failure)}
-        disabled={working}
-        loadOptions={loadOptions}
-        onChange={edit}
-      />
-      <div className="settings-actions">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
+        <SchemaForm
+          fields={fields}
+          draft={draft}
+          errors={fieldErrors(failure)}
           disabled={working}
-          onClick={checkConnection}
-        >
-          {busy === "checking" && (
-            <Loader2 className="animate-spin" aria-hidden="true" />
-          )}
-          {busy === "checking" ? "Checking…" : "Check connection"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={working}
-          onClick={previewMatches}
-        >
-          {busy === "previewing" && (
-            <Loader2 className="animate-spin" aria-hidden="true" />
-          )}
-          {busy === "previewing" ? "Previewing…" : "Preview matches"}
-        </Button>
-        <Button type="button" size="sm" disabled={!canSave} onClick={save}>
-          {busy === "saving" && (
-            <Loader2 className="animate-spin" aria-hidden="true" />
-          )}
-          {busy === "saving" ? "Saving…" : "Save"}
-        </Button>
-      </div>
-      {!preview && !working && (
-        <p className="settings-hint">
-          {saved && !dirty
-            ? "These rules are the saved configuration."
-            : stale
-              ? "The rules changed. Preview matches again before saving."
-              : "Preview the matching issues before saving."}
-        </p>
-      )}
-      {connection && (
+          loadOptions={loadOptions}
+          onChange={edit}
+        />
+        {!preview && (
+          <div className="settings-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={working}
+              onClick={previewMatches}
+            >
+              {busy === "previewing" ? "Previewing…" : "Preview matches"}
+            </Button>
+          </div>
+        )}
+        {!preview && !working && (
+          <p className="settings-hint">
+            {saved && !dirty
+              ? "These rules are the saved configuration."
+              : stale
+                ? "The rules changed. Preview matches again before saving."
+                : "Preview the matching issues before saving."}
+          </p>
+        )}
+        {failure && (
+          <p role="alert" className="settings-failure">
+            {failure.fields.length > 0
+              ? "Fix the highlighted settings, then try again."
+              : failure.message}
+          </p>
+        )}
+        {notice && (
+          <p className="settings-hint" role="status">
+            {notice}
+          </p>
+        )}
+        {preview && (
+          <PreviewPanel
+            preview={preview}
+            refresh={() => void previewMatches()}
+            busy={working}
+          />
+        )}
+        {saved && status === "unsaved" && (
+          <p className="settings-hint">
+            The saved configuration from {formatDateTime(saved.saved_at)} still
+            applies until you save.
+          </p>
+        )}
+      </SettingsCard>
+      <SettingsCard
+        id={`source-${connector.provider}-sync`}
+        title="Sync"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={schedule.refreshing}
+            onClick={() => void schedule.refreshAll()}
+          >
+            Refresh now
+          </Button>
+        }
+        footer={
+          <p className="settings-hint">
+            Agents can refresh without the desktop open:{" "}
+            <code>ticketd source refresh</code>
+          </p>
+        }
+      >
         <p className="settings-hint" role="status">
-          {connection}
+          {schedule.refreshing
+            ? `Refreshing ${connector.name}…`
+            : lastRefreshed
+              ? `${syncing ? "Last refreshed" : "Last synced"} ${ago(lastRefreshed, now)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}.`
+              : "Not refreshed yet."}
         </p>
-      )}
-      {failure && failure.fields.length === 0 && (
-        <p role="alert" className="settings-failure">
-          {failure.message}
-        </p>
-      )}
-      {failure && failure.fields.length > 0 && (
-        <p role="alert" className="settings-failure">
-          Fix the highlighted settings, then try again.
-        </p>
-      )}
-      {notice && (
-        <p className="settings-hint" role="status">
-          {notice}
-        </p>
-      )}
-      {preview && <PreviewPanel preview={preview} />}
-    </SettingsCard>
+      </SettingsCard>
+    </div>
   );
 }
