@@ -115,3 +115,25 @@ fn settings_quick_reference_commands_run() {
         ],
     );
 }
+
+#[test]
+fn documents_can_be_created_edited_and_reopened_via_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let created: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "First thought"],
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    run(
+        dir.path(),
+        &["document", "change", id, "--title", "A title"],
+    );
+    let opened: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "open", id])).unwrap();
+    assert_eq!(opened["title"], "A title");
+    assert_eq!(opened["body"], "First thought");
+    let recent: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
+    assert_eq!(recent[0]["id"], id);
+}

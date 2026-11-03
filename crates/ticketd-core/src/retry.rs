@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project,
-    RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    BatchOperation, Document, DocumentPatch, Effort, Error, Evidence, EvidenceInput, Note,
+    NotePatch, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    CreateDocument {
+        title: Option<String>,
+        body: String,
+    },
+    ChangeDocument {
+        id: String,
+        patch: DocumentPatch,
+    },
     AddEvidence {
         reference: String,
         input: EvidenceInput,
@@ -174,6 +182,7 @@ pub enum WriteRequest {
 // Results are owned at the public boundary; boxing tickets would complicate every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
+    Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
     Note(Note),
@@ -235,6 +244,12 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::CreateDocument { title, body } => {
+                WriteResult::Document(self.create_document(title.as_deref(), &body)?)
+            }
+            WriteRequest::ChangeDocument { id, patch } => {
+                WriteResult::Document(self.change_document(&id, patch)?)
+            }
             WriteRequest::AddEvidence { reference, input } => {
                 WriteResult::Evidence(self.add_evidence(&reference, input)?)
             }

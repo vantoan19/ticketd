@@ -1,3 +1,4 @@
+import { Documents } from "@/features/documents/Documents";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
@@ -26,6 +27,7 @@ export function App() {
     | "archived-efforts"
     | "settings"
     | "inbox"
+    | "documents"
   >("tickets");
   const [settingsSection, setSettingsSection] =
     useState<SettingsCardKey>("appearance");
@@ -75,6 +77,7 @@ export function App() {
       window.clearInterval(timer);
     };
   }, []);
+  const [capture, setCapture] = useState(false);
   const [creating, setCreating] = useState(false);
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
@@ -145,6 +148,7 @@ export function App() {
             />
           ) : (
             <WorkspaceSidebar
+              onCapture={() => setCapture(true)}
               counts={counts}
               view={view}
               setView={openView}
@@ -228,6 +232,12 @@ export function App() {
                 }}
               />
             )}
+            <div hidden={view !== "documents"}>
+              <Documents
+                capture={capture}
+                onCaptureClose={() => setCapture(false)}
+              />
+            </div>
             <TicketWorkspaceView
               workspace={workspace}
               bulk={bulk}
