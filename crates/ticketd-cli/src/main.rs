@@ -36,6 +36,14 @@ enum DocumentCommand {
     Open {
         id: String,
     },
+    /// Read a bounded page of Document body text (character offsets)
+    Read {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 4096)]
+        limit: usize,
+    },
     Recent,
     TrashList,
     Trash {
@@ -596,6 +604,10 @@ enum ActivityCommand {
         file: Option<String>,
         #[arg(long)]
         agent: Option<String>,
+        #[arg(long, conflicts_with = "document")]
+        details_file: Option<String>,
+        #[arg(long)]
+        document: Option<String>,
     },
     /// Edit supplied fields of an activity
     Edit {
@@ -686,6 +698,19 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             )?)?,
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
+            DocumentCommand::Read { id, offset, limit } => {
+                let document = workspace.show_document(&id)?;
+                let limit = limit.clamp(1, 65536);
+                let mut chars = document.body.chars().skip(offset);
+                let body: String = chars.by_ref().take(limit).collect();
+                let next_offset = chars.next().map(|_| offset + body.chars().count());
+                let fetch = next_offset.map(|next| {
+                    format!("ticketd document read {id} --offset {next} --limit {limit}")
+                });
+                serde_json::to_string(
+                    &serde_json::json!({"id": document.id, "title": document.title, "created_at": document.created_at, "updated_at": document.updated_at, "trashed": document.trashed, "body": body, "offset": offset, "next_offset": next_offset, "truncated": next_offset.is_some(), "fetch": fetch}),
+                )?
+            }
             DocumentCommand::Recent => serde_json::to_string(&workspace.recent_documents()?)?,
             DocumentCommand::TrashList => serde_json::to_string(&workspace.trashed_documents()?)?,
             DocumentCommand::Trash { id } => {
@@ -867,12 +892,20 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 brief,
                 file,
                 agent,
+                details_file,
+                document,
             } => {
+                if file.as_deref() == Some("-") && details_file.as_deref() == Some("-") {
+                    return Err("brief and details cannot both read from stdin".into());
+                }
                 let brief = read_content(brief, file)?.ok_or("provide --brief or --file")?;
-                serde_json::to_string(&workspace.add_activity(
+                let details = read_content(None, details_file)?;
+                serde_json::to_string(&workspace.add_activity_with_details(
                     &reference,
                     &brief,
                     agent.as_deref(),
+                    details.as_deref(),
+                    document.as_deref(),
                 )?)?
             }
             ActivityCommand::Edit {

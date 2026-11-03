@@ -11,6 +11,8 @@ pub struct Activity {
     pub reported_at: String,
     pub updated_at: String,
     pub editing_agent: Option<String>,
+    #[serde(default)]
+    pub supporting_document_id: Option<String>,
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ActivityPatch {
@@ -29,10 +31,11 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Activity> {
         reported_at: row.get(3)?,
         updated_at: row.get(4)?,
         editing_agent: row.get(5)?,
+        supporting_document_id: row.get(6)?,
     })
 }
 pub(crate) fn get(conn: &Connection, ticket: &str, id: &str) -> Result<Activity, Error> {
-    conn.query_row("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent FROM activities WHERE ticket_id = ?1 AND id = ?2", params![ticket,id], row).optional()?.ok_or_else(|| Error::ActivityNotFound(id.to_owned()))
+    conn.query_row("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 AND id = ?2", params![ticket,id], row).optional()?.ok_or_else(|| Error::ActivityNotFound(id.to_owned()))
 }
 pub(crate) fn add(
     conn: &Connection,
@@ -85,7 +88,7 @@ pub(crate) fn read(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Activity>, Error> {
-    let mut statement = conn.prepare("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+    let mut statement = conn.prepare("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
     Ok(statement
         .query_map(params![ticket, limit.clamp(1, 100), offset], row)?
         .collect::<Result<Vec<_>, _>>()?)
@@ -174,7 +177,7 @@ pub(crate) fn feed(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<ActivityFeedEntry>, Error> {
-    let mut statement = conn.prepare("SELECT kind, seq, id, brief, reported_at, updated_at, agent, from_value, to_value FROM (SELECT 1 AS kind, number AS seq, id, brief, reported_at, updated_at, editing_agent AS agent, NULL AS from_value, NULL AS to_value FROM activities WHERE ticket_id=?1 UNION ALL SELECT 0, number, kind, NULL, timestamp, NULL, editing_agent, from_value, to_value FROM ticket_history WHERE ticket_id=?1) ORDER BY reported_at DESC, kind DESC, seq DESC LIMIT ?2 OFFSET ?3")?;
+    let mut statement = conn.prepare("SELECT kind, seq, id, brief, reported_at, updated_at, agent, from_value, to_value, supporting_document_id FROM (SELECT 1 AS kind, number AS seq, id, brief, reported_at, updated_at, editing_agent AS agent, NULL AS from_value, NULL AS to_value, supporting_document_id FROM activities WHERE ticket_id=?1 UNION ALL SELECT 0, number, kind, NULL, timestamp, NULL, editing_agent, from_value, to_value, NULL FROM ticket_history WHERE ticket_id=?1) ORDER BY reported_at DESC, kind DESC, seq DESC LIMIT ?2 OFFSET ?3")?;
     Ok(statement
         .query_map(params![ticket, limit.clamp(1, 100), offset], |row| {
             if row.get::<_, i64>(0)? == 1 {
@@ -186,6 +189,7 @@ pub(crate) fn feed(
                         reported_at: row.get(4)?,
                         updated_at: row.get(5)?,
                         editing_agent: row.get(6)?,
+                        supporting_document_id: row.get(9)?,
                     },
                 })
             } else {

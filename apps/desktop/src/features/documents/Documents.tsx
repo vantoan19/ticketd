@@ -8,6 +8,7 @@ import "./documents.css";
 function heading(document: Document) {
   return (
     document.title?.trim() ||
+    document.origin_brief?.trim() ||
     document.body
       .split("\n")
       .find((line) => line.trim())

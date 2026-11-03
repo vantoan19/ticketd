@@ -238,6 +238,7 @@ const activitySchema = z.object({
   reported_at: z.string(),
   updated_at: z.string(),
   editing_agent: z.string().nullable(),
+  supporting_document_id: z.string().nullable().optional(),
 });
 const activityFeedSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("authored"), activity: activitySchema }),
@@ -580,6 +581,23 @@ export const client = {
   async addActivity(reference: string, brief: string) {
     return activitySchema.parse(
       await invoke("add_activity", { reference, brief }),
+    );
+  },
+  async addActivityWithDetails(
+    reference: string,
+    brief: string,
+    details: string | null,
+    existingDocumentId: string | null,
+    requestId: string,
+  ) {
+    return activitySchema.parse(
+      await invoke("add_activity_with_details", {
+        reference,
+        brief,
+        details,
+        existingDocumentId,
+        requestId,
+      }),
     );
   },
   async editActivity(reference: string, id: string, brief: string) {

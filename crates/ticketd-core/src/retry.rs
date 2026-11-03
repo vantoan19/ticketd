@@ -76,6 +76,13 @@ pub enum WriteRequest {
         brief: String,
         agent: Option<String>,
     },
+    AddActivityWithDetails {
+        reference: String,
+        brief: String,
+        agent: Option<String>,
+        details: Option<String>,
+        existing_document_id: Option<String>,
+    },
     EditActivity {
         reference: String,
         id: String,
@@ -315,6 +322,19 @@ impl Workspace {
                 brief,
                 agent,
             } => WriteResult::Activity(self.add_activity(&reference, &brief, agent.as_deref())?),
+            WriteRequest::AddActivityWithDetails {
+                reference,
+                brief,
+                agent,
+                details,
+                existing_document_id,
+            } => WriteResult::Activity(self.add_activity_with_details(
+                &reference,
+                &brief,
+                agent.as_deref(),
+                details.as_deref(),
+                existing_document_id.as_deref(),
+            )?),
             WriteRequest::EditActivity {
                 reference,
                 id,

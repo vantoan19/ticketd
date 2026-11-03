@@ -158,3 +158,19 @@ fn documents_can_be_created_edited_and_reopened_via_cli() {
     assert_eq!(restored["body"], "First thought");
     assert_eq!(restored["trashed"], false);
 }
+
+#[test]
+fn document_read_returns_bounded_text_and_continuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let created: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "abécdef"],
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let result: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "read", id, "--limit", "3"])).unwrap();
+    assert_eq!(result["body"], "abé");
+    assert_eq!(result["next_offset"], 3);
+    assert_eq!(result["id"], id);
+}
