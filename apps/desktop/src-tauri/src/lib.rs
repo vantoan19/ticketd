@@ -368,6 +368,14 @@ fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn find_tickets_with_updates(
+    filter: TicketFilter,
+) -> Result<Vec<ticketd_core::TicketWithUpdate>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.find_tickets_with_updates(&filter))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, String> {
     Workspace::open_default()
         .and_then(|w| w.count_tickets(&filter))
@@ -1284,6 +1292,7 @@ pub fn run() -> Result<(), tauri::Error> {
             show_ticket,
             search_tickets,
             find_tickets,
+            find_tickets_with_updates,
             count_tickets,
             dependency_graph,
             plan_dependency_graph,

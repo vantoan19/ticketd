@@ -28,7 +28,15 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => bridge);
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args: unknown) => {
+    if (command === "find_tickets_with_updates") {
+      const tickets: unknown[] = await bridge.invoke("find_tickets", args);
+      return tickets.map((ticket) => ({ ticket, latest_update: null }));
+    }
+    return bridge.invoke(command, args);
+  },
+}));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
 
 vi.mock("@uiw/react-codemirror", () => ({

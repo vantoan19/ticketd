@@ -329,7 +329,16 @@ export function useTicketWorkspace(
     detailGeneration.current++;
     setDetails((items) => ({ ...items, [updated.reference]: updated }));
     setTickets((items) =>
-      items.map((item) => (item.id === updated.id ? updated : item)),
+      items.map((item) => {
+        if (item.id !== updated.id) return item;
+        // Detail mutations return a Ticket without the page-only summary.
+        // Retain it while it still identifies the same latest Activity.
+        return item.progress_summary !== undefined &&
+          item.progress_summary?.activity_id ===
+            updated.latest_update?.activity_id
+          ? { ...updated, progress_summary: item.progress_summary }
+          : updated;
+      }),
     );
   }, []);
   const total = counts ? counts.total : tickets.length;

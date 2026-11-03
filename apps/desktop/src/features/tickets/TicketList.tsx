@@ -10,6 +10,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
+import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
@@ -202,8 +203,14 @@ function RowDetails({
   const state = readiness(ticket);
   const context = rowContext(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
+  const active =
+    ticket.status === "In progress" || ticket.status === "In review";
   return (
-    <span className="ticket-row-meta">
+    <span
+      className={
+        active ? "ticket-row-meta ticket-row-meta-active" : "ticket-row-meta"
+      }
+    >
       <span className="ticket-row-contextual">
         {/* A group header already names the status. */}
         {unavailable ? (
@@ -226,8 +233,19 @@ function RowDetails({
             </span>
           )
         )}
-        {context && <span className="ticket-row-context">{context}</span>}
-        {ticket.tags.length > 0 && (
+        {active && ticket.progress_summary && (
+          <span
+            className="ticket-row-brief"
+            title={ticket.progress_summary.brief.text}
+          >
+            {progressBrief(ticket.progress_summary.brief.text)}
+            {ticket.progress_summary.brief.truncated ? "…" : ""}
+          </span>
+        )}
+        {!active && context && (
+          <span className="ticket-row-context">{context}</span>
+        )}
+        {!active && ticket.tags.length > 0 && (
           <span className="ticket-row-tags">
             {ticket.tags.map((tag) => (
               <span key={tag} className="ticket-tag">
@@ -238,20 +256,20 @@ function RowDetails({
         )}
       </span>
       <span className="ticket-row-time">
-        {ticket.status === "In progress" || ticket.status === "In review" ? (
-          ticket.latest_update ? (
+        {active ? (
+          ticket.progress_summary ? (
             <>
               <time
-                dateTime={ticket.latest_update.reported_at}
-                title={formatDateTime(ticket.latest_update.reported_at)}
+                dateTime={ticket.progress_summary.reported_at}
+                title={formatDateTime(ticket.progress_summary.reported_at)}
               >
-                Reported {ago(ticket.latest_update.reported_at, now)}
+                Reported {ago(ticket.progress_summary.reported_at, now)}
               </time>
-              {ticket.latest_update.editing_agent &&
-                ` · ${ticket.latest_update.editing_agent}`}
             </>
-          ) : (
+          ) : ticket.progress_summary === null ? (
             "No update reported"
+          ) : (
+            "Update unavailable"
           )
         ) : ticket.updated_at ? (
           <time
