@@ -206,7 +206,11 @@ function RowDetails({
   const active =
     ticket.status === "In progress" || ticket.status === "In review";
   return (
-    <span className="ticket-row-meta">
+    <span
+      className={
+        active ? "ticket-row-meta ticket-row-meta-active" : "ticket-row-meta"
+      }
+    >
       <span className="ticket-row-contextual">
         {/* A group header already names the status. */}
         {unavailable ? (
