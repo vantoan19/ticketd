@@ -6,6 +6,7 @@ use crate::{Error, Ticket, TicketPatch, Workspace};
 
 #[derive(Debug, Serialize)]
 pub struct ContextLink {
+    pub activity_id: Option<String>,
     pub source_id: String,
     pub target_id: String,
     pub source_kind: String,
@@ -54,7 +55,58 @@ fn passage(body: &str, at: usize) -> String {
 }
 
 pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
-    tx.execute("DELETE FROM context_mentions WHERE source_id = ?1", [id])?;
+    index_text(tx, id, body, false)
+}
+
+pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    index_text(tx, id, body, true)?;
+    // Backlinks recognize visible ticket references even in link text and
+    // decoded Markdown runs; retain those established references here too.
+    for (text, range) in crate::backlinks::text_runs(body) {
+        for (at, _) in text.match_indices("T-") {
+            let rest = &text[at + 2..];
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
+            if digits == 0
+                || rest.starts_with('0')
+                || !text[..at].chars().next_back().is_none_or(boundary)
+                || !rest[digits..].chars().next().is_none_or(boundary)
+            {
+                continue;
+            }
+            if let Ok(number) = rest[..digits].parse::<i64>() {
+                let target: Option<String> = tx
+                    .query_row(
+                        "SELECT id FROM tickets WHERE number = ?1",
+                        [number],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(target) = target {
+                    let offset = body[range.clone()]
+                        .find(&text[at..at + 2 + digits])
+                        .map_or(range.start, |n| range.start + n);
+                    tx.execute("INSERT OR IGNORE INTO activity_mentions (activity_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, offset)])?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(), Error> {
+    let (delete, insert) = if activity {
+        (
+            "DELETE FROM activity_mentions WHERE activity_id = ?1",
+            "INSERT OR IGNORE INTO activity_mentions (activity_id, target_id, passage) VALUES (?1, ?2, ?3)",
+        )
+    } else {
+        (
+            "DELETE FROM context_mentions WHERE source_id = ?1",
+            "INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)",
+        )
+    };
+    tx.execute(delete, [id])?;
     let mut in_link = false;
     let mut in_code = false;
     for (event, range) in Parser::new(body).into_offset_iter() {
@@ -87,7 +139,7 @@ pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Er
                             let at = body[range.clone()]
                                 .find(&text[at..at + 2 + digits])
                                 .map_or(range.start, |offset| range.start + offset);
-                            tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, at)])?;
+                            tx.execute(insert, params![id, target, passage(body, at)])?;
                         }
                     }
                 }
@@ -117,7 +169,7 @@ pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Er
                 None
             };
             if let Some(target) = target {
-                tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, range.start)])?;
+                tx.execute(insert, params![id, target, passage(body, range.start)])?;
             }
         }
     }
@@ -200,10 +252,11 @@ impl Workspace {
             return Err(Error::NotFound(id.to_owned()));
         }
         let column = if outgoing { "source_id" } else { "target_id" };
-        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id) , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM context_mentions m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3"))?;
+        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM (SELECT source_id, target_id, passage, NULL AS activity_id FROM context_mentions UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(ContextLink {
+                    activity_id: r.get(7)?,
                     source_id: r.get(0)?,
                     target_id: r.get(1)?,
                     source_kind: r.get(2)?,
@@ -211,8 +264,8 @@ impl Workspace {
                     passage: r.get(4)?,
                     source_label: r.get(5)?,
                     target_label: r.get(6)?,
-                    source_trashed: r.get(7)?,
-                    target_trashed: r.get(8)?,
+                    source_trashed: r.get(8)?,
+                    target_trashed: r.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

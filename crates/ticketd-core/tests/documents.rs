@@ -647,3 +647,65 @@ fn keeping_activity_details_preserves_identity_and_makes_them_visible() {
     w.delete_activity(&ticket.reference, &activity.id).unwrap();
     assert_eq!(w.show_document(&id).unwrap().body, "unique detail");
 }
+
+#[test]
+fn activity_context_references_follow_edits_and_deletion() {
+    use ticketd_core::ActivityPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Source").unwrap();
+    let doc = workspace.create_document(Some("Target"), "").unwrap();
+    let activity = workspace
+        .add_activity(
+            &ticket.reference,
+            &format!("See [target](ticketd://document/{})", doc.id),
+            None,
+        )
+        .unwrap();
+    let links = workspace.context_backlinks(&doc.id, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].activity_id.as_deref(), Some(activity.id.as_str()));
+    workspace
+        .edit_activity(
+            &ticket.reference,
+            &activity.id,
+            ActivityPatch {
+                brief: Some("No link".into()),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .context_backlinks(&doc.id, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn activity_references_include_visible_link_text_and_disappear_on_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_ticket("Target").unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let activity = workspace
+        .add_activity(
+            &source.reference,
+            &format!("[{}](https://example.com)", target.reference),
+            None,
+        )
+        .unwrap();
+    let links = workspace.context_backlinks(&target.id, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].activity_id.as_deref(), Some(activity.id.as_str()));
+    workspace
+        .delete_activity(&source.reference, &activity.id)
+        .unwrap();
+    assert!(
+        workspace
+            .context_backlinks(&target.id, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
