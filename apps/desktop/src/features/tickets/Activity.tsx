@@ -1,4 +1,8 @@
-import { documents, type Document } from "@/features/documents/api";
+import {
+  documents,
+  type Document,
+  type DocumentSummary,
+} from "@/features/documents/api";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { useNow } from "@/lib/use-now";
 import {
@@ -162,12 +166,14 @@ export function Activity({
   const [support, setSupportValue] = useState(
     () => localValue(selectionKey) ?? "",
   );
-  const [availableDocuments, setAvailableDocuments] = useState<Document[]>([]);
+  const [availableDocuments, setAvailableDocuments] = useState<
+    DocumentSummary[]
+  >([]);
   const [openedDocument, setOpenedDocument] = useState<Document | null>(null);
   useEffect(() => {
     if (active && support)
       void documents
-        .recent()
+        .recent(0)
         .then(setAvailableDocuments)
         .catch((reason: unknown) => setError(String(reason)));
   }, [active, support]);
@@ -517,7 +523,7 @@ export function Activity({
                     value={support}
                     onFocus={() =>
                       void documents
-                        .recent()
+                        .recent(0)
                         .then(setAvailableDocuments)
                         .catch((reason: unknown) => setError(String(reason)))
                     }
@@ -526,11 +532,7 @@ export function Activity({
                     <option value="">None</option>
                     {availableDocuments.map((document) => (
                       <option key={document.id} value={document.id}>
-                        {document.title ||
-                          document.body
-                            .split("\n")
-                            .find((line) => line.trim()) ||
-                          "Untitled"}
+                        {document.heading}
                       </option>
                     ))}
                   </select>
