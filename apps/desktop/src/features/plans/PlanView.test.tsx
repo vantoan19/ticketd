@@ -26,7 +26,15 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => bridge);
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args: unknown) => {
+    if (command === "find_tickets_with_updates") {
+      const tickets: unknown[] = await bridge.invoke("find_tickets", args);
+      return tickets.map((ticket) => ({ ticket, latest_update: null }));
+    }
+    return bridge.invoke(command, args);
+  },
+}));
 
 type Fake = { id: string; reference: string; status: string; plan: string };
 let plans: { id: string; name: string; archived: boolean; purpose: string }[] =

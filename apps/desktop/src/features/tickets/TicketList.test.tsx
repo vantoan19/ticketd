@@ -220,12 +220,51 @@ test("rows show core update times and authored progress instead of an empty seco
         reported_at: when,
         editing_agent: "agent",
       },
+      progress_summary: {
+        activity_id: "n1",
+        brief: { text: "Verified the fix", truncated: false },
+        reported_at: when,
+        updated_at: when,
+        editing_agent: "agent",
+        supporting_document_id: null,
+      },
     }),
-    ticket({ id: "unreported", reference: "T-3", status: "In review" }),
+    ticket({
+      id: "unreported",
+      reference: "T-3",
+      status: "In review",
+      progress_summary: null,
+    }),
   ]);
   expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
   expect(
     screen.getByText(/Reported 3 h ago/).parentElement?.textContent,
   ).toContain("agent");
+  expect(screen.getByText("Verified the fix")).toBeTruthy();
   expect(screen.getByText("No update reported")).toBeTruthy();
+});
+
+test("distinguishes unavailable progress and marks bounded briefs", () => {
+  const when = new Date().toISOString();
+  renderList([
+    ticket({ id: "1", reference: "T-1", status: "In progress" }),
+    ticket({
+      id: "2",
+      reference: "T-2",
+      status: "In review",
+      progress_summary: {
+        activity_id: "a",
+        brief: {
+          text: "**Long** [checkpoint](https://example.com)",
+          truncated: true,
+        },
+        reported_at: when,
+        updated_at: when,
+        editing_agent: null,
+        supporting_document_id: null,
+      },
+    }),
+  ]);
+  expect(screen.getByText("Update unavailable")).toBeTruthy();
+  expect(screen.getByText("Long checkpoint…")).toBeTruthy();
 });
