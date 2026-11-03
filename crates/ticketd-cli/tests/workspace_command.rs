@@ -137,3 +137,19 @@ fn documents_can_be_created_edited_and_reopened_via_cli() {
         serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
     assert_eq!(recent[0]["id"], id);
 }
+
+#[test]
+fn document_ticket_and_backlinks_are_available_to_agents() {
+    let dir = tempfile::tempdir().unwrap();
+    let document: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "Investigation"],
+    ))
+    .unwrap();
+    let id = document["id"].as_str().unwrap();
+    let ticket: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "create-ticket", id, "Task"])).unwrap();
+    let links: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "backlinks", id])).unwrap();
+    assert_eq!(links[0]["source_reference"], ticket["reference"]);
+}

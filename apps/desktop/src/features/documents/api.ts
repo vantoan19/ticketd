@@ -9,7 +9,26 @@ const schema = z.object({
   updated_at: z.string(),
 });
 export type Document = z.infer<typeof schema>;
+const linkSchema = z.object({
+  source_id: z.string(),
+  target_id: z.string(),
+  source_kind: z.string(),
+  target_kind: z.string(),
+  passage: z.string(),
+  source_label: z.string(),
+  target_label: z.string(),
+});
 export const documents = {
+  linkMarkdown: async (reference: string) =>
+    z.string().parse(await invoke("context_link_markdown", { reference })),
+  links: async (id: string) =>
+    z
+      .tuple([z.array(linkSchema), z.array(linkSchema)])
+      .parse(await invoke("document_context_links", { id })),
+  createTicket: async (id: string, title: string, requestId: string) =>
+    z
+      .object({ reference: z.string() })
+      .parse(await invoke("ticket_from_document", { id, title, requestId })),
   recent: async () => z.array(schema).parse(await invoke("recent_documents")),
   show: async (id: string) =>
     schema.parse(await invoke("show_document", { id })),

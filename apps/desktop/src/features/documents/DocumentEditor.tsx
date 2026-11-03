@@ -18,10 +18,30 @@ type Pending = {
 export function DocumentEditor({
   initial,
   onClose,
+  currentTicket,
+  onOpenDocument,
+  onOpenTicket,
 }: {
   initial: Document | null;
   onClose: () => void;
+  currentTicket?: string | null;
+  onOpenDocument?: (id: string) => void;
+  onOpenTicket?: (reference: string) => void;
 }) {
+  const [linkTarget, setLinkTarget] = useState("");
+  const [ticketTitle, setTicketTitle] = useState("");
+  const [links, setLinks] = useState<
+    Awaited<ReturnType<typeof documents.links>>
+  >([[], []]);
+  const [linkError, setLinkError] = useState("");
+  const [suggestion, setSuggestion] = useState(currentTicket ?? null);
+  useEffect(() => {
+    if (initial)
+      void documents
+        .links(initial.id)
+        .then(setLinks)
+        .catch((error: unknown) => setLinkError(String(error)));
+  }, [initial]);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [status, setStatus] = useState("Start writing. We’ll save as you go.");
@@ -38,7 +58,20 @@ export function DocumentEditor({
   }, [onClose]);
   const save = async () => {
     if (saving.current) return;
-    const snapshot = draft.current;
+    let snapshot = draft.current;
+    if (
+      !id.current &&
+      suggestion &&
+      snapshot.title.trim() &&
+      !snapshot.body.trim()
+    ) {
+      snapshot = {
+        ...snapshot,
+        body: `[${suggestion}](ticketd://ticket/${suggestion})`,
+      };
+      draft.current = snapshot;
+      setBody(snapshot.body);
+    }
     const titleChanged = snapshot.title !== saved.current.title;
     const bodyChanged = snapshot.body !== saved.current.body;
     if (!pending.current && !titleChanged && !bodyChanged) {
@@ -183,15 +216,128 @@ export function DocumentEditor({
             />
           </Field>
         </FieldGroup>
+        {suggestion && (
+          <p>
+            Connected to {suggestion}{" "}
+            <Button
+              variant="ghost"
+              aria-label={`Remove connection to ${suggestion}`}
+              onClick={() => {
+                const link = `[${suggestion}](ticketd://ticket/${suggestion})`;
+                const next =
+                  draft.current.body === link
+                    ? ""
+                    : draft.current.body.replace(`\n\n${link}`, "");
+                draft.current = { ...draft.current, body: next };
+                setBody(next);
+                setSuggestion(null);
+              }}
+            >
+              Remove
+            </Button>
+          </p>
+        )}
         <LazyMarkdownEditor
           value={body}
           onChange={(value) => {
-            draft.current = { ...draft.current, body: value };
-            setBody(value);
+            const link = suggestion
+              ? `[${suggestion}](ticketd://ticket/${suggestion})`
+              : "";
+            const next =
+              suggestion &&
+              value.trim() &&
+              !draft.current.body &&
+              !value.includes(link)
+                ? `${value}\n\n${link}`
+                : value;
+            draft.current = { ...draft.current, body: next };
+            setBody(next);
           }}
           label="Your thought"
           autoFocus
         />
+        <Field>
+          <FieldLabel htmlFor="link-target">Link target</FieldLabel>
+          <Input
+            id="link-target"
+            placeholder="Ticket reference or Document ID"
+            value={linkTarget}
+            onChange={(event) => setLinkTarget(event.target.value)}
+          />
+        </Field>
+        <Button
+          disabled={!linkTarget.trim()}
+          variant="outline"
+          onClick={() =>
+            void documents
+              .linkMarkdown(linkTarget.trim())
+              .then((link) => {
+                const next = draft.current.body
+                  ? `${draft.current.body}\n\n${link}`
+                  : link;
+                draft.current = { ...draft.current, body: next };
+                setBody(next);
+                setLinkTarget("");
+                setLinkError("");
+              })
+              .catch((error: unknown) => setLinkError(String(error)))
+          }
+        >
+          Insert link
+        </Button>
+        {linkError && <p role="alert">{linkError}</p>}
+        {initial && (
+          <section aria-label="Connected items">
+            <h2>Connected items</h2>
+            <ul>
+              {links.flatMap((group, direction) =>
+                group.map((link) => {
+                  const kind =
+                    direction === 0 ? link.target_kind : link.source_kind;
+                  const target =
+                    direction === 0 ? link.target_id : link.source_id;
+                  const label =
+                    direction === 0 ? link.target_label : link.source_label;
+                  return (
+                    <li key={`${direction}-${target}-${link.passage}`}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          if (kind === "document") onOpenDocument?.(target);
+                          else if (kind === "ticket") onOpenTicket?.(label);
+                        }}
+                      >
+                        {label}
+                      </Button>
+                      <p>{link.passage}</p>
+                    </li>
+                  );
+                }),
+              )}
+            </ul>
+            <Field>
+              <FieldLabel htmlFor="ticket-from-document">
+                New ticket title
+              </FieldLabel>
+              <Input
+                id="ticket-from-document"
+                value={ticketTitle}
+                onChange={(event) => setTicketTitle(event.target.value)}
+              />
+            </Field>
+            <Button
+              disabled={!ticketTitle.trim()}
+              onClick={() =>
+                void documents
+                  .createTicket(initial.id, ticketTitle, crypto.randomUUID())
+                  .then((ticket) => onOpenTicket?.(ticket.reference))
+                  .catch((error: unknown) => setLinkError(String(error)))
+              }
+            >
+              Create ticket
+            </Button>
+          </section>
+        )}
         <footer>
           <span role="status">{status}</span>
           {failed && (

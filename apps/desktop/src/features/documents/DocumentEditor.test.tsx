@@ -7,10 +7,18 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DocumentEditor } from "./DocumentEditor";
 import { documents } from "./api";
-vi.mock("./api", () => ({ documents: { save: vi.fn(), show: vi.fn() } }));
+vi.mock("./api", () => ({
+  documents: {
+    save: vi.fn(),
+    show: vi.fn(),
+    links: vi.fn().mockResolvedValue([[], []]),
+    createTicket: vi.fn(),
+    linkMarkdown: vi.fn(),
+  },
+}));
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({
     value,
@@ -26,7 +34,11 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
     />
   ),
 }));
+beforeEach(() => {
+  vi.mocked(documents.links).mockResolvedValue([[], []]);
+});
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.resetAllMocks();
 });
@@ -95,4 +107,40 @@ it("defers external refresh while the editor has focus", async () => {
     "Changed externally",
   );
   vi.useRealTimers();
+});
+it("suggests only the current ticket and lets it be removed before capture", async () => {
+  vi.mocked(documents.save).mockResolvedValue({
+    id: "d1",
+    title: null,
+    body: "Thought",
+    created_at: "now",
+    updated_at: "now",
+  });
+  render(
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove connection to T-12" }),
+  );
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Thought" },
+  });
+  fireEvent.click(screen.getByText("Back to work"));
+  await waitFor(() => expect(documents.save).toHaveBeenCalled());
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Thought");
+});
+it("inserts a validated link into the draft", async () => {
+  vi.mocked(documents.linkMarkdown).mockResolvedValue(
+    "[T-4](ticketd://ticket/T-4)",
+  );
+  render(<DocumentEditor initial={null} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Link target"), {
+    target: { value: "T-4" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Insert link" }));
+  await waitFor(() =>
+    expect(
+      (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
+    ).toBe("[T-4](ticketd://ticket/T-4)"),
+  );
 });

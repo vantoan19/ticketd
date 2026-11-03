@@ -105,6 +105,51 @@ fn save_document(
 }
 
 #[tauri::command]
+fn context_link_markdown(reference: String) -> Result<String, String> {
+    Workspace::open_default()
+        .and_then(|w| w.context_link_markdown(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn document_context_links(
+    id: String,
+) -> Result<
+    (
+        Vec<ticketd_core::ContextLink>,
+        Vec<ticketd_core::ContextLink>,
+    ),
+    String,
+> {
+    Workspace::open_default()
+        .and_then(|w| {
+            Ok((
+                w.context_links(&id, 100, 0)?,
+                w.context_backlinks(&id, 100, 0)?,
+            ))
+        })
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn ticket_from_document(
+    id: String,
+    title: String,
+    request_id: String,
+) -> Result<ticketd_core::Ticket, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::CreateTicketFromDocument { id, title },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket result".into()),
+    }
+}
+
+#[tauri::command]
 fn reminder(reference: String) -> Result<Option<String>, String> {
     Workspace::open_default()
         .and_then(|w| w.reminder(&reference))
@@ -1066,6 +1111,9 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            context_link_markdown,
+            document_context_links,
+            ticket_from_document,
             recent_documents,
             show_document,
             open_document,

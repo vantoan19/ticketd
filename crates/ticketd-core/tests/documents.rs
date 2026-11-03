@@ -90,3 +90,149 @@ fn replayed_patch_can_clear_title_without_replacing_body() {
     assert_eq!(updated.title, None);
     assert_eq!(updated.body, "Keep this");
 }
+
+#[test]
+fn creating_multiple_tickets_from_a_document_preserves_the_source_and_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace
+        .create_document(Some("Investigation"), "Evidence remains here")
+        .unwrap();
+    let first = workspace
+        .create_ticket_from_document(&source.id, "First task")
+        .unwrap();
+    let second = workspace
+        .create_ticket_from_document(&source.id, "Second task")
+        .unwrap();
+    assert_ne!(first.id, second.id);
+    assert_eq!(workspace.show_document(&source.id).unwrap(), source);
+    let links = workspace.document_backlinks(&source.id, 20, 0).unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].source_reference, first.reference);
+    assert_eq!(links[1].source_reference, second.reference);
+}
+
+#[test]
+fn editing_ticket_markdown_removes_document_backlinks() {
+    use ticketd_core::TicketPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_document(None, "Source").unwrap();
+    let ticket = workspace
+        .create_ticket_from_document(&source.id, "Task")
+        .unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("No link".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .document_backlinks(&source.id, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn retrying_create_ticket_from_document_does_not_duplicate_ticket() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = workspace.create_document(None, "Source").unwrap();
+    let request = || WriteRequest::CreateTicketFromDocument {
+        id: source.id.clone(),
+        title: "Task".into(),
+    };
+    let first = workspace.write(Some("source-ticket"), request()).unwrap();
+    let second = workspace.write(Some("source-ticket"), request()).unwrap();
+    assert_eq!(first, second);
+    assert!(matches!(first, WriteResult::Ticket(_)));
+    assert_eq!(
+        workspace
+            .document_backlinks(&source.id, 20, 0)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn document_references_are_indexed_in_both_directions_and_updated_with_markdown() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_document(Some("Target"), "Body").unwrap();
+    let source = workspace
+        .create_document(
+            None,
+            &format!("Reason: [target](ticketd://document/{})", target.id),
+        )
+        .unwrap();
+    let links = workspace.context_links(&source.id, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].target_id, target.id);
+    assert!(links[0].passage.starts_with("Reason:"));
+    assert_eq!(
+        workspace.context_backlinks(&target.id, 20, 0).unwrap()[0].source_id,
+        source.id
+    );
+    workspace
+        .change_document(
+            &source.id,
+            DocumentPatch {
+                title: None,
+                body: Some("Removed".into()),
+            },
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .context_backlinks(&target.id, 20, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn document_ticket_mentions_create_backlinks_without_creating_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let document = workspace
+        .create_document(None, &format!("Related to {}", ticket.reference))
+        .unwrap();
+    let links = workspace.context_backlinks(&ticket.id, 20, 0).unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].source_id, document.id);
+    assert!(
+        workspace
+            .show_ticket(&ticket.reference)
+            .unwrap()
+            .prerequisites
+            .is_empty()
+    );
+}
+
+#[test]
+fn link_insertion_validates_target_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let document = workspace.create_document(Some("Context"), "Body").unwrap();
+    assert_eq!(
+        workspace.context_link_markdown(&ticket.reference).unwrap(),
+        format!(
+            "[{}](ticketd://ticket/{})",
+            ticket.reference, ticket.reference
+        )
+    );
+    assert_eq!(
+        workspace.context_link_markdown(&document.id).unwrap(),
+        format!("[Document](ticketd://document/{})", document.id)
+    );
+    assert!(workspace.context_link_markdown("T-999999").is_err());
+}

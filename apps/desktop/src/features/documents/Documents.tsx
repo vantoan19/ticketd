@@ -19,10 +19,14 @@ export function Documents({
   capture,
   active,
   onCaptureClose,
+  currentTicket,
+  onOpenTicket,
 }: {
   capture: boolean;
   active: boolean;
   onCaptureClose: () => void;
+  currentTicket: string | null;
+  onOpenTicket: (reference: string) => void;
 }) {
   const [recent, setRecent] = useState<Document[]>([]);
   const [selected, setSelected] = useState<Document | null>(null);
@@ -70,6 +74,16 @@ export function Documents({
         <DocumentEditor
           key={selected.id}
           initial={selected}
+          onOpenDocument={(id) =>
+            void documents
+              .open(id)
+              .then(setSelected)
+              .catch((e: unknown) => setError(String(e)))
+          }
+          onOpenTicket={(reference) => {
+            setSelected(null);
+            onOpenTicket(reference);
+          }}
           onClose={() => {
             setSelected(null);
             void refresh();
@@ -79,6 +93,7 @@ export function Documents({
       {capture && (
         <DocumentEditor
           initial={null}
+          currentTicket={currentTicket}
           onClose={() => {
             onCaptureClose();
             void refresh();

@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    CreateTicketFromDocument {
+        id: String,
+        title: String,
+    },
     CreateDocument {
         title: Option<String>,
         body: String,
@@ -248,6 +252,9 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::CreateTicketFromDocument { id, title } => {
+                WriteResult::Ticket(self.create_ticket_from_document(&id, &title)?)
+            }
             WriteRequest::CreateDocument { title, body } => {
                 WriteResult::Document(self.create_document(title.as_deref(), &body)?)
             }

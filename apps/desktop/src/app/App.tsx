@@ -236,6 +236,11 @@ export function App() {
               <Documents
                 active={view === "documents"}
                 capture={capture}
+                currentTicket={view === "tickets" ? workspace.selected : null}
+                onOpenTicket={(reference) => {
+                  setSelected(reference);
+                  setView("tickets");
+                }}
                 onCaptureClose={() => setCapture(false)}
               />
             </div>
