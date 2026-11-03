@@ -39,6 +39,19 @@ import "./activity.css";
  * switching tickets, or the detail remounting, never loses typed text.
  */
 const noteDrafts = new Map<string, string>();
+const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+
+function loadDraft(reference: string): string {
+  try {
+    return (
+      localStorage.getItem(draftKey(reference)) ??
+      noteDrafts.get(reference) ??
+      ""
+    );
+  } catch {
+    return noteDrafts.get(reference) ?? "";
+  }
+}
 
 export function Activity({
   reference,
@@ -97,13 +110,19 @@ export function Activity({
   const [history, setHistory] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraftValue] = useState(
-    () => noteDrafts.get(reference) ?? "",
+  const [draft, setDraftValue] = useState(() => loadDraft(reference));
+  const [composing, setComposing] = useState(() =>
+    Boolean(loadDraft(reference)),
   );
-  const [composing, setComposing] = useState(() => noteDrafts.has(reference));
   function setDraft(content: string) {
     if (content) noteDrafts.set(reference, content);
     else noteDrafts.delete(reference);
+    try {
+      if (content) localStorage.setItem(draftKey(reference), content);
+      else localStorage.removeItem(draftKey(reference));
+    } catch {
+      setError("Could not save the unpublished update on this device.");
+    }
     setDraftValue(content);
   }
   const [edit, setEdit] = useState<{

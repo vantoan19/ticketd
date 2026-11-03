@@ -37,6 +37,7 @@ vi.mock("@uiw/react-codemirror", () => ({
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 
@@ -78,6 +79,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
     expect(screen.getByRole("alert").textContent).toContain("Database busy"),
   );
   expect(composer).toHaveProperty("value", "A **draft**");
+  expect(localStorage.getItem("ticketd:activity-draft:T-1")).toBe(
+    "A **draft**",
+  );
   expect(composer).toHaveProperty("readOnly", false);
   expect(
     bridge.invoke.mock.calls.filter(([command]) => command === "add_note"),
@@ -506,4 +510,29 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   expect(saved.content).toBe("## Edited finding");
   expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Cancel edit" })).toBeNull();
+});
+
+test("recovers an unpublished brief after the desktop restarts", async () => {
+  localStorage.setItem("ticketd:activity-draft:T-987", "A recovered **brief**");
+  bridge.invoke.mockResolvedValue([]);
+  render(
+    <Activity
+      reference="T-987"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  expect(
+    screen.getByRole("textbox", { name: "New note source" }),
+  ).toHaveProperty("value", "A recovered **brief**");
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "add_note"),
+  ).toBe(false);
+  localStorage.removeItem("ticketd:activity-draft:T-987");
 });

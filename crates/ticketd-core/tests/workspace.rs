@@ -86,6 +86,37 @@ fn status_changes_are_recorded_with_optional_agent() {
 }
 
 #[test]
+fn authored_activity_requires_a_nonempty_brief() {
+    use ticketd_core::NotePatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    assert!(workspace.add_note(&ticket.reference, "  \n", None).is_err());
+    let activity = workspace
+        .add_note(&ticket.reference, "A brief", None)
+        .unwrap();
+    assert!(
+        workspace
+            .edit_note(
+                &ticket.reference,
+                &activity.id,
+                NotePatch {
+                    content: Some("  ".into()),
+                    editing_agent: None,
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(
+        workspace
+            .note(&ticket.reference, &activity.id)
+            .unwrap()
+            .content,
+        "A brief"
+    );
+}
+
+#[test]
 fn notes_can_be_paged_edited_and_deleted_after_reopening() {
     use ticketd_core::NotePatch;
     let dir = tempfile::tempdir().unwrap();

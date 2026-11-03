@@ -38,6 +38,9 @@ pub(crate) fn add(
     content: &str,
     agent: Option<&str>,
 ) -> Result<Note, Error> {
+    if content.trim().is_empty() {
+        return Err(Error::EmptyActivityBrief);
+    }
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO notes (id, ticket_id, content, editing_agent) VALUES (?1, ?2, ?3, ?4)",
@@ -51,6 +54,13 @@ pub(crate) fn edit(
     id: &str,
     patch: NotePatch,
 ) -> Result<Note, Error> {
+    if patch
+        .content
+        .as_ref()
+        .is_some_and(|content| content.trim().is_empty())
+    {
+        return Err(Error::EmptyActivityBrief);
+    }
     let changed = conn.execute("UPDATE notes SET content = COALESCE(?1, content), editing_agent = COALESCE(?2, editing_agent), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ticket_id = ?3 AND id = ?4", params![patch.content,patch.editing_agent,ticket,id])?;
     if changed == 0 {
         return Err(Error::NoteNotFound(id.to_owned()));

@@ -152,6 +152,8 @@ pub enum Error {
     InvalidEvidence(String),
     #[error("evidence '{0}' was not found")]
     EvidenceNotFound(String),
+    #[error("activity brief must not be empty")]
+    EmptyActivityBrief,
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
     #[error(
