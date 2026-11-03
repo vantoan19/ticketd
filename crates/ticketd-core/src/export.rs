@@ -17,6 +17,7 @@ impl Workspace {
                 "documents",
                 "id, title, body, created_at, updated_at, trashed",
             ),
+            ("context_mentions", "source_id, target_id, passage"),
             ("document_opens", "sequence, document_id"),
             ("projects", "id, name, path"),
             ("project_checkouts", "project_id, path"),

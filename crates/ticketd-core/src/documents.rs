@@ -53,6 +53,7 @@ impl Workspace {
                 "INSERT INTO documents (id, title, body) VALUES (?1, ?2, ?3)",
                 params![id, title, body],
             )?;
+            crate::document_links::index_body(&self.connection, &id, body)?;
             self.open_document(&id)
         })();
         match result {
@@ -113,17 +114,35 @@ impl Workspace {
         if self.show_document(id)?.trashed {
             return Err(Error::Trashed(id.to_owned()));
         }
-        let changes = match (patch.title, patch.body) {
+        self.connection.execute_batch("SAVEPOINT change_document")?;
+        let result = (|| {
+            let body_to_index = patch.body.clone();
+            let changes = match (patch.title, patch.body) {
             (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
             (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
             (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,
             (None, None) => 0,
         };
-        let document = self.show_document(id)?;
-        if changes == 0 && document.trashed {
-            return Err(Error::Trashed(id.to_owned()));
+            let document = self.show_document(id)?;
+            if changes == 0 && document.trashed {
+                return Err(Error::Trashed(id.to_owned()));
+            }
+            if let Some(body) = body_to_index {
+                crate::document_links::index_body(&self.connection, id, &body)?;
+            }
+            self.show_document(id)
+        })();
+        match result {
+            Ok(document) => {
+                self.connection.execute_batch("RELEASE change_document")?;
+                Ok(document)
+            }
+            Err(error) => {
+                self.connection
+                    .execute_batch("ROLLBACK TO change_document; RELEASE change_document")?;
+                Err(error)
+            }
         }
-        Ok(document)
     }
     pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
         let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;

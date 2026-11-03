@@ -5,6 +5,10 @@ import ReactMarkdown, {
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
 import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -36,6 +40,38 @@ function DocumentLink({
   children?: React.ReactNode;
 }) {
   const { select, revision } = useContext(TicketNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  const openPlan = useContext(PlanNavigation);
+  if (href?.startsWith("ticketd://plan/")) {
+    const id = href.slice("ticketd://plan/".length);
+    return openPlan ? (
+      <button type="button" onClick={() => openPlan(id)}>
+        {children}
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
+  if (href?.startsWith("ticketd://document/")) {
+    const id = href.slice("ticketd://document/".length);
+    return openDocument ? (
+      <button type="button" onClick={() => openDocument(id)}>
+        {children}
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
+  if (href?.startsWith("ticketd://ticket/"))
+    return select ? (
+      <TicketReference
+        reference={href.slice("ticketd://ticket/".length)}
+        select={select}
+        revision={revision}
+      />
+    ) : (
+      <>{children}</>
+    );
   if (href?.startsWith("ticketd:"))
     return select ? (
       <TicketReference

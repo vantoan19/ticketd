@@ -19,10 +19,18 @@ export function Documents({
   capture,
   active,
   onCaptureClose,
+  currentTicket,
+  onOpenTicket,
+  onOpenPlan,
+  target,
 }: {
   capture: boolean;
   active: boolean;
   onCaptureClose: () => void;
+  currentTicket: string | null;
+  onOpenTicket: (reference: string) => void;
+  onOpenPlan: (id: string) => void;
+  target: { id: string; key: number } | null;
 }) {
   const [recent, setRecent] = useState<Document[]>([]);
   const [trash, setTrash] = useState<Document[]>([]);
@@ -36,6 +44,13 @@ export function Documents({
         setTrash(trash);
       })
       .catch((e: unknown) => setError(String(e)));
+  useEffect(() => {
+    if (target)
+      void documents
+        .open(target.id)
+        .then(setSelected)
+        .catch((e: unknown) => setError(String(e)));
+  }, [target]);
   useEffect(() => {
     if (active) void refresh();
   }, [active, capture]);
@@ -79,6 +94,20 @@ export function Documents({
         <DocumentEditor
           key={selected.id}
           initial={selected}
+          onOpenDocument={(id) =>
+            void documents
+              .open(id)
+              .then(setSelected)
+              .catch((e: unknown) => setError(String(e)))
+          }
+          onOpenPlan={(id) => {
+            setSelected(null);
+            onOpenPlan(id);
+          }}
+          onOpenTicket={(reference) => {
+            setSelected(null);
+            onOpenTicket(reference);
+          }}
           onClose={() => {
             setSelected(null);
             void refresh();
@@ -88,6 +117,7 @@ export function Documents({
       {capture && (
         <DocumentEditor
           initial={null}
+          currentTicket={currentTicket}
           onClose={() => {
             onCaptureClose();
             void refresh();

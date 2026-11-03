@@ -22,6 +22,28 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum DocumentCommand {
+    References {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    Incoming {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    Link {
+        target: String,
+    },
+    CreateTicket {
+        id: String,
+        title: String,
+    },
+    Backlinks {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     Create {
         #[arg(long)]
         title: Option<String>,
@@ -676,6 +698,19 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     };
     let text = match args.command {
         Command::Document { command } => match command {
+            DocumentCommand::References { id, offset } => {
+                serde_json::to_string(&workspace.context_links(&id, 100, offset)?)?
+            }
+            DocumentCommand::Incoming { id, offset } => {
+                serde_json::to_string(&workspace.context_backlinks(&id, 100, offset)?)?
+            }
+            DocumentCommand::Link { target } => workspace.context_link_markdown(&target)?,
+            DocumentCommand::CreateTicket { id, title } => {
+                serde_json::to_string(&workspace.create_ticket_from_document(&id, &title)?)?
+            }
+            DocumentCommand::Backlinks { id, offset } => {
+                serde_json::to_string(&workspace.document_backlinks(&id, 100, offset)?)?
+            }
             DocumentCommand::Create {
                 title,
                 body,

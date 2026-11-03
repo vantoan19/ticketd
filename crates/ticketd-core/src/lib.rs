@@ -8,6 +8,8 @@ pub use backup_review::{
     BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
 };
 mod context;
+mod document_links;
+pub use document_links::{ContextLink, DocumentBacklink};
 mod documents;
 pub use documents::{Document, DocumentPatch};
 mod duplicates;
@@ -59,7 +61,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 34;
+pub const FORMAT_VERSION: i64 = 35;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -503,6 +505,9 @@ impl Workspace {
             }
             transaction.execute_batch("PRAGMA user_version = 34;")?;
         }
+        if version < 35 {
+            document_links::migrate(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -627,6 +632,9 @@ impl Workspace {
             }
         }
         transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
+        if let Some(body) = patch.body.as_deref() {
+            document_links::index_body(&transaction, &ticket.id, body)?;
+        }
         if status != ticket.status {
             history::record(
                 &transaction,

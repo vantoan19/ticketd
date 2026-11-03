@@ -262,3 +262,21 @@ fn restore_accepts_what_inspection_calls_valid_and_refuses_the_rest() {
     let error = Workspace::restore(&path, &unrelated).unwrap_err();
     assert!(error.to_string().contains("not a ticketd"), "{error}");
 }
+
+#[test]
+fn backup_inspection_rejects_missing_context_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let connection = Connection::open(&backup).unwrap();
+    connection
+        .execute_batch("DROP TABLE context_mentions")
+        .unwrap();
+    drop(connection);
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("expected missing tables")
+    };
+    assert!(tables.contains(&"context_mentions".to_owned()));
+}

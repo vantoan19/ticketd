@@ -190,6 +190,7 @@ export function TicketPage({
         )}
         {active && (
           <Backlinks
+            ticketId={ticket.id}
             reference={ticket.reference}
             revision={revision}
             select={onMention}

@@ -2058,6 +2058,7 @@ fn complete_attempt(
             "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
             params![sent.ticket_id, new_title, new_body],
         )?;
+        crate::document_links::index_body(transaction, sent.ticket_id, new_body)?;
     }
     match sent.adopt {
         Some(from) => adopt_identity(transaction, from, sent.ticket_id, sent.agent)?,

@@ -48,7 +48,7 @@
 .document-dialog header {
   margin-bottom: 24px;
 }
-.document-dialog input {
+.document-dialog #document-title {
   width: 100%;
   margin-bottom: 16px;
   font-size: 24px;

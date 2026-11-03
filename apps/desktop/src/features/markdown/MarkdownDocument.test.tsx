@@ -7,6 +7,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
 import { MarkdownDocument } from "./MarkdownDocument";
 
 vi.mock("mermaid", () => ({
@@ -84,4 +88,26 @@ test("highlights known code languages while preserving literal HTML as code", ()
   expect(container.querySelector("pre code")?.textContent).toBe(code + "\n");
   expect(container.querySelector("pre code span")?.textContent).toBe("const");
   expect(container.querySelector("img")).toBeNull();
+});
+
+test("opens a Document link from Markdown", () => {
+  const open = vi.fn();
+  render(
+    <DocumentNavigation.Provider value={open}>
+      <MarkdownDocument source="[Context](ticketd://document/doc-1)" />
+    </DocumentNavigation.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Context" }));
+  expect(open).toHaveBeenCalledWith("doc-1");
+});
+
+test("opens a Plan link from Markdown", () => {
+  const open = vi.fn();
+  render(
+    <PlanNavigation.Provider value={open}>
+      <MarkdownDocument source="[Plan](ticketd://plan/plan-1)" />
+    </PlanNavigation.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  expect(open).toHaveBeenCalledWith("plan-1");
 });
