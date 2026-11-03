@@ -17,11 +17,28 @@ fn shared_documents_and_spec_survive_reopen_without_changing_ticket_membership()
     workspace
         .set_plan_document(&second.id, &doc.id, true)
         .unwrap();
+    let replacement = workspace
+        .create_document(Some("Replacement"), "New spec")
+        .unwrap();
+    workspace
+        .set_plan_spec(&first.id, Some(&replacement.id))
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_plan(&first.id)
+            .unwrap()
+            .plan
+            .spec_document_id
+            .as_deref(),
+        Some(replacement.id.as_str())
+    );
+    workspace.set_plan_spec(&first.id, Some(&doc.id)).unwrap();
     drop(workspace);
     let workspace = Workspace::open(&path).unwrap();
     let view = workspace.show_plan(&first.id).unwrap();
     assert_eq!(view.plan.spec_document_id.as_deref(), Some(doc.id.as_str()));
-    assert_eq!(view.documents[0].id, doc.id);
+    assert!(view.documents.iter().any(|item| item.id == doc.id));
+    assert!(view.documents.iter().any(|item| item.id == replacement.id));
     assert!(view.members.is_empty());
     assert_eq!(workspace.show_plan(&second.id).unwrap().documents.len(), 1);
 }
