@@ -135,7 +135,8 @@ test("reveals the existing chronological note without scrolling the workspace", 
   };
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "get_activity") return selected;
-    if (command === "activity_feed") return [{ type: "authored", activity: selected }];
+    if (command === "activity_feed")
+      return [{ type: "authored", activity: selected }];
     if (command === "ticket_history") return [];
     throw new Error(`Unexpected command: ${command}`);
   });
@@ -198,7 +199,10 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
     async (command: string, args?: { offset: number }) => {
       if (command === "get_activity") return selected;
       if (command === "activity_feed")
-        return (args?.offset ? [selected] : firstPage).map((activity) => ({ type: "authored", activity }));
+        return (args?.offset ? [selected] : firstPage).map((activity) => ({
+          type: "authored",
+          activity,
+        }));
       if (command === "ticket_history") return [];
       throw new Error(`Unexpected command: ${command}`);
     },
@@ -250,7 +254,8 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch: { brief: string } }) => {
       if (command === "get_activity") return saved;
-      if (command === "activity_feed" || command === "ticket_history") return [];
+      if (command === "activity_feed" || command === "ticket_history")
+        return [];
       if (command === "edit_activity" && saved) {
         saved = { ...saved, brief: args!.patch.brief };
         return saved;
@@ -282,9 +287,12 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
-    target: { value: "Edited earlier update" },
-  });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Edit update source" }),
+    {
+      target: { value: "Edited earlier update" },
+    },
+  );
   saved = { ...saved!, brief: "Changed externally" };
   view.rerender(<Activity {...targetProps} revision={1} />);
   await screen.findByText(/The saved update changed/);
@@ -298,7 +306,9 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
     screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete update" }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Delete update" }),
+  );
   await waitFor(() =>
     expect(screen.queryByText("Edited earlier update")).toBeNull(),
   );
@@ -324,7 +334,8 @@ test("finishing a note edit does not discard a newer note navigation", async () 
     async (command: string, args?: { id: string }) => {
       if (command === "get_activity")
         return args?.id === "second" ? secondRead : first;
-      if (command === "activity_feed" || command === "ticket_history") return [];
+      if (command === "activity_feed" || command === "ticket_history")
+        return [];
       if (command === "edit_activity") return save;
       throw new Error(`Unexpected command: ${command}`);
     },
@@ -384,7 +395,8 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   let saved: (typeof original)[] = [];
   bridge.invoke.mockImplementation(
     async (command: string, args?: { brief: string }) => {
-      if (command === "activity_feed") return saved.map((activity) => ({ type: "authored", activity }));
+      if (command === "activity_feed")
+        return saved.map((activity) => ({ type: "authored", activity }));
       if (command === "ticket_history") return [];
       if (command === "add_activity") {
         const note = { ...original, brief: args!.brief };
@@ -431,7 +443,8 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   const scoped = { ...props, reference: "T-11" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "activity_feed") return [{ type: "authored", activity: saved }];
+    if (command === "activity_feed")
+      return [{ type: "authored", activity: saved }];
     if (command === "ticket_history") return [];
     if (command === "edit_activity") throw new Error("Disk full");
     throw new Error(`Unexpected ${command}`);
@@ -456,9 +469,12 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
-    target: { value: "My edited **draft**" },
-  });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Edit update source" }),
+    {
+      target: { value: "My edited **draft**" },
+    },
+  );
   view.rerender(<Activity {...scoped} active={false} />);
   saved = { ...saved, brief: "An external update" };
   view.rerender(<Activity {...scoped} revision={1} />);
@@ -490,7 +506,8 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   let saved = { ...original };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch: { brief: string } }) => {
-      if (command === "activity_feed") return [{ type: "authored", activity: saved }];
+      if (command === "activity_feed")
+        return [{ type: "authored", activity: saved }];
       if (command === "ticket_history") return [];
       if (command === "edit_activity") {
         saved = { ...saved, brief: args!.patch.brief };
@@ -509,9 +526,12 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
-    target: { value: "## Edited finding" },
-  });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Edit update source" }),
+    {
+      target: { value: "## Edited finding" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await screen.findByRole("heading", { name: "Edited finding" });
   expect(saved.brief).toBe("## Edited finding");
@@ -542,4 +562,25 @@ test("recovers an unpublished brief after the desktop restarts", async () => {
     bridge.invoke.mock.calls.some(([command]) => command === "add_activity"),
   ).toBe(false);
   localStorage.removeItem("ticketd:activity-draft:T-987");
+});
+
+test("reports when a brief cannot be saved locally", async () => {
+  bridge.invoke.mockResolvedValue([]);
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new Error("Storage unavailable");
+  });
+  render(<Activity {...props} reference="T-988" />);
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
+    target: { value: "Still in the editor" },
+  });
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Could not save the unpublished update",
+  );
+  expect(
+    screen.getByRole("textbox", { name: "New update source" }),
+  ).toHaveProperty("value", "Still in the editor");
 });

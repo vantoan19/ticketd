@@ -68,7 +68,7 @@ const context = run(
   "--project",
   "--plan",
   "--relationships",
-  "--notes",
+  "--activities",
 );
 assert.equal(context.relationships.parent.reference, outcome.reference);
 assert.equal(context.project.id, project.id);
@@ -148,10 +148,10 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
-  await (await (await detail()).$("button=Add a note")).click();
+  await (await (await detail()).$("button=Add update")).click();
   const noteEditor = await (
     await detail()
-  ).$('[role="textbox"][aria-label="New note rich text"]');
+  ).$('[role="textbox"][aria-label="New update rich text"]');
   await noteEditor.click();
   const sentence = "Reviewed rich notes in the installed desktop.";
   // The WebKit driver may drop a keystroke. Retype a bounded number of times,
@@ -169,7 +169,7 @@ try {
         await browser.execute(
           () =>
             document.querySelector(
-              '[role="textbox"][aria-label="New note rich text"]',
+              '[role="textbox"][aria-label="New update rich text"]',
             )?.textContent,
         ),
       )}`,
@@ -178,12 +178,18 @@ try {
     await browser.keys(["Backspace"]);
   }
   assert.equal((await noteEditor.getText()).trim(), sentence);
-  assert.equal(run("note", "list", harness.reference).length, 0);
-  await (await (await detail()).$("button=Add note")).click();
+  assert.equal(
+    run("activity", "list", harness.reference).filter(
+      (entry) => entry.type === "authored",
+    ).length,
+    0,
+  );
+  await (await (await detail()).$("button=Post update")).click();
   await browser.waitUntil(
     () =>
-      run("note", "list", harness.reference).some((note) =>
-        note.content.includes(sentence),
+      run("activity", "list", harness.reference).some(
+        (entry) =>
+          entry.type === "authored" && entry.activity.brief.includes(sentence),
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
@@ -243,10 +249,10 @@ try {
     "workflow-validation",
   );
   run(
-    "note",
+    "activity",
     "add",
     harness.reference,
-    "--content",
+    "--brief",
     "Implemented the installed desktop workflow harness and exercised shared workspace operations.",
     "--agent",
     "workflow-validation",

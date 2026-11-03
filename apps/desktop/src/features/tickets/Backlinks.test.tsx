@@ -31,11 +31,12 @@ test("lists each mention with its location and opens the source passage", async 
           mention_end: 7,
         },
       ];
-    if (command === "get_note")
+    if (command === "get_activity")
       return {
         id: "n1",
-        content: "See T-1 for context.",
-        created_at: "2026-10-31T10:00:00Z",
+        ticket_id: "ticket",
+        brief: "See T-1 for context.",
+        reported_at: "2026-10-31T10:00:00Z",
         updated_at: "2026-10-31T10:00:00Z",
         editing_agent: null,
       };
@@ -46,7 +47,7 @@ test("lists each mention with its location and opens the source passage", async 
   await screen.findByText("Cache layer");
   expect(screen.getByRole("heading", { name: /Mentioned in/ })).toBeTruthy();
   expect(screen.getByText("Description")).toBeTruthy();
-  expect(await screen.findByText(/^Note · /)).toBeTruthy();
+  expect(await screen.findByText(/^Update · /)).toBeTruthy();
   // Only the whole reference is emphasized, not the prefix of T-12.
   expect(
     screen

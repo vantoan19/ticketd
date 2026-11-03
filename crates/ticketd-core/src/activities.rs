@@ -168,13 +168,38 @@ pub enum ActivityFeedEntry {
     Automatic { id: i64, event: crate::HistoryEntry },
 }
 
-pub(crate) fn feed(conn: &Connection, ticket: &str, limit: u32, offset: u32) -> Result<Vec<ActivityFeedEntry>, Error> {
+pub(crate) fn feed(
+    conn: &Connection,
+    ticket: &str,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ActivityFeedEntry>, Error> {
     let mut statement = conn.prepare("SELECT kind, seq, id, brief, reported_at, updated_at, agent, from_value, to_value FROM (SELECT 1 AS kind, number AS seq, id, brief, reported_at, updated_at, editing_agent AS agent, NULL AS from_value, NULL AS to_value FROM activities WHERE ticket_id=?1 UNION ALL SELECT 0, number, kind, NULL, timestamp, NULL, editing_agent, from_value, to_value FROM ticket_history WHERE ticket_id=?1) ORDER BY reported_at DESC, kind DESC, seq DESC LIMIT ?2 OFFSET ?3")?;
-    Ok(statement.query_map(params![ticket, limit.clamp(1, 100), offset], |row| {
-        if row.get::<_, i64>(0)? == 1 {
-            Ok(ActivityFeedEntry::Authored { activity: Activity { id: row.get(2)?, ticket_id: ticket.to_owned(), brief: row.get(3)?, reported_at: row.get(4)?, updated_at: row.get(5)?, editing_agent: row.get(6)? } })
-        } else {
-            Ok(ActivityFeedEntry::Automatic { id: row.get(1)?, event: crate::HistoryEntry { kind: row.get(2)?, from_value: row.get(7)?, to_value: row.get(8)?, timestamp: row.get(4)?, editing_agent: row.get(6)? } })
-        }
-    })?.collect::<Result<Vec<_>, _>>()?)
+    Ok(statement
+        .query_map(params![ticket, limit.clamp(1, 100), offset], |row| {
+            if row.get::<_, i64>(0)? == 1 {
+                Ok(ActivityFeedEntry::Authored {
+                    activity: Activity {
+                        id: row.get(2)?,
+                        ticket_id: ticket.to_owned(),
+                        brief: row.get(3)?,
+                        reported_at: row.get(4)?,
+                        updated_at: row.get(5)?,
+                        editing_agent: row.get(6)?,
+                    },
+                })
+            } else {
+                Ok(ActivityFeedEntry::Automatic {
+                    id: row.get(1)?,
+                    event: crate::HistoryEntry {
+                        kind: row.get(2)?,
+                        from_value: row.get(7)?,
+                        to_value: row.get(8)?,
+                        timestamp: row.get(4)?,
+                        editing_agent: row.get(6)?,
+                    },
+                })
+            }
+        })?
+        .collect::<Result<Vec<_>, _>>()?)
 }

@@ -2,7 +2,10 @@
 mod cli_status;
 
 use ticketd_core::{
-    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Document, DocumentPatch, Evidence, EvidenceInput, HistoryEntry, InboxEntry, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph,
+    Document, DocumentPatch, Evidence, EvidenceInput, HistoryEntry, InboxEntry, Plan, PlanView,
+    Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
+    TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -462,7 +465,11 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn activity_feed(reference: String, limit: u32, offset: u32) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
+fn activity_feed(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
         .map_err(|e| e.to_string())

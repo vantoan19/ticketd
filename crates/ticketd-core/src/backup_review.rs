@@ -101,10 +101,15 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     } else {
         count(connection, "tickets")?
     };
+    let activity_table = if table_exists(connection, "activities")? {
+        "activities"
+    } else {
+        "notes"
+    };
     let mut latest: Option<String> = None;
     for (table, column) in [
         ("ticket_history", "timestamp"),
-        ("activities", "updated_at"),
+        (activity_table, "updated_at"),
         ("evidence", "updated_at"),
     ] {
         if !table_exists(connection, table)? {
@@ -121,7 +126,7 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     Ok(WorkspaceSummary {
         last_change: latest,
         tickets,
-        activities: count(connection, "activities")?,
+        activities: count(connection, activity_table)?,
         evidence: count(connection, "evidence")?,
         projects: count(connection, "projects")?,
         plans: count(connection, "plans")?,

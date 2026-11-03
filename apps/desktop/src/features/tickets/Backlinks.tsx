@@ -48,7 +48,9 @@ export function Backlinks({
               ? [
                   client
                     .activity(link.source_reference, link.activity_id)
-                    .then((note) => [link.activity_id, note?.reported_at] as const)
+                    .then(
+                      (note) => [link.activity_id, note?.reported_at] as const,
+                    )
                     .catch(() => null),
                 ]
               : [],
@@ -105,7 +107,7 @@ export function Backlinks({
               </span>
               <span className="backlink-where">
                 {link.activity_id
-                  ? `Note${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
+                  ? `Update${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
                   : "Description"}
               </span>
               <span className="mention-passage">

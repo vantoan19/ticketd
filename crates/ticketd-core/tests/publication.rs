@@ -530,7 +530,10 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     assert_eq!(published.prerequisites.len(), 1);
     assert_eq!(published.children.len(), 1);
     assert_eq!(
-        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace
+            .activities(&ticket.reference, 10, 0)
+            .unwrap()
+            .len(),
         1
     );
     let source = published.source.unwrap();
@@ -801,7 +804,10 @@ fn concurrent_submission_is_refused_and_the_workspace_stays_writable_during_the_
     assert_eq!(*observed.lock().unwrap(), vec!["InFlight", "AttemptOpen"]);
     assert_eq!(f.created(), 1);
     assert_eq!(
-        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace
+            .activities(&ticket.reference, 10, 0)
+            .unwrap()
+            .len(),
         1
     );
 }
@@ -1006,7 +1012,10 @@ fn confirming_the_created_issue_completes_the_handoff_and_keeps_local_progress()
     assert_eq!(source.origin, Origin::Published);
     assert!(matches!(source.ownership, Ownership::External));
     assert_eq!(
-        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace
+            .activities(&ticket.reference, 10, 0)
+            .unwrap()
+            .len(),
         1
     );
     // Attached once, and nothing further is ever created.
@@ -1226,7 +1235,10 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     );
     // The local note, and the text the issue replaced.
     assert_eq!(
-        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace
+            .activities(&ticket.reference, 10, 0)
+            .unwrap()
+            .len(),
         2
     );
     // The imported ticket is in the trash, not deleted, and the identity is unique.

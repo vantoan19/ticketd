@@ -240,9 +240,17 @@ const activitySchema = z.object({
 });
 const activityFeedSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("authored"), activity: activitySchema }),
-  z.object({ type: z.literal("automatic"), id: z.number(), event: z.object({
-    kind: z.string(), from_value: z.string(), to_value: z.string(), timestamp: z.string(), editing_agent: z.string().nullable(),
-  }) }),
+  z.object({
+    type: z.literal("automatic"),
+    id: z.number(),
+    event: z.object({
+      kind: z.string(),
+      from_value: z.string(),
+      to_value: z.string(),
+      timestamp: z.string(),
+      editing_agent: z.string().nullable(),
+    }),
+  }),
 ]);
 const evidenceSchema = z.object({
   id: z.string(),
@@ -559,16 +567,24 @@ export const client = {
       );
   },
   async activityFeed(reference: string, offset: number) {
-    return z.array(activityFeedSchema).parse(await invoke("activity_feed", { reference, limit: 50, offset }));
+    return z
+      .array(activityFeedSchema)
+      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
   },
   async activity(reference: string, id: string) {
-    return activitySchema.nullable().parse(await invoke("get_activity", { reference, id }));
+    return activitySchema
+      .nullable()
+      .parse(await invoke("get_activity", { reference, id }));
   },
   async addActivity(reference: string, brief: string) {
-    return activitySchema.parse(await invoke("add_activity", { reference, brief }));
+    return activitySchema.parse(
+      await invoke("add_activity", { reference, brief }),
+    );
   },
   async editActivity(reference: string, id: string, brief: string) {
-    return activitySchema.parse(await invoke("edit_activity", { reference, id, patch: { brief } }));
+    return activitySchema.parse(
+      await invoke("edit_activity", { reference, id, patch: { brief } }),
+    );
   },
   async deleteActivity(reference: string, id: string) {
     await invoke("delete_activity", { reference, id });

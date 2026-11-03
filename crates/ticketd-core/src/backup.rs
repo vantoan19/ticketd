@@ -101,12 +101,15 @@ pub(crate) fn missing_tables(
 ) -> Result<Vec<&'static str>, Error> {
     let mut missing = Vec::new();
     for (table, introduced) in TABLES {
-        if version >= introduced && !(table == "notes" && version >= 32) && !table_exists(connection, table)? {
+        if version >= introduced
+            && !(table == "notes" && version >= 32)
+            && !table_exists(connection, table)?
+        {
             missing.push(table);
         }
     }
     if version >= 32 && !table_exists(connection, "activities")? {
-        missing.push("activities".into());
+        missing.push("activities");
     }
     Ok(missing)
 }

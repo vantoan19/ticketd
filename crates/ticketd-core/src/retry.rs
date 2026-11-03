@@ -1,5 +1,6 @@
 use crate::{
-    Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence, EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence,
+    EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};

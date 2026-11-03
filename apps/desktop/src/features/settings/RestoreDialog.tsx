@@ -141,7 +141,7 @@ function Comparison({
         <tr>
           <th
             scope="row"
-            title="The latest ticket history, note, or evidence change. Edits to titles, descriptions, tags, follows and reminders are not dated."
+            title="The latest ticket history, activity, or evidence change. Edits to titles, descriptions, tags, follows and reminders are not dated."
           >
             Last recorded activity
           </th>
@@ -358,7 +358,7 @@ export function RestoreDialog({
                   <strong>Pause ticketd CLI commands.</strong>{" "}
                   <span className="restore-muted">
                     Stop other ticketd commands, such as an agent recording
-                    notes, until the restore finishes.
+                    activities, until the restore finishes.
                   </span>
                 </p>
               </div>
@@ -375,7 +375,7 @@ export function RestoreDialog({
                     <span className="restore-muted">
                       You're now working from the backup:{" "}
                       {phase.inspection.check.summary.tickets} tickets,{" "}
-                      {phase.inspection.check.summary.activities} notes.
+                      {phase.inspection.check.summary.activities} activities.
                     </span>
                   </span>
                 </p>

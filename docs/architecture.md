@@ -48,14 +48,14 @@ Rich document editing uses Plate, with Markdown remaining canonical across stora
 
 ## Interface direction
 
-| Caller intent           | Core behavior                                                                                 |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket |
+| Caller intent           | Core behavior                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket               |
 | Change a ticket         | Apply supplied fields, explicit relationship changes, and optional authored Activities as one atomic change |
-| Apply a batch           | Compose the same operations atomically, with local names for new tickets                      |
-| Find tickets            | Apply search, filters, ordering, and output limits                                            |
-| Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                |
-| View a dependency graph | Return bounded graph data for presentation                                                    |
+| Apply a batch           | Compose the same operations atomically, with local names for new tickets                                    |
+| Find tickets            | Apply search, filters, ordering, and output limits                                                          |
+| Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                              |
+| View a dependency graph | Return bounded graph data for presentation                                                                  |
 
 Projects, Plans, Activities, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
 

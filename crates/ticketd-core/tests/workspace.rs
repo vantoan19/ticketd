@@ -91,7 +91,11 @@ fn authored_activity_requires_a_nonempty_brief() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Outcome").unwrap();
-    assert!(workspace.add_activity(&ticket.reference, "  \n", None).is_err());
+    assert!(
+        workspace
+            .add_activity(&ticket.reference, "  \n", None)
+            .is_err()
+    );
     let activity = workspace
         .add_activity(&ticket.reference, "A brief", None)
         .unwrap();
@@ -150,7 +154,9 @@ fn notes_can_be_paged_edited_and_deleted_after_reopening() {
         workspace.activities(&ticket.reference, 1, 1).unwrap(),
         vec![second.clone()]
     );
-    workspace.delete_activity(&ticket.reference, &first.id).unwrap();
+    workspace
+        .delete_activity(&ticket.reference, &first.id)
+        .unwrap();
     assert_eq!(
         workspace.activities(&ticket.reference, 10, 0).unwrap(),
         vec![second]
@@ -761,7 +767,10 @@ fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
     assert_eq!(child.parent.unwrap().reference, results[0].reference);
     assert_eq!(child.prerequisites[0].reference, results[0].reference);
     assert_eq!(child.tags, ["feature"]);
-    assert_eq!(workspace.activities(&child.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(
+        workspace.activities(&child.reference, 10, 0).unwrap().len(),
+        1
+    );
     let history_before = workspace.ticket_history(&child.reference).unwrap();
     let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
         {"operation":"create", "name":"temporary", "title":"Rolled back"},
@@ -775,7 +784,10 @@ fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
         workspace.show_ticket(&child.reference).unwrap().status,
         ticketd_core::Status::Todo
     );
-    assert_eq!(workspace.activities(&child.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(
+        workspace.activities(&child.reference, 10, 0).unwrap().len(),
+        1
+    );
     assert_eq!(
         workspace.ticket_history(&child.reference).unwrap(),
         history_before
@@ -1014,7 +1026,9 @@ fn search_tracks_note_deletion() {
             .len(),
         1
     );
-    workspace.delete_activity(&ticket.reference, &note.id).unwrap();
+    workspace
+        .delete_activity(&ticket.reference, &note.id)
+        .unwrap();
     assert!(
         workspace
             .search_tickets("[literal]", None, false, 50, 0)
@@ -1606,7 +1620,9 @@ fn backlinks_follow_markdown_content_and_note_changes() {
     assert_eq!(links[0].source_reference, source.reference);
     assert_eq!(links[0].passage, "See T-1 here.");
     assert_eq!(links[1].activity_id.as_deref(), Some(note.id.as_str()));
-    workspace.delete_activity(&source.reference, &note.id).unwrap();
+    workspace
+        .delete_activity(&source.reference, &note.id)
+        .unwrap();
     assert_eq!(
         workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
         1
@@ -1756,7 +1772,9 @@ fn followed_note_remains_understandable_after_deletion() {
     let note = workspace
         .add_activity(&ticket.reference, "Original finding", Some("agent"))
         .unwrap();
-    workspace.delete_activity(&ticket.reference, &note.id).unwrap();
+    workspace
+        .delete_activity(&ticket.reference, &note.id)
+        .unwrap();
     let entries = workspace.inbox(100, 0).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].kind, "activity");
@@ -4221,11 +4239,25 @@ fn activity_feed_interleaves_reports_and_automatic_events_with_bounded_pages() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Outcome").unwrap();
-    workspace.change_ticket(&ticket.reference, TicketPatch { status: Some(Status::InProgress), ..Default::default() }).unwrap();
-    let report = workspace.add_activity(&ticket.reference, "First finding", Some("agent")).unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let report = workspace
+        .add_activity(&ticket.reference, "First finding", Some("agent"))
+        .unwrap();
     let page = workspace.activity_feed(&ticket.reference, 1, 0).unwrap();
     assert_eq!(page.len(), 1);
-    assert!(matches!(&page[0], ActivityFeedEntry::Authored { activity } if activity.id == report.id));
+    assert!(
+        matches!(&page[0], ActivityFeedEntry::Authored { activity } if activity.id == report.id)
+    );
     let older = workspace.activity_feed(&ticket.reference, 1, 1).unwrap();
-    assert!(matches!(&older[0], ActivityFeedEntry::Automatic { event, .. } if event.to_value == "In progress"));
+    assert!(
+        matches!(&older[0], ActivityFeedEntry::Automatic { event, .. } if event.to_value == "In progress")
+    );
 }

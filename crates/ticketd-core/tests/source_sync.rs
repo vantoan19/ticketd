@@ -1200,7 +1200,7 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     assert_eq!(item["body"]["text"], "please do X");
     assert!(item.get("editing_agent").is_none());
     assert_eq!(
-        value["notes"]["items"][0]["editing_agent"]["text"],
+        value["activities"]["items"][0]["editing_agent"]["text"],
         "agent-x"
     );
     let without = f
@@ -1501,6 +1501,7 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
             [],
         )
         .unwrap();
+    legacy.execute_batch("ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes;").unwrap();
     legacy.pragma_update(None, "user_version", 27).unwrap();
     drop(legacy);
     let migrated = Workspace::open(path).unwrap();

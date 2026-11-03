@@ -46,10 +46,20 @@ const note = {
 
 test("a change that came from a source reads as the source, not as an agent", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "activity_feed") return [{ type: "automatic", id: 1, event: {
-      kind: "status", from_value: "Todo", to_value: "Canceled",
-      timestamp: "2026-10-31T11:00:00Z", editing_agent: "github",
-    }}];
+    if (command === "activity_feed")
+      return [
+        {
+          type: "automatic",
+          id: 1,
+          event: {
+            kind: "status",
+            from_value: "Todo",
+            to_value: "Canceled",
+            timestamp: "2026-10-31T11:00:00Z",
+            editing_agent: "github",
+          },
+        },
+      ];
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-20" />);
@@ -59,11 +69,33 @@ test("a change that came from a source reads as the source, not as an agent", as
 
 test("shows an editing agent only when one was recorded and words history as sentences", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "activity_feed") return [
-      { type: "automatic", id: 1, event: { kind: "status", from_value: "Todo", to_value: "In progress", timestamp: "2026-10-31T11:00:00Z", editing_agent: null } },
-      { type: "authored", activity: { ...note, id: "agentless", brief: "Plain", editing_agent: null } },
-      { type: "authored", activity: { ...note, id: "agent", brief: "By agent" } },
-    ];
+    if (command === "activity_feed")
+      return [
+        {
+          type: "automatic",
+          id: 1,
+          event: {
+            kind: "status",
+            from_value: "Todo",
+            to_value: "In progress",
+            timestamp: "2026-10-31T11:00:00Z",
+            editing_agent: null,
+          },
+        },
+        {
+          type: "authored",
+          activity: {
+            ...note,
+            id: "agentless",
+            brief: "Plain",
+            editing_agent: null,
+          },
+        },
+        {
+          type: "authored",
+          activity: { ...note, id: "agent", brief: "By agent" },
+        },
+      ];
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-20" />);
@@ -107,7 +139,9 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
 test("Activity puts the composer before labelled notes and quiet relative history", async () => {
   const recent = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "activity_feed" ? [{ type: "authored", activity: { ...note, reported_at: recent } }] : [],
+    command === "activity_feed"
+      ? [{ type: "authored", activity: { ...note, reported_at: recent } }]
+      : [],
   );
   render(
     <Activity
@@ -118,9 +152,7 @@ test("Activity puts the composer before labelled notes and quiet relative histor
     />,
   );
   const body = await screen.findByText("Body");
-  expect(
-    screen.getByRole("heading", { name: "Activity" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
   expect(
     screen.getByText("Only in ticketd · never sent to GitHub"),
   ).toBeTruthy();

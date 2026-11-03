@@ -25,7 +25,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
-import { client, type AuthoredActivity, type ActivityFeedEntry, type Project } from "@/lib/api/client";
+import {
+  client,
+  type AuthoredActivity,
+  type ActivityFeedEntry,
+  type Project,
+} from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { historySentence } from "./history-sentence";
 import { attribution } from "./ticket-source";
@@ -34,7 +39,7 @@ import { revealInDetail } from "./detail-scroll";
 import "./activity.css";
 
 /**
- * Unsubmitted note drafts by ticket reference. They outlive this component so
+ * Unsubmitted update drafts by ticket identity. They outlive this component so
  * switching tickets, or the detail remounting, never loses typed text.
  */
 const noteDrafts = new Map<string, string>();
@@ -54,6 +59,7 @@ function loadDraft(reference: string): string {
 
 export function Activity({
   reference,
+  ticketId = reference,
   status,
   revision,
   projects,
@@ -70,6 +76,7 @@ export function Activity({
   latestNoteId?: string | undefined;
   onChanged?: () => Promise<void>;
   reference: string;
+  ticketId?: string;
   status: string;
   revision: number;
   projects: Project[];
@@ -106,20 +113,24 @@ export function Activity({
     };
   }, [active, reference, revision, targetId, targetKey]);
   const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
-  const notes = feed.flatMap((item) => item.type === "authored" ? [item.activity] : []);
-  const history = feed.flatMap((item) => item.type === "automatic" ? [item.event] : []);
+  const notes = feed.flatMap((item) =>
+    item.type === "authored" ? [item.activity] : [],
+  );
+  const history = feed.flatMap((item) =>
+    item.type === "automatic" ? [item.event] : [],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraftValue] = useState(() => loadDraft(reference));
+  const [draft, setDraftValue] = useState(() => loadDraft(ticketId));
   const [composing, setComposing] = useState(() =>
-    Boolean(loadDraft(reference)),
+    Boolean(loadDraft(ticketId)),
   );
   function setDraft(content: string) {
-    if (content) noteDrafts.set(reference, content);
-    else noteDrafts.delete(reference);
+    if (content) noteDrafts.set(ticketId, content);
+    else noteDrafts.delete(ticketId);
     try {
-      if (content) localStorage.setItem(draftKey(reference), content);
-      else localStorage.removeItem(draftKey(reference));
+      if (content) localStorage.setItem(draftKey(ticketId), content);
+      else localStorage.removeItem(draftKey(ticketId));
     } catch {
       setError("Could not save the unpublished update on this device.");
     }
@@ -269,7 +280,7 @@ export function Activity({
     revealInDetail(element);
     element.focus({ preventScroll: true });
     revealedTarget.current = { id: targetId, key: targetKey };
-  }, [active, targetId, targetKey, notes, targetNote]);
+  }, [active, targetId, targetKey, feed, targetNote]);
   const entries = [
     ...displayedNotes.map((note) => ({
       type: "note" as const,

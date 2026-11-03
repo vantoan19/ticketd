@@ -205,6 +205,7 @@ export function TicketPage({
         )}
         <Activity
           reference={ticket.reference}
+          ticketId={ticket.id}
           target={
             updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
               ? updateTarget

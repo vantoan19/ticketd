@@ -53,8 +53,8 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
-pub use history::{HistoryEntry, Readiness, Status};
 pub use activities::{Activity, ActivityFeedEntry, ActivityPatch, ReportedUpdate};
+pub use history::{HistoryEntry, Readiness, Status};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
@@ -712,7 +712,12 @@ impl Workspace {
         tx.commit()?;
         Ok(())
     }
-    pub fn activity_feed(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<ActivityFeedEntry>, Error> {
+    pub fn activity_feed(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ActivityFeedEntry>, Error> {
         let ticket = self.show_ticket(reference)?;
         activities::feed(&self.connection, &ticket.id, limit, offset)
     }
@@ -722,7 +727,12 @@ impl Workspace {
         activities::get(&self.connection, &ticket.id, id)
     }
 
-    pub fn activities(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Activity>, Error> {
+    pub fn activities(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Activity>, Error> {
         let ticket = self.show_ticket(reference)?;
         activities::read(&self.connection, &ticket.id, limit, offset)
     }

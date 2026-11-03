@@ -234,7 +234,9 @@ fn takeover_keeps_the_ticket_and_work_and_reads_local_with_provenance() {
     f.workspace
         .change_ticket("T-1", patch(None, Some(Status::InProgress)))
         .unwrap();
-    f.workspace.add_activity("T-1", "my own note", None).unwrap();
+    f.workspace
+        .add_activity("T-1", "my own note", None)
+        .unwrap();
     let before = f.workspace.show_ticket("T-1").unwrap();
     // Content is locked while the source owns it.
     assert!(matches!(

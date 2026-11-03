@@ -1,7 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput, EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
+    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -873,7 +874,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 workspace.delete_activity(&reference, &id)?;
                 "null".into()
             }
-            ActivityCommand::Show { reference, id } => serde_json::to_string(&workspace.activity(&reference, &id)?)?,
+            ActivityCommand::Show { reference, id } => {
+                serde_json::to_string(&workspace.activity(&reference, &id)?)?
+            }
             ActivityCommand::List {
                 reference,
                 limit,
