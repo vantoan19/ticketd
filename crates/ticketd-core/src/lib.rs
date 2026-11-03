@@ -9,7 +9,7 @@ pub use backup_review::{
 };
 mod context;
 mod documents;
-pub use documents::{Document, DocumentPatch};
+pub use documents::{Document, DocumentPatch, DocumentSearchResult, DocumentSummary};
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
@@ -59,7 +59,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 31;
+pub const FORMAT_VERSION: i64 = 36;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -483,6 +483,9 @@ impl Workspace {
         }
         if version < 31 {
             documents::migrate(&transaction)?;
+        }
+        if version < 36 {
+            documents::migrate_search(&transaction)?;
         }
         transaction.commit()?;
         Ok(())

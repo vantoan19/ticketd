@@ -3,9 +3,9 @@ mod cli_status;
 
 use ticketd_core::{
     BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Document, DocumentPatch,
-    Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Plan, PlanView, Project,
-    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
-    TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    DocumentSearchResult, DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, Note,
+    NotePatch, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket,
+    TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -57,9 +57,43 @@ impl From<ticketd_core::Error> for BridgeFailure {
 }
 
 #[tauri::command]
-fn recent_documents() -> Result<Vec<Document>, String> {
+fn recent_documents() -> Result<Vec<DocumentSummary>, String> {
     Workspace::open_default()
         .and_then(|w| w.recent_documents())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn pinned_documents() -> Result<Vec<DocumentSummary>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.pinned_documents(100, 0))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn search_documents(
+    query: String,
+    tag: Option<String>,
+    offset: u32,
+) -> Result<Vec<DocumentSearchResult>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.search_documents(&query, tag.as_deref(), 50, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_document_pin(id: String, pinned: bool) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.set_document_pin(&id, pinned))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn document_tags(id: String) -> Result<Vec<String>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.document_tags(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String> {
+    Workspace::open_default()
+        .and_then(|mut w| w.set_document_tag(&id, &tag, present))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -1067,6 +1101,11 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             recent_documents,
+            pinned_documents,
+            search_documents,
+            set_document_pin,
+            document_tags,
+            set_document_tag,
             show_document,
             open_document,
             save_document,

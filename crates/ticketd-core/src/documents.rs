@@ -12,6 +12,19 @@ pub struct Document {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentSummary {
+    pub id: String,
+    pub heading: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentSearchResult {
+    pub id: String,
+    pub heading: String,
+    pub snippet: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct DocumentPatch {
     /// Outer None leaves the title unchanged; Some(None) removes it.
@@ -37,6 +50,29 @@ pub(crate) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
         PRAGMA user_version = 31;")?;
     Ok(())
 }
+
+pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch("CREATE VIRTUAL TABLE document_fts USING fts5(title, body, content='documents', content_rowid='rowid');
+        INSERT INTO document_fts(document_fts) VALUES ('rebuild');
+        CREATE TRIGGER document_fts_insert AFTER INSERT ON documents BEGIN
+            INSERT INTO document_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+        END;
+        CREATE TRIGGER document_fts_delete AFTER DELETE ON documents BEGIN
+            INSERT INTO document_fts(document_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
+        END;
+        CREATE TRIGGER document_fts_update AFTER UPDATE OF title, body ON documents BEGIN
+            INSERT INTO document_fts(document_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
+            INSERT INTO document_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+        END;
+        CREATE TABLE document_pins (document_id TEXT PRIMARY KEY REFERENCES documents(id));
+        CREATE TABLE document_tags (document_id TEXT NOT NULL REFERENCES documents(id), tag_name TEXT NOT NULL REFERENCES tags(name), PRIMARY KEY(document_id, tag_name));
+        CREATE INDEX document_tags_tag ON document_tags(tag_name, document_id);
+        PRAGMA user_version = 36;")?;
+    Ok(())
+}
+
+// Limit headings in list results even when a document has a very long first line.
+const HEADING: &str = "coalesce(nullif(trim(d.title), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {
@@ -91,18 +127,135 @@ impl Workspace {
         Ok(document)
     }
 
-    pub fn recent_documents(&self) -> Result<Vec<Document>, Error> {
-        let mut statement = self.connection.prepare("SELECT d.id, d.title, d.body, d.created_at, d.updated_at FROM document_opens o JOIN documents d ON d.id = o.document_id ORDER BY o.sequence DESC")?;
-        let rows = statement.query_map([], |row| {
-            Ok(Document {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    pub fn recent_documents(&self) -> Result<Vec<DocumentSummary>, Error> {
+        self.recent_documents_page(50, 0)
+    }
+
+    pub fn recent_documents_page(
+        &self,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<DocumentSummary>, Error> {
+        let sql = format!(
+            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        Ok(statement
+            .query_map(params![limit.min(100), offset], |row| {
+                Ok(DocumentSummary {
+                    id: row.get(0)?,
+                    heading: row.get(1)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
+    pub fn pinned_documents(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
+        let sql = format!(
+            "SELECT d.id, {HEADING} FROM document_pins p JOIN documents d ON d.id = p.document_id ORDER BY d.id LIMIT ?1 OFFSET ?2"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        Ok(statement
+            .query_map(params![limit.min(100), offset], |row| {
+                Ok(DocumentSummary {
+                    id: row.get(0)?,
+                    heading: row.get(1)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
+    pub fn search_documents(
+        &self,
+        query: &str,
+        tag: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<DocumentSearchResult>, Error> {
+        let query = query.trim();
+        if query.is_empty() {
+            let Some(tag) = tag else {
+                return Ok(Vec::new());
+            };
+            let sql = format!(
+                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3"
+            );
+            let mut statement = self.connection.prepare(&sql)?;
+            return Ok(statement
+                .query_map(
+                    params![tag.trim().to_lowercase(), limit.min(100), offset],
+                    |row| {
+                        Ok(DocumentSearchResult {
+                            id: row.get(0)?,
+                            heading: row.get(1)?,
+                            snippet: String::new(),
+                        })
+                    },
+                )?
+                .collect::<Result<_, _>>()?);
+        }
+        let expression = format!("\"{}\"", query.replace('"', "\"\""));
+        let tag = tag.map(|value| value.trim().to_lowercase());
+        let sql = format!(
+            "SELECT d.id, {HEADING}, snippet(document_fts, -1, '', '', '…', 24) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        Ok(statement
+            .query_map(params![expression, tag, limit.min(100), offset], |row| {
+                Ok(DocumentSearchResult {
+                    id: row.get(0)?,
+                    heading: row.get(1)?,
+                    snippet: row.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
+    pub fn set_document_pin(&mut self, id: &str, pinned: bool) -> Result<(), Error> {
+        self.show_document(id)?;
+        if pinned {
+            self.connection.execute(
+                "INSERT OR IGNORE INTO document_pins(document_id) VALUES (?1)",
+                [id],
+            )?;
+        } else {
+            self.connection
+                .execute("DELETE FROM document_pins WHERE document_id = ?1", [id])?;
+        }
+        Ok(())
+    }
+
+    pub fn set_document_tag(&mut self, id: &str, tag: &str, present: bool) -> Result<(), Error> {
+        let tag = tag.trim().to_lowercase();
+        if tag.is_empty() {
+            return Err(Error::EmptyTag);
+        }
+        self.show_document(id)?;
+        let tx = self.connection.savepoint()?;
+        if present {
+            tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
+            tx.execute(
+                "INSERT OR IGNORE INTO document_tags(document_id, tag_name) VALUES (?1, ?2)",
+                params![id, tag],
+            )?;
+        } else {
+            tx.execute(
+                "DELETE FROM document_tags WHERE document_id = ?1 AND tag_name = ?2",
+                params![id, tag],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn document_tags(&self, id: &str) -> Result<Vec<String>, Error> {
+        self.show_document(id)?;
+        let mut statement = self.connection.prepare(
+            "SELECT tag_name FROM document_tags WHERE document_id = ?1 ORDER BY tag_name",
+        )?;
+        Ok(statement
+            .query_map([id], |row| row.get(0))?
+            .collect::<Result<_, _>>()?)
     }
 
     pub fn change_document(&mut self, id: &str, patch: DocumentPatch) -> Result<Document, Error> {

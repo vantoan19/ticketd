@@ -90,3 +90,85 @@ fn replayed_patch_can_clear_title_without_replacing_body() {
     assert_eq!(updated.title, None);
     assert_eq!(updated.body, "Keep this");
 }
+
+#[test]
+fn search_tracks_edits_and_organization_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let first = workspace
+        .create_document(None, "\nA rare compass in the forest")
+        .unwrap();
+    let second = workspace
+        .create_document(Some("Compass notes"), "other")
+        .unwrap();
+    workspace.set_document_pin(&first.id, true).unwrap();
+    workspace
+        .set_document_tag(&first.id, "research", true)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .search_documents("compass", None, 10, 0)
+            .unwrap()
+            .len(),
+        2
+    );
+    workspace
+        .change_document(
+            &second.id,
+            DocumentPatch {
+                title: Some(Some("Changed".into())),
+                body: None,
+            },
+        )
+        .unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(&path).unwrap();
+    let results = workspace
+        .search_documents("compass", Some("research"), 1, 0)
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, first.id);
+    assert!(results[0].snippet.contains("compass"));
+    assert_eq!(workspace.pinned_documents(10, 0).unwrap()[0].id, first.id);
+    assert_eq!(
+        workspace
+            .search_documents("compass", None, 1, 1)
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn organization_writes_are_replayable_and_exported() {
+    use ticketd_core::WriteRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let document = workspace.create_document(None, "Example").unwrap();
+    let pin = || WriteRequest::SetDocumentPin {
+        id: document.id.clone(),
+        pinned: true,
+    };
+    assert_eq!(
+        workspace.write(Some("pin"), pin()).unwrap(),
+        workspace.write(Some("pin"), pin()).unwrap()
+    );
+    workspace
+        .write(
+            Some("tag"),
+            WriteRequest::SetDocumentTag {
+                id: document.id.clone(),
+                tag: "  Research ".into(),
+                present: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.document_tags(&document.id).unwrap(),
+        vec!["research"]
+    );
+    let export = workspace.export().unwrap();
+    assert_eq!(export["document_pins"][0]["document_id"], document.id);
+    assert_eq!(export["document_tags"][0]["tag_name"], "research");
+}

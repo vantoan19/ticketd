@@ -20,6 +20,15 @@ pub enum WriteRequest {
         id: String,
         patch: DocumentPatch,
     },
+    SetDocumentPin {
+        id: String,
+        pinned: bool,
+    },
+    SetDocumentTag {
+        id: String,
+        tag: String,
+        present: bool,
+    },
     AddEvidence {
         reference: String,
         input: EvidenceInput,
@@ -253,6 +262,14 @@ impl Workspace {
             }
             WriteRequest::ChangeDocument { id, patch } => {
                 WriteResult::Document(self.change_document(&id, patch)?)
+            }
+            WriteRequest::SetDocumentPin { id, pinned } => {
+                self.set_document_pin(&id, pinned)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetDocumentTag { id, tag, present } => {
+                self.set_document_tag(&id, &tag, present)?;
+                WriteResult::Deleted
             }
             WriteRequest::AddEvidence { reference, input } => {
                 WriteResult::Evidence(self.add_evidence(&reference, input)?)
