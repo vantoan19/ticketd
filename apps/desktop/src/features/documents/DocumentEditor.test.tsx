@@ -218,3 +218,49 @@ it("opens a trashed Document readably and restores it", async () => {
     "Preserved",
   );
 });
+it("keeps capture typing unchanged while saving the suggested connection", async () => {
+  vi.mocked(documents.save).mockResolvedValue({
+    id: "d1",
+    title: null,
+    body: "Thought\n\n[T-12](ticketd://ticket/T-12)",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
+  render(
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+  );
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Thought" },
+  });
+  fireEvent.click(screen.getByText("Back to work"));
+  await waitFor(() => expect(documents.save).toHaveBeenCalled());
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(
+    "Thought\n\n[T-12](ticketd://ticket/T-12)",
+  );
+  expect(
+    (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
+  ).toBe("Thought");
+});
+it("removes a suggested connection after the first save", async () => {
+  vi.mocked(documents.save).mockResolvedValue({
+    id: "d1",
+    title: null,
+    body: "Thought",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
+  render(
+    <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
+  );
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Thought" },
+  });
+  await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(1));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove connection to T-12" }),
+  );
+  await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(documents.save).mock.calls[1]?.[2]).toBe("Thought");
+});

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { DocumentNavigation } from "@/features/markdown/MarkdownDocument";
+import { DocumentNavigation } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { client } from "@/lib/api/client";
@@ -24,10 +24,12 @@ export type MentionTarget = {
 
 export function Backlinks({
   reference,
+  ticketId,
   revision,
   select,
 }: {
   reference: string;
+  ticketId?: string;
   revision: number;
   select: (target: MentionTarget) => void;
 }) {
@@ -80,9 +82,12 @@ export function Backlinks({
   }, [reference, revision, offset]);
   useEffect(() => {
     let active = true;
-    void client
-      .showTicket(reference)
-      .then((ticket) => documents.links(ticket.id))
+    if (!ticketId)
+      return () => {
+        active = false;
+      };
+    void documents
+      .links(ticketId)
       .then(([, incoming]) => {
         if (active)
           setDocumentLinks(
@@ -93,7 +98,7 @@ export function Backlinks({
     return () => {
       active = false;
     };
-  }, [reference, revision]);
+  }, [ticketId, revision]);
   if (
     !error &&
     links.length === 0 &&

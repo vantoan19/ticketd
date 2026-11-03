@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { documents, type Document } from "./api";
 
-type Snapshot = { title: string; body: string };
+type Snapshot = { title: string; body: string; suggestion: string | null };
 type Pending = {
   id: string | null;
   title: string | null;
@@ -53,8 +53,8 @@ export function DocumentEditor({
     null,
   );
   const [failed, setFailed] = useState(false);
-  const draft = useRef<Snapshot>({ title, body });
-  const saved = useRef<Snapshot>({ title, body });
+  const draft = useRef<Snapshot>({ title, body, suggestion });
+  const saved = useRef<Snapshot>({ title, body, suggestion: null });
   const id = useRef(initial?.id ?? null);
   const pending = useRef<Pending | null>(null);
   const saving = useRef(false);
@@ -89,22 +89,11 @@ export function DocumentEditor({
   };
   const save = async () => {
     if (saving.current) return;
-    let snapshot = draft.current;
-    if (
-      !id.current &&
-      suggestion &&
-      snapshot.title.trim() &&
-      !snapshot.body.trim()
-    ) {
-      snapshot = {
-        ...snapshot,
-        body: `[${suggestion}](ticketd://ticket/${suggestion})`,
-      };
-      draft.current = snapshot;
-      setBody(snapshot.body);
-    }
+    const snapshot = draft.current;
     const titleChanged = snapshot.title !== saved.current.title;
-    const bodyChanged = snapshot.body !== saved.current.body;
+    const bodyChanged =
+      snapshot.body !== saved.current.body ||
+      snapshot.suggestion !== saved.current.suggestion;
     if (!pending.current && !titleChanged && !bodyChanged) {
       if (transition.current) void finishTransition();
       else if (closeRequested.current) finish();
@@ -122,7 +111,12 @@ export function DocumentEditor({
     const request = pending.current ?? {
       id: id.current,
       title: snapshot.title.trim() ? snapshot.title : null,
-      body: !id.current || bodyChanged ? snapshot.body : null,
+      body:
+        !id.current || bodyChanged
+          ? snapshot.suggestion
+            ? `${snapshot.body}${snapshot.body ? "\n\n" : ""}[${snapshot.suggestion}](ticketd://ticket/${snapshot.suggestion})`
+            : snapshot.body
+          : null,
       titleChanged,
       requestId: crypto.randomUUID(),
       snapshot,
@@ -151,7 +145,8 @@ export function DocumentEditor({
           .catch((error: unknown) => setLinkError(String(error)));
       if (
         draft.current.title !== saved.current.title ||
-        draft.current.body !== saved.current.body
+        draft.current.body !== saved.current.body ||
+        draft.current.suggestion !== saved.current.suggestion
       )
         void save();
       else if (transition.current) void finishTransition();
@@ -170,7 +165,7 @@ export function DocumentEditor({
   useEffect(() => {
     const timer = window.setTimeout(() => void saveRef.current(), 400);
     return () => window.clearTimeout(timer);
-  }, [title, body]);
+  }, [title, body, suggestion]);
   useEffect(() => {
     // Replacing rich editor content while typing can move its selection or focus.
     const editing = () =>
@@ -187,7 +182,8 @@ export function DocumentEditor({
         saving.current ||
         pending.current ||
         draft.current.title !== saved.current.title ||
-        draft.current.body !== saved.current.body
+        draft.current.body !== saved.current.body ||
+        draft.current.suggestion !== saved.current.suggestion
       )
         return;
       void documents
@@ -198,11 +194,28 @@ export function DocumentEditor({
             saving.current ||
             pending.current ||
             draft.current.title !== saved.current.title ||
-            draft.current.body !== saved.current.body
+            draft.current.body !== saved.current.body ||
+            draft.current.suggestion !== saved.current.suggestion
           )
             return;
           setTrashed(document.trashed);
-          const next = { title: document.title ?? "", body: document.body };
+          const currentSuggestion = draft.current.suggestion;
+          const link = currentSuggestion
+            ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})`
+            : "";
+          const hasLink =
+            currentSuggestion &&
+            (document.body === link || document.body.endsWith(`\n\n${link}`));
+          const next = {
+            title: document.title ?? "",
+            body: hasLink
+              ? document.body
+                  .slice(0, document.body.length - link.length)
+                  .replace(/\n\n$/, "")
+              : document.body,
+            suggestion: hasLink ? currentSuggestion : null,
+          };
+          if (!hasLink && currentSuggestion) setSuggestion(null);
           saved.current = next;
           draft.current = next;
           setTitle(next.title);
@@ -269,13 +282,7 @@ export function DocumentEditor({
               variant="ghost"
               aria-label={`Remove connection to ${suggestion}`}
               onClick={() => {
-                const link = `[${suggestion}](ticketd://ticket/${suggestion})`;
-                const next =
-                  draft.current.body === link
-                    ? ""
-                    : draft.current.body.replace(`\n\n${link}`, "");
-                draft.current = { ...draft.current, body: next };
-                setBody(next);
+                draft.current = { ...draft.current, suggestion: null };
                 setSuggestion(null);
               }}
             >
@@ -286,18 +293,8 @@ export function DocumentEditor({
         <LazyMarkdownEditor
           value={body}
           onChange={(value) => {
-            const link = suggestion
-              ? `[${suggestion}](ticketd://ticket/${suggestion})`
-              : "";
-            const next =
-              suggestion &&
-              value.trim() &&
-              !draft.current.body &&
-              !value.includes(link)
-                ? `${value}\n\n${link}`
-                : value;
-            draft.current = { ...draft.current, body: next };
-            setBody(next);
+            draft.current = { ...draft.current, body: value };
+            setBody(value);
           }}
           label="Your thought"
           readOnly={trashed || transitioning}

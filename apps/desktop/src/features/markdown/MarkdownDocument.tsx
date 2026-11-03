@@ -5,6 +5,10 @@ import ReactMarkdown, {
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
 import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -23,9 +27,6 @@ const remarkPlugins = [remarkGfm, references];
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
-export const DocumentNavigation = createContext<((id: string) => void) | null>(
-  null,
-);
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -40,6 +41,17 @@ function DocumentLink({
 }) {
   const { select, revision } = useContext(TicketNavigation);
   const openDocument = useContext(DocumentNavigation);
+  const openPlan = useContext(PlanNavigation);
+  if (href?.startsWith("ticketd://plan/")) {
+    const id = href.slice("ticketd://plan/".length);
+    return openPlan ? (
+      <button type="button" onClick={() => openPlan(id)}>
+        {children}
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
   if (href?.startsWith("ticketd://document/")) {
     const id = href.slice("ticketd://document/".length);
     return openDocument ? (

@@ -294,3 +294,47 @@ fn trashed_document_links_remain_navigable_and_identify_trash() {
     workspace.set_document_trashed(&target.id, false).unwrap();
     assert!(!workspace.context_links(&source.id, 20, 0).unwrap()[0].target_trashed);
 }
+
+#[test]
+fn document_reference_cycles_are_allowed_without_implying_ticket_relationships() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let first = workspace.create_document(None, "first").unwrap();
+    let second = workspace
+        .create_document(None, &format!("[first](ticketd://document/{})", first.id))
+        .unwrap();
+    workspace
+        .change_document(
+            &first.id,
+            DocumentPatch {
+                title: None,
+                body: Some(format!("[second](ticketd://document/{})", second.id)),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.context_links(&first.id, 20, 0).unwrap()[0].target_id,
+        second.id
+    );
+    assert_eq!(
+        workspace.context_links(&second.id, 20, 0).unwrap()[0].target_id,
+        first.id
+    );
+}
+
+#[test]
+fn context_passages_are_bounded_and_keep_the_link_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let target = workspace.create_document(None, "target").unwrap();
+    let body = format!(
+        "{} [source](ticketd://document/{}) {}",
+        "a".repeat(1000),
+        target.id,
+        "z".repeat(1000)
+    );
+    let source = workspace.create_document(None, &body).unwrap();
+    let links = workspace.context_links(&source.id, 20, 0).unwrap();
+    assert!(links[0].passage.chars().count() <= 512);
+    assert!(links[0].passage.contains("[source]"));
+}

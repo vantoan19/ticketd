@@ -25,11 +25,11 @@ pub struct DocumentBacklink {
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
-    tx.execute_batch("INSERT INTO entities(id, kind) SELECT id, 'ticket' FROM tickets; INSERT INTO entities(id, kind) SELECT id, 'plan' FROM plans;
-        CREATE TRIGGER ticket_entity_insert AFTER INSERT ON tickets BEGIN INSERT INTO entities(id,kind) VALUES (NEW.id,'ticket'); END;
-        CREATE TRIGGER plan_entity_insert AFTER INSERT ON plans BEGIN INSERT INTO entities(id,kind) VALUES (NEW.id,'plan'); END;
-        CREATE TABLE context_mentions (source_id TEXT NOT NULL REFERENCES entities(id), target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(source_id, target_id, passage));
-        CREATE INDEX context_mentions_target ON context_mentions(target_id, source_id); PRAGMA user_version = 35;")?;
+    tx.execute_batch("INSERT OR IGNORE INTO entities(id, kind) SELECT id, 'ticket' FROM tickets; INSERT OR IGNORE INTO entities(id, kind) SELECT id, 'plan' FROM plans;
+        CREATE TRIGGER IF NOT EXISTS ticket_entity_insert AFTER INSERT ON tickets BEGIN INSERT INTO entities(id,kind) VALUES (NEW.id,'ticket'); END;
+        CREATE TRIGGER IF NOT EXISTS plan_entity_insert AFTER INSERT ON plans BEGIN INSERT INTO entities(id,kind) VALUES (NEW.id,'plan'); END;
+        CREATE TABLE IF NOT EXISTS context_mentions (source_id TEXT NOT NULL REFERENCES entities(id), target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(source_id, target_id, passage));
+        CREATE INDEX IF NOT EXISTS context_mentions_target ON context_mentions(target_id, source_id); PRAGMA user_version = 35;")?;
     let mut statement =
         tx.prepare("SELECT id, body FROM tickets UNION ALL SELECT id, body FROM documents")?;
     let items = statement
@@ -40,6 +40,17 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
         index_body(tx, &id, &body)?;
     }
     Ok(())
+}
+
+fn passage(body: &str, at: usize) -> String {
+    let start = body[..at].rfind('\n').map_or(0, |i| i + 1);
+    let end = body[at..].find('\n').map_or(body.len(), |i| at + i);
+    let before = body[start..at].chars().count();
+    body[start..end]
+        .chars()
+        .skip(before.saturating_sub(256))
+        .take(512)
+        .collect()
 }
 
 pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
@@ -73,11 +84,10 @@ pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Er
                             })
                             .optional()?;
                         if let Some(target) = target {
-                            let start = body[..range.start].rfind('\n').map_or(0, |i| i + 1);
-                            let end = body[range.end..]
-                                .find('\n')
-                                .map_or(body.len(), |i| range.end + i);
-                            tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, &body[start..end]])?;
+                            let at = body[range.clone()]
+                                .find(&text[at..at + 2 + digits])
+                                .map_or(range.start, |offset| range.start + offset);
+                            tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, at)])?;
                         }
                     }
                 }
@@ -107,11 +117,7 @@ pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Er
                 None
             };
             if let Some(target) = target {
-                let start = body[..range.start].rfind('\n').map_or(0, |i| i + 1);
-                let end = body[range.end..]
-                    .find('\n')
-                    .map_or(body.len(), |i| range.end + i);
-                tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, &body[start..end]])?;
+                tx.execute("INSERT OR IGNORE INTO context_mentions (source_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, range.start)])?;
             }
         }
     }

@@ -14,6 +14,8 @@ export function bridgeDefault(
   args?: { id?: string; reference?: string },
 ): unknown {
   switch (command) {
+    case "document_context_links":
+      return [[], []];
     case "list_projects":
     case "list_plans":
     case "find_tickets":
