@@ -660,11 +660,7 @@ test("restores a selected supporting Document after navigation", async () => {
       return Promise.resolve([
         {
           id: "doc-1",
-          title: "Investigation",
-          body: "Evidence",
-          created_at: "2026-01-01",
-          updated_at: "2026-01-01",
-          trashed: false,
+          heading: "Investigation",
         },
       ]);
     return Promise.resolve([]);

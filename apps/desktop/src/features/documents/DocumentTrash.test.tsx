@@ -12,6 +12,7 @@ import { documents } from "./api";
 
 vi.mock("./api", () => ({
   documents: {
+    links: vi.fn().mockResolvedValue([[], []]),
     recent: vi.fn(),
     pins: vi.fn(),
     tags: vi.fn(),
@@ -55,7 +56,17 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
     trashed = value;
     return { ...doc, trashed };
   });
-  render(<Documents active capture={false} onCaptureClose={vi.fn()} />);
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
   await screen.findByText("This Document is in Trash.");
