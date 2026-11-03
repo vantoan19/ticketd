@@ -200,6 +200,15 @@ pub enum WriteRequest {
         name: Option<String>,
         archived: Option<bool>,
     },
+    SetPlanDocument {
+        plan_id: String,
+        document_id: String,
+        present: bool,
+    },
+    SetPlanSpec {
+        plan_id: String,
+        document_id: Option<String>,
+    },
     SetPlanPurpose {
         id: String,
         purpose: String,
@@ -481,6 +490,15 @@ impl Workspace {
             WriteRequest::ChangePlan { id, name, archived } => {
                 WriteResult::Plan(self.change_plan(&id, name.as_deref(), archived)?)
             }
+            WriteRequest::SetPlanDocument {
+                plan_id,
+                document_id,
+                present,
+            } => WriteResult::Plan(self.set_plan_document(&plan_id, &document_id, present)?),
+            WriteRequest::SetPlanSpec {
+                plan_id,
+                document_id,
+            } => WriteResult::Plan(self.set_plan_spec(&plan_id, document_id.as_deref())?),
             WriteRequest::SetPlanPurpose { id, purpose } => {
                 WriteResult::Plan(self.set_plan_purpose(&id, &purpose)?)
             }

@@ -912,6 +912,54 @@ fn list_plans() -> Result<Vec<Plan>, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn set_plan_document(
+    plan_id: String,
+    document_id: String,
+    present: bool,
+    request_id: String,
+) -> Result<Plan, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetPlanDocument {
+                    plan_id,
+                    document_id,
+                    present,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Plan(plan) => Ok(plan),
+        _ => Err("Unexpected Plan result".into()),
+    }
+}
+
+#[tauri::command]
+fn set_plan_spec(
+    plan_id: String,
+    document_id: Option<String>,
+    request_id: String,
+) -> Result<Plan, String> {
+    match Workspace::open_default()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetPlanSpec {
+                    plan_id,
+                    document_id,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Plan(plan) => Ok(plan),
+        _ => Err("Unexpected Plan result".into()),
+    }
+}
+
+#[tauri::command]
 fn show_plan(id: String) -> Result<PlanView, String> {
     Workspace::open_default()
         .and_then(|w| w.show_plan(&id))
@@ -1279,6 +1327,8 @@ pub fn run() -> Result<(), tauri::Error> {
             export_workspace,
             list_plans,
             show_plan,
+            set_plan_document,
+            set_plan_spec,
             create_plan,
             change_plan,
             set_plan_purpose,

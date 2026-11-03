@@ -663,3 +663,43 @@ fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
     assert_eq!(feed.as_array().unwrap().len(), 1);
     assert_eq!(feed[0]["activity"]["brief"], "Ready for review");
 }
+
+#[test]
+fn cli_plan_context_shows_associated_document_and_opt_in_body() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let plan = run(&["plan", "create", "Release"]);
+    let document = run(&[
+        "document",
+        "create",
+        "--title",
+        "Spec",
+        "--body",
+        "# Details",
+    ]);
+    let plan_id = plan["id"].as_str().unwrap();
+    let doc_id = document["id"].as_str().unwrap();
+    run(&["plan", "document", plan_id, doc_id]);
+    run(&["plan", "spec", plan_id, doc_id]);
+    let context = run(&["plan", "context", plan_id]);
+    assert_eq!(context["plan"]["spec_document_id"], doc_id);
+    assert!(context["documents"][0]["body"].is_null());
+    let with_bodies = run(&["plan", "context", plan_id, "--bodies"]);
+    assert_eq!(with_bodies["documents"][0]["body"], "# Details");
+}
