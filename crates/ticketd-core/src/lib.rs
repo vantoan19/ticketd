@@ -64,7 +64,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 39;
+pub const FORMAT_VERSION: i64 = 40;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -569,6 +569,19 @@ impl Workspace {
             transaction.execute_batch("CREATE TABLE IF NOT EXISTS plan_documents (plan_id TEXT NOT NULL REFERENCES plans(id), document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(plan_id, document_id));
                 CREATE INDEX IF NOT EXISTS plan_documents_by_document ON plan_documents(document_id, plan_id);
                 PRAGMA user_version = 39;")?;
+        }
+        if version < 40 {
+            transaction.execute_batch("CREATE TABLE IF NOT EXISTS activity_mentions (activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE, target_id TEXT NOT NULL REFERENCES entities(id), passage TEXT NOT NULL, PRIMARY KEY(activity_id, target_id, passage)); CREATE INDEX IF NOT EXISTS activity_mentions_target ON activity_mentions(target_id, activity_id); CREATE INDEX IF NOT EXISTS activities_support_ticket ON activities(ticket_id, supporting_document_id, id); CREATE INDEX IF NOT EXISTS activities_support_document ON activities(supporting_document_id, ticket_id, id); PRAGMA user_version = 40;")?;
+            let mut statement = transaction.prepare("SELECT id, brief FROM activities")?;
+            let activities = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            for (id, brief) in activities {
+                document_links::index_activity(&transaction, &id, &brief)?;
+            }
         }
         transaction.commit()?;
         Ok(())

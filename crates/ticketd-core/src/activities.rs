@@ -51,6 +51,7 @@ pub(crate) fn add(
         "INSERT INTO activities (id, ticket_id, brief, editing_agent) VALUES (?1, ?2, ?3, ?4)",
         params![id, ticket, brief, agent],
     )?;
+    crate::document_links::index_activity(conn, &id, brief)?;
     get(conn, ticket, &id)
 }
 pub(crate) fn edit(
@@ -70,7 +71,9 @@ pub(crate) fn edit(
     if changed == 0 {
         return Err(Error::ActivityNotFound(id.to_owned()));
     }
-    get(conn, ticket, id)
+    let activity = get(conn, ticket, id)?;
+    crate::document_links::index_activity(conn, id, &activity.brief)?;
+    Ok(activity)
 }
 pub(crate) fn delete(conn: &Connection, ticket: &str, id: &str) -> Result<(), Error> {
     if conn.execute(

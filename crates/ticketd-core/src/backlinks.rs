@@ -60,7 +60,7 @@ fn contains_reference(text: &str, reference: &str) -> bool {
 }
 
 // Markdown escapes and entities can split one visible text node into several events.
-fn text_runs(content: &str) -> Vec<(String, std::ops::Range<usize>)> {
+pub(crate) fn text_runs(content: &str) -> Vec<(String, std::ops::Range<usize>)> {
     let mut runs = Vec::new();
     let mut current: Option<(String, std::ops::Range<usize>)> = None;
     let mut in_code = false;
