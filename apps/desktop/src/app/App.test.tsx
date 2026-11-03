@@ -83,7 +83,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch?: { title?: string } }) => {
       if (command === "list_projects" || command === "list_plans") return [];
-      if (command === "list_notes") return [];
+      if (command === "activity_feed") return [];
       if (command === "find_tickets") return [saved];
       if (command === "count_tickets") return bridgeDefault(command);
       if (command === "show_ticket") return saved;
@@ -188,7 +188,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
       if (
         command === "list_projects" ||
         command === "list_plans" ||
-        command === "list_notes" ||
+        command === "activity_feed" ||
         command === "ticket_history"
       )
         return [];
@@ -260,13 +260,13 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
   await act(async () => {
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
     target: { value: "Unfinished note" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Second" }));
@@ -282,7 +282,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("textbox", { name: "New note source" }),
+    screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Unfinished note");
 });
 
@@ -410,7 +410,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
         [
           "list_projects",
           "list_plans",
-          "list_notes",
+          "activity_feed",
           "ticket_history",
         ].includes(command)
       )

@@ -12,7 +12,7 @@ pub struct ContextOptions {
     pub project: bool,
     pub plan: bool,
     pub relationships: bool,
-    pub notes: bool,
+    pub activities: bool,
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
@@ -79,10 +79,10 @@ pub struct ContextRelationships {
     pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
-pub struct ContextNote {
+pub struct ContextActivity {
     pub id: String,
-    pub content: BoundedText,
-    pub created_at: String,
+    pub brief: BoundedText,
+    pub reported_at: String,
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
 }
@@ -127,7 +127,7 @@ pub struct TicketContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<ContextPage<ContextNote>>,
+    pub activities: Option<ContextPage<ContextActivity>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,14 +285,14 @@ impl Workspace {
         } else {
             None
         };
-        let notes = if options.notes {
-            let mut stmt = tx.prepare("SELECT id,content,created_at,updated_at,editing_agent FROM notes WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+        let activities = if options.activities {
+            let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent FROM activities WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
             let rows = stmt
                 .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    Ok(ContextNote {
+                    Ok(ContextActivity {
                         id: r.get(0)?,
-                        content: text(r.get(1)?, TEXT),
-                        created_at: r.get(2)?,
+                        brief: text(r.get(1)?, TEXT),
+                        reported_at: r.get(2)?,
                         updated_at: r.get(3)?,
                         editing_agent: r.get::<_, Option<String>>(4)?.map(|v| text(v, LABEL)),
                     })
@@ -384,7 +384,7 @@ impl Workspace {
             project,
             plan,
             relationships,
-            notes,
+            activities,
             evidence,
             backlinks,
             source_conversation,

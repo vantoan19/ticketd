@@ -17,7 +17,7 @@ export function bridgeDefault(
     case "list_projects":
     case "list_plans":
     case "find_tickets":
-    case "list_notes":
+    case "activity_feed":
     case "ticket_history":
     case "list_evidence":
     case "ticket_backlinks":

@@ -407,7 +407,7 @@ export function TicketProperties({
               variant="ghost"
               size="sm"
               title={formatDateTime(ticket.latest_update.reported_at)}
-              onClick={() => onOpenNote?.(ticket.latest_update!.note_id)}
+              onClick={() => onOpenNote?.(ticket.latest_update!.activity_id)}
             >
               <MessageSquare data-icon="inline-start" />
               {ago(ticket.latest_update.reported_at, now)}

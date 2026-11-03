@@ -198,13 +198,14 @@ test("the header shows the list position with Previous and Next", async () => {
 test("Latest update jumps to its note and tags appear as separate chips", async () => {
   const note = {
     id: "latest",
-    content: "Reported progress",
-    created_at: new Date().toISOString(),
+    ticket_id: "ticket",
+    brief: "Reported progress",
+    reported_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     editing_agent: "agent",
   };
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
-    if (command === "get_note") return note;
+    if (command === "get_activity") return note;
     return bridgeDefault(command, args as { reference?: string });
   });
   renderDetails({
@@ -212,8 +213,8 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
     status: "In progress",
     tags: ["frontend", "urgent"],
     latest_update: {
-      note_id: note.id,
-      reported_at: note.created_at,
+      activity_id: note.id,
+      reported_at: note.reported_at,
       editing_agent: "agent",
     },
   });

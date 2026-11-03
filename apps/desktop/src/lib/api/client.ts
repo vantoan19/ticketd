@@ -87,7 +87,7 @@ const ticketSchema = z.object({
   updated_at: z.string().nullish(),
   latest_update: z
     .object({
-      note_id: z.string(),
+      activity_id: z.string(),
       reported_at: z.string(),
       editing_agent: z.string().nullable(),
     })
@@ -230,13 +230,28 @@ const projectSchema = z.object({
   paths: z.array(z.string()),
 });
 export type Project = z.infer<typeof projectSchema>;
-const noteSchema = z.object({
+const activitySchema = z.object({
   id: z.string(),
-  content: z.string(),
-  created_at: z.string(),
+  ticket_id: z.string(),
+  brief: z.string(),
+  reported_at: z.string(),
   updated_at: z.string(),
   editing_agent: z.string().nullable(),
 });
+const activityFeedSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("authored"), activity: activitySchema }),
+  z.object({
+    type: z.literal("automatic"),
+    id: z.number(),
+    event: z.object({
+      kind: z.string(),
+      from_value: z.string(),
+      to_value: z.string(),
+      timestamp: z.string(),
+      editing_agent: z.string().nullable(),
+    }),
+  }),
+]);
 const evidenceSchema = z.object({
   id: z.string(),
   kind: z.enum([
@@ -257,7 +272,8 @@ export type EvidenceInput = Pick<
   Evidence,
   "kind" | "name" | "value" | "editing_agent"
 >;
-export type Note = z.infer<typeof noteSchema>;
+export type AuthoredActivity = z.infer<typeof activitySchema>;
+export type ActivityFeedEntry = z.infer<typeof activityFeedSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export type FindFilter = {
   query: string;
@@ -540,7 +556,7 @@ export const client = {
         z.object({
           source_reference: z.string(),
           source_title: z.string(),
-          note_id: z.string().nullable(),
+          activity_id: z.string().nullable(),
           passage: z.string(),
           mention_start: z.number().int().nonnegative(),
           mention_end: z.number().int().nonnegative(),
@@ -550,26 +566,28 @@ export const client = {
         await invoke("ticket_backlinks", { reference, limit: 20, offset }),
       );
   },
-  async notes(reference: string, offset: number) {
+  async activityFeed(reference: string, offset: number) {
     return z
-      .array(noteSchema)
-      .parse(await invoke("list_notes", { reference, limit: 50, offset }));
+      .array(activityFeedSchema)
+      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
   },
-  async note(reference: string, id: string) {
-    return noteSchema
+  async activity(reference: string, id: string) {
+    return activitySchema
       .nullable()
-      .parse(await invoke("get_note", { reference, id }));
+      .parse(await invoke("get_activity", { reference, id }));
   },
-  async addNote(reference: string, content: string) {
-    return noteSchema.parse(await invoke("add_note", { reference, content }));
-  },
-  async editNote(reference: string, id: string, content: string) {
-    return noteSchema.parse(
-      await invoke("edit_note", { reference, id, patch: { content } }),
+  async addActivity(reference: string, brief: string) {
+    return activitySchema.parse(
+      await invoke("add_activity", { reference, brief }),
     );
   },
-  async deleteNote(reference: string, id: string) {
-    await invoke("delete_note", { reference, id });
+  async editActivity(reference: string, id: string, brief: string) {
+    return activitySchema.parse(
+      await invoke("edit_activity", { reference, id, patch: { brief } }),
+    );
+  },
+  async deleteActivity(reference: string, id: string) {
+    await invoke("delete_activity", { reference, id });
   },
   async showTicket(reference: string) {
     return ticketSchema.parse(await invoke("show_ticket", { reference }));

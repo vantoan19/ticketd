@@ -52,14 +52,14 @@ mod history;
 pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
-mod notes;
+mod activities;
+pub use activities::{Activity, ActivityFeedEntry, ActivityPatch, ReportedUpdate};
 pub use history::{HistoryEntry, Readiness, Status};
-pub use notes::{Note, NotePatch, ReportedUpdate};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 31;
+pub const FORMAT_VERSION: i64 = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -156,8 +156,10 @@ pub enum Error {
     InvalidEvidence(String),
     #[error("evidence '{0}' was not found")]
     EvidenceNotFound(String),
-    #[error("note '{0}' was not found")]
-    NoteNotFound(String),
+    #[error("activity brief must not be empty")]
+    EmptyActivityBrief,
+    #[error("activity '{0}' was not found")]
+    ActivityNotFound(String),
     #[error(
         "{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change"
     )]
@@ -400,7 +402,7 @@ impl Workspace {
             transaction.pragma_update(None, "user_version", 4)?;
         }
         if version < 5 {
-            notes::migrate(&transaction)?;
+            activities::migrate(&transaction)?;
         }
         if version < 6 {
             relationships::migrate(&transaction)?;
@@ -473,7 +475,7 @@ impl Workspace {
             source::migrate_details(&transaction)?;
         }
         if version < 28 {
-            notes::migrate_updates(&transaction)?;
+            activities::migrate_updates(&transaction)?;
         }
         if version < 29 {
             source::migrate_run_counts(&transaction)?;
@@ -483,6 +485,9 @@ impl Workspace {
         }
         if version < 31 {
             documents::migrate(&transaction)?;
+        }
+        if version < 32 {
+            transaction.execute_batch("ALTER TABLE notes RENAME TO activities; ALTER TABLE activities RENAME COLUMN content TO brief; ALTER TABLE activities RENAME COLUMN created_at TO reported_at; UPDATE inbox_entries SET kind = 'activity' WHERE kind = 'note'; CREATE INDEX IF NOT EXISTS activities_feed ON activities(ticket_id, reported_at DESC, number DESC); CREATE INDEX IF NOT EXISTS ticket_history_feed ON ticket_history(ticket_id, timestamp DESC, number DESC); PRAGMA user_version = 32;")?;
         }
         transaction.commit()?;
         Ok(())
@@ -628,7 +633,7 @@ impl Workspace {
         hierarchy::populate(&transaction, &mut updated)?;
         duplicates::populate(&transaction, &mut updated)?;
         source::populate(&transaction, &mut updated)?;
-        notes::populate_update(&transaction, &mut updated)?;
+        activities::populate_update(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -669,52 +674,67 @@ impl Workspace {
         history::read(&self.connection, &ticket.id)
     }
 
-    pub fn add_note(
+    pub fn add_activity(
         &mut self,
         reference: &str,
         content: &str,
         agent: Option<&str>,
-    ) -> Result<Note, Error> {
+    ) -> Result<Activity, Error> {
         let tx = self.connection.savepoint()?;
         transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
-        let result = notes::add(&tx, &id_ticket, content, agent)?;
-        inbox::record(&tx, &id_ticket, "note", &result.id, content, agent)?;
+        let result = activities::add(&tx, &id_ticket, content, agent)?;
+        inbox::record(&tx, &id_ticket, "activity", &result.id, content, agent)?;
         tx.commit()?;
         Ok(result)
     }
-    pub fn edit_note(
+    pub fn edit_activity(
         &mut self,
         reference: &str,
         id: &str,
-        patch: NotePatch,
-    ) -> Result<Note, Error> {
+        patch: ActivityPatch,
+    ) -> Result<Activity, Error> {
         let tx = self.connection.savepoint()?;
         transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
-        let result = notes::edit(&tx, &id_ticket, id, patch)?;
+        let result = activities::edit(&tx, &id_ticket, id, patch)?;
         tx.commit()?;
         Ok(result)
     }
-    pub fn delete_note(&mut self, reference: &str, id: &str) -> Result<(), Error> {
+    pub fn delete_activity(&mut self, reference: &str, id: &str) -> Result<(), Error> {
         let tx = self.connection.savepoint()?;
         transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
-        notes::delete(&tx, &id_ticket, id)?;
+        activities::delete(&tx, &id_ticket, id)?;
         tx.commit()?;
         Ok(())
     }
-    pub fn note(&self, reference: &str, id: &str) -> Result<Note, Error> {
+    pub fn activity_feed(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<ActivityFeedEntry>, Error> {
         let ticket = self.show_ticket(reference)?;
-        notes::get(&self.connection, &ticket.id, id)
+        activities::feed(&self.connection, &ticket.id, limit, offset)
     }
 
-    pub fn notes(&self, reference: &str, limit: u32, offset: u32) -> Result<Vec<Note>, Error> {
+    pub fn activity(&self, reference: &str, id: &str) -> Result<Activity, Error> {
         let ticket = self.show_ticket(reference)?;
-        notes::read(&self.connection, &ticket.id, limit, offset)
+        activities::get(&self.connection, &ticket.id, id)
+    }
+
+    pub fn activities(
+        &self,
+        reference: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Activity>, Error> {
+        let ticket = self.show_ticket(reference)?;
+        activities::read(&self.connection, &ticket.id, limit, offset)
     }
 
     pub fn list_tickets(&self) -> Result<Vec<Ticket>, Error> {
@@ -738,7 +758,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             duplicates::populate(&self.connection, ticket)?;
             source::populate(&self.connection, ticket)?;
-            notes::populate_update(&self.connection, ticket)?;
+            activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -761,7 +781,7 @@ impl Workspace {
         hierarchy::populate(&self.connection, &mut ticket)?;
         duplicates::populate(&self.connection, &mut ticket)?;
         source::populate(&self.connection, &mut ticket)?;
-        notes::populate_update(&self.connection, &mut ticket)?;
+        activities::populate_update(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
