@@ -8,6 +8,8 @@ pub use backup_review::{
     BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
 };
 mod context;
+mod documents;
+pub use documents::{Document, DocumentPatch};
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
@@ -61,6 +63,8 @@ pub const FORMAT_VERSION: i64 = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("document '{0}' was not found")]
+    DocumentNotFound(String),
     #[error("backup or restore failed: {0}")]
     Backup(String),
     #[error(
@@ -479,6 +483,9 @@ impl Workspace {
         if version < 30 {
             transaction.execute_batch("CREATE INDEX IF NOT EXISTS dependencies_dependent ON dependencies(dependent_id, blocker_id); PRAGMA user_version = 30;")?;
         }
+        if version < 31 {
+            documents::migrate(&transaction)?;
+        }
         if version < 32 {
             transaction.execute_batch("ALTER TABLE notes RENAME TO activities; ALTER TABLE activities RENAME COLUMN content TO brief; ALTER TABLE activities RENAME COLUMN created_at TO reported_at; UPDATE inbox_entries SET kind = 'activity' WHERE kind = 'note'; CREATE INDEX IF NOT EXISTS activities_feed ON activities(ticket_id, reported_at DESC, number DESC); CREATE INDEX IF NOT EXISTS ticket_history_feed ON ticket_history(ticket_id, timestamp DESC, number DESC); PRAGMA user_version = 32;")?;
         }
@@ -824,6 +831,11 @@ pub use batch::{BatchOperation, TicketChange};
 
 /// Where the default workspace lives, without creating anything.
 fn default_path_unchecked() -> Result<std::path::PathBuf, Error> {
+    // Development builds can exercise the desktop against a disposable workspace.
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("TICKETD_TEST_WORKSPACE") {
+        return Ok(path.into());
+    }
     let dirs = ProjectDirs::from("", "", "ticketd").ok_or(Error::NoDataDirectory)?;
     Ok(dirs.data_dir().join("workspace.sqlite3"))
 }

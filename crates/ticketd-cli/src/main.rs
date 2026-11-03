@@ -1,8 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    Availability, BatchOperation, ContextOptions, EvidenceInput, EvidenceKind, ActivityPatch, Status,
-    TicketFilter, TicketPatch, Workspace, WriteRequest,
+    ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput, EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -21,7 +20,42 @@ enum ReminderCommand {
 }
 
 #[derive(Subcommand)]
+enum DocumentCommand {
+    Create {
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    Open {
+        id: String,
+    },
+    Recent,
+    Change {
+        id: String,
+        #[arg(long, conflicts_with = "clear_title")]
+        title: Option<String>,
+        #[arg(long)]
+        clear_title: bool,
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        #[arg(long)]
+        body_file: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Capture and read Documents
+    Document {
+        #[command(subcommand)]
+        command: DocumentCommand,
+    },
     /// Manage a personal ticket reminder (times require an RFC 3339 offset)
     Reminder {
         #[command(subcommand)]
@@ -628,6 +662,36 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         None => Workspace::open_default()?,
     };
     let text = match args.command {
+        Command::Document { command } => match command {
+            DocumentCommand::Create {
+                title,
+                body,
+                body_file,
+            } => serde_json::to_string(&workspace.create_document(
+                title.as_deref(),
+                &read_content(body, body_file)?.unwrap_or_default(),
+            )?)?,
+            DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
+            DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
+            DocumentCommand::Recent => serde_json::to_string(&workspace.recent_documents()?)?,
+            DocumentCommand::Change {
+                id,
+                title,
+                clear_title,
+                body,
+                body_file,
+            } => serde_json::to_string(&workspace.change_document(
+                &id,
+                DocumentPatch {
+                    title: if clear_title {
+                        Some(None)
+                    } else {
+                        title.map(Some)
+                    },
+                    body: read_content(body, body_file)?,
+                },
+            )?)?,
+        },
         Command::Reminder { command } => match command {
             ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
                 Some(value) => {
