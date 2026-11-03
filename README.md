@@ -135,3 +135,46 @@ returns bounded pages of related tickets, discoveries, and their sources.
 The JSON export includes `contextual_relationships` records. Backups retain
 these links and retry outcomes; personal preferences remain scoped to
 `local-person`, independently of editing-agent attribution.
+
+### Reporting progress
+
+Post an authored Activity when beginning work, reaching a meaningful result,
+changing direction, requesting input, pausing, or handing off for review or
+completion. Keep the brief readable; optional session context can go in its prose.
+Activities do not change status or dependency readiness.
+
+```sh
+ticketd activity add T-1 --file update.md --agent agent-name
+printf '%s\n' 'Investigating the failure' | ticketd activity add T-1 --file - --agent agent-name
+```
+
+For safe retries, put the following JSON in `report.json` (or pass `-` and pipe
+it on stdin), then run `ticketd write report.json --request-id checkpoint-1`.
+Use the same request ID and identical request for a retry; use a new ID for a
+new checkpoint. A status change may be included atomically:
+
+```json
+{
+  "operation": "ticket_change",
+  "reference": "T-1",
+  "change": {
+    "status": "In progress",
+    "activities": ["Investigating the failure"],
+    "editing_agent": "agent-name"
+  }
+}
+```
+
+Read one latest report with `ticketd context T-1 --latest-update`; the field is
+absent unless selected and null when no authored Activity exists. Use `ticketd
+list --latest-update` or `ticketd search QUERY --latest-update` for filtered,
+paginated ticket summaries. Briefs are limited to 1024 Unicode characters and
+carry a `truncated` flag. Fetch the complete brief with `ticketd activity show
+T-1 ACTIVITY_ID`. Supporting Document references and detail fetching depend on
+supporting-document functionality when available.
+
+Record optional execution evidence using `ticketd evidence add T-1 --kind
+branch --name branch --value feature/example`; kinds also include `worktree`,
+`pull-request`, `commit`, and `verification`. For example, use `--kind
+verification --name checks --value './scripts/check passed'`. Read evidence
+with `ticketd evidence list T-1` or select it with `ticketd context T-1 --evidence`.

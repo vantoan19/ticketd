@@ -91,6 +91,31 @@ pub(crate) fn read(
         .collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Bounded latest authored progress. Fetch the Activity by ID for the full brief.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatestUpdate {
+    pub activity_id: String,
+    pub brief: UpdateBrief,
+    pub reported_at: String,
+    pub updated_at: String,
+    pub editing_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateBrief {
+    pub text: String,
+    pub truncated: bool,
+}
+
+pub(crate) fn latest(conn: &Connection, ticket: &str) -> Result<Option<LatestUpdate>, Error> {
+    Ok(conn.query_row("SELECT id, brief, reported_at, updated_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [ticket], |row| {
+        let brief: String = row.get(1)?;
+        let mut chars = brief.chars();
+        let text = chars.by_ref().take(1024).collect();
+        Ok(LatestUpdate { activity_id: row.get(0)?, brief: UpdateBrief { text, truncated: chars.next().is_some() }, reported_at: row.get(2)?, updated_at: row.get(3)?, editing_agent: row.get(4)? })
+    }).optional()?)
+}
+
 /// A note's reporting time and attribution for list and rail summaries.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportedUpdate {
@@ -105,7 +130,7 @@ pub(crate) fn populate_update(conn: &Connection, ticket: &mut crate::Ticket) -> 
         [&ticket.id],
         |row| row.get(0),
     )?;
-    ticket.latest_update = conn.query_row("SELECT id, reported_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY reported_at DESC, number DESC LIMIT 1", [&ticket.id], |row| Ok(ReportedUpdate { activity_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
+    ticket.latest_update = conn.query_row("SELECT id, reported_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [&ticket.id], |row| Ok(ReportedUpdate { activity_id: row.get(0)?, reported_at: row.get(1)?, editing_agent: row.get(2)? })).optional()?;
     Ok(())
 }
 

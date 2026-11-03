@@ -621,15 +621,45 @@ fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
     run(&["create", "Outcome"], None);
+    assert!(run(&["context", "T-1", "--latest-update"], None)["latest_update"].is_null());
     run(&["change", "T-1", "--status", "In progress"], None);
     let posted = run(
         &["activity", "add", "T-1", "--file", "-", "--agent", "runner"],
         Some("A **brief**"),
     );
     assert_eq!(posted["brief"], "A **brief**");
+    let request = r#"{"operation":"ticket_change","reference":"T-1","change":{"status":"In review","activities":["Ready for review"],"editing_agent":"runner"}}"#;
+    let first = run(&["write", "-", "--request-id", "progress-1"], Some(request));
+    assert_eq!(
+        run(&["write", "-", "--request-id", "progress-1"], Some(request)),
+        first
+    );
+    let latest = run(&["context", "T-1", "--latest-update"], None);
+    assert_eq!(latest["latest_update"]["brief"]["text"], "Ready for review");
+    let feed = run(&["activity", "list", "T-1"], None);
+    assert_eq!(
+        feed.as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["activity"]["brief"] == "Ready for review")
+            .count(),
+        1
+    );
     let id = posted["id"].as_str().unwrap();
+    let omitted = run(&["context", "T-1"], None);
+    assert!(omitted.get("latest_update").is_none());
+    let context = run(&["context", "T-1", "--latest-update"], None);
+    assert_eq!(
+        context["latest_update"]["brief"]["text"],
+        "Ready for review"
+    );
+    let list = run(&["list", "--latest-update"], None);
+    assert_eq!(
+        list[0]["latest_update"]["brief"]["text"],
+        "Ready for review"
+    );
     assert_eq!(run(&["activity", "show", "T-1", id], None), posted);
     let feed = run(&["activity", "list", "T-1", "--limit", "1"], None);
     assert_eq!(feed.as_array().unwrap().len(), 1);
-    assert_eq!(feed[0]["activity"]["id"], id);
+    assert_eq!(feed[0]["activity"]["brief"], "Ready for review");
 }
