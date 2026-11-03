@@ -488,3 +488,34 @@ fn cli_requires_a_canonical_ticket_to_choose_duplicate() {
     let ticket: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(ticket["status"], "Todo");
 }
+
+#[test]
+fn cli_creates_ticket_in_plan_and_edits_purpose() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let invoke = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    let plan = invoke(&["plan", "create", "Launch"]);
+    let id = plan["id"].as_str().unwrap();
+    invoke(&["plan", "purpose", id, "Ship safely"]);
+    let ticket = invoke(&["create", "Work", "--plan", id]);
+    assert_eq!(ticket["plan_id"], id);
+    let view = invoke(&["plan", "show", id]);
+    assert_eq!(view["plan"]["purpose"], "Ship safely");
+    assert_eq!(view["counts"]["todo"], 1);
+}

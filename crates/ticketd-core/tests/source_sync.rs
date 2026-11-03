@@ -322,12 +322,12 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     let mut f = Fixture::new();
     f.publish(issue(1, "Original"), true);
     f.refresh();
-    let effort = f.workspace.create_effort("Launch").unwrap();
+    let plan = f.workspace.create_plan("Launch").unwrap();
     f.workspace
         .change_ticket(
             "T-1",
             TicketPatch {
-                effort_id: Some(Some(effort.id.clone())),
+                plan_id: Some(Some(plan.id.clone())),
                 status: Some(Status::InProgress),
                 ..TicketPatch::default()
             },
@@ -355,7 +355,7 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     assert_eq!(ticket.title, "Retitled");
     assert_eq!(ticket.body, "Body of Retitled");
     assert_eq!(ticket.status, Status::InProgress);
-    assert_eq!(ticket.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(ticket.plan_id.as_deref(), Some(plan.id.as_str()));
     assert_eq!(ticket.tags, vec!["backend".to_owned()]);
     assert_eq!(ticket.prerequisites.len(), 1);
     assert_eq!(ticket.children.len(), 1);

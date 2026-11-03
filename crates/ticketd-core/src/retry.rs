@@ -1,5 +1,5 @@
 use crate::{
-    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project,
+    BatchOperation, Error, Evidence, EvidenceInput, Note, NotePatch, Plan, Project,
     RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
@@ -155,17 +155,21 @@ pub enum WriteRequest {
         id: String,
         path: String,
     },
-    CreateEffort {
+    CreatePlan {
         name: String,
     },
-    ChangeEffort {
+    ChangePlan {
         id: String,
         name: Option<String>,
         archived: Option<bool>,
     },
-    SetEffort {
+    SetPlanPurpose {
+        id: String,
+        purpose: String,
+    },
+    SetPlan {
         reference: String,
-        effort: Option<String>,
+        plan: Option<String>,
         agent: Option<String>,
     },
 }
@@ -179,7 +183,7 @@ pub enum WriteResult {
     Note(Note),
     Evidence(Evidence),
     Project(Project),
-    Effort(Effort),
+    Plan(Plan),
     Deleted,
 }
 
@@ -398,19 +402,20 @@ impl Workspace {
             WriteRequest::RemoveCheckout { id, path } => {
                 WriteResult::Project(self.remove_checkout(&id, &path)?)
             }
-            WriteRequest::CreateEffort { name } => WriteResult::Effort(self.create_effort(&name)?),
-            WriteRequest::ChangeEffort { id, name, archived } => {
-                WriteResult::Effort(self.change_effort(&id, name.as_deref(), archived)?)
+            WriteRequest::CreatePlan { name } => WriteResult::Plan(self.create_plan(&name)?),
+            WriteRequest::ChangePlan { id, name, archived } => {
+                WriteResult::Plan(self.change_plan(&id, name.as_deref(), archived)?)
             }
-            WriteRequest::SetEffort {
+            WriteRequest::SetPlanPurpose { id, purpose } => {
+                WriteResult::Plan(self.set_plan_purpose(&id, &purpose)?)
+            }
+            WriteRequest::SetPlan {
                 reference,
-                effort,
+                plan,
                 agent,
-            } => WriteResult::Ticket(self.set_effort(
-                &reference,
-                effort.as_deref(),
-                agent.as_deref(),
-            )?),
+            } => {
+                WriteResult::Ticket(self.set_plan(&reference, plan.as_deref(), agent.as_deref())?)
+            }
         })
     }
 }

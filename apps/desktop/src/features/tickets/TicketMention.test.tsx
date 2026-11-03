@@ -55,7 +55,7 @@ const ticket = (reference: string, body: string, trashed = false): Ticket => ({
   trashed,
   body,
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: null,
   tags: [],
   parent: null,

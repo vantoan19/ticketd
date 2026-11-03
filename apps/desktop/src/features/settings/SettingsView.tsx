@@ -189,7 +189,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
   const facts = info && [
     ["Tickets", String(info.tickets)],
     ["Projects", String(info.projects)],
-    ["Active Efforts", String(info.active_efforts)],
+    ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],
     ["Workspace format version", String(info.format_version)],
   ];

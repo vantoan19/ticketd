@@ -30,8 +30,8 @@ fn populated(path: &std::path::Path) -> Workspace {
         )
         .unwrap();
     workspace.create_project("App", "/tmp/app").unwrap();
-    workspace.create_effort("Release").unwrap();
-    workspace.create_effort("Cleanup").unwrap();
+    workspace.create_plan("Release").unwrap();
+    workspace.create_plan("Cleanup").unwrap();
     workspace
 }
 
@@ -59,7 +59,7 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
             summary.notes,
             summary.evidence,
             summary.projects,
-            summary.efforts
+            summary.plans
         ),
         (2, 2, 1, 1, 2)
     );
@@ -84,7 +84,7 @@ fn an_empty_workspace_has_no_last_change() {
         notes: 0,
         evidence: 0,
         projects: 0,
-        efforts: 0,
+        plans: 0,
     };
     assert_eq!(inspection.current, expected);
     assert_eq!(

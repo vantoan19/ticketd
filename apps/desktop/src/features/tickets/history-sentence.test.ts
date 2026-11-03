@@ -4,7 +4,7 @@ import { summarize } from "./inboxModel";
 
 const lookups = {
   project: (id: string) => (id === "p1" ? "Platform" : undefined),
-  effort: (id: string) => (id === "e1" ? "Quarter" : undefined),
+  plan: (id: string) => (id === "e1" ? "Quarter" : undefined),
 };
 const sentence = (kind: string, from_value: string, to_value: string) =>
   historySentence(
@@ -20,7 +20,7 @@ test("describes recorded changes as sentences without event keys", () => {
   expect(sentence("project", "p1", "gone")).toBe(
     "Project changed from Platform to gone",
   );
-  expect(sentence("effort", "e1", "")).toBe("Effort cleared");
+  expect(sentence("plan", "e1", "")).toBe("Plan cleared");
   expect(sentence("dependency", "", "T-3")).toBe("Now blocked by T-3");
   expect(sentence("relationship:blocks", "T-4", "")).toBe(
     "No longer blocks T-4",

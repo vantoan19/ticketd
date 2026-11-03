@@ -1,4 +1,4 @@
-.effort-header {
+.plan-header {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -6,7 +6,7 @@
 }
 /* The name and actions share the first line; the context line runs the full
    width beneath them instead of wrapping in the space the actions leave. */
-.effort-title-row {
+.plan-title-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
@@ -15,20 +15,20 @@
   align-items: center;
   gap: 4px 16px;
 }
-.effort-title {
+.plan-title {
   display: contents;
 }
-.effort-name-row {
+.plan-name-row {
   grid-area: name;
 }
-.effort-title p {
+.plan-title p {
   grid-area: context;
 }
-.effort-actions {
+.plan-actions {
   grid-area: actions;
 }
 @container (max-width: 440px) {
-  .effort-title-row {
+  .plan-title-row {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "name"
@@ -36,14 +36,14 @@
       "actions";
   }
 }
-.effort-name-row {
+.plan-name-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
 }
-.effort-header h1,
-.effort-index h1 {
+.plan-header h1,
+.plan-index h1 {
   margin: 0;
   color: var(--foreground);
   font-size: 24px;
@@ -52,7 +52,7 @@
   letter-spacing: -0.6px;
   overflow-wrap: anywhere;
 }
-.effort-state {
+.plan-state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -60,57 +60,57 @@
   font-size: 12px;
   line-height: 16px;
 }
-.effort-title p {
+.plan-title p {
   margin: 0;
   color: var(--muted-foreground);
 }
-.effort-actions {
+.plan-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
-.effort-counts {
+.plan-counts {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 24px;
   margin: 4px 0 0;
 }
-.effort-counts > div {
+.plan-counts > div {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.effort-counts dt {
+.plan-counts dt {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--muted-foreground);
 }
-.effort-counts dd {
+.plan-counts dd {
   margin: 0;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-.effort-note {
+.plan-note {
   margin: 0;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
 }
-.effort-rename,
-.effort-create {
+.plan-rename,
+.plan-create {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
 }
-.effort-rename [data-slot="field"],
-.effort-create [data-slot="field"] {
+.plan-rename [data-slot="field"],
+.plan-create [data-slot="field"] {
   flex: 1 1 200px;
   max-width: 360px;
 }
 /* Matches the other management pages: one centered column. */
-.effort-index {
+.plan-index {
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -120,12 +120,12 @@
   padding: 32px 24px 48px;
   overflow-y: auto;
 }
-.effort-index > h1 + .effort-note {
+.plan-index > h1 + .plan-note {
   margin-top: -12px;
   font-size: 14px;
   line-height: 20px;
 }
-.effort-index-list {
+.plan-index-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -133,17 +133,17 @@
   padding: 0;
   list-style: none;
 }
-.effort-index-list li {
+.plan-index-list li {
   display: flex;
   align-items: center;
   gap: 8px;
   padding-left: 0;
   border-radius: 6px;
 }
-.effort-index-list li:hover {
+.plan-index-list li:hover {
   background: var(--recessed);
 }
-.effort-index-list li > button:first-child {
+.plan-index-list li > button:first-child {
   display: flex;
   flex: 1;
   align-items: center;
@@ -155,17 +155,17 @@
   border-radius: 6px;
   background: transparent;
 }
-.effort-index-list li > button:first-child:focus-visible {
+.plan-index-list li > button:first-child:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
-.effort-add-search {
+.plan-add-search {
   display: flex;
   align-items: center;
   gap: 8px;
   color: var(--muted-foreground);
 }
-.effort-add-results {
+.plan-add-results {
   display: flex;
   flex-direction: column;
   max-height: 320px;
@@ -174,14 +174,14 @@
   overflow-y: auto;
   list-style: none;
 }
-.effort-add-results li {
+.plan-add-results li {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 40px;
   padding: 4px 0;
 }
-.effort-add-title {
+.plan-add-title {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -190,12 +190,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.effort-add-title small {
+.plan-add-title small {
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
 }
-.effort-add-error {
+.plan-add-error {
   margin: 0;
   color: var(--destructive);
 }

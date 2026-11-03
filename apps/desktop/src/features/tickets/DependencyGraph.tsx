@@ -33,7 +33,7 @@ import {
   type Relationships,
   type Ticket,
 } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import "./dependency-graph.css";
 
 type NodeData = {
@@ -206,14 +206,14 @@ function SelectionPanel({
   ticket,
   origin,
   projects,
-  efforts,
+  plans,
   onOpen,
   onBack,
 }: {
   ticket: GraphTicket;
   origin: string;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   onOpen: (reference: string) => void;
   onBack: () => void;
 }) {
@@ -246,7 +246,7 @@ function SelectionPanel({
     title: item.title.text,
   }));
   const project = projects.find((item) => item.id === detail?.project_id);
-  const effort = efforts.find((item) => item.id === detail?.effort_id);
+  const plan = plans.find((item) => item.id === detail?.plan_id);
   const placeholder = detail ? "None" : "Loading…";
   return (
     <aside className="graph-panel" aria-label="Selected ticket">
@@ -276,8 +276,8 @@ function SelectionPanel({
       <dl className="graph-panel-facts">
         <dt>Project</dt>
         <dd>{project?.name ?? placeholder}</dd>
-        <dt>Effort</dt>
-        <dd>{effort?.name ?? placeholder}</dd>
+        <dt>Plan</dt>
+        <dd>{plan?.name ?? placeholder}</dd>
       </dl>
       <div className="graph-panel-actions">
         {ticket.reference !== origin && (
@@ -298,14 +298,14 @@ export default function DependencyGraph({
   reference,
   revision,
   projects,
-  efforts,
+  plans,
   onBack,
   onOpen,
 }: {
   reference: string;
   revision: number;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   onBack: () => void;
   onOpen: (reference: string) => void;
 }) {
@@ -369,7 +369,7 @@ export default function DependencyGraph({
               ticket={selectedTicket}
               origin={reference}
               projects={projects}
-              efforts={efforts}
+              plans={plans}
               onOpen={onOpen}
               onBack={onBack}
             />

@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
 import { client, type Note, type Project } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
 import { attribution } from "./ticket-source";
@@ -49,7 +49,7 @@ export function Activity({
   trashed,
   select,
   target,
-  efforts = [],
+  plans = [],
   sourceName,
   latestNoteId,
   onChanged,
@@ -65,7 +65,7 @@ export function Activity({
   trashed: boolean;
   select?: (reference: string) => void;
   target?: { id: string; key: number } | null;
-  efforts?: Effort[];
+  plans?: Plan[];
 }) {
   const now = useNow();
   const [loadError, setLoadError] = useState("");
@@ -268,7 +268,7 @@ export function Activity({
   const lookups = {
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
-    effort: (id: string) => efforts.find((effort) => effort.id === id)?.name,
+    plan: (id: string) => plans.find((plan) => plan.id === id)?.name,
   };
   const draftText = edit ? edit.content : draft;
   return (

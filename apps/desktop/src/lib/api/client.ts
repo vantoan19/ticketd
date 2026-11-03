@@ -94,7 +94,7 @@ const ticketSchema = z.object({
     .nullish(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
-  effort_id: z.string().nullable(),
+  plan_id: z.string().nullable(),
   availability: z.string().nullable(),
   /** This duplicate's canonical ticket became a Duplicate itself; the ticket that is now the original. */
   duplicate_redirect: z.string().nullish(),
@@ -259,7 +259,7 @@ export type FindFilter = {
   query: string;
   project: string | null;
   unlinked: boolean;
-  effort: string | null;
+  plan: string | null;
   status: string | null;
   tags: string[];
   availability: string | null;
@@ -313,7 +313,7 @@ export type SourceCounts = z.infer<typeof sourceCountsSchema>;
 export type StatusCounts = z.infer<typeof statusCountsSchema>;
 export type BulkChange = {
   project_id?: string | null;
-  effort_id?: string | null;
+  plan_id?: string | null;
   add_tags?: string[];
   remove_tags?: string[];
 };
@@ -458,10 +458,8 @@ export const client = {
   ) {
     return ticketSchema.parse(await invoke(command, { reference, tag }));
   },
-  async setEffort(reference: string, effort: string | null) {
-    return ticketSchema.parse(
-      await invoke("set_effort", { reference, effort }),
-    );
+  async setPlan(reference: string, plan: string | null) {
+    return ticketSchema.parse(await invoke("set_plan", { reference, plan }));
   },
   async setParent(reference: string, parent: string | null) {
     await invoke("set_parent", { reference, parent });
@@ -482,12 +480,17 @@ export const client = {
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },
-  async listEfforts() {
+  async listPlans() {
     return z
       .array(
-        z.object({ id: z.string(), name: z.string(), archived: z.boolean() }),
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          archived: z.boolean(),
+          purpose: z.string().default(""),
+        }),
       )
-      .parse(await invoke("list_efforts"));
+      .parse(await invoke("list_plans"));
   },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
@@ -618,7 +621,7 @@ export const client = {
     body: string,
     status: string,
     projectId: string | null,
-    effortId: string | null,
+    planId: string | null,
     tags: string[],
     follow: boolean,
   ) {
@@ -628,7 +631,7 @@ export const client = {
         body,
         status,
         projectId,
-        effortId,
+        planId,
         tags,
         follow,
       }),

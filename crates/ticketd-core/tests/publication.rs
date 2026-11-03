@@ -499,9 +499,9 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body text");
     set_status(&mut f, &ticket.reference, Status::InProgress);
-    let effort = f.workspace.create_effort("Launch").unwrap();
+    let plan = f.workspace.create_plan("Launch").unwrap();
     f.workspace
-        .set_effort(&ticket.reference, Some(&effort.id), None)
+        .set_plan(&ticket.reference, Some(&plan.id), None)
         .unwrap();
     f.workspace.add_tag(&ticket.reference, "backend").unwrap();
     f.workspace
@@ -525,7 +525,7 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     assert_eq!(published.reference, ticket.reference);
     assert_eq!(published.id, ticket.id);
     assert_eq!(published.status, Status::InProgress);
-    assert_eq!(published.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(published.plan_id.as_deref(), Some(plan.id.as_str()));
     assert_eq!(published.tags, vec!["backend".to_owned()]);
     assert_eq!(published.prerequisites.len(), 1);
     assert_eq!(published.children.len(), 1);
@@ -547,7 +547,7 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
             .any(|entry| entry.kind == "source" && entry.to_value == "o/r#101")
     );
 
-    // Exactly the previewed text, and nothing about notes, tags, Efforts or children.
+    // Exactly the previewed text, and nothing about notes, tags, Plans or children.
     let created = f.fake.0.lock().unwrap().created.clone();
     assert_eq!(
         created,

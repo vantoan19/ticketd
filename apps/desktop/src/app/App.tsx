@@ -12,7 +12,7 @@ import { useReminderNotifications } from "@/features/tickets/useReminderNotifica
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Menu } from "lucide-react";
-import { EffortList } from "@/features/efforts/EffortList";
+import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -20,12 +20,7 @@ import { SourceActivityContext } from "@/features/tickets/source-activity";
 
 export function App() {
   const [view, setView] = useState<
-    | "tickets"
-    | "projects"
-    | "efforts"
-    | "archived-efforts"
-    | "settings"
-    | "inbox"
+    "tickets" | "projects" | "plans" | "archived-plans" | "settings" | "inbox"
   >("tickets");
   const [settingsSection, setSettingsSection] =
     useState<SettingsCardKey>("appearance");
@@ -82,7 +77,7 @@ export function App() {
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
     projects,
-    efforts,
+    plans,
     setSelected,
     setDetails,
     error,
@@ -149,7 +144,7 @@ export function App() {
               view={view}
               setView={openView}
               projects={projects}
-              efforts={efforts}
+              plans={plans}
               scope={scope}
               navigation={navigation}
               setCreating={(value) => {
@@ -184,7 +179,7 @@ export function App() {
               navigation={navigation}
               {...(createStatus && { initialStatus: createStatus })}
               projects={projects}
-              efforts={efforts}
+              plans={plans}
               create={create}
             />
             {view === "settings" && (
@@ -208,10 +203,10 @@ export function App() {
                 />
               </div>
             }
-            {(view === "efforts" || view === "archived-efforts") && (
-              <EffortList
-                efforts={efforts}
-                archived={view === "archived-efforts"}
+            {(view === "plans" || view === "archived-plans") && (
+              <PlanList
+                plans={plans}
+                archived={view === "archived-plans"}
                 onOpen={(id) => scope("all", "all", id)}
                 refresh={refresh}
               />

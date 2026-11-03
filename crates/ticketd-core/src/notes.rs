@@ -119,8 +119,8 @@ pub(crate) fn migrate_updates(tx: &Transaction<'_>) -> Result<(), Error> {
         CREATE TRIGGER IF NOT EXISTS ticket_created_time AFTER INSERT ON tickets BEGIN
             UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
         END;
-        CREATE TRIGGER IF NOT EXISTS ticket_changed_time AFTER UPDATE OF title, body, status, project_id, effort_id, trashed ON tickets
-        WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body OR OLD.status IS NOT NEW.status OR OLD.project_id IS NOT NEW.project_id OR OLD.effort_id IS NOT NEW.effort_id OR OLD.trashed IS NOT NEW.trashed BEGIN
+        CREATE TRIGGER IF NOT EXISTS ticket_changed_time AFTER UPDATE OF title, body, status, project_id, plan_id, trashed ON tickets
+        WHEN OLD.title IS NOT NEW.title OR OLD.body IS NOT NEW.body OR OLD.status IS NOT NEW.status OR OLD.project_id IS NOT NEW.project_id OR OLD.plan_id IS NOT NEW.plan_id OR OLD.trashed IS NOT NEW.trashed BEGIN
             UPDATE tickets SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
         END;
         CREATE TRIGGER IF NOT EXISTS ticket_history_time AFTER INSERT ON ticket_history WHEN NEW.kind NOT IN ('source_unavailable', 'publication_unresolved') BEGIN

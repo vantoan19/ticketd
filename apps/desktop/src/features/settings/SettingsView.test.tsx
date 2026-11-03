@@ -47,7 +47,7 @@ const info = {
   path: "/Users/me/Library/Application Support/ticketd/workspace.sqlite3",
   tickets: 42,
   projects: 3,
-  active_efforts: 2,
+  active_plans: 2,
   size_bytes: 2_621_440,
   format_version: 20,
 };
@@ -126,7 +126,7 @@ test("the Location card shows the path, counts, size, and format version", async
   const text = screen.getByRole("region", { name: "Location" }).textContent;
   expect(text).toContain("Tickets42");
   expect(text).toContain("Projects3");
-  expect(text).toContain("Active Efforts2");
+  expect(text).toContain("Active Plans2");
   expect(text).toContain("File size2.5 MB");
   expect(text).toContain("Workspace format version20");
 });

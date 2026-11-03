@@ -59,7 +59,7 @@ const COUNTS = [
   ["notes", "Notes", "note", "notes"],
   ["evidence", "Implementation evidence", "evidence item", "evidence items"],
   ["projects", "Projects", "project", "projects"],
-  ["efforts", "Efforts", "Effort", "Efforts"],
+  ["plans", "Plans", "Plan", "Plans"],
 ] as const;
 
 /** "The backup has 7 fewer tickets and 19 fewer notes." or a statement that counts match. */

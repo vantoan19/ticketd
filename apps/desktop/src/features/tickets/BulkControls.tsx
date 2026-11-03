@@ -30,13 +30,13 @@ export function BulkControls({
   bulk,
   visible,
   projects,
-  efforts,
+  plans,
 }: {
   bulk: BulkEdit;
-  /** Tickets currently listed, for Select all and Effort membership counts. */
+  /** Tickets currently listed, for Select all and Plan membership counts. */
   visible: Ticket[];
   projects: TicketWorkspace["projects"];
-  efforts: TicketWorkspace["efforts"];
+  plans: TicketWorkspace["plans"];
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
   const retry = useRef<HTMLButtonElement>(null);
@@ -54,9 +54,9 @@ export function BulkControls({
   const selectedTickets = visible.filter((ticket) =>
     selection.includes(ticket.reference),
   );
-  const activeEfforts = efforts.filter((item) => !item.archived);
-  const inEffort = (id: string) =>
-    selectedTickets.filter((ticket) => ticket.effort_id === id).length;
+  const activePlans = plans.filter((item) => !item.archived);
+  const inPlan = (id: string) =>
+    selectedTickets.filter((ticket) => ticket.plan_id === id).length;
   const canSelectMore = visible.some(
     (ticket) => !selection.includes(ticket.reference),
   );
@@ -162,34 +162,34 @@ export function BulkControls({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Set Effort</DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger>Set Plan</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  {activeEfforts.map((item) => (
+                  {activePlans.map((item) => (
                     <DropdownMenuItem
                       key={item.id}
                       onSelect={() =>
                         organize(
-                          { effort_id: item.id },
+                          { plan_id: item.id },
                           `Added ${tickets(count)} to ${item.name}`,
                         )
                       }
                     >
                       {item.name}{" "}
                       <span className="bulk-menu-count">
-                        {inEffort(item.id)} of {count}
+                        {inPlan(item.id)} of {count}
                       </span>
                     </DropdownMenuItem>
                   ))}
-                  {activeEfforts.length > 0 && <DropdownMenuSeparator />}
+                  {activePlans.length > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem
                     onSelect={() =>
                       organize(
-                        { effort_id: null },
-                        `Removed ${tickets(count)} from their Effort`,
+                        { plan_id: null },
+                        `Removed ${tickets(count)} from their Plan`,
                       )
                     }
                   >
-                    Remove from Effort
+                    Remove from Plan
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
