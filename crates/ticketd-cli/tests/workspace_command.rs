@@ -100,12 +100,18 @@ fn settings_quick_reference_commands_run() {
     );
     run(
         dir.path(),
-        &["context", "T-1", "--relationships", "--notes", "--evidence"],
+        &[
+            "context",
+            "T-1",
+            "--relationships",
+            "--activities",
+            "--evidence",
+        ],
     );
     run(
         dir.path(),
         &[
-            "note",
+            "activity",
             "add",
             "T-1",
             "--file",
@@ -136,4 +142,41 @@ fn documents_can_be_created_edited_and_reopened_via_cli() {
     let recent: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
     assert_eq!(recent[0]["id"], id);
+    run(dir.path(), &["document", "trash", id]);
+    let recent: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
+    assert_eq!(recent.as_array().unwrap().len(), 0);
+    let trashed: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "trash-list"])).unwrap();
+    assert_eq!(trashed[0]["id"], id);
+    let opened: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "open", id])).unwrap();
+    assert_eq!(opened["trashed"], true);
+    run(dir.path(), &["document", "restore", id]);
+    let restored: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "show", id])).unwrap();
+    assert_eq!(restored["body"], "First thought");
+    assert_eq!(restored["trashed"], false);
+}
+
+#[test]
+fn documents_can_be_searched_pinned_and_tagged_via_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let created: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "A compass in the forest"],
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    run(dir.path(), &["document", "pin", id]);
+    run(dir.path(), &["document", "tag", id, "research"]);
+    let results: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "search", "compass", "--tag", "research"],
+    ))
+    .unwrap();
+    assert_eq!(results[0]["id"], id);
+    let pins: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "pins"])).unwrap();
+    assert_eq!(pins[0]["id"], id);
 }

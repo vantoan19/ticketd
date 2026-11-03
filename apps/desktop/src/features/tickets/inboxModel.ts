@@ -9,7 +9,7 @@ export type DayGroup = "Today" | "Yesterday" | "Earlier";
 /** What kind of thing happened, in words suitable for an accessible name. */
 export function entryNoun(entry: Entry): string {
   if (entry.kind === "reminder") return "reminder";
-  if (entry.kind === "note") return "note";
+  if (entry.kind === "activity") return "update";
   return "change";
 }
 
@@ -18,8 +18,8 @@ export function summarize(entry: Entry): string {
   const base =
     entry.kind === "reminder"
       ? "Your reminder is due"
-      : entry.kind === "note"
-        ? `New note: ${entry.to_value}`
+      : entry.kind === "activity"
+        ? `New update: ${entry.to_value}`
         : describeChange(entry.kind, entry.from_value, entry.to_value);
   return entry.editing_agent
     ? `${base} · ${providerName(entry.editing_agent)}`

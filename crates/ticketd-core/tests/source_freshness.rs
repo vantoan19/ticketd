@@ -341,7 +341,7 @@ fn migration_from_28_keeps_freshness_but_does_not_invent_a_count() {
     drop(f.workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE source_status DROP COLUMN last_checked_tickets; PRAGMA user_version = 28;",
+        "ALTER TABLE source_status DROP COLUMN last_checked_tickets; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 28;",
     )
     .unwrap();
     drop(db);

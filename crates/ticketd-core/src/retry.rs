@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Document, DocumentPatch, Error, Evidence, EvidenceInput, Note, NotePatch, Plan,
-    Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence,
+    EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,12 @@ pub enum WriteRequest {
         id: String,
         tag: String,
         present: bool,
+    },
+    TrashDocument {
+        id: String,
+    },
+    RestoreDocument {
+        id: String,
     },
     AddEvidence {
         reference: String,
@@ -74,17 +80,17 @@ pub enum WriteRequest {
         trashed: bool,
         agent: Option<String>,
     },
-    AddNote {
+    AddActivity {
         reference: String,
-        content: String,
+        brief: String,
         agent: Option<String>,
     },
-    EditNote {
+    EditActivity {
         reference: String,
         id: String,
-        patch: NotePatch,
+        patch: ActivityPatch,
     },
-    DeleteNote {
+    DeleteActivity {
         reference: String,
         id: String,
     },
@@ -198,7 +204,7 @@ pub enum WriteResult {
     Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
-    Note(Note),
+    Activity(Activity),
     Evidence(Evidence),
     Project(Project),
     Plan(Plan),
@@ -271,6 +277,12 @@ impl Workspace {
                 self.set_document_tag(&id, &tag, present)?;
                 WriteResult::Deleted
             }
+            WriteRequest::TrashDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, true)?)
+            }
+            WriteRequest::RestoreDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, false)?)
+            }
             WriteRequest::AddEvidence { reference, input } => {
                 WriteResult::Evidence(self.add_evidence(&reference, input)?)
             }
@@ -315,18 +327,18 @@ impl Workspace {
                 trashed,
                 agent,
             } => WriteResult::Ticket(self.set_trashed(&reference, trashed, agent.as_deref())?),
-            WriteRequest::AddNote {
+            WriteRequest::AddActivity {
                 reference,
-                content,
+                brief,
                 agent,
-            } => WriteResult::Note(self.add_note(&reference, &content, agent.as_deref())?),
-            WriteRequest::EditNote {
+            } => WriteResult::Activity(self.add_activity(&reference, &brief, agent.as_deref())?),
+            WriteRequest::EditActivity {
                 reference,
                 id,
                 patch,
-            } => WriteResult::Note(self.edit_note(&reference, &id, patch)?),
-            WriteRequest::DeleteNote { reference, id } => {
-                self.delete_note(&reference, &id)?;
+            } => WriteResult::Activity(self.edit_activity(&reference, &id, patch)?),
+            WriteRequest::DeleteActivity { reference, id } => {
+                self.delete_activity(&reference, &id)?;
                 WriteResult::Deleted
             }
             WriteRequest::AddTag { reference, name } => {

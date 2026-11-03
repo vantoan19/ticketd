@@ -10,6 +10,8 @@ pub struct Document {
     pub body: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub trashed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,27 +54,27 @@ pub(crate) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
 }
 
 pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("CREATE VIRTUAL TABLE document_fts USING fts5(title, body, content='documents', content_rowid='rowid');
+    tx.execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS document_fts USING fts5(title, body, content='documents', content_rowid='rowid');
         INSERT INTO document_fts(document_fts) VALUES ('rebuild');
-        CREATE TRIGGER document_fts_insert AFTER INSERT ON documents BEGIN
+        CREATE TRIGGER IF NOT EXISTS document_fts_insert AFTER INSERT ON documents BEGIN
             INSERT INTO document_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
         END;
-        CREATE TRIGGER document_fts_delete AFTER DELETE ON documents BEGIN
+        CREATE TRIGGER IF NOT EXISTS document_fts_delete AFTER DELETE ON documents BEGIN
             INSERT INTO document_fts(document_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
         END;
-        CREATE TRIGGER document_fts_update AFTER UPDATE OF title, body ON documents BEGIN
+        CREATE TRIGGER IF NOT EXISTS document_fts_update AFTER UPDATE OF title, body ON documents BEGIN
             INSERT INTO document_fts(document_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
             INSERT INTO document_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
         END;
-        CREATE TABLE document_pins (document_id TEXT PRIMARY KEY REFERENCES documents(id));
-        CREATE TABLE document_tags (document_id TEXT NOT NULL REFERENCES documents(id), tag_name TEXT NOT NULL REFERENCES tags(name), PRIMARY KEY(document_id, tag_name));
-        CREATE INDEX document_tags_tag ON document_tags(tag_name, document_id);
+        CREATE TABLE IF NOT EXISTS document_pins (document_id TEXT PRIMARY KEY REFERENCES documents(id));
+        CREATE TABLE IF NOT EXISTS document_tags (document_id TEXT NOT NULL REFERENCES documents(id), tag_name TEXT NOT NULL REFERENCES tags(name), PRIMARY KEY(document_id, tag_name));
+        CREATE INDEX IF NOT EXISTS document_tags_tag ON document_tags(tag_name, document_id);
         PRAGMA user_version = 36;")?;
     Ok(())
 }
 
 // Limit headings in list results even when a document has a very long first line.
-const HEADING: &str = "coalesce(nullif(trim(d.title), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
+const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {
@@ -105,7 +107,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                "SELECT id, title, body, created_at, updated_at FROM documents WHERE id = ?1",
+                "SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(Document {
@@ -114,6 +116,7 @@ impl Workspace {
                         body: row.get(2)?,
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
+                        trashed: row.get(5)?,
                     })
                 },
             )
@@ -137,7 +140,7 @@ impl Workspace {
         offset: u32,
     ) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id WHERE d.trashed = 0 ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -152,7 +155,7 @@ impl Workspace {
 
     pub fn pinned_documents(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING} FROM document_pins p JOIN documents d ON d.id = p.document_id ORDER BY d.id LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING} FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 ORDER BY d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -178,7 +181,7 @@ impl Workspace {
                 return Ok(Vec::new());
             };
             let sql = format!(
-                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 ORDER BY d.id LIMIT ?2 OFFSET ?3"
+                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 ORDER BY d.id LIMIT ?2 OFFSET ?3"
             );
             let mut statement = self.connection.prepare(&sql)?;
             return Ok(statement
@@ -197,7 +200,7 @@ impl Workspace {
         let expression = format!("\"{}\"", query.replace('"', "\"\""));
         let tag = tag.map(|value| value.trim().to_lowercase());
         let sql = format!(
-            "SELECT d.id, {HEADING}, snippet(document_fts, -1, '', '', '…', 24) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -259,13 +262,42 @@ impl Workspace {
     }
 
     pub fn change_document(&mut self, id: &str, patch: DocumentPatch) -> Result<Document, Error> {
-        self.show_document(id)?;
-        match (patch.title, patch.body) {
-            (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, title, body])?,
-            (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, title])?,
-            (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1", params![id, body])?,
+        if self.show_document(id)?.trashed {
+            return Err(Error::Trashed(id.to_owned()));
+        }
+        let changes = match (patch.title, patch.body) {
+            (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
+            (Some(title), None) => self.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
+            (None, Some(body)) => self.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,
             (None, None) => 0,
         };
+        let document = self.show_document(id)?;
+        if changes == 0 && document.trashed {
+            return Err(Error::Trashed(id.to_owned()));
+        }
+        Ok(document)
+    }
+    pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
+        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
+        let rows = statement.query_map([], |row| {
+            Ok(Document {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                body: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                trashed: row.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn set_document_trashed(&mut self, id: &str, trashed: bool) -> Result<Document, Error> {
+        self.show_document(id)?;
+        self.connection.execute(
+            "UPDATE documents SET trashed = ?2 WHERE id = ?1",
+            params![id, trashed],
+        )?;
         self.show_document(id)
     }
 }

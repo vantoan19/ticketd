@@ -37,23 +37,27 @@ const props = {
 };
 const note = {
   id: "n",
-  content: "Body",
-  created_at: "2026-10-31T10:00:00Z",
+  ticket_id: "ticket",
+  brief: "Body",
+  reported_at: "2026-10-31T10:00:00Z",
   updated_at: "2026-10-31T10:00:00Z",
   editing_agent: "cli-agent",
 };
 
 test("a change that came from a source reads as the source, not as an agent", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_notes") return [];
-    if (command === "ticket_history")
+    if (command === "activity_feed")
       return [
         {
-          kind: "status",
-          from_value: "Todo",
-          to_value: "Canceled",
-          timestamp: "2026-10-31T11:00:00Z",
-          editing_agent: "github",
+          type: "automatic",
+          id: 1,
+          event: {
+            kind: "status",
+            from_value: "Todo",
+            to_value: "Canceled",
+            timestamp: "2026-10-31T11:00:00Z",
+            editing_agent: "github",
+          },
         },
       ];
     throw new Error(`Unexpected ${command}`);
@@ -65,19 +69,31 @@ test("a change that came from a source reads as the source, not as an agent", as
 
 test("shows an editing agent only when one was recorded and words history as sentences", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_notes")
-      return [
-        { ...note, id: "agentless", content: "Plain", editing_agent: null },
-        { ...note, id: "agent", content: "By agent" },
-      ];
-    if (command === "ticket_history")
+    if (command === "activity_feed")
       return [
         {
-          kind: "status",
-          from_value: "Todo",
-          to_value: "In progress",
-          timestamp: "2026-10-31T11:00:00Z",
-          editing_agent: null,
+          type: "automatic",
+          id: 1,
+          event: {
+            kind: "status",
+            from_value: "Todo",
+            to_value: "In progress",
+            timestamp: "2026-10-31T11:00:00Z",
+            editing_agent: null,
+          },
+        },
+        {
+          type: "authored",
+          activity: {
+            ...note,
+            id: "agentless",
+            brief: "Plain",
+            editing_agent: null,
+          },
+        },
+        {
+          type: "authored",
+          activity: { ...note, id: "agent", brief: "By agent" },
         },
       ];
     throw new Error(`Unexpected ${command}`);
@@ -91,39 +107,41 @@ test("shows an editing agent only when one was recorded and words history as sen
 
 test("keeps a note draft when the ticket is left and revisited, until it is discarded", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_notes" || command === "ticket_history") return [];
+    if (command === "activity_feed" || command === "ticket_history") return [];
     throw new Error(`Unexpected ${command}`);
   });
   const first = render(<Activity {...props} reference="T-21" />);
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
     target: { value: "Half-written finding" },
   });
   first.unmount();
   render(<Activity {...props} reference="T-22" />);
-  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-21" />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
   expect(
-    screen.getByRole("textbox", { name: "New note source" }),
+    screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Half-written finding");
   fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
-  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-21" />);
-  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
 });
 
-test("Notes and history puts the composer before labelled notes and quiet relative history", async () => {
+test("Activity puts the composer before labelled notes and quiet relative history", async () => {
   const recent = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "list_notes" ? [{ ...note, created_at: recent }] : [],
+    command === "activity_feed"
+      ? [{ type: "authored", activity: { ...note, reported_at: recent } }]
+      : [],
   );
   render(
     <Activity
@@ -134,9 +152,7 @@ test("Notes and history puts the composer before labelled notes and quiet relati
     />,
   );
   const body = await screen.findByText("Body");
-  expect(
-    screen.getByRole("heading", { name: "Notes and history" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Activity" })).toBeTruthy();
   expect(
     screen.getByText("Only in ticketd · never sent to GitHub"),
   ).toBeTruthy();
@@ -144,7 +160,7 @@ test("Notes and history puts the composer before labelled notes and quiet relati
   expect(screen.getByText("2 h ago")).toBeTruthy();
   expect(
     screen
-      .getByRole("button", { name: "Add a note" })
+      .getByRole("button", { name: "Add update" })
       .compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 });

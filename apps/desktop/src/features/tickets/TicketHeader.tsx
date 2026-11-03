@@ -42,7 +42,7 @@ import "./ticket-detail.css";
 
 /** The shell command an agent runs to read this ticket's context. */
 function contextCommand(reference: string): string {
-  return `ticketd context ${reference} --relationships --notes --evidence`;
+  return `ticketd context ${reference} --relationships --activities --evidence`;
 }
 
 /** The reference, personal actions, actions menu, and pane controls of a ticket. */

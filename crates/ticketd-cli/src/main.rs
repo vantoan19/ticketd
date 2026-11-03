@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput, EvidenceKind,
-    NotePatch, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
+    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
 };
 
 #[derive(Parser)]
@@ -70,6 +70,13 @@ enum DocumentCommand {
         tag: String,
         #[arg(long)]
         remove: bool,
+    },
+    TrashList,
+    Trash {
+        id: String,
+    },
+    Restore {
+        id: String,
     },
     Change {
         id: String,
@@ -172,10 +179,10 @@ enum Command {
         #[command(subcommand)]
         command: EvidenceCommand,
     },
-    /// Manage ticket notes
-    Note {
+    /// Manage ticket activities
+    Activity {
         #[command(subcommand)]
-        command: NoteCommand,
+        command: ActivityCommand,
     },
     /// Add a tag (trimmed and lowercased; duplicates are ignored)
     AddTag { reference: String, tag: String },
@@ -268,7 +275,7 @@ enum Command {
         #[arg(long)]
         relationships: bool,
         #[arg(long)]
-        notes: bool,
+        activities: bool,
         #[arg(long)]
         evidence: bool,
         #[arg(long)]
@@ -286,7 +293,12 @@ enum Command {
         filters: FindArgs,
     },
     /// View a bounded dependency graph around a ticket
-    Graph { reference: String },
+    Graph {
+        #[arg(required_unless_present = "plan", conflicts_with = "plan")]
+        reference: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
+    },
     /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
     /// Show a ticket by its reference
@@ -608,31 +620,33 @@ enum EvidenceCommand {
     },
 }
 #[derive(Subcommand)]
-enum NoteCommand {
-    /// Append a note, reading --file - from stdin
+enum ActivityCommand {
+    /// Append an activity, reading --file - from stdin
     Add {
         reference: String,
         #[arg(long, conflicts_with = "file")]
-        content: Option<String>,
+        brief: Option<String>,
         #[arg(long)]
         file: Option<String>,
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Edit supplied fields of a note
+    /// Edit supplied fields of an activity
     Edit {
         reference: String,
         id: String,
         #[arg(long, conflicts_with = "file")]
-        content: Option<String>,
+        brief: Option<String>,
         #[arg(long)]
         file: Option<String>,
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Delete a note
+    /// Delete an activity
     Delete { reference: String, id: String },
-    /// Read notes in insertion order
+    /// Read an exact authored activity
+    Show { reference: String, id: String },
+    /// Read the chronological activity feed
     List {
         reference: String,
         #[arg(long, default_value_t = 50)]
@@ -732,6 +746,13 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 workspace.set_document_tag(&id, &tag, !remove)?;
                 "ok".into()
             }
+            DocumentCommand::TrashList => serde_json::to_string(&workspace.trashed_documents()?)?,
+            DocumentCommand::Trash { id } => {
+                serde_json::to_string(&workspace.write(None, WriteRequest::TrashDocument { id })?)?
+            }
+            DocumentCommand::Restore { id } => serde_json::to_string(
+                &workspace.write(None, WriteRequest::RestoreDocument { id })?,
+            )?,
             DocumentCommand::Change {
                 id,
                 title,
@@ -899,43 +920,46 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 offset,
             } => serde_json::to_string(&workspace.evidence(&reference, limit, offset)?)?,
         },
-        Command::Note { command } => match command {
-            NoteCommand::Add {
+        Command::Activity { command } => match command {
+            ActivityCommand::Add {
                 reference,
-                content,
+                brief,
                 file,
                 agent,
             } => {
-                let content = read_content(content, file)?.ok_or("provide --content or --file")?;
-                serde_json::to_string(&workspace.add_note(
+                let brief = read_content(brief, file)?.ok_or("provide --brief or --file")?;
+                serde_json::to_string(&workspace.add_activity(
                     &reference,
-                    &content,
+                    &brief,
                     agent.as_deref(),
                 )?)?
             }
-            NoteCommand::Edit {
+            ActivityCommand::Edit {
                 reference,
                 id,
-                content,
+                brief,
                 file,
                 agent,
-            } => serde_json::to_string(&workspace.edit_note(
+            } => serde_json::to_string(&workspace.edit_activity(
                 &reference,
                 &id,
-                NotePatch {
-                    content: read_content(content, file)?,
+                ActivityPatch {
+                    brief: read_content(brief, file)?,
                     editing_agent: agent,
                 },
             )?)?,
-            NoteCommand::Delete { reference, id } => {
-                workspace.delete_note(&reference, &id)?;
+            ActivityCommand::Delete { reference, id } => {
+                workspace.delete_activity(&reference, &id)?;
                 "null".into()
             }
-            NoteCommand::List {
+            ActivityCommand::Show { reference, id } => {
+                serde_json::to_string(&workspace.activity(&reference, &id)?)?
+            }
+            ActivityCommand::List {
                 reference,
                 limit,
                 offset,
-            } => serde_json::to_string(&workspace.notes(&reference, limit, offset)?)?,
+            } => serde_json::to_string(&workspace.activity_feed(&reference, limit, offset)?)?,
         },
         Command::TrashList => serde_json::to_string(&workspace.list_trash()?)?,
         Command::Trash { reference, agent } => {
@@ -1074,7 +1098,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             project,
             plan,
             relationships,
-            notes,
+            activities,
             evidence,
             backlinks,
             conversation,
@@ -1085,7 +1109,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 project,
                 plan,
                 relationships,
-                notes,
+                activities,
                 evidence,
                 backlinks,
                 conversation,
@@ -1093,8 +1117,14 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             },
         )?)?,
 
-        Command::Graph { reference } => {
-            serde_json::to_string(&workspace.dependency_graph(&reference)?)?
+        Command::Graph { reference, plan } => {
+            if let Some(plan) = plan {
+                serde_json::to_string(&workspace.plan_dependency_graph(&plan)?)?
+            } else {
+                serde_json::to_string(
+                    &workspace.dependency_graph(reference.as_deref().unwrap_or_default())?,
+                )?
+            }
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,

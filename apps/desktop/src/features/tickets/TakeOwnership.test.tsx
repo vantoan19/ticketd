@@ -90,7 +90,7 @@ test("Take ownership asks first, explains the consequences, then applies once an
     /no longer reach this ticket/,
     /stays as provenance/,
     /It never reconnects by itself/,
-    /subtickets, dependencies, relationships and notes/i,
+    /subtickets, dependencies, relationships and activities/i,
   ])
     expect(within(dialog).getByText(text)).toBeTruthy();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
