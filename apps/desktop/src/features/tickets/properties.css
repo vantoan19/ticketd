@@ -167,3 +167,18 @@
   margin-left: 0;
   max-width: 100%;
 }
+
+.latest-update {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.latest-update p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.latest-update small {
+  color: var(--muted-foreground);
+}

@@ -4,9 +4,9 @@ mod cli_status;
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph,
     Document, DocumentPatch, DocumentSearchResult, DocumentSummary, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status,
-    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo,
-    WriteRequest, WriteResult,
+    HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup, SidebarCounts,
+    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -591,6 +591,13 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
+#[tauri::command]
+fn latest_update(reference: String) -> Result<Option<LatestUpdate>, String> {
+    Workspace::open_default()
+        .and_then(|workspace| workspace.latest_update(&reference))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn activity_feed(
     reference: String,
@@ -1300,6 +1307,7 @@ pub fn run() -> Result<(), tauri::Error> {
             delete_evidence,
             ticket_backlinks,
             source_conversation,
+            latest_update,
             activity_feed,
             list_activities,
             get_activity,
