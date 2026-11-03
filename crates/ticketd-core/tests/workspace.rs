@@ -4183,3 +4183,63 @@ fn dependency_graph_reports_omitted_edges_in_dense_graph() {
     assert!(graph.omitted_edges);
     assert!(graph.truncated);
 }
+
+#[test]
+fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("plan-graph.sqlite")).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    let member = workspace.create_ticket("Member").unwrap();
+    let outside = workspace.create_ticket("Outside").unwrap();
+    workspace
+        .set_plan(&member.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace
+        .add_dependency(&outside.reference, &member.reference, None)
+        .unwrap();
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert_eq!(graph.nodes.len(), 2);
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|n| n.reference == outside.reference && n.boundary)
+    );
+    assert!(graph.nodes.iter().any(|n| n.reference == member.reference
+        && !n.boundary
+        && n.availability.as_deref() == Some("Blocked")));
+    assert_eq!(workspace.show_plan(&plan.id).unwrap().counts.todo, 1);
+    assert!(
+        workspace
+            .add_dependency(&member.reference, &outside.reference, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn plan_graph_discloses_omissions_and_cycle_validation_uses_full_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bounded-plan.sqlite")).unwrap();
+    let plan = workspace.create_plan("Large Plan").unwrap();
+    let mut tickets: Vec<String> = Vec::new();
+    for i in 0..55 {
+        let ticket = workspace.create_ticket(&format!("Ticket {i}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+        if let Some(previous) = tickets.last() {
+            workspace
+                .add_dependency(previous, &ticket.reference, None)
+                .unwrap();
+        }
+        tickets.push(ticket.reference);
+    }
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert!(graph.omitted_neighbors);
+    assert_eq!(graph.nodes.len(), 50);
+    assert!(
+        workspace
+            .add_dependency(&tickets[54], &tickets[0], None)
+            .is_err()
+    );
+}

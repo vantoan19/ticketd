@@ -152,7 +152,7 @@ const relationshipsSchema = z.object({
 export type Relationships = z.infer<typeof relationshipsSchema>;
 export type RelatedTicket = z.infer<typeof relatedSchema>;
 
-const graphSchema = z.object({
+export const graphSchema = z.object({
   nodes: z.array(
     z.object({
       id: z.string(),
@@ -161,6 +161,7 @@ const graphSchema = z.object({
       title: z.string(),
       status: z.string(),
       availability: z.string().nullable(),
+      boundary: z.boolean().optional(),
     }),
   ),
   edges: z.array(z.object({ blocker: z.string(), dependent: z.string() })),

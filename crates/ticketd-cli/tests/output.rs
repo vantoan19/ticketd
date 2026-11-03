@@ -521,6 +521,40 @@ fn cli_creates_ticket_in_plan_and_edits_purpose() {
 }
 
 #[test]
+fn plan_graph_cli_displays_boundary_blockers() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let plan_id;
+    {
+        let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+        plan_id = workspace.create_plan("Launch").unwrap().id;
+        let blocker = workspace.create_ticket("Outside").unwrap();
+        let member = workspace.create_ticket("Member").unwrap();
+        workspace
+            .set_plan(&member.reference, Some(&plan_id), None)
+            .unwrap();
+        workspace
+            .add_dependency(&blocker.reference, &member.reference, None)
+            .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["graph", "--plan", &plan_id])
+        .env("TICKETD_TEST_WORKSPACE", path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(graph["nodes"][0]["reference"], "T-2");
+    assert_eq!(graph["nodes"][1]["boundary"], true);
+    assert_eq!(graph["edges"][0]["blocker"], "T-1");
+}
+
+#[test]
 fn graph_cli_reports_relationships_and_limits() {
     use std::process::Command;
     let dir = tempfile::tempdir().unwrap();

@@ -57,7 +57,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 30;
+pub const FORMAT_VERSION: i64 = 33;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -476,6 +476,9 @@ impl Workspace {
         }
         if version < 30 {
             transaction.execute_batch("CREATE INDEX IF NOT EXISTS dependencies_dependent ON dependencies(dependent_id, blocker_id); PRAGMA user_version = 30;")?;
+        }
+        if version < 33 {
+            transaction.execute_batch("CREATE INDEX IF NOT EXISTS tickets_plan_scope ON tickets(plan_id, trashed, number); PRAGMA user_version = 33;")?;
         }
         transaction.commit()?;
         Ok(())

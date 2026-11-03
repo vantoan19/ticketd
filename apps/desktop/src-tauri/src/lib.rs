@@ -159,6 +159,13 @@ fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
 }
 
 #[tauri::command]
+fn plan_dependency_graph(id: String) -> Result<DependencyGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| w.plan_dependency_graph(&id))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn ticket_backlinks(
     reference: String,
     limit: u32,
@@ -1055,6 +1062,7 @@ pub fn run() -> Result<(), tauri::Error> {
             find_tickets,
             count_tickets,
             dependency_graph,
+            plan_dependency_graph,
             list_trash,
             set_trashed,
             create_ticket,

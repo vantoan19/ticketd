@@ -217,7 +217,12 @@ enum Command {
         filters: FindArgs,
     },
     /// View a bounded dependency graph around a ticket
-    Graph { reference: String },
+    Graph {
+        #[arg(required_unless_present = "plan", conflicts_with = "plan")]
+        reference: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
+    },
     /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
     /// Show a ticket by its reference
@@ -969,8 +974,14 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             },
         )?)?,
 
-        Command::Graph { reference } => {
-            serde_json::to_string(&workspace.dependency_graph(&reference)?)?
+        Command::Graph { reference, plan } => {
+            if let Some(plan) = plan {
+                serde_json::to_string(&workspace.plan_dependency_graph(&plan)?)?
+            } else {
+                serde_json::to_string(
+                    &workspace.dependency_graph(reference.as_deref().unwrap_or_default())?,
+                )?
+            }
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
