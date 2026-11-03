@@ -494,6 +494,17 @@ impl Workspace {
         if version < 33 {
             transaction.execute_batch("CREATE INDEX IF NOT EXISTS tickets_plan_scope ON tickets(plan_id, trashed, number); PRAGMA user_version = 33;")?;
         }
+        if version < 34 {
+            let has_trashed: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'trashed')",
+                [],
+                |row| row.get(0),
+            )?;
+            if !has_trashed {
+                transaction.execute_batch("ALTER TABLE documents ADD COLUMN trashed INTEGER NOT NULL DEFAULT 0 CHECK(trashed IN (0, 1));")?;
+            }
+            transaction.execute_batch("PRAGMA user_version = 34;")?;
+        }
         if version < 35 {
             document_links::migrate(&transaction)?;
         }

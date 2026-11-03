@@ -14,6 +14,7 @@ vi.mock("./api", () => ({
   documents: {
     save: vi.fn(),
     show: vi.fn(),
+    setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),
@@ -58,6 +59,7 @@ it("keeps a failed capture open and retries the same request before returning", 
       body: "A thought",
       created_at: "now",
       updated_at: "now",
+      trashed: false,
     });
   const close = vi.fn();
   render(<DocumentEditor initial={null} onClose={close} />);
@@ -84,6 +86,7 @@ it("defers external refresh while the editor has focus", async () => {
     body: "Original",
     created_at: "now",
     updated_at: "now",
+    trashed: false,
   };
   vi.mocked(documents.show).mockResolvedValue({
     ...original,
@@ -115,6 +118,7 @@ it("suggests only the current ticket and lets it be removed before capture", asy
     body: "Thought",
     created_at: "now",
     updated_at: "now",
+    trashed: false,
   });
   render(
     <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
@@ -151,6 +155,7 @@ it("opens a connected ticket after saving a document draft", async () => {
     body: "Original",
     created_at: "now",
     updated_at: "now",
+    trashed: false,
   };
   vi.mocked(documents.links).mockResolvedValue([
     [],
@@ -162,6 +167,8 @@ it("opens a connected ticket after saving a document draft", async () => {
         target_kind: "document",
         source_label: "T-4",
         target_label: "Document",
+        source_trashed: false,
+        target_trashed: false,
         passage: "Source",
       },
     ],
@@ -178,4 +185,36 @@ it("opens a connected ticket after saving a document draft", async () => {
   fireEvent.click(screen.getByRole("button", { name: "T-4" }));
   await waitFor(() => expect(open).toHaveBeenCalledWith("T-4"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Updated");
+});
+
+it("opens a trashed Document readably and restores it", async () => {
+  const original = {
+    id: "d1",
+    title: "Context",
+    body: "Preserved",
+    created_at: "now",
+    updated_at: "now",
+    trashed: true,
+  };
+  vi.mocked(documents.setTrashed).mockResolvedValue({
+    ...original,
+    trashed: false,
+  });
+  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  expect(screen.getByText("This Document is in Trash.")).toBeTruthy();
+  expect(screen.getByLabelText("Optional title")).toHaveProperty(
+    "readOnly",
+    true,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await screen.findByRole("button", { name: "Move to Trash" });
+  expect(documents.setTrashed).toHaveBeenCalledWith(
+    "d1",
+    false,
+    expect.any(String),
+  );
+  expect(screen.getByLabelText("Your thought")).toHaveProperty(
+    "value",
+    "Preserved",
+  );
 });

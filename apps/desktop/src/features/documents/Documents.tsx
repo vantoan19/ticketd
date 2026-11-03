@@ -33,12 +33,16 @@ export function Documents({
   target: { id: string; key: number } | null;
 }) {
   const [recent, setRecent] = useState<Document[]>([]);
+  const [trash, setTrash] = useState<Document[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
   const [error, setError] = useState("");
   const refresh = () =>
-    documents
-      .recent()
-      .then(setRecent)
+    Promise.all([documents.recent(), documents.trash()])
+      .then(([recent, trash]) => {
+        setRecent(recent);
+        setTrash(trash);
+      })
       .catch((e: unknown) => setError(String(e)));
   useEffect(() => {
     if (target)
@@ -53,19 +57,24 @@ export function Documents({
   return (
     <div className="documents-page">
       <h1>Documents</h1>
-      <h2>Recently opened</h2>
+      <Button variant="outline" onClick={() => setShowTrash(!showTrash)}>
+        {showTrash ? "Recently opened" : "Trash"}
+      </Button>
+      <h2>{showTrash ? "Trash" : "Recently opened"}</h2>
       {error && <p role="alert">{error}</p>}
-      {recent.length === 0 && (
+      {(showTrash ? trash : recent).length === 0 && (
         <Empty>
           <EmptyHeader>
             <EmptyDescription>
-              Your captured thoughts will appear here.
+              {showTrash
+                ? "Trash is empty."
+                : "Your captured thoughts will appear here."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
       )}
       <ul>
-        {recent.map((document) => (
+        {(showTrash ? trash : recent).map((document) => (
           <li key={document.id}>
             <Button
               variant="ghost"

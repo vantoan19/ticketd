@@ -13,7 +13,10 @@ impl Workspace {
         result.insert("format_version".into(), Value::from(1));
         for (table, columns) in [
             ("entities", "id, kind"),
-            ("documents", "id, title, body, created_at, updated_at"),
+            (
+                "documents",
+                "id, title, body, created_at, updated_at, trashed",
+            ),
             ("context_mentions", "source_id, target_id, passage"),
             ("document_opens", "sequence, document_id"),
             ("projects", "id, name, path"),

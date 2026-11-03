@@ -24,6 +24,12 @@ pub enum WriteRequest {
         id: String,
         patch: DocumentPatch,
     },
+    TrashDocument {
+        id: String,
+    },
+    RestoreDocument {
+        id: String,
+    },
     AddEvidence {
         reference: String,
         input: EvidenceInput,
@@ -260,6 +266,12 @@ impl Workspace {
             }
             WriteRequest::ChangeDocument { id, patch } => {
                 WriteResult::Document(self.change_document(&id, patch)?)
+            }
+            WriteRequest::TrashDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, true)?)
+            }
+            WriteRequest::RestoreDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, false)?)
             }
             WriteRequest::AddEvidence { reference, input } => {
                 WriteResult::Evidence(self.add_evidence(&reference, input)?)

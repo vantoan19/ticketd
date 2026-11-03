@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { DocumentNavigation } from "@/features/markdown/MarkdownDocument";
+import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { client } from "@/lib/api/client";
 import { EmphasizedPassage } from "./reference-passage";
@@ -29,6 +31,10 @@ export function Backlinks({
   revision: number;
   select: (target: MentionTarget) => void;
 }) {
+  const openDocument = useContext(DocumentNavigation);
+  const [documentLinks, setDocumentLinks] = useState<
+    Awaited<ReturnType<typeof documents.links>>[1]
+  >([]);
   const [links, setLinks] = useState<Link[]>([]);
   const [noteDates, setNoteDates] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
@@ -72,7 +78,29 @@ export function Backlinks({
       active = false;
     };
   }, [reference, revision, offset]);
-  if (!error && links.length === 0 && offset === 0) return null;
+  useEffect(() => {
+    let active = true;
+    void client
+      .showTicket(reference)
+      .then((ticket) => documents.links(ticket.id))
+      .then(([, incoming]) => {
+        if (active)
+          setDocumentLinks(
+            incoming.filter((link) => link.source_kind === "document"),
+          );
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [reference, revision]);
+  if (
+    !error &&
+    links.length === 0 &&
+    documentLinks.length === 0 &&
+    offset === 0
+  )
+    return null;
   return (
     <section className="backlinks" aria-label="Mentioned in">
       <h3>
@@ -83,6 +111,21 @@ export function Backlinks({
       </h3>
       {error && <p role="alert">{error}</p>}
       <ul className="backlink-list">
+        {documentLinks.map((link) => (
+          <li key={`${link.source_id}-${link.passage}`}>
+            <button
+              type="button"
+              className="backlink-source"
+              onClick={() => openDocument?.(link.source_id)}
+            >
+              <strong>
+                {link.source_label}
+                {link.source_trashed ? " (Trash)" : ""}
+              </strong>
+              <span>{link.passage}</span>
+            </button>
+          </li>
+        ))}
         {links.map((link, index) => (
           <li
             key={`${link.source_reference}-${link.activity_id ?? "description"}-${index}`}

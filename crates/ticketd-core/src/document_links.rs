@@ -13,6 +13,8 @@ pub struct ContextLink {
     pub passage: String,
     pub source_label: String,
     pub target_label: String,
+    pub source_trashed: bool,
+    pub target_trashed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,7 +151,9 @@ impl Workspace {
         self.connection
             .execute_batch("SAVEPOINT create_ticket_from_document")?;
         let result = (|| {
-            self.show_document(id)?;
+            if self.show_document(id)?.trashed {
+                return Err(Error::Trashed(id.to_owned()));
+            }
             let ticket = self.create_ticket(title)?;
             self.change_ticket(
                 &ticket.reference,
@@ -190,7 +194,7 @@ impl Workspace {
             return Err(Error::NotFound(id.to_owned()));
         }
         let column = if outgoing { "source_id" } else { "target_id" };
-        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id) FROM context_mentions m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3"))?;
+        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id) , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM context_mentions m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(ContextLink {
@@ -201,6 +205,8 @@ impl Workspace {
                     passage: r.get(4)?,
                     source_label: r.get(5)?,
                     target_label: r.get(6)?,
+                    source_trashed: r.get(7)?,
+                    target_trashed: r.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

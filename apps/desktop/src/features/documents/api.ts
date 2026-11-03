@@ -7,6 +7,7 @@ const schema = z.object({
   body: z.string(),
   created_at: z.string(),
   updated_at: z.string(),
+  trashed: z.boolean(),
 });
 export type Document = z.infer<typeof schema>;
 const linkSchema = z.object({
@@ -17,6 +18,8 @@ const linkSchema = z.object({
   passage: z.string(),
   source_label: z.string(),
   target_label: z.string(),
+  source_trashed: z.boolean(),
+  target_trashed: z.boolean(),
 });
 export const documents = {
   linkMarkdown: async (reference: string) =>
@@ -30,6 +33,11 @@ export const documents = {
       .object({ reference: z.string() })
       .parse(await invoke("ticket_from_document", { id, title, requestId })),
   recent: async () => z.array(schema).parse(await invoke("recent_documents")),
+  trash: async () => z.array(schema).parse(await invoke("trashed_documents")),
+  setTrashed: async (id: string, trashed: boolean, requestId: string) =>
+    schema.parse(
+      await invoke("set_document_trashed", { id, trashed, requestId }),
+    ),
   show: async (id: string) =>
     schema.parse(await invoke("show_document", { id })),
   open: async (id: string) =>

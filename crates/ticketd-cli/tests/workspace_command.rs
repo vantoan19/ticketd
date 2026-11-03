@@ -142,6 +142,21 @@ fn documents_can_be_created_edited_and_reopened_via_cli() {
     let recent: serde_json::Value =
         serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
     assert_eq!(recent[0]["id"], id);
+    run(dir.path(), &["document", "trash", id]);
+    let recent: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "recent"])).unwrap();
+    assert_eq!(recent.as_array().unwrap().len(), 0);
+    let trashed: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "trash-list"])).unwrap();
+    assert_eq!(trashed[0]["id"], id);
+    let opened: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "open", id])).unwrap();
+    assert_eq!(opened["trashed"], true);
+    run(dir.path(), &["document", "restore", id]);
+    let restored: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "show", id])).unwrap();
+    assert_eq!(restored["body"], "First thought");
+    assert_eq!(restored["trashed"], false);
 }
 
 #[test]
