@@ -7,14 +7,17 @@ complete snapshot has been written. Errors are reported to stderr by the CLI or
 in the desktop. When redirecting stdout yourself, a failed command may leave a
 partial file; use `--file` for safe publication.
 
-The root object has integer `format_version` 1 and arrays named `projects`,
+The root object has integer `format_version` 1 and arrays named `entities`,
+`documents`, `document_opens`, `document_pins`, `document_tags`, `projects`,
 `project_checkouts`, `plans`, `tickets`, `activities`, `evidence`, `ticket_history`,
 `ticket_follows`, `inbox_entries`, `tags`, `ticket_tags`, `dependencies`,
 `duplicate_tickets`, `ticket_parents`, `source_configurations`, `external_identities`, `external_ownership`, `source_sync`, `external_duplicate_targets`, `source_conversation`, `source_status`, and `publication_attempts`. Each array contains objects
 with the corresponding record fields. IDs are strings; `ticket_id`, `project_id`,
 `plan_id`, `child_id`, `parent_id`, `blocker_id`, and `dependent_id` refer to
-IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`. Ticket
-`number` forms its stable reference as `T-` followed by the decimal number.
+IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`.
+`document_tags.tag_name` also refers to `tags.name`; `document_pins` and
+`document_opens` refer to Document IDs. The full-text index is derived from
+Document titles and Markdown bodies and is not exported. Ticket `number` forms its stable reference as `T-` followed by the decimal number.
 Optional values are null; `trashed` and `archived` are integers 0 or 1. History
 values are recorded strings, with their meaning determined by `kind`. Checkout
 paths describe the source machine and may need adjustment on another machine.
