@@ -5,6 +5,7 @@ import {
   render,
   screen,
   within,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -47,6 +48,10 @@ beforeEach(() => {
     ],
     max_nodes: 50,
     max_depth: 5,
+    max_edges: 300,
+    max_work: 3000,
+    omitted_neighbors: false,
+    omitted_edges: false,
     truncated: false,
   };
   vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -161,4 +166,15 @@ test("marks the origin ticket and says when the graph is limited", async () => {
   expect(
     screen.getByText(/up to 5 links from T-2 and at most 50 tickets/),
   ).toBeTruthy();
+});
+
+test("re-centers the graph on the selected ticket", async () => {
+  renderGraph();
+  fireEvent.click(await screen.findByRole("button", { name: /^T-3\b/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Center graph on T-3" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("dependency_graph", {
+      reference: "T-3",
+    }),
+  );
 });
