@@ -1,5 +1,5 @@
 use crate::{
-    BatchOperation, Error, Evidence, EvidenceInput, Note, NotePatch, Plan, Project,
+    BatchOperation, Error, Evidence, EvidenceInput, Activity, ActivityPatch, Plan, Project,
     RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
@@ -57,17 +57,17 @@ pub enum WriteRequest {
         trashed: bool,
         agent: Option<String>,
     },
-    AddNote {
+    AddActivity {
         reference: String,
-        content: String,
+        brief: String,
         agent: Option<String>,
     },
-    EditNote {
+    EditActivity {
         reference: String,
         id: String,
-        patch: NotePatch,
+        patch: ActivityPatch,
     },
-    DeleteNote {
+    DeleteActivity {
         reference: String,
         id: String,
     },
@@ -180,7 +180,7 @@ pub enum WriteRequest {
 pub enum WriteResult {
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
-    Note(Note),
+    Activity(Activity),
     Evidence(Evidence),
     Project(Project),
     Plan(Plan),
@@ -283,18 +283,18 @@ impl Workspace {
                 trashed,
                 agent,
             } => WriteResult::Ticket(self.set_trashed(&reference, trashed, agent.as_deref())?),
-            WriteRequest::AddNote {
+            WriteRequest::AddActivity {
                 reference,
-                content,
+                brief,
                 agent,
-            } => WriteResult::Note(self.add_note(&reference, &content, agent.as_deref())?),
-            WriteRequest::EditNote {
+            } => WriteResult::Activity(self.add_activity(&reference, &brief, agent.as_deref())?),
+            WriteRequest::EditActivity {
                 reference,
                 id,
                 patch,
-            } => WriteResult::Note(self.edit_note(&reference, &id, patch)?),
-            WriteRequest::DeleteNote { reference, id } => {
-                self.delete_note(&reference, &id)?;
+            } => WriteResult::Activity(self.edit_activity(&reference, &id, patch)?),
+            WriteRequest::DeleteActivity { reference, id } => {
+                self.delete_activity(&reference, &id)?;
                 WriteResult::Deleted
             }
             WriteRequest::AddTag { reference, name } => {

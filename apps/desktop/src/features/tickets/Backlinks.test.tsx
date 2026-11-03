@@ -17,7 +17,7 @@ test("lists each mention with its location and opens the source passage", async 
         {
           source_reference: "T-2",
           source_title: "Cache layer",
-          note_id: null,
+          activity_id: null,
           passage: "Blocked on T-1 and T-12.",
           mention_start: 11,
           mention_end: 14,
@@ -25,7 +25,7 @@ test("lists each mention with its location and opens the source passage", async 
         {
           source_reference: "T-3",
           source_title: "Docs",
-          note_id: "n1",
+          activity_id: "n1",
           passage: "See T-1 for context.",
           mention_start: 4,
           mention_end: 7,

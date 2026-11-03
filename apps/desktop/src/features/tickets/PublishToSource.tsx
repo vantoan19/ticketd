@@ -371,7 +371,7 @@ export function PublishDialog({
                 </li>
                 <li>
                   {preview.local
-                    ? `${preview.local.notes} ${preview.local.notes === 1 ? "note" : "notes"}, `
+                    ? `${preview.local.activities} ${preview.local.activities === 1 ? "note" : "notes"}, `
                     : "Notes, "}
                   Plan, tags and relationships — never sent to GitHub
                 </li>

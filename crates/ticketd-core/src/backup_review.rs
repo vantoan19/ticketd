@@ -17,7 +17,7 @@ pub struct WorkspaceSummary {
     pub last_change: Option<String>,
     /// Tickets outside Trash.
     pub tickets: u64,
-    pub notes: u64,
+    pub activities: u64,
     pub evidence: u64,
     pub projects: u64,
     pub plans: u64,
@@ -104,7 +104,7 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     let mut latest: Option<String> = None;
     for (table, column) in [
         ("ticket_history", "timestamp"),
-        ("notes", "updated_at"),
+        ("activities", "updated_at"),
         ("evidence", "updated_at"),
     ] {
         if !table_exists(connection, table)? {
@@ -121,7 +121,7 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     Ok(WorkspaceSummary {
         last_change: latest,
         tickets,
-        notes: count(connection, "notes")?,
+        activities: count(connection, "activities")?,
         evidence: count(connection, "evidence")?,
         projects: count(connection, "projects")?,
         plans: count(connection, "plans")?,

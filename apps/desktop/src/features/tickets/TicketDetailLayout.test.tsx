@@ -212,7 +212,7 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
     status: "In progress",
     tags: ["frontend", "urgent"],
     latest_update: {
-      note_id: note.id,
+      activity_id: note.id,
       reported_at: note.created_at,
       editing_agent: "agent",
     },

@@ -76,7 +76,7 @@ standard input. A create names a ticket for later operations using `$name`:
       "parent": "$parent",
       "add_blockers": ["$parent"],
       "add_tags": ["feature"],
-      "notes": ["Plan agreed"]
+      "activities": ["Plan agreed"]
     }
   }
 ]
@@ -93,23 +93,23 @@ between operations.
 ### Bounded ticket context
 
 `ticketd context T-1` returns JSON with the ticket, derived availability, and
-its tags. Add `--project`, `--plan`, `--relationships`, or `--notes` to
+its tags. Add `--project`, `--plan`, `--relationships`, or `--activities` to
 select those scopes. An omitted scope is absent; a selected but unlinked project,
 Plan, or parent is `null`. Related tickets include status and `trashed`; only
 Done satisfies a prerequisite. A missing root or a missing linked project or
 Plan produces an error on stderr and a nonzero exit code, with no JSON on
 stdout.
 
-Each list is ordered by ticket reference number, tag name, or note insertion
+Each list is ordered by ticket reference number, tag name, or Activity insertion
 order, and contains at most 20 items. A non-null `next_offset` means to repeat
 the command with `--offset` set to that value; the offset applies independently
 to every list in the response. Each call reads one snapshot, but later pages can
 reflect intervening changes. Text objects contain `text` and `truncated`:
-ticket and note bodies are limited to 4096 Unicode characters, other user text
-to 256. Use `ticketd show T-1` for full ticket content and `ticketd note list
-T-1` for full notes. The bounded body must not be used as an editable draft.
+ticket bodies and Activity briefs are limited to 4096 Unicode characters, other user text
+to 256. Use `ticketd show T-1` for full ticket content and `ticketd activity list
+T-1` for the full activity feed. The bounded body must not be used as an editable draft.
 
-Search saved titles, bodies, and notes with `ticketd search QUERY`. The query is a
+Search saved titles, bodies, and Activity briefs with `ticketd search QUERY`. The query is a
 literal substring (ASCII letters match without case); an empty query returns no
 matches. Results exclude trash and are ordered by descending ticket reference.
 Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
@@ -117,10 +117,10 @@ or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
 
 `ticketd backlinks T-1` lists incoming references as JSON. Each entry has
-`source_reference`, `source_title`, `note_id` (null for a description),
+`source_reference`, `source_title`, `activity_id` (null for a description),
 `passage` (the source line, trimmed to 512 characters around the reference), and
 `mention_start` and `mention_end`, which locate the mention in the source ticket
-description or note. They count Unicode scalar values (characters, as `passage`
+description or authored Activity. They count Unicode scalar values (characters, as `passage`
 is), not bytes or UTF-16 units, and do not count a leading U+FEFF byte order
 mark, so a Python agent can slice `body[mention_start:mention_end]` after
 dropping that mark. The span is the reference itself unless its source uses

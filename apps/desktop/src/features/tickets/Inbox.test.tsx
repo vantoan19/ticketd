@@ -58,7 +58,7 @@ beforeEach(() => {
       id: 2,
       reference: "T-2",
       title: "Finding",
-      kind: "note",
+      kind: "activity",
       from_value: "note-id",
       to_value: "Original note",
       editing_agent: "agent",
@@ -87,7 +87,7 @@ test("opens the note identified by an inbox entry and shows its text", async () 
   render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-2.*Finding/ }));
   expect(select).toHaveBeenCalledWith("T-2", "note-id");
-  expect(screen.getByText(/New note: Original note · agent/)).toBeTruthy();
+  expect(screen.getByText(/New update: Original note · agent/)).toBeTruthy();
 });
 
 test("groups entries by local day and never shows internal event keys", async () => {

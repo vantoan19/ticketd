@@ -25,9 +25,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MoreHorizontal } from "lucide-react";
-import { client, type Note, type Project } from "@/lib/api/client";
+import { client, type AuthoredActivity, type ActivityFeedEntry, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
-import { historyClient, type Entry } from "@/lib/api/history";
 import { historySentence } from "./history-sentence";
 import { attribution } from "./ticket-source";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
@@ -82,7 +81,7 @@ export function Activity({
 }) {
   const now = useNow();
   const [loadError, setLoadError] = useState("");
-  const [targetNote, setTargetNote] = useState<Note | null>(null);
+  const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
   const targetRef = useRef<HTMLLIElement>(null);
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
@@ -94,7 +93,7 @@ export function Activity({
     const request = { id: targetId };
     targetRequest.current = request;
     void client
-      .note(reference, targetId)
+      .activity(reference, targetId)
       .then((note) => {
         if (current && targetRequest.current === request) setTargetNote(note);
       })
@@ -106,8 +105,9 @@ export function Activity({
       current = false;
     };
   }, [active, reference, revision, targetId, targetKey]);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [history, setHistory] = useState<Entry[]>([]);
+  const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
+  const notes = feed.flatMap((item) => item.type === "authored" ? [item.activity] : []);
+  const history = feed.flatMap((item) => item.type === "automatic" ? [item.event] : []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [draft, setDraftValue] = useState(() => loadDraft(reference));
@@ -135,24 +135,23 @@ export function Activity({
   const pages = useRef(1);
   const [more, setMore] = useState(false);
   const loadNotes = useCallback(async () => {
-    const loaded: Note[] = [];
-    let page: Note[] = [];
+    const loaded: ActivityFeedEntry[] = [];
+    let page: ActivityFeedEntry[] = [];
     for (let index = 0; index < pages.current; index++) {
-      page = await client.notes(reference, index * 50);
+      page = await client.activityFeed(reference, index * 50);
       loaded.push(...page);
       if (page.length < 50) break;
     }
-    setNotes(loaded);
+    setFeed(loaded);
     setMore(page.length === 50);
   }, [reference]);
   useEffect(() => {
     if (!active) return;
     let current = true;
     void Promise.resolve()
-      .then(() => Promise.all([loadNotes(), historyClient.list(reference)]))
-      .then(([, entries]) => {
+      .then(() => loadNotes())
+      .then(() => {
         if (current) {
-          setHistory(entries);
           setLoadError("");
         }
       })
@@ -180,7 +179,7 @@ export function Activity({
     setError("");
     try {
       if (edit) {
-        const savedNote = await client.editNote(
+        const savedNote = await client.editActivity(
           reference,
           edit.id,
           edit.content,
@@ -190,7 +189,7 @@ export function Activity({
         setTargetNote((previous) =>
           previous?.id === savedNote.id ? savedNote : previous,
         );
-      } else await client.addNote(reference, draft);
+      } else await client.addActivity(reference, draft);
       if (edit) setEdit(null);
       else {
         setDraft("");
@@ -211,7 +210,7 @@ export function Activity({
     setPending(true);
     setError("");
     try {
-      await client.deleteNote(reference, id);
+      await client.deleteActivity(reference, id);
       if (targetRequest.current?.id === id) targetRequest.current = null;
       setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
@@ -229,9 +228,9 @@ export function Activity({
     setPending(true);
     setError("");
     try {
-      const page = await client.notes(reference, notes.length);
+      const page = await client.activityFeed(reference, feed.length);
       pages.current += 1;
-      setNotes((previous) => [...previous, ...page]);
+      setFeed((previous) => [...previous, ...page]);
       setMore(page.length === 50);
     } catch (reason) {
       setError(String(reason));
@@ -253,7 +252,7 @@ export function Activity({
   const changed =
     edit &&
     !displayedNotes.some(
-      (note) => note.id === edit.id && note.content === edit.original,
+      (note) => note.id === edit.id && note.brief === edit.original,
     );
   useLayoutEffect(() => {
     if (!active || targetId === undefined || targetKey === undefined) {
@@ -274,7 +273,7 @@ export function Activity({
   const entries = [
     ...displayedNotes.map((note) => ({
       type: "note" as const,
-      timestamp: note.created_at,
+      timestamp: note.reported_at,
       note,
     })),
     ...history.map((entry, index) => ({
@@ -293,7 +292,7 @@ export function Activity({
   return (
     <section className="activity" aria-label="Activity">
       <div className="activity-heading">
-        <h3>Notes and history</h3>
+        <h3>Activity</h3>
         <span>
           Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
         </span>
@@ -309,7 +308,7 @@ export function Activity({
           className="activity-compact-composer"
           onClick={() => setComposing(true)}
         >
-          Add a note
+          Add update
         </button>
       )}
       {!trashed && (composing || edit) && (
@@ -320,11 +319,11 @@ export function Activity({
           <FieldGroup>
             <Field data-disabled={pending}>
               <FieldLabel asChild>
-                <span>{edit ? "Edit note" : "New note"}</span>
+                <span>{edit ? "Edit update" : "New update"}</span>
               </FieldLabel>
               <LazyMarkdownEditor
                 key={edit?.id ?? "new"}
-                label={edit ? "Edit note" : "New note"}
+                label={edit ? "Edit update" : "New update"}
                 value={draftText}
                 onChange={(content) =>
                   edit ? setEdit({ ...edit, content }) : setDraft(content)
@@ -336,7 +335,7 @@ export function Activity({
           </FieldGroup>
           {changed && (
             <p role="status" className="activity-muted">
-              The saved note changed while you were editing. Your draft is
+              The saved update changed while you were editing. Your draft is
               preserved; saving will replace the saved content.
             </p>
           )}
@@ -346,7 +345,7 @@ export function Activity({
               size="sm"
               disabled={pending || !draftText.trim()}
             >
-              {pending ? "Saving…" : edit ? "Save note" : "Add note"}
+              {pending ? "Saving…" : edit ? "Save update" : "Post update"}
             </Button>
             {edit ? (
               <Button
@@ -383,7 +382,7 @@ export function Activity({
         <Empty className="activity-empty">
           <EmptyHeader>
             <EmptyDescription>
-              No notes or recorded changes yet.
+              No updates or recorded changes yet.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -400,21 +399,21 @@ export function Activity({
                 tabIndex={active && item.note.id === targetId ? -1 : undefined}
                 aria-label={
                   active && item.note.id === targetId
-                    ? "Selected note"
+                    ? "Selected update"
                     : undefined
                 }
               >
                 <div className="activity-meta">
                   <strong>
-                    {item.note.id === latestNoteId ? "Latest update" : "Note"}
+                    {item.note.id === latestNoteId ? "Latest update" : "Update"}
                   </strong>
                   <time
-                    dateTime={item.note.created_at}
-                    title={formatDateTime(item.note.created_at)}
+                    dateTime={item.note.reported_at}
+                    title={formatDateTime(item.note.reported_at)}
                   >
-                    {relativeDateTime(item.note.created_at, now)}
+                    {relativeDateTime(item.note.reported_at, now)}
                   </time>
-                  {item.note.updated_at !== item.note.created_at && (
+                  {item.note.updated_at !== item.note.reported_at && (
                     <span>Edited {formatDateTime(item.note.updated_at)}</span>
                   )}
                   {item.note.editing_agent && (
@@ -429,7 +428,7 @@ export function Activity({
                           size="icon-sm"
                           className="activity-menu"
                           disabled={pending}
-                          aria-label={`Actions for note from ${formatDateTime(item.note.created_at)}`}
+                          aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
                         >
                           <MoreHorizontal />
                         </Button>
@@ -439,18 +438,18 @@ export function Activity({
                           onSelect={() =>
                             setEdit({
                               id: item.note.id,
-                              original: item.note.content,
-                              content: item.note.content,
+                              original: item.note.brief,
+                              content: item.note.brief,
                             })
                           }
                         >
-                          Edit note
+                          Edit update
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
                           onSelect={() => void remove(item.note.id)}
                         >
-                          Delete note
+                          Delete update
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -458,7 +457,7 @@ export function Activity({
                 </div>
                 <div className="markdown-preview activity-note">
                   <MarkdownDocument
-                    source={item.note.content}
+                    source={item.note.brief}
                     select={select}
                     revision={revision}
                   />
@@ -489,7 +488,7 @@ export function Activity({
           disabled={pending}
           onClick={() => void loadMore()}
         >
-          Load more notes
+          Load more activity
         </Button>
       )}
     </section>

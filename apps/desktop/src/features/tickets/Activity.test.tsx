@@ -44,7 +44,7 @@ afterEach(() => {
 test("preserves a note draft on a failed save and prevents repeated submissions", async () => {
   let rejectSave: (reason: Error) => void = () => {};
   bridge.invoke.mockImplementation((command: string) => {
-    if (command === "ticket_history" || command === "list_notes")
+    if (command === "ticket_history" || command === "activity_feed")
       return Promise.resolve([]);
     return new Promise((_resolve, reject) => {
       rejectSave = reject;
@@ -60,13 +60,13 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
       trashed={false}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  const composer = screen.getByRole("textbox", { name: "New note source" });
+  const composer = screen.getByRole("textbox", { name: "New update source" });
   fireEvent.change(composer, { target: { value: "A **draft**" } });
-  fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Post update" }));
   expect(
     screen.getByRole("button", { name: "Saving…" }).hasAttribute("disabled"),
   ).toBe(true);
@@ -84,21 +84,22 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   );
   expect(composer).toHaveProperty("readOnly", false);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_note"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity"),
   ).toHaveLength(1);
 });
 
 test("opens the selected note even when it is outside the loaded page", async () => {
   bridge.invoke.mockImplementation((command: string) => {
-    if (command === "get_note")
+    if (command === "get_activity")
       return Promise.resolve({
         id: "older",
-        content: "Edited finding",
-        created_at: "2026-01-01",
+        ticket_id: "ticket-1",
+        brief: "Edited finding",
+        reported_at: "2026-01-01",
         updated_at: "2026-01-02",
         editing_agent: null,
       });
-    if (command === "ticket_history" || command === "list_notes")
+    if (command === "ticket_history" || command === "activity_feed")
       return Promise.resolve([]);
     throw new Error(`Unexpected command: ${command}`);
   });
@@ -113,11 +114,11 @@ test("opens the selected note even when it is outside the loaded page", async ()
       target={{ id: "older", key: 1 }}
     />,
   );
-  const note = await screen.findByLabelText("Selected note");
+  const note = await screen.findByLabelText("Selected update");
   expect(note.textContent).toContain("Edited finding");
   expect(note.closest("ol")).not.toBeNull();
   expect(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
   ).toBeTruthy();
   // Revealing a note also moves focus to it, so the keyboard lands there.
   expect(document.activeElement).toBe(note);
@@ -126,14 +127,15 @@ test("opens the selected note even when it is outside the loaded page", async ()
 test("reveals the existing chronological note without scrolling the workspace", async () => {
   const selected = {
     id: "selected",
-    content: "A single update",
-    created_at: "2026-01-01T00:00:00Z",
+    ticket_id: "ticket-1",
+    brief: "A single update",
+    reported_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     editing_agent: null,
   };
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "get_note") return selected;
-    if (command === "list_notes") return [selected];
+    if (command === "get_activity") return selected;
+    if (command === "activity_feed") return [{ type: "authored", activity: selected }];
     if (command === "ticket_history") return [];
     throw new Error(`Unexpected command: ${command}`);
   });
@@ -147,7 +149,7 @@ test("reveals the existing chronological note without scrolling the workspace", 
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
     function (this: HTMLElement) {
       if (this === scroller) return new DOMRect(0, 100, 500, 300);
-      if (this.getAttribute("aria-label") === "Selected note")
+      if (this.getAttribute("aria-label") === "Selected update")
         return new DOMRect(0, 500, 500, 100);
       return new DOMRect();
     },
@@ -165,7 +167,7 @@ test("reveals the existing chronological note without scrolling the workspace", 
     />,
     { container: scroller },
   );
-  const note = await screen.findByLabelText("Selected note");
+  const note = await screen.findByLabelText("Selected update");
   await waitFor(() =>
     expect(screen.getAllByText("A single update")).toHaveLength(1),
   );
@@ -179,23 +181,24 @@ test("reveals the existing chronological note without scrolling the workspace", 
 test("does not duplicate an unloaded target when its page is later loaded", async () => {
   const selected = {
     id: "older",
-    content: "Earlier update",
-    created_at: "2026-01-01T00:00:00Z",
+    ticket_id: "ticket-1",
+    brief: "Earlier update",
+    reported_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     editing_agent: null,
   };
   const firstPage = Array.from({ length: 50 }, (_, index) => ({
     ...selected,
     id: `recent-${index}`,
-    content: `Recent update ${index}`,
-    created_at: "2026-10-01T00:00:00Z",
+    brief: `Recent update ${index}`,
+    reported_at: "2026-10-01T00:00:00Z",
     updated_at: "2026-10-01T00:00:00Z",
   }));
   bridge.invoke.mockImplementation(
     async (command: string, args?: { offset: number }) => {
-      if (command === "get_note") return selected;
-      if (command === "list_notes")
-        return args?.offset ? [selected] : firstPage;
+      if (command === "get_activity") return selected;
+      if (command === "activity_feed")
+        return (args?.offset ? [selected] : firstPage).map((activity) => ({ type: "authored", activity }));
       if (command === "ticket_history") return [];
       throw new Error(`Unexpected command: ${command}`);
     },
@@ -211,13 +214,13 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
       target={{ id: "older", key: 1 }}
     />,
   );
-  const note = await screen.findByLabelText("Selected note");
+  const note = await screen.findByLabelText("Selected update");
   expect(note.closest("ol")).not.toBeNull();
   fireEvent.click(
-    await screen.findByRole("button", { name: "Load more notes" }),
+    await screen.findByRole("button", { name: "Load more activity" }),
   );
   await waitFor(() =>
-    expect(bridge.invoke).toHaveBeenCalledWith("list_notes", {
+    expect(bridge.invoke).toHaveBeenCalledWith("activity_feed", {
       reference: "T-1",
       limit: 50,
       offset: 50,
@@ -231,26 +234,28 @@ test("does not duplicate an unloaded target when its page is later loaded", asyn
 test("an unloaded targeted note can be edited and deleted without a stale copy", async () => {
   let saved: {
     id: string;
-    content: string;
-    created_at: string;
+    ticket_id: string;
+    brief: string;
+    reported_at: string;
     updated_at: string;
     editing_agent: string | null;
   } | null = {
     id: "older",
-    content: "Earlier update",
-    created_at: "2026-01-01T00:00:00Z",
+    ticket_id: "ticket-1",
+    brief: "Earlier update",
+    reported_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     editing_agent: null,
   };
   bridge.invoke.mockImplementation(
-    async (command: string, args?: { patch: { content: string } }) => {
-      if (command === "get_note") return saved;
-      if (command === "list_notes" || command === "ticket_history") return [];
-      if (command === "edit_note" && saved) {
-        saved = { ...saved, content: args!.patch.content };
+    async (command: string, args?: { patch: { brief: string } }) => {
+      if (command === "get_activity") return saved;
+      if (command === "activity_feed" || command === "ticket_history") return [];
+      if (command === "edit_activity" && saved) {
+        saved = { ...saved, brief: args!.patch.brief };
         return saved;
       }
-      if (command === "delete_note") {
+      if (command === "delete_activity") {
         saved = null;
         return;
       }
@@ -269,31 +274,31 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   const view = render(<Activity {...targetProps} />);
   await screen.findByText("Earlier update");
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
-  expect(screen.queryByText(/The saved note changed/)).toBeNull();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
+  expect(screen.queryByText(/The saved update changed/)).toBeNull();
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
     target: { value: "Edited earlier update" },
   });
-  saved = { ...saved!, content: "Changed externally" };
+  saved = { ...saved!, brief: "Changed externally" };
   view.rerender(<Activity {...targetProps} revision={1} />);
-  await screen.findByText(/The saved note changed/);
+  await screen.findByText(/The saved update changed/);
   expect(
-    screen.getByRole("textbox", { name: "Edit note source" }),
+    screen.getByRole("textbox", { name: "Edit update source" }),
   ).toHaveProperty("value", "Edited earlier update");
-  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await screen.findByText("Edited earlier update");
   expect(screen.queryByText("Earlier update")).toBeNull();
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete note" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete update" }));
   await waitFor(() =>
     expect(screen.queryByText("Edited earlier update")).toBeNull(),
   );
@@ -302,12 +307,13 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
 test("finishing a note edit does not discard a newer note navigation", async () => {
   const first = {
     id: "first",
-    content: "First target",
-    created_at: "2026-01-01T00:00:00Z",
+    ticket_id: "ticket-1",
+    brief: "First target",
+    reported_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     editing_agent: null,
   };
-  const second = { ...first, id: "second", content: "Second target" };
+  const second = { ...first, id: "second", brief: "Second target" };
   let finishSave: (note: typeof first) => void = () => {};
   let finishSecond: (note: typeof first) => void = () => {};
   const save = new Promise<typeof first>((resolve) => (finishSave = resolve));
@@ -316,10 +322,10 @@ test("finishing a note edit does not discard a newer note navigation", async () 
   );
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id: string }) => {
-      if (command === "get_note")
+      if (command === "get_activity")
         return args?.id === "second" ? secondRead : first;
-      if (command === "list_notes" || command === "ticket_history") return [];
-      if (command === "edit_note") return save;
+      if (command === "activity_feed" || command === "ticket_history") return [];
+      if (command === "edit_activity") return save;
       throw new Error(`Unexpected command: ${command}`);
     },
   );
@@ -336,21 +342,21 @@ test("finishing a note edit does not discard a newer note navigation", async () 
   );
   await screen.findByText("First target");
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   view.rerender(
     <Activity {...targetProps} target={{ id: "second", key: 2 }} />,
   );
   await waitFor(() =>
-    expect(bridge.invoke).toHaveBeenCalledWith("get_note", {
+    expect(bridge.invoke).toHaveBeenCalledWith("get_activity", {
       reference: "T-1",
       id: "second",
     }),
   );
-  await act(async () => finishSave({ ...first, content: "Saved first" }));
+  await act(async () => finishSave({ ...first, brief: "Saved first" }));
   await waitFor(() => expect(screen.queryByText("Saving…")).toBeNull());
   await act(async () => finishSecond(second));
   expect(await screen.findByText("Second target")).toBeTruthy();
@@ -366,8 +372,9 @@ const props = {
 };
 const original = {
   id: "note-1",
-  content: "Original **note**",
-  created_at: "2026-10-31T10:00:00Z",
+  ticket_id: "ticket-1",
+  brief: "Original **note**",
+  reported_at: "2026-10-31T10:00:00Z",
   updated_at: "2026-10-31T10:00:00Z",
   editing_agent: "cli-agent",
 };
@@ -376,11 +383,11 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   const scoped = { ...props, reference: "T-10" };
   let saved: (typeof original)[] = [];
   bridge.invoke.mockImplementation(
-    async (command: string, args?: { content: string }) => {
-      if (command === "list_notes") return saved;
+    async (command: string, args?: { brief: string }) => {
+      if (command === "activity_feed") return saved.map((activity) => ({ type: "authored", activity }));
       if (command === "ticket_history") return [];
-      if (command === "add_note") {
-        const note = { ...original, content: args!.content };
+      if (command === "add_activity") {
+        const note = { ...original, brief: args!.brief };
         saved = [note];
         return note;
       }
@@ -389,104 +396,104 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   );
   render(<Activity {...scoped} />);
   expect(screen.queryByRole("textbox")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
-  const add = screen.getByRole("button", { name: "Add note" });
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  const add = screen.getByRole("button", { name: "Post update" });
   expect(add).toHaveProperty("disabled", true);
   fireEvent.submit(add.closest("form")!);
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  const source = screen.getByRole("textbox", { name: "New note source" });
+  const source = screen.getByRole("textbox", { name: "New update source" });
   fireEvent.change(source, { target: { value: " \n\t" } });
   fireEvent.submit(add.closest("form")!);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_note"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity"),
   ).toHaveLength(0);
   fireEvent.change(source, { target: { value: "## Finding\n\n- [x] Done" } });
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   expect(
-    screen.getByRole("textbox", { name: "New note rich text" }).textContent,
+    screen.getByRole("textbox", { name: "New update rich text" }).textContent,
   ).toContain("Finding");
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_note"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity"),
   ).toHaveLength(0);
   fireEvent.click(add);
   await waitFor(() =>
     expect(screen.getByRole("heading", { name: "Finding" })).toBeTruthy(),
   );
-  expect(saved[0]?.content).toBe("## Finding\n\n- [x] Done");
+  expect(saved[0]?.brief).toBe("## Finding\n\n- [x] Done");
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
 });
 
 test("preserves new and edited drafts across hidden navigation, external refresh and failed edits, then cancels back to the new draft", async () => {
   const scoped = { ...props, reference: "T-11" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "list_notes") return [saved];
+    if (command === "activity_feed") return [{ type: "authored", activity: saved }];
     if (command === "ticket_history") return [];
-    if (command === "edit_note") throw new Error("Disk full");
+    if (command === "edit_activity") throw new Error("Disk full");
     throw new Error(`Unexpected ${command}`);
   });
   const view = render(<Activity {...scoped} />);
   await screen.findByText("Agent: cli-agent");
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
     target: { value: "Unsubmitted new draft" },
   });
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
   expect(
-    screen.getByRole("textbox", { name: "Edit note rich text" }).textContent,
+    screen.getByRole("textbox", { name: "Edit update rich text" }).textContent,
   ).toContain("Original note");
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
     target: { value: "My edited **draft**" },
   });
   view.rerender(<Activity {...scoped} active={false} />);
-  saved = { ...saved, content: "An external update" };
+  saved = { ...saved, brief: "An external update" };
   view.rerender(<Activity {...scoped} revision={1} />);
-  await screen.findByText(/The saved note changed while you were editing/);
+  await screen.findByText(/The saved update changed while you were editing/);
   expect(
-    screen.getByRole("textbox", { name: "Edit note source" }),
+    screen.getByRole("textbox", { name: "Edit update source" }),
   ).toHaveProperty("value", "My edited **draft**");
-  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain("Disk full"),
   );
   expect(
-    screen.getByRole("textbox", { name: "Edit note source" }),
+    screen.getByRole("textbox", { name: "Edit update source" }),
   ).toHaveProperty("value", "My edited **draft**");
   fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
   expect(
-    screen.getByRole("textbox", { name: "New note source" }),
+    screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Unsubmitted new draft");
   view.rerender(<Activity {...scoped} revision={1} trashed />);
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Add note" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Post update" })).toBeNull();
 });
 
 test("explicitly saves an edited note and returns to the untouched new draft", async () => {
   const scoped = { ...props, reference: "T-12" };
   let saved = { ...original };
   bridge.invoke.mockImplementation(
-    async (command: string, args?: { patch: { content: string } }) => {
-      if (command === "list_notes") return [saved];
+    async (command: string, args?: { patch: { brief: string } }) => {
+      if (command === "activity_feed") return [{ type: "authored", activity: saved }];
       if (command === "ticket_history") return [];
-      if (command === "edit_note") {
-        saved = { ...saved, content: args!.patch.content };
+      if (command === "edit_activity") {
+        saved = { ...saved, brief: args!.patch.brief };
         return saved;
       }
       throw new Error(`Unexpected ${command}`);
@@ -495,20 +502,20 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   render(<Activity {...scoped} />);
   await screen.findByText("Agent: cli-agent");
   fireEvent.pointerDown(
-    screen.getByRole("button", { name: /Actions for note from/ }),
+    screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },
   );
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit update" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit update source" }), {
     target: { value: "## Edited finding" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await screen.findByRole("heading", { name: "Edited finding" });
-  expect(saved.content).toBe("## Edited finding");
-  expect(screen.getByRole("button", { name: "Add a note" })).toBeTruthy();
+  expect(saved.brief).toBe("## Edited finding");
+  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Cancel edit" })).toBeNull();
 });
 
@@ -529,10 +536,10 @@ test("recovers an unpublished brief after the desktop restarts", async () => {
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
   expect(
-    screen.getByRole("textbox", { name: "New note source" }),
+    screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "A recovered **brief**");
   expect(
-    bridge.invoke.mock.calls.some(([command]) => command === "add_note"),
+    bridge.invoke.mock.calls.some(([command]) => command === "add_activity"),
   ).toBe(false);
   localStorage.removeItem("ticketd:activity-draft:T-987");
 });

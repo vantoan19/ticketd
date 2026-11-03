@@ -51,13 +51,13 @@ Rich document editing uses Plate, with Markdown remaining canonical across stora
 | Caller intent           | Core behavior                                                                                 |
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket |
-| Change a ticket         | Apply supplied fields, explicit relationship changes, and optional notes as one atomic change |
+| Change a ticket         | Apply supplied fields, explicit relationship changes, and optional authored Activities as one atomic change |
 | Apply a batch           | Compose the same operations atomically, with local names for new tickets                      |
 | Find tickets            | Apply search, filters, ordering, and output limits                                            |
 | Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                |
 | View a dependency graph | Return bounded graph data for presentation                                                    |
 
-Projects, Plans, notes, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
+Projects, Plans, Activities, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
 
 ## Writes and concurrent editing
 
@@ -69,7 +69,7 @@ Request IDs prevent repeated execution after a lost response; they do not preven
 
 ## Workspace and persistence
 
-One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Plans, notes, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
+One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Plans, Activities, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
 
 The core owns migrations, export, backup/restore, and data access. Domain validation and persistence must remain atomic across processes, including cycle checks and hierarchy rules. Validate lock handling, concurrent writes, migration coordination, and active-database backup behavior before finalizing the process model.
 
@@ -178,7 +178,7 @@ Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
 while a ticket reads _Source unavailable_. It flips `external_ownership` to
 `local`, clears the failure columns of `source_sync` and records an `ownership`
-history entry; the identity, content, status, relationships and notes are
+history entry; the identity, content, status, relationships and authored Activities are
 untouched. Because every refresh path re-reads authority inside its own write,
 rediscovery, restored access and a refresh already in flight neither resume
 synchronization nor import a second ticket, and nothing turns a local row back
@@ -258,8 +258,8 @@ local time and UTC. The retryable `set_reminder` write takes `reference` and
 `due_at` (or null to dismiss). Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
 
-Inbox entries for new notes retain the note ID and its original content in
-`from_value` and `to_value`; this snapshot remains meaningful after the note is
+Inbox entries for new Activities retain the Activity ID and its original brief in
+`from_value` and `to_value`; this snapshot remains meaningful after the Activity is
 edited or deleted. `editing_agent` is descriptive attribution. Relationship
 history kinds `parent`, `dependency`, and those prefixed `relationship:` also
 produce inbox entries for followed tickets, in the same transaction as the

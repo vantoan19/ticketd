@@ -36,7 +36,7 @@ const BACKUP = "/Users/me/Backups/ticketd-2026-10-31.sqlite3";
 const current = {
   last_change: "2026-11-01T09:41:00Z",
   tickets: 128,
-  notes: 361,
+  activities: 361,
   evidence: 54,
   projects: 4,
   plans: 3,
@@ -50,7 +50,7 @@ const valid: BackupInspection = {
     summary: {
       last_change: "2026-10-31T18:04:00Z",
       tickets: 121,
-      notes: 342,
+      activities: 342,
       evidence: 50,
       projects: 4,
       plans: 3,

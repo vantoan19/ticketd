@@ -56,7 +56,7 @@ function splitPath(path: string) {
 
 const COUNTS = [
   ["tickets", "Tickets", "ticket", "tickets"],
-  ["notes", "Notes", "note", "notes"],
+  ["activities", "Activities", "activity", "activities"],
   ["evidence", "Implementation evidence", "evidence item", "evidence items"],
   ["projects", "Projects", "project", "projects"],
   ["plans", "Plans", "Plan", "Plans"],
@@ -375,7 +375,7 @@ export function RestoreDialog({
                     <span className="restore-muted">
                       You're now working from the backup:{" "}
                       {phase.inspection.check.summary.tickets} tickets,{" "}
-                      {phase.inspection.check.summary.notes} notes.
+                      {phase.inspection.check.summary.activities} notes.
                     </span>
                   </span>
                 </p>

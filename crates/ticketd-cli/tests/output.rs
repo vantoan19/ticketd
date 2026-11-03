@@ -77,11 +77,11 @@ fn cli_status_change_appears_in_followed_inbox() {
     run(
         &["write", "-", "--request-id", "note"],
         Some(
-            r#"{"operation":"add_note","reference":"T-1","content":"CLI finding","agent":"runner"}"#,
+            r#"{"operation":"add_activity","reference":"T-1","brief":"CLI finding","agent":"runner"}"#,
         ),
     );
     let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
-    assert_eq!(inbox[0]["kind"], "note");
+    assert_eq!(inbox[0]["kind"], "activity");
     assert_eq!(inbox[0]["to_value"], "CLI finding");
     assert_eq!(inbox[0]["editing_agent"], "runner");
 }
@@ -549,4 +549,28 @@ fn graph_cli_reports_relationships_and_limits() {
     assert_eq!(graph["omitted_neighbors"], false);
     assert_eq!(graph["omitted_edges"], false);
     assert_eq!(graph["max_edges"], 300);
+}
+
+#[test]
+fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
+    use std::{io::Write, process::{Command, Stdio}};
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], input: Option<&str>| -> serde_json::Value {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args).env("TICKETD_TEST_WORKSPACE", dir.path().join("workspace.sqlite3"))
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        if let Some(input) = input { child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap(); }
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    run(&["create", "Outcome"], None);
+    run(&["change", "T-1", "--status", "In progress"], None);
+    let posted = run(&["activity", "add", "T-1", "--file", "-", "--agent", "runner"], Some("A **brief**"));
+    assert_eq!(posted["brief"], "A **brief**");
+    let id = posted["id"].as_str().unwrap();
+    assert_eq!(run(&["activity", "show", "T-1", id], None), posted);
+    let feed = run(&["activity", "list", "T-1", "--limit", "1"], None);
+    assert_eq!(feed.as_array().unwrap().len(), 1);
+    assert_eq!(feed[0]["activity"]["id"], id);
 }

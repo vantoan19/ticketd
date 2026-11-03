@@ -411,7 +411,7 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
         "Cache entries never expire.",
     );
     f.workspace
-        .add_note(&ticket.reference, "private note", None)
+        .add_activity(&ticket.reference, "private note", None)
         .unwrap();
 
     let preview = f
@@ -421,7 +421,7 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
 
     assert_eq!(preview.title, "Escalate the cache bug");
     assert_eq!(preview.body, "Cache entries never expire.");
-    assert_eq!(preview.local.notes, 1);
+    assert_eq!(preview.local.activities, 1);
     assert_eq!(preview.destination.as_deref(), Some("o/r"));
     assert_eq!(preview.destinations, vec!["o/r".to_owned()]);
     assert_eq!(preview.provider_name, "Fake");
@@ -505,7 +505,7 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
         .unwrap();
     f.workspace.add_tag(&ticket.reference, "backend").unwrap();
     f.workspace
-        .add_note(&ticket.reference, "local note", None)
+        .add_activity(&ticket.reference, "local note", None)
         .unwrap();
     let blocker = f.workspace.create_ticket("Prerequisite").unwrap();
     f.workspace
@@ -530,7 +530,7 @@ fn successful_publication_transfers_ownership_and_keeps_identity_progress_and_or
     assert_eq!(published.prerequisites.len(), 1);
     assert_eq!(published.children.len(), 1);
     assert_eq!(
-        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
         1
     );
     let source = published.source.unwrap();
@@ -781,7 +781,7 @@ fn concurrent_submission_is_refused_and_the_workspace_stays_writable_during_the_
         let mut other = Workspace::open(&path).unwrap();
         // No write lock is held across the network call.
         other
-            .add_note(&reference, "written during the remote call", None)
+            .add_activity(&reference, "written during the remote call", None)
             .unwrap();
         let attempt = other.show_ticket(&reference).unwrap().publication.unwrap();
         sink.lock().unwrap().push(format!("{:?}", attempt.state));
@@ -801,7 +801,7 @@ fn concurrent_submission_is_refused_and_the_workspace_stays_writable_during_the_
     assert_eq!(*observed.lock().unwrap(), vec!["InFlight", "AttemptOpen"]);
     assert_eq!(f.created(), 1);
     assert_eq!(
-        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
         1
     );
 }
@@ -850,9 +850,9 @@ fn edits_made_while_publishing_are_kept_as_a_note_not_dropped_by_the_next_refres
         .unwrap();
 
     assert_eq!(f.ticket(&ticket.reference).body, "Body");
-    let notes = f.workspace.notes(&ticket.reference, 10, 0).unwrap();
+    let notes = f.workspace.activities(&ticket.reference, 10, 0).unwrap();
     assert_eq!(notes.len(), 1);
-    assert!(notes[0].content.contains("Edited meanwhile"));
+    assert!(notes[0].brief.contains("Edited meanwhile"));
 }
 
 #[test]
@@ -907,7 +907,7 @@ fn attempts_survive_export_backup_restore_and_the_format_upgrade() {
 
     // A version 25 workspace gains the table on open and keeps its tickets.
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; PRAGMA user_version = 25;")
+    db.execute_batch("DROP TABLE publication_attempts; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 25;")
         .unwrap();
     drop(db);
     let workspace = Workspace::open(&path).unwrap();
@@ -990,7 +990,7 @@ fn confirming_the_created_issue_completes_the_handoff_and_keeps_local_progress()
     let ticket = f.lost_response("Escalate");
     set_status(&mut f, &ticket.reference, Status::InProgress);
     f.workspace
-        .add_note(&ticket.reference, "local progress", None)
+        .add_activity(&ticket.reference, "local progress", None)
         .unwrap();
 
     let outcome = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
@@ -1006,7 +1006,7 @@ fn confirming_the_created_issue_completes_the_handoff_and_keeps_local_progress()
     assert_eq!(source.origin, Origin::Published);
     assert!(matches!(source.ownership, Ownership::External));
     assert_eq!(
-        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
         1
     );
     // Attached once, and nothing further is ever created.
@@ -1200,7 +1200,7 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");
     f.workspace
-        .add_note(&ticket.reference, "local work", None)
+        .add_activity(&ticket.reference, "local work", None)
         .unwrap();
     // A teammate rewrote the title and the description, so discovery no longer
     // recognizes the issue as this attempt's result and imports it as T-2.
@@ -1226,7 +1226,7 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     );
     // The local note, and the text the issue replaced.
     assert_eq!(
-        f.workspace.notes(&ticket.reference, 10, 0).unwrap().len(),
+        f.workspace.activities(&ticket.reference, 10, 0).unwrap().len(),
         2
     );
     // The imported ticket is in the trash, not deleted, and the identity is unique.
@@ -1612,11 +1612,11 @@ fn attaching_an_issue_with_other_text_needs_confirmation_and_keeps_the_local_tex
     let after = f.ticket(&ticket.reference);
     assert_eq!(after.title, "Unrelated probe");
     assert_eq!(after.body, "Unrelated text");
-    let notes = f.workspace.notes(&ticket.reference, 10, 0).unwrap();
+    let notes = f.workspace.activities(&ticket.reference, 10, 0).unwrap();
     assert!(
         notes
             .iter()
-            .any(|n| n.content.contains("Title: Escalate") && n.content.contains("Body")),
+            .any(|n| n.brief.contains("Title: Escalate") && n.brief.contains("Body")),
         "{notes:?}"
     );
     // A refresh finds nothing further to lose.

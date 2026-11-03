@@ -217,7 +217,7 @@ export function TicketPage({
           active={active}
           trashed={ticket.trashed}
           select={select}
-          latestNoteId={ticket.latest_update?.note_id}
+          latestNoteId={ticket.latest_update?.activity_id}
           sourceName={source?.provider_name}
           onChanged={refresh}
         />

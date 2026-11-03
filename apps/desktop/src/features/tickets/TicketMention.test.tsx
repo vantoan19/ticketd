@@ -113,7 +113,7 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                 {
                   source_reference: "T-2",
                   source_title: "Source",
-                  note_id: null,
+                  activity_id: null,
                   passage: "Blocked on T-1 today.",
                   ...span,
                 },

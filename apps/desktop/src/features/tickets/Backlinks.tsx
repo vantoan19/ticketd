@@ -44,11 +44,11 @@ export function Backlinks({
         // The mention itself carries no date, so read each note's.
         const dated = await Promise.all(
           result.flatMap((link) =>
-            link.note_id
+            link.activity_id
               ? [
                   client
-                    .note(link.source_reference, link.note_id)
-                    .then((note) => [link.note_id, note?.created_at] as const)
+                    .activity(link.source_reference, link.activity_id)
+                    .then((note) => [link.activity_id, note?.reported_at] as const)
                     .catch(() => null),
                 ]
               : [],
@@ -83,7 +83,7 @@ export function Backlinks({
       <ul className="backlink-list">
         {links.map((link, index) => (
           <li
-            key={`${link.source_reference}-${link.note_id ?? "description"}-${index}`}
+            key={`${link.source_reference}-${link.activity_id ?? "description"}-${index}`}
           >
             <button
               type="button"
@@ -92,7 +92,7 @@ export function Backlinks({
                 select({
                   reference: link.source_reference,
                   mentioned: reference,
-                  noteId: link.note_id,
+                  noteId: link.activity_id,
                   passage: link.passage,
                   start: link.mention_start,
                   end: link.mention_end,
@@ -104,8 +104,8 @@ export function Backlinks({
                 <span>{link.source_title}</span>
               </span>
               <span className="backlink-where">
-                {link.note_id
-                  ? `Note${noteDates[link.note_id] ? ` · ${formatDateTime(noteDates[link.note_id] ?? "")}` : ""}`
+                {link.activity_id
+                  ? `Note${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
                   : "Description"}
               </span>
               <span className="mention-passage">

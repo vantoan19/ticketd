@@ -87,21 +87,21 @@ fn status_changes_are_recorded_with_optional_agent() {
 
 #[test]
 fn authored_activity_requires_a_nonempty_brief() {
-    use ticketd_core::NotePatch;
+    use ticketd_core::ActivityPatch;
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Outcome").unwrap();
-    assert!(workspace.add_note(&ticket.reference, "  \n", None).is_err());
+    assert!(workspace.add_activity(&ticket.reference, "  \n", None).is_err());
     let activity = workspace
-        .add_note(&ticket.reference, "A brief", None)
+        .add_activity(&ticket.reference, "A brief", None)
         .unwrap();
     assert!(
         workspace
-            .edit_note(
+            .edit_activity(
                 &ticket.reference,
                 &activity.id,
-                NotePatch {
-                    content: Some("  ".into()),
+                ActivityPatch {
+                    brief: Some("  ".into()),
                     editing_agent: None,
                 }
             )
@@ -109,32 +109,32 @@ fn authored_activity_requires_a_nonempty_brief() {
     );
     assert_eq!(
         workspace
-            .note(&ticket.reference, &activity.id)
+            .activity(&ticket.reference, &activity.id)
             .unwrap()
-            .content,
+            .brief,
         "A brief"
     );
 }
 
 #[test]
 fn notes_can_be_paged_edited_and_deleted_after_reopening() {
-    use ticketd_core::NotePatch;
+    use ticketd_core::ActivityPatch;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
     let ticket = workspace.create_ticket("Notes").unwrap();
     let first = workspace
-        .add_note(&ticket.reference, "First\nline", Some("codex"))
+        .add_activity(&ticket.reference, "First\nline", Some("codex"))
         .unwrap();
     let second = workspace
-        .add_note(&ticket.reference, "Second", None)
+        .add_activity(&ticket.reference, "Second", None)
         .unwrap();
     let edited = workspace
-        .edit_note(
+        .edit_activity(
             &ticket.reference,
             &first.id,
-            NotePatch {
-                content: Some("Revised".into()),
+            ActivityPatch {
+                brief: Some("Revised".into()),
                 editing_agent: None,
             },
         )
@@ -143,16 +143,16 @@ fn notes_can_be_paged_edited_and_deleted_after_reopening() {
     drop(workspace);
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(
-        workspace.notes(&ticket.reference, 1, 0).unwrap(),
+        workspace.activities(&ticket.reference, 1, 0).unwrap(),
         vec![edited]
     );
     assert_eq!(
-        workspace.notes(&ticket.reference, 1, 1).unwrap(),
+        workspace.activities(&ticket.reference, 1, 1).unwrap(),
         vec![second.clone()]
     );
-    workspace.delete_note(&ticket.reference, &first.id).unwrap();
+    workspace.delete_activity(&ticket.reference, &first.id).unwrap();
     assert_eq!(
-        workspace.notes(&ticket.reference, 10, 0).unwrap(),
+        workspace.activities(&ticket.reference, 10, 0).unwrap(),
         vec![second]
     );
     assert_eq!(workspace.show_ticket(&ticket.reference).unwrap().body, "");
@@ -609,7 +609,7 @@ fn trash_preserves_relationships_and_requires_restoration_for_edits() {
         w.change_ticket(&parent.reference, TicketPatch::default())
             .is_err()
     );
-    assert!(w.add_note(&parent.reference, "note", None).is_err());
+    assert!(w.add_activity(&parent.reference, "note", None).is_err());
     assert!(
         w.add_dependency(&child.reference, &parent.reference, None)
             .is_err()
@@ -754,18 +754,18 @@ fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
     let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
         {"operation":"create", "name":"parent", "title":"Parent"},
         {"operation":"create", "name":"child", "title":"Child"},
-        {"operation":"change", "ticket":"$child", "change":{"parent":"$parent", "add_blockers":["$parent"], "add_tags":["Feature"], "notes":["Started"]}}
+        {"operation":"change", "ticket":"$child", "change":{"parent":"$parent", "add_blockers":["$parent"], "add_tags":["Feature"], "activities":["Started"]}}
     ])).unwrap();
     let results = workspace.apply_batch(operations).unwrap();
     let child = workspace.show_ticket(&results[1].reference).unwrap();
     assert_eq!(child.parent.unwrap().reference, results[0].reference);
     assert_eq!(child.prerequisites[0].reference, results[0].reference);
     assert_eq!(child.tags, ["feature"]);
-    assert_eq!(workspace.notes(&child.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(workspace.activities(&child.reference, 10, 0).unwrap().len(), 1);
     let history_before = workspace.ticket_history(&child.reference).unwrap();
     let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
         {"operation":"create", "name":"temporary", "title":"Rolled back"},
-        {"operation":"change", "ticket":child.reference, "change":{"status":"Done", "notes":["rolled back"]}},
+        {"operation":"change", "ticket":child.reference, "change":{"status":"Done", "activities":["rolled back"]}},
         {"operation":"change", "ticket":results[0].reference, "change":{"add_blockers":[child.reference]}}
     ])).unwrap();
     let error = workspace.apply_batch(operations).unwrap_err().to_string();
@@ -775,7 +775,7 @@ fn batch_creates_linked_tickets_and_rolls_back_late_failure() {
         workspace.show_ticket(&child.reference).unwrap().status,
         ticketd_core::Status::Todo
     );
-    assert_eq!(workspace.notes(&child.reference, 10, 0).unwrap().len(), 1);
+    assert_eq!(workspace.activities(&child.reference, 10, 0).unwrap().len(), 1);
     assert_eq!(
         workspace.ticket_history(&child.reference).unwrap(),
         history_before
@@ -799,13 +799,13 @@ fn context_is_bounded_and_reports_related_state() {
         },
     )
     .unwrap();
-    ws.add_note(&ticket.reference, "Finding", None).unwrap();
+    ws.add_activity(&ticket.reference, "Finding", None).unwrap();
     let context = ws
         .ticket_context(
             &ticket.reference,
             ticketd_core::ContextOptions {
                 relationships: true,
-                notes: true,
+                activities: true,
                 ..Default::default()
             },
         )
@@ -819,7 +819,7 @@ fn context_is_bounded_and_reports_related_state() {
     );
     assert!(relationships.prerequisites.items[0].trashed);
     assert!(relationships.prerequisites.items[0].unresolved);
-    assert_eq!(context.notes.unwrap().items[0].content.text, "Finding");
+    assert_eq!(context.activities.unwrap().items[0].brief.text, "Finding");
     assert_eq!(context.ticket.availability.as_deref(), Some("Blocked"));
 }
 
@@ -1005,7 +1005,7 @@ fn search_tracks_note_deletion() {
     let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
     let ticket = workspace.create_ticket("Example").unwrap();
     let note = workspace
-        .add_note(&ticket.reference, "A [literal] finding", None)
+        .add_activity(&ticket.reference, "A [literal] finding", None)
         .unwrap();
     assert_eq!(
         workspace
@@ -1014,7 +1014,7 @@ fn search_tracks_note_deletion() {
             .len(),
         1
     );
-    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    workspace.delete_activity(&ticket.reference, &note.id).unwrap();
     assert!(
         workspace
             .search_tickets("[literal]", None, false, 50, 0)
@@ -1046,7 +1046,7 @@ fn export_preserves_workspace_relationships_and_trash() {
         .unwrap();
     workspace.add_tag(&child.reference, "urgent").unwrap();
     let note = workspace
-        .add_note(&child.reference, "Finding", Some("agent"))
+        .add_activity(&child.reference, "Finding", Some("agent"))
         .unwrap();
     workspace
         .set_trashed(&parent.reference, true, None)
@@ -1059,8 +1059,8 @@ fn export_preserves_workspace_relationships_and_trash() {
     assert_eq!(export["tickets"][0]["id"], parent.id);
     assert_eq!(export["tickets"][0]["trashed"], 1);
     assert_eq!(export["tickets"][1]["plan_id"], plan.id);
-    assert_eq!(export["notes"][0]["id"], note.id);
-    assert_eq!(export["notes"][0]["ticket_id"], child.id);
+    assert_eq!(export["activities"][0]["id"], note.id);
+    assert_eq!(export["activities"][0]["ticket_id"], child.id);
     assert_eq!(export["ticket_parents"][0]["parent_id"], parent.id);
     assert_eq!(export["dependencies"][0]["dependent_id"], child.id);
     assert_eq!(export["ticket_tags"][0]["tag_name"], "urgent");
@@ -1215,7 +1215,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     workspace.add_tag(&reference, "kept").unwrap();
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; PRAGMA user_version = 12;")
+    db.execute_batch("DROP INDEX ticket_history_ticket_id; DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; DROP TABLE inbox_entries; DROP TABLE ticket_follows; DROP TABLE duplicate_tickets; DROP TABLE evidence; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 12;")
         .unwrap();
     drop(db);
     // Hold a shared lock while both openers observe the old schema, so neither
@@ -1261,7 +1261,7 @@ fn migration_preserves_workspace_and_recovers_from_failure() {
     );
     workspaces.clear();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("PRAGMA user_version = 12;").unwrap();
+    db.execute_batch("ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 12;").unwrap();
     drop(db);
     let error = match Workspace::open(&path) {
         Ok(_) => panic!("migration should fail"),
@@ -1595,7 +1595,7 @@ fn backlinks_follow_markdown_content_and_note_changes() {
         )
         .unwrap();
     let note = workspace
-        .add_note(
+        .add_activity(
             &source.reference,
             &format!("A note about {}", target.reference),
             None,
@@ -1605,8 +1605,8 @@ fn backlinks_follow_markdown_content_and_note_changes() {
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].source_reference, source.reference);
     assert_eq!(links[0].passage, "See T-1 here.");
-    assert_eq!(links[1].note_id.as_deref(), Some(note.id.as_str()));
-    workspace.delete_note(&source.reference, &note.id).unwrap();
+    assert_eq!(links[1].activity_id.as_deref(), Some(note.id.as_str()));
+    workspace.delete_activity(&source.reference, &note.id).unwrap();
     assert_eq!(
         workspace.backlinks(&target.reference, 20, 0).unwrap().len(),
         1
@@ -1646,21 +1646,21 @@ fn backlink_pages_follow_edits_and_trash_visibility() {
     let target = workspace.create_ticket("Target").unwrap();
     let source = workspace.create_ticket("Source").unwrap();
     let first = workspace
-        .add_note(&source.reference, "T-1 first", None)
+        .add_activity(&source.reference, "T-1 first", None)
         .unwrap();
     workspace
-        .add_note(&source.reference, "T-1 second", None)
+        .add_activity(&source.reference, "T-1 second", None)
         .unwrap();
     assert_eq!(
         workspace.backlinks(&target.reference, 1, 1).unwrap()[0].passage,
         "T-1 second"
     );
     workspace
-        .edit_note(
+        .edit_activity(
             &source.reference,
             &first.id,
-            ticketd_core::NotePatch {
-                content: Some("Changed".into()),
+            ticketd_core::ActivityPatch {
+                brief: Some("Changed".into()),
                 ..Default::default()
             },
         )
@@ -1754,12 +1754,12 @@ fn followed_note_remains_understandable_after_deletion() {
     let ticket = workspace.create_ticket("Tracked").unwrap();
     workspace.set_following(&ticket.reference, true).unwrap();
     let note = workspace
-        .add_note(&ticket.reference, "Original finding", Some("agent"))
+        .add_activity(&ticket.reference, "Original finding", Some("agent"))
         .unwrap();
-    workspace.delete_note(&ticket.reference, &note.id).unwrap();
+    workspace.delete_activity(&ticket.reference, &note.id).unwrap();
     let entries = workspace.inbox(100, 0).unwrap();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, "note");
+    assert_eq!(entries[0].kind, "activity");
     assert_eq!(entries[0].from_value, note.id);
     assert_eq!(entries[0].to_value, "Original finding");
 }
@@ -1776,7 +1776,7 @@ fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
         operations: vec![BatchOperation::Change {
             ticket: ticket.reference.clone(),
             change: Box::new(TicketChange {
-                notes: vec!["Batch note".into()],
+                activities: vec!["Batch note".into()],
                 add_blockers: vec![blocker.reference.clone()],
                 ..Default::default()
             }),
@@ -1786,7 +1786,7 @@ fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
         BatchOperation::Change {
             ticket: ticket.reference.clone(),
             change: Box::new(TicketChange {
-                notes: vec!["Rolled back".into()],
+                activities: vec!["Rolled back".into()],
                 ..Default::default()
             }),
         },
@@ -1804,7 +1804,7 @@ fn followed_batch_notes_and_relationships_are_atomic_and_retry_safe() {
     assert!(
         entries
             .iter()
-            .any(|e| e.kind == "note" && e.to_value == "Batch note")
+            .any(|e| e.kind == "activity" && e.to_value == "Batch note")
     );
     assert!(
         entries
@@ -2192,7 +2192,7 @@ fn version_sixteen_workspace_keeps_evidence_and_adds_inbox_attribution() {
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; PRAGMA user_version = 16;",
+        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; DROP TABLE ticket_reminders; ALTER TABLE inbox_entries DROP COLUMN editing_agent; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 16;",
     )
     .unwrap();
     drop(db);
@@ -2764,7 +2764,7 @@ fn version_eighteen_reminders_survive_contextual_relationship_migration_and_rest
     drop(workspace);
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; PRAGMA user_version = 18;",
+        "DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; DROP TABLE last_backup; DROP TABLE contextual_relationships; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 18;",
     )
     .unwrap();
     drop(db);
@@ -3577,7 +3577,7 @@ fn legacy_canceled_duplicates_migrate_deliberately() {
         [&moved_on.id],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; PRAGMA user_version = 20;")
+    db.execute_batch("DROP TABLE publication_attempts; DROP TABLE source_status; DROP TABLE source_conversation; DROP TABLE source_configurations; DROP TABLE external_duplicate_targets; DROP TABLE source_sync; DROP TABLE external_ownership; DROP TABLE external_identities; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 20;")
         .unwrap();
     drop(db);
 
@@ -4213,4 +4213,19 @@ fn dependency_graph_reports_omitted_edges_in_dense_graph() {
     assert_eq!(graph.edges.len(), graph.max_edges);
     assert!(graph.omitted_edges);
     assert!(graph.truncated);
+}
+
+#[test]
+fn activity_feed_interleaves_reports_and_automatic_events_with_bounded_pages() {
+    use ticketd_core::ActivityFeedEntry;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Outcome").unwrap();
+    workspace.change_ticket(&ticket.reference, TicketPatch { status: Some(Status::InProgress), ..Default::default() }).unwrap();
+    let report = workspace.add_activity(&ticket.reference, "First finding", Some("agent")).unwrap();
+    let page = workspace.activity_feed(&ticket.reference, 1, 0).unwrap();
+    assert_eq!(page.len(), 1);
+    assert!(matches!(&page[0], ActivityFeedEntry::Authored { activity } if activity.id == report.id));
+    let older = workspace.activity_feed(&ticket.reference, 1, 1).unwrap();
+    assert!(matches!(&older[0], ActivityFeedEntry::Automatic { event, .. } if event.to_value == "In progress"));
 }
