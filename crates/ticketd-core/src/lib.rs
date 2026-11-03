@@ -20,7 +20,7 @@ pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};
 pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspace_file};
 
-mod efforts;
+mod plans;
 mod retry;
 pub mod source;
 pub use retry::{WriteRequest, WriteResult};
@@ -33,7 +33,7 @@ pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter, TicketOrder};
 mod tags;
-pub use efforts::{Effort, EffortCounts, EffortView};
+pub use plans::{Plan, PlanCounts, PlanView};
 
 use std::{
     path::Path,
@@ -82,6 +82,10 @@ pub enum Error {
         #[source]
         source: Box<Error>,
     },
+    #[error(
+        "This workspace uses the previous Effort schema. Open it with the previous version; its data has not been changed."
+    )]
+    LegacyEffortWorkspace,
     #[error("request ID was already used for different content: {0}")]
     RequestConflict(String),
     #[error("request serialization error: {0}")]
@@ -94,10 +98,10 @@ pub enum Error {
     },
     #[error("invalid batch: {0}")]
     InvalidBatch(String),
-    #[error("effort name must not be empty")]
-    EmptyEffortName,
-    #[error("effort '{0}' was not found")]
-    EffortNotFound(String),
+    #[error("plan name must not be empty")]
+    EmptyPlanName,
+    #[error("plan '{0}' was not found")]
+    PlanNotFound(String),
     #[error(
         "checkout matches multiple projects; specify --project explicitly or remove a registration"
     )]
@@ -200,7 +204,7 @@ pub struct Ticket {
     #[serde(default)]
     pub latest_update: Option<ReportedUpdate>,
     pub tags: Vec<String>,
-    pub effort_id: Option<String>,
+    pub plan_id: Option<String>,
     pub project_id: Option<String>,
     pub availability: Option<String>,
     pub prerequisites: Vec<relationships::Prerequisite>,
@@ -241,7 +245,7 @@ pub struct TicketPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_project_patch"
     )]
-    pub effort_id: Option<Option<String>>,
+    pub plan_id: Option<Option<String>>,
 }
 
 fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
@@ -309,6 +313,13 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            let legacy: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'efforts')",
+                [], |row| row.get(0),
+            )?;
+            if legacy {
+                return Err(Error::LegacyEffortWorkspace);
+            }
             if version > FORMAT_VERSION {
                 return Err(Error::NewerSchema(version));
             }
@@ -333,6 +344,13 @@ impl Workspace {
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            let legacy: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'efforts')",
+                [], |row| row.get(0),
+            )?;
+            if legacy {
+                return Err(Error::LegacyEffortWorkspace);
+            }
             if version > FORMAT_VERSION {
                 return Err(Error::NewerSchema(version));
             }
@@ -388,7 +406,7 @@ impl Workspace {
             projects::migrate(&transaction)?;
         }
         if version < 8 {
-            efforts::migrate(&transaction)?;
+            plans::migrate(&transaction)?;
             transaction.pragma_update(None, "user_version", 8)?;
         }
         if version < 9 {
@@ -472,6 +490,15 @@ impl Workspace {
         title: &str,
         project_id: Option<&str>,
     ) -> Result<Ticket, Error> {
+        self.create_ticket_in_context(title, project_id, None)
+    }
+
+    pub fn create_ticket_in_context(
+        &mut self,
+        title: &str,
+        project_id: Option<&str>,
+        plan_id: Option<&str>,
+    ) -> Result<Ticket, Error> {
         let title = title.trim();
         if title.is_empty() {
             return Err(Error::EmptyTitle);
@@ -481,14 +508,20 @@ impl Workspace {
         if let Some(id) = project_id {
             projects::find(&transaction, id)?;
         }
+        if let Some(id) = plan_id {
+            plans::get(&transaction, id)?;
+        }
         let id = Uuid::new_v4().to_string();
         transaction.execute(
-            "INSERT INTO tickets (id, title, status, project_id) VALUES (?1, ?2, 'Todo', ?3)",
-            params![id, title, project_id],
+            "INSERT INTO tickets (id, title, status, project_id, plan_id) VALUES (?1, ?2, 'Todo', ?3, ?4)",
+            params![id, title, project_id, plan_id],
         )?;
         let number = transaction.last_insert_rowid();
         if let Some(project_id) = project_id {
             history::record(&transaction, &id, "project", "", project_id, None)?;
+        }
+        if let Some(plan_id) = plan_id {
+            history::record(&transaction, &id, "plan", "", plan_id, None)?;
         }
         transaction.commit()?;
         self.show_ticket(&format!("T-{number}"))
@@ -506,7 +539,7 @@ impl Workspace {
         transaction_write_lock(&transaction)?;
         let ticket = transaction
             .query_row(
-                "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -520,21 +553,21 @@ impl Workspace {
             patch.body.as_deref(),
             patch.status.unwrap_or(ticket.status),
         )?;
-        if let Some(ref effort_id) = patch.effort_id {
-            if let Some(id) = effort_id {
-                efforts::get(&transaction, id)?;
+        if let Some(ref plan_id) = patch.plan_id {
+            if let Some(id) = plan_id {
+                plans::get(&transaction, id)?;
             }
-            if *effort_id != ticket.effort_id {
+            if *plan_id != ticket.plan_id {
                 transaction.execute(
-                    "UPDATE tickets SET effort_id = ?1 WHERE number = ?2",
-                    params![effort_id, number],
+                    "UPDATE tickets SET plan_id = ?1 WHERE number = ?2",
+                    params![plan_id, number],
                 )?;
                 history::record(
                     &transaction,
                     &ticket.id,
-                    "effort",
-                    ticket.effort_id.as_deref().unwrap_or(""),
-                    effort_id.as_deref().unwrap_or(""),
+                    "plan",
+                    ticket.plan_id.as_deref().unwrap_or(""),
+                    plan_id.as_deref().unwrap_or(""),
                     patch.editing_agent.as_deref(),
                 )?;
             }
@@ -579,7 +612,7 @@ impl Workspace {
             )?;
         }
         let mut updated = transaction.query_row(
-            "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
+            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
             [number],
             ticket_from_row,
         )?;
@@ -687,7 +720,7 @@ impl Workspace {
 
     fn list_by_trash(&self, trashed: bool) -> Result<Vec<Ticket>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
+            "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE trashed = ?1 ORDER BY number DESC",
         )?;
         let mut tickets = statement
             .query_map([trashed], ticket_from_row)?
@@ -710,7 +743,7 @@ impl Workspace {
         let ticket = self
             .connection
             .query_row(
-                "SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE number = ?1",
+                "SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE number = ?1",
                 [number],
                 ticket_from_row,
             )
@@ -744,7 +777,7 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         latest_update: None,
         tags: Vec::new(),
         project_id: row.get(5)?,
-        effort_id: row.get(6)?,
+        plan_id: row.get(6)?,
         availability: None,
         prerequisites: Vec::new(),
         duplicate_of: None,

@@ -4,13 +4,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Effort {
+pub struct Plan {
     pub id: String,
     pub name: String,
+    pub purpose: String,
     pub archived: bool,
 }
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct EffortCounts {
+pub struct PlanCounts {
     pub todo: u64,
     pub in_progress: u64,
     pub in_review: u64,
@@ -20,84 +21,94 @@ pub struct EffortCounts {
     pub duplicate: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffortView {
-    pub effort: Effort,
+pub struct PlanView {
+    pub plan: Plan,
     pub members: Vec<Ticket>,
-    pub counts: EffortCounts,
+    pub counts: PlanCounts,
 }
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
-    connection.execute_batch("CREATE TABLE efforts (id TEXT PRIMARY KEY, name TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0); ALTER TABLE tickets ADD COLUMN effort_id TEXT REFERENCES efforts(id);")?;
+    connection.execute_batch("CREATE TABLE plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0); ALTER TABLE tickets ADD COLUMN plan_id TEXT REFERENCES plans(id);")?;
     Ok(())
 }
-pub(crate) fn get(connection: &Connection, id: &str) -> Result<Effort, Error> {
+pub(crate) fn get(connection: &Connection, id: &str) -> Result<Plan, Error> {
     connection
         .query_row(
-            "SELECT id, name, archived FROM efforts WHERE id = ?1",
+            "SELECT id, name, archived, purpose FROM plans WHERE id = ?1",
             [id],
             |r| {
-                Ok(Effort {
+                Ok(Plan {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     archived: r.get(2)?,
+                    purpose: r.get(3)?,
                 })
             },
         )
         .optional()?
-        .ok_or_else(|| Error::EffortNotFound(id.into()))
+        .ok_or_else(|| Error::PlanNotFound(id.into()))
 }
 impl Workspace {
-    pub fn create_effort(&mut self, name: &str) -> Result<Effort, Error> {
+    pub fn create_plan(&mut self, name: &str) -> Result<Plan, Error> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(Error::EmptyEffortName);
+            return Err(Error::EmptyPlanName);
         }
         let id = Uuid::new_v4().to_string();
         self.connection.execute(
-            "INSERT INTO efforts (id, name) VALUES (?1, ?2)",
+            "INSERT INTO plans (id, name) VALUES (?1, ?2)",
             params![id, name],
         )?;
         get(&self.connection, &id)
     }
-    pub fn change_effort(
+    pub fn change_plan(
         &mut self,
         id: &str,
         name: Option<&str>,
         archived: Option<bool>,
-    ) -> Result<Effort, Error> {
+    ) -> Result<Plan, Error> {
         let name = name.map(str::trim);
         if name == Some("") {
-            return Err(Error::EmptyEffortName);
+            return Err(Error::EmptyPlanName);
         }
         get(&self.connection, id)?;
-        self.connection.execute("UPDATE efforts SET name = COALESCE(?1, name), archived = COALESCE(?2, archived) WHERE id = ?3", params![name, archived, id])?;
+        self.connection.execute("UPDATE plans SET name = COALESCE(?1, name), archived = COALESCE(?2, archived) WHERE id = ?3", params![name, archived, id])?;
         get(&self.connection, id)
     }
-    pub fn list_efforts(&self, include_archived: bool) -> Result<Vec<Effort>, Error> {
+    pub fn set_plan_purpose(&mut self, id: &str, purpose: &str) -> Result<Plan, Error> {
+        get(&self.connection, id)?;
+        self.connection.execute(
+            "UPDATE plans SET purpose = ?1 WHERE id = ?2",
+            params![purpose, id],
+        )?;
+        get(&self.connection, id)
+    }
+    pub fn list_plans(&self, include_archived: bool) -> Result<Vec<Plan>, Error> {
         let mut stmt = self.connection.prepare(
-            "SELECT id, name, archived FROM efforts WHERE ?1 OR archived = 0 ORDER BY name, id",
+            "SELECT id, name, archived, purpose FROM plans WHERE ?1 OR archived = 0 ORDER BY name, id",
         )?;
         Ok(stmt
             .query_map([include_archived], |r| {
-                Ok(Effort {
+                Ok(Plan {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     archived: r.get(2)?,
+                    purpose: r.get(3)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?)
     }
-    pub fn show_effort(&self, id: &str) -> Result<EffortView, Error> {
+    pub fn show_plan(&self, id: &str) -> Result<PlanView, Error> {
         let tx = self.connection.unchecked_transaction()?;
-        let effort = get(&tx, id)?;
+        let plan = get(&tx, id)?;
         let mut stmt = tx.prepare(
-            "SELECT number FROM tickets WHERE effort_id = ?1 AND trashed = 0 ORDER BY number",
+            "SELECT number FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number",
         )?;
         let references = stmt
             .query_map([id], |r| Ok(format!("T-{}", r.get::<_, i64>(0)?)))?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
-        let mut counts = EffortCounts::default();
+        let mut counts = PlanCounts::default();
         let mut members = Vec::new();
         for reference in references {
             let ticket = self.show_ticket(&reference)?;
@@ -112,22 +123,22 @@ impl Workspace {
             members.push(ticket);
         }
         tx.commit()?;
-        Ok(EffortView {
-            effort,
+        Ok(PlanView {
+            plan,
             members,
             counts,
         })
     }
-    pub fn set_effort(
+    pub fn set_plan(
         &mut self,
         reference: &str,
-        effort: Option<&str>,
+        plan: Option<&str>,
         agent: Option<&str>,
     ) -> Result<Ticket, Error> {
         self.change_ticket(
             reference,
             TicketPatch {
-                effort_id: Some(effort.map(str::to_owned)),
+                plan_id: Some(plan.map(str::to_owned)),
                 editing_agent: agent.map(str::to_owned),
                 ..Default::default()
             },

@@ -35,7 +35,7 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `a
 
 | Module        | Responsibility                                                                                                                           |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop UI    | Lists, ticket details, Efforts, graph presentation, Markdown editing, unsaved drafts, and save feedback                                  |
+| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                    |
 | Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                         |
 | CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
 | Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
@@ -57,7 +57,7 @@ Rich document editing uses Plate, with Markdown remaining canonical across stora
 | Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                |
 | View a dependency graph | Return bounded graph data for presentation                                                    |
 
-Projects, Efforts, notes, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
+Projects, Plans, notes, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
 
 ## Writes and concurrent editing
 
@@ -69,13 +69,13 @@ Request IDs prevent repeated execution after a lost response; they do not preven
 
 ## Workspace and persistence
 
-One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Efforts, notes, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
+One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Plans, notes, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
 
 The core owns migrations, export, backup/restore, and data access. Domain validation and persistence must remain atomic across processes, including cycle checks and hierarchy rules. Validate lock handling, concurrent writes, migration coordination, and active-database backup behavior before finalizing the process model.
 
 ## External changes
 
-The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Effort counts. The notification or polling mechanism remains to be chosen; unsaved editor drafts remain owned by the UI.
+The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Plan counts. The notification or polling mechanism remains to be chosen; unsaved editor drafts remain owned by the UI.
 
 ## Verification and future evolution
 
@@ -267,8 +267,7 @@ change. New relationship types use that prefix to participate.
 
 ## Context-management extension
 
-The confirmed target model adds Documents and Activities and replaces Effort with
-Plan; see [product behavior](mvp-spec.md#16-context-management) and
+The confirmed target model adds Documents, Activities, and Plans; see [product behavior](mvp-spec.md#16-context-management) and
 [ADR 0007](adr/0007-context-storage-and-graph-queries.md). Earlier implementation
 names and command examples in this architecture describe the current runtime,
 not compatibility requirements for the extension. No migration of development

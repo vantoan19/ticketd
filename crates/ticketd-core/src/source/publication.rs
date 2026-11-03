@@ -139,7 +139,7 @@ pub enum Eligibility {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicationLocalData {
     pub notes: u64,
-    pub effort: Option<String>,
+    pub plan: Option<String>,
     pub tags: Vec<String>,
     pub subtickets: Vec<String>,
 }
@@ -888,7 +888,7 @@ impl Workspace {
             body: ticket.body,
             local: PublicationLocalData {
                 notes: self.connection.query_row("SELECT COUNT(*) FROM notes WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
-                effort: self.connection.query_row("SELECT e.name FROM tickets t JOIN efforts e ON e.id = t.effort_id WHERE t.id = ?1", [&ticket.id], |row| row.get(0)).optional()?,
+                plan: self.connection.query_row("SELECT e.name FROM tickets t JOIN plans e ON e.id = t.plan_id WHERE t.id = ?1", [&ticket.id], |row| row.get(0)).optional()?,
                 tags: crate::tags::for_ticket(&self.connection, &ticket.id)?,
                 subtickets: {
                     let mut statement = self.connection.prepare("SELECT 'T-' || t.number FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1 ORDER BY t.number")?;
@@ -1066,7 +1066,7 @@ impl Workspace {
 
     /// Links the confirmed issue and settles the attempt in one write. If that
     /// write cannot happen, the issue is still recorded on the attempt (best
-    /// effort) and the attempt stays unresolved.
+    /// plan) and the attempt stays unresolved.
     fn finish_created(
         &mut self,
         started: &Started,

@@ -65,7 +65,7 @@ const ticket: Ticket = {
   trashed: false,
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -82,7 +82,7 @@ function renderDetails(item: Ticket = ticket) {
       setSelected={vi.fn()}
       details={{ [item.reference]: item }}
       projects={[]}
-      efforts={[]}
+      plans={[]}
       revision={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}
@@ -92,7 +92,7 @@ function renderDetails(item: Ticket = ticket) {
   );
 }
 
-test("the property rail holds Status, Source, Project, Effort, Tags, Relationships, and Attention in order", async () => {
+test("the property rail holds Status, Source, Project, Plan, Tags, Relationships, and Attention in order", async () => {
   renderDetails();
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
@@ -106,7 +106,7 @@ test("the property rail holds Status, Source, Project, Effort, Tags, Relationshi
     "Status",
     "Source",
     "Project",
-    "Effort",
+    "Plan",
     "Tags",
     "Relationships",
     "Attention",

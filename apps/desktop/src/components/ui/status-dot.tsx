@@ -2,7 +2,7 @@ import { cn } from "cn";
 
 /** `ready`, `blocked` and `unread` are ticket status vocabulary. Use `positive`
  * and `attention` for other good and needs-attention states, such as an active
- * Effort or the command-line check. */
+ * Plan or the command-line check. */
 export type StatusDotTone =
   | "ready"
   | "blocked"

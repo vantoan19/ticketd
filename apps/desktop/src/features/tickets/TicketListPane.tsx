@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { EffortHeader } from "@/features/efforts/EffortHeader";
-import { useEffortView } from "@/features/efforts/useEffortView";
-import { effortsClient } from "@/lib/api/efforts";
+import { PlanHeader } from "@/features/plans/PlanHeader";
+import { usePlanView } from "@/features/plans/usePlanView";
+import { plansClient } from "@/lib/api/plans";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -34,14 +34,14 @@ export function TicketListPane({
 }) {
   const {
     projects,
-    efforts,
+    plans,
     filter,
     query,
     setQuery,
     offset,
     setOffset,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,
@@ -70,13 +70,13 @@ export function TicketListPane({
     queryError,
     revision,
   } = workspace;
-  // An Effort scope shows the Effort's own header instead of a plain title.
+  // An Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const effortScope = !trash && navigation.effort ? navigation.effort : "";
-  const scopedEffort = efforts.find((item) => item.id === effortScope);
-  const effortState = useEffortView(effortScope, revision, refresh);
+  const planScope = !trash && navigation.plan ? navigation.plan : "";
+  const scopedPlan = plans.find((item) => item.id === planScope);
+  const planState = usePlanView(planScope, revision, refresh);
   const filtered =
-    navigation.effort !== effort ||
+    navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family) ||
@@ -95,7 +95,7 @@ export function TicketListPane({
     offset,
     filter,
     query,
-    effort,
+    plan,
     status,
     tags,
     availability,
@@ -135,8 +135,8 @@ export function TicketListPane({
   const filterProps = {
     query,
     setQuery,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,
@@ -145,7 +145,7 @@ export function TicketListPane({
     setAvailability,
     family,
     setFamily,
-    efforts,
+    plans,
     setOffset,
     navigation,
     clearFilters,
@@ -157,15 +157,15 @@ export function TicketListPane({
       tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
-      {scopedEffort ? (
-        <EffortHeader
-          effort={scopedEffort}
-          efforts={efforts}
+      {scopedPlan ? (
+        <PlanHeader
+          plan={scopedPlan}
+          plans={plans}
           projects={projects}
-          state={effortState}
+          state={planState}
         >
           <TicketFilters part="controls" {...filterProps} />
-        </EffortHeader>
+        </PlanHeader>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
@@ -226,7 +226,7 @@ export function TicketListPane({
               {query ? (
                 <p>
                   Nothing matches <q>{query}</q>
-                  {tags || status || availability || family || effort
+                  {tags || status || availability || family || plan
                     ? " with the current filters"
                     : ""}
                   .
@@ -235,23 +235,18 @@ export function TicketListPane({
                 <p>Nothing matches the current filters.</p>
               )}
               <Button variant="outline" onClick={clearFilters}>
-                {query &&
-                !tags &&
-                !status &&
-                !availability &&
-                !family &&
-                !effort
+                {query && !tags && !status && !availability && !family && !plan
                   ? "Clear search"
                   : "Clear filters"}
               </Button>
             </>
-          ) : effortScope ? (
+          ) : planScope ? (
             <>
-              <strong>No tickets in this Effort</strong>
+              <strong>No tickets in this Plan</strong>
               <p>Use Add tickets to bring existing tickets into it.</p>
             </>
           ) : navigation.project !== "all" ||
-            navigation.effort ||
+            navigation.plan ||
             navigation.kind !== "all" ? (
             <>
               <strong>No tickets in this scope</strong>
@@ -291,9 +286,9 @@ export function TicketListPane({
           <TicketList
             tickets={visibleTickets}
             scope={{
-              showEffort: !navigation.effort,
+              showPlan: !navigation.plan,
               showProject: navigation.project === "all",
-              efforts,
+              plans,
               projects,
             }}
             selected={selected}
@@ -312,17 +307,17 @@ export function TicketListPane({
             bulkSelection={bulk.selection}
             onToggle={bulk.toggle}
             onOpen={onOpen}
-            {...(scopedEffort && {
+            {...(scopedPlan && {
               rowAction: (ticket: Ticket) => (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  disabled={effortState.pending}
-                  aria-label={`Remove ${ticket.reference} from ${scopedEffort.name}`}
-                  title="Remove from Effort"
+                  disabled={planState.pending}
+                  aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                  title="Remove from Plan"
                   onClick={() =>
-                    void effortState.run(() =>
-                      effortsClient.setMember(ticket.reference, null),
+                    void planState.run(() =>
+                      plansClient.setMember(ticket.reference, null),
                     )
                   }
                 >
@@ -375,7 +370,7 @@ export function TicketListPane({
           bulk={bulk}
           visible={visibleTickets}
           projects={projects}
-          efforts={efforts}
+          plans={plans}
         />
       )}
     </section>

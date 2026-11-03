@@ -46,18 +46,13 @@ function SidebarCount({ value }: { value: number }) {
 }
 
 type View =
-  | "tickets"
-  | "projects"
-  | "efforts"
-  | "archived-efforts"
-  | "settings"
-  | "inbox";
+  "tickets" | "projects" | "plans" | "archived-plans" | "settings" | "inbox";
 export function WorkspaceSidebar({
   view,
   counts,
   setView,
   projects,
-  efforts,
+  plans,
   scope,
   setCreating,
   createTriggerRef,
@@ -66,24 +61,24 @@ export function WorkspaceSidebar({
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
-    effort: string;
+    plan: string;
   };
   view: View;
   counts: SidebarCounts;
   setView: (view: View) => void;
   projects: Project[];
-  efforts: { id: string; name: string; archived: boolean }[];
+  plans: { id: string; name: string; archived: boolean }[];
   scope: (
     next: "all" | "ready" | "progress" | "trash",
     project?: string,
-    effortId?: string,
+    planId?: string,
   ) => void;
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const isMobile = useIsMobile();
   const unread = counts.unread_inbox > 0;
-  const archivedEfforts = efforts.filter((e) => e.archived).length;
+  const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -138,7 +133,7 @@ export function WorkspaceSidebar({
                 isActive={
                   navigation.kind === "all" &&
                   navigation.project === "all" &&
-                  !navigation.effort &&
+                  !navigation.plan &&
                   view === "tickets"
                 }
                 onClick={() => scope("all")}
@@ -212,23 +207,20 @@ export function WorkspaceSidebar({
           </SidebarGroup>
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
-              Efforts{" "}
-              <IconButton
-                label="Manage Efforts"
-                onClick={() => setView("efforts")}
-              >
+              Plans{" "}
+              <IconButton label="Manage Plans" onClick={() => setView("plans")}>
                 <Settings2 size={16} />
               </IconButton>
             </div>
-            <nav aria-label="Effort scopes" className="sidebar-nav">
+            <nav aria-label="Plan scopes" className="sidebar-nav">
               <SidebarMenu>
-                {efforts
+                {plans
                   .filter((e) => !e.archived)
                   .map((e) => (
                     <SidebarMenuItem key={e.id}>
                       <SidebarMenuButton
                         isActive={
-                          navigation.effort === e.id && view === "tickets"
+                          navigation.plan === e.id && view === "tickets"
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >
@@ -238,12 +230,12 @@ export function WorkspaceSidebar({
                   ))}
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    isActive={view === "archived-efforts"}
-                    onClick={() => setView("archived-efforts")}
+                    isActive={view === "archived-plans"}
+                    onClick={() => setView("archived-plans")}
                   >
-                    <Archive size={16} /> Archived Efforts
-                    {archivedEfforts > 0 && (
-                      <SidebarCount value={archivedEfforts} />
+                    <Archive size={16} /> Archived Plans
+                    {archivedPlans > 0 && (
+                      <SidebarCount value={archivedPlans} />
                     )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>

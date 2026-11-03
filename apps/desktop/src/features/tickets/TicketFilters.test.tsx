@@ -10,8 +10,8 @@ test("Search and Filters start as named icon buttons and search opens on demand"
     <TicketFilters
       query=""
       setQuery={setQuery}
-      effort=""
-      setEffort={vi.fn()}
+      plan=""
+      setPlan={vi.fn()}
       status=""
       setStatus={vi.fn()}
       tags=""
@@ -20,9 +20,9 @@ test("Search and Filters start as named icon buttons and search opens on demand"
       setAvailability={vi.fn()}
       family=""
       setFamily={vi.fn()}
-      efforts={[]}
+      plans={[]}
       setOffset={vi.fn()}
-      navigation={{ kind: "all", project: "all", effort: "" }}
+      navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
     />,
   );

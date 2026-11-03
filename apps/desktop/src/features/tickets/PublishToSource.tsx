@@ -373,7 +373,7 @@ export function PublishDialog({
                   {preview.local
                     ? `${preview.local.notes} ${preview.local.notes === 1 ? "note" : "notes"}, `
                     : "Notes, "}
-                  Effort, tags and relationships — never sent to GitHub
+                  Plan, tags and relationships — never sent to GitHub
                 </li>
                 {(preview.local?.subtickets.length
                   ? preview.local.subtickets

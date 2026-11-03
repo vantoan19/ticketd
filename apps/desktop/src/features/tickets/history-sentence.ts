@@ -1,16 +1,16 @@
 import type { Entry } from "@/lib/api/history";
 
 type Lookups = {
-  /** Resolve a Project or Effort id to its name; unknown ids fall through. */
+  /** Resolve a Project or Plan id to its name; unknown ids fall through. */
   project: (id: string) => string | undefined;
-  effort: (id: string) => string | undefined;
+  plan: (id: string) => string | undefined;
 };
 
 const quote = (value: string) => `“${value}”`;
 
 const noLookups: Lookups = {
   project: () => undefined,
-  effort: () => undefined,
+  plan: () => undefined,
 };
 
 /** Plain-language sentence for one recorded change, never an event key. */
@@ -41,13 +41,13 @@ export function describeChange(
           ? `Added to project ${name(to)}`
           : `Removed from project ${name(from)}`;
     }
-    case "effort": {
-      const name = (id: string) => lookups.effort(id) ?? id;
+    case "plan": {
+      const name = (id: string) => lookups.plan(id) ?? id;
       return from && to
-        ? `Effort changed from ${name(from)} to ${name(to)}`
+        ? `Plan changed from ${name(from)} to ${name(to)}`
         : to
-          ? `Effort set to ${name(to)}`
-          : "Effort cleared";
+          ? `Plan set to ${name(to)}`
+          : "Plan cleared";
     }
     case "parent":
       return from && to

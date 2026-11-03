@@ -10,7 +10,7 @@ const LABEL: usize = 256;
 #[derive(Debug, Default, Deserialize)]
 pub struct ContextOptions {
     pub project: bool,
-    pub effort: bool,
+    pub plan: bool,
     pub relationships: bool,
     pub notes: bool,
     #[serde(default)]
@@ -123,7 +123,7 @@ pub struct TicketContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<Option<ContextLink>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<Option<ContextLink>>,
+    pub plan: Option<Option<ContextLink>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,7 +190,7 @@ impl Workspace {
     ) -> Result<TicketContext, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let id = relationships::id(&tx, reference)?;
-        let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
+        let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
         let availability = crate::history::availability(&tx, &id, ticket.status, ticket.trashed)?;
         let tags = {
             let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;
@@ -219,11 +219,11 @@ impl Workspace {
         } else {
             None
         };
-        let effort = if options.effort {
-            Some(match ticket.effort_id {
+        let plan = if options.plan {
+            Some(match ticket.plan_id {
                 Some(id) => Some(
                     tx.query_row(
-                        "SELECT id, name, archived FROM efforts WHERE id = ?1",
+                        "SELECT id, name, archived FROM plans WHERE id = ?1",
                         [&id],
                         |r| {
                             Ok(ContextLink {
@@ -234,7 +234,7 @@ impl Workspace {
                         },
                     )
                     .optional()?
-                    .ok_or(Error::EffortNotFound(id))?,
+                    .ok_or(Error::PlanNotFound(id))?,
                 ),
                 None => None,
             })
@@ -382,7 +382,7 @@ impl Workspace {
                 tags,
             },
             project,
-            effort,
+            plan,
             relationships,
             notes,
             evidence,

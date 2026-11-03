@@ -16,7 +16,7 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   body: "",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -26,9 +26,9 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   ...overrides,
 });
 const scope: RowScope = {
-  showEffort: true,
+  showPlan: true,
   showProject: true,
-  efforts: [{ id: "e1", name: "Launch" }],
+  plans: [{ id: "e1", name: "Launch" }],
   projects: [{ id: "p1", name: "Website" }],
 };
 function renderList(tickets: Ticket[], props = {}) {
@@ -98,10 +98,10 @@ test("shows one context item and tags as pills", () => {
   renderList([
     ticket({
       parent: { reference: "T-7", title: "Parent", trashed: false },
-      effort_id: "e1",
+      plan_id: "e1",
       tags: ["ui", "bug"],
     }),
-    ticket({ id: "2", reference: "T-2", effort_id: "e1", project_id: "p1" }),
+    ticket({ id: "2", reference: "T-2", plan_id: "e1", project_id: "p1" }),
   ]);
   expect(screen.getByText("Subticket of T-7")).toBeTruthy();
   expect(screen.getAllByText("Launch")).toHaveLength(1);

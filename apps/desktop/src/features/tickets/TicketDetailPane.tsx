@@ -26,7 +26,7 @@ export function TicketDetailPane({
     tickets,
     details,
     projects,
-    efforts,
+    plans,
     revision,
     refresh,
     updateTicket,
@@ -51,7 +51,7 @@ export function TicketDetailPane({
         setSelected={onSelect}
         details={details}
         projects={projects}
-        efforts={efforts}
+        plans={plans}
         revision={revision}
         refresh={refresh}
         updateTicket={updateTicket}

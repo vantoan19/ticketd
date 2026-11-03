@@ -20,7 +20,7 @@ import { PublicationNotice } from "@/features/tickets/PublishToSource";
 import { externalSource, sourceState } from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import type { Project, Ticket } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 
 type NoteTarget = { id: string; key: number };
 
@@ -29,7 +29,7 @@ export function TicketPage({
   ticket,
   active,
   projects,
-  efforts,
+  plans,
   revision,
   refresh,
   updateTicket,
@@ -43,7 +43,7 @@ export function TicketPage({
   /** Only the selected ticket reads its links, evidence, and backlinks. */
   active: boolean;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   revision: number;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
@@ -211,7 +211,7 @@ export function TicketPage({
               : noteTarget
           }
           projects={projects}
-          efforts={efforts}
+          plans={plans}
           status={ticket.status}
           revision={revision}
           active={active}
@@ -225,7 +225,7 @@ export function TicketPage({
       <TicketProperties
         ticket={ticket}
         projects={projects}
-        efforts={efforts}
+        plans={plans}
         onSaved={updateTicket}
         refresh={refresh}
         onOpenTicket={select}

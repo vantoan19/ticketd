@@ -405,13 +405,13 @@ fn concurrent_hierarchy_assignments_preserve_one_level() {
 }
 
 #[test]
-fn effort_membership_progress_and_archiving_preserve_tickets() {
+fn plan_membership_progress_and_archiving_preserve_tickets() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    let effort = workspace.create_effort("Launch").unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
     let ticket = workspace.create_ticket("Ship").unwrap();
     workspace
-        .set_effort(&ticket.reference, Some(&effort.id), Some("agent"))
+        .set_plan(&ticket.reference, Some(&plan.id), Some("agent"))
         .unwrap();
     workspace
         .change_ticket(
@@ -422,65 +422,54 @@ fn effort_membership_progress_and_archiving_preserve_tickets() {
             },
         )
         .unwrap();
-    let view = workspace.show_effort(&effort.id).unwrap();
+    let view = workspace.show_plan(&plan.id).unwrap();
     assert_eq!(view.members.len(), 1);
     assert_eq!(view.counts.done, 1);
+    workspace.change_plan(&plan.id, None, Some(true)).unwrap();
+    assert!(workspace.list_plans(false).unwrap().is_empty());
     workspace
-        .change_effort(&effort.id, None, Some(true))
-        .unwrap();
-    assert!(workspace.list_efforts(false).unwrap().is_empty());
-    workspace
-        .change_effort(&effort.id, Some("Release"), Some(false))
+        .change_plan(&plan.id, Some("Release"), Some(false))
         .unwrap();
     assert_eq!(
         workspace.show_ticket(&ticket.reference).unwrap().status,
         Status::Done
     );
-    workspace.set_effort(&ticket.reference, None, None).unwrap();
+    workspace.set_plan(&ticket.reference, None, None).unwrap();
     let history = workspace.ticket_history(&ticket.reference).unwrap();
     assert_eq!(
-        history
-            .iter()
-            .filter(|entry| entry.kind == "effort")
-            .count(),
+        history.iter().filter(|entry| entry.kind == "plan").count(),
         2
     );
-    assert!(
-        workspace
-            .show_effort(&effort.id)
-            .unwrap()
-            .members
-            .is_empty()
-    );
+    assert!(workspace.show_plan(&plan.id).unwrap().members.is_empty());
 }
 
 #[test]
-fn moving_effort_membership_is_atomic_and_survives_reopening() {
+fn moving_plan_membership_is_atomic_and_survives_reopening() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
-    let first = workspace.create_effort("First").unwrap();
-    let second = workspace.create_effort("Second").unwrap();
+    let first = workspace.create_plan("First").unwrap();
+    let second = workspace.create_plan("Second").unwrap();
     let ticket = workspace.create_ticket("Shared outcome").unwrap();
     workspace
-        .set_effort(&ticket.reference, Some(&first.id), None)
+        .set_plan(&ticket.reference, Some(&first.id), None)
         .unwrap();
     assert!(
         workspace
-            .set_effort(&ticket.reference, Some("missing"), None)
+            .set_plan(&ticket.reference, Some("missing"), None)
             .is_err()
     );
     assert_eq!(
-        workspace.show_ticket(&ticket.reference).unwrap().effort_id,
+        workspace.show_ticket(&ticket.reference).unwrap().plan_id,
         Some(first.id.clone())
     );
     workspace
-        .set_effort(&ticket.reference, Some(&second.id), None)
+        .set_plan(&ticket.reference, Some(&second.id), None)
         .unwrap();
     drop(workspace);
     let workspace = Workspace::open(&path).unwrap();
-    assert!(workspace.show_effort(&first.id).unwrap().members.is_empty());
-    assert_eq!(workspace.show_effort(&second.id).unwrap().members.len(), 1);
+    assert!(workspace.show_plan(&first.id).unwrap().members.is_empty());
+    assert_eq!(workspace.show_plan(&second.id).unwrap().members.len(), 1);
     let history = workspace.ticket_history(&ticket.reference).unwrap();
     assert_eq!(history.len(), 2);
     assert_eq!(history[1].from_value, first.id);
@@ -538,7 +527,7 @@ fn project_patch_distinguishes_omitted_and_null() {
 }
 
 #[test]
-fn effort_patch_combines_membership_and_status_atomically() {
+fn plan_patch_combines_membership_and_status_atomically() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let ticket = workspace.create_ticket("Combined change").unwrap();
@@ -547,7 +536,7 @@ fn effort_patch_combines_membership_and_status_atomically() {
             .change_ticket(
                 &ticket.reference,
                 TicketPatch {
-                    effort_id: Some(Some("missing".into())),
+                    plan_id: Some(Some("missing".into())),
                     status: Some(Status::Done),
                     ..Default::default()
                 }
@@ -564,8 +553,8 @@ fn effort_patch_combines_membership_and_status_atomically() {
             .unwrap()
             .is_empty()
     );
-    let clear: TicketPatch = serde_json::from_str(r#"{"effort_id":null}"#).unwrap();
-    assert_eq!(clear.effort_id, Some(None));
+    let clear: TicketPatch = serde_json::from_str(r#"{"plan_id":null}"#).unwrap();
+    assert_eq!(clear.plan_id, Some(None));
 }
 
 #[test]
@@ -1010,13 +999,13 @@ fn export_preserves_workspace_relationships_and_trash() {
     let project = workspace
         .create_project("Project", dir.path().to_str().unwrap())
         .unwrap();
-    let effort = workspace.create_effort("Effort").unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
     let parent = workspace
         .create_ticket_in_project("Parent", Some(&project.id))
         .unwrap();
     let child = workspace.create_ticket("Child").unwrap();
     workspace
-        .set_effort(&child.reference, Some(&effort.id), None)
+        .set_plan(&child.reference, Some(&plan.id), None)
         .unwrap();
     workspace
         .set_parent(&child.reference, Some(&parent.reference), None)
@@ -1035,10 +1024,10 @@ fn export_preserves_workspace_relationships_and_trash() {
     assert_eq!(export["format_version"], 1);
     assert_eq!(export["projects"][0]["id"], project.id);
     assert_eq!(export["project_checkouts"][0]["project_id"], project.id);
-    assert_eq!(export["efforts"][0]["id"], effort.id);
+    assert_eq!(export["plans"][0]["id"], plan.id);
     assert_eq!(export["tickets"][0]["id"], parent.id);
     assert_eq!(export["tickets"][0]["trashed"], 1);
-    assert_eq!(export["tickets"][1]["effort_id"], effort.id);
+    assert_eq!(export["tickets"][1]["plan_id"], plan.id);
     assert_eq!(export["notes"][0]["id"], note.id);
     assert_eq!(export["notes"][0]["ticket_id"], child.id);
     assert_eq!(export["ticket_parents"][0]["parent_id"], parent.id);
@@ -1095,14 +1084,14 @@ fn combined_filters_search_flat_family_with_all_tags_and_paging() {
 }
 
 #[test]
-fn combined_filters_apply_project_effort_status_and_blocked_before_paging() {
+fn combined_filters_apply_project_plan_status_and_blocked_before_paging() {
     use ticketd_core::{Availability, TicketFilter};
     let dir = tempfile::tempdir().unwrap();
     let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    let effort = w.create_effort("Release").unwrap();
+    let plan = w.create_plan("Release").unwrap();
     let blocker = w.create_ticket("Prerequisite").unwrap();
     let blocked = w.create_ticket("Ship release").unwrap();
-    w.set_effort(&blocked.reference, Some(&effort.id), None)
+    w.set_plan(&blocked.reference, Some(&plan.id), None)
         .unwrap();
     w.add_dependency(&blocker.reference, &blocked.reference, None)
         .unwrap();
@@ -1110,7 +1099,7 @@ fn combined_filters_apply_project_effort_status_and_blocked_before_paging() {
     let filter = TicketFilter {
         query: "release".into(),
         unlinked: true,
-        effort: Some(effort.id),
+        plan: Some(plan.id),
         status: Some(Status::Todo),
         availability: Some(Availability::Blocked),
         limit: 1,
@@ -2775,15 +2764,15 @@ fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection()
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("bulk-organization.sqlite")).unwrap();
     let project = workspace.create_project("Project", "/project").unwrap();
-    let effort = workspace.create_effort("Effort").unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
     let first = workspace.create_ticket("First").unwrap();
     let second = workspace.create_ticket("Second").unwrap();
     workspace.add_tag(&first.reference, "keep").unwrap();
     workspace.add_tag(&second.reference, "remove").unwrap();
     let changes = || {
         serde_json::from_value::<Vec<BatchOperation>>(serde_json::json!([
-        {"operation":"change", "ticket":first.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}},
-        {"operation":"change", "ticket":second.reference, "change":{"project_id":project.id,"effort_id":effort.id,"add_tags":["new"],"remove_tags":["remove"]}}
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":project.id,"plan_id":plan.id,"add_tags":["new"],"remove_tags":["remove"]}},
+        {"operation":"change", "ticket":second.reference, "change":{"project_id":project.id,"plan_id":plan.id,"add_tags":["new"],"remove_tags":["remove"]}}
     ])).unwrap()
     };
     workspace
@@ -2804,27 +2793,27 @@ fn bulk_organization_preserves_unrelated_tags_and_rolls_back_invalid_selection()
         .unwrap();
     let saved = workspace.show_ticket(&first.reference).unwrap();
     assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
-    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(saved.plan_id.as_deref(), Some(plan.id.as_str()));
     assert_eq!(saved.tags, vec!["keep", "new"]);
     assert_eq!(
         workspace.show_ticket(&second.reference).unwrap().tags,
         vec!["new"]
     );
     let invalid: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
-        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}},
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"plan_id":null}},
         {"operation":"change", "ticket":second.reference, "change":{"project_id":"missing"}}
     ])).unwrap();
     assert!(workspace.apply_batch(invalid).is_err());
     let saved = workspace.show_ticket(&first.reference).unwrap();
     assert_eq!(saved.project_id.as_deref(), Some(project.id.as_str()));
-    assert_eq!(saved.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(saved.plan_id.as_deref(), Some(plan.id.as_str()));
     let clear: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
-        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"effort_id":null}}
+        {"operation":"change", "ticket":first.reference, "change":{"project_id":null,"plan_id":null}}
     ])).unwrap();
     workspace.apply_batch(clear).unwrap();
     let saved = workspace.show_ticket(&first.reference).unwrap();
     assert_eq!(saved.project_id, None);
-    assert_eq!(saved.effort_id, None);
+    assert_eq!(saved.plan_id, None);
     assert_eq!(saved.tags, vec!["keep", "new"]);
 }
 
@@ -2977,10 +2966,10 @@ fn workspace_info_reports_location_counts_size_and_format() {
         .set_trashed(&trashed.reference, true, None)
         .unwrap();
     workspace.create_project("Core", "/tmp/core").unwrap();
-    workspace.create_effort("Active").unwrap();
-    let archived = workspace.create_effort("Old").unwrap();
+    workspace.create_plan("Active").unwrap();
+    let archived = workspace.create_plan("Old").unwrap();
     workspace
-        .change_effort(&archived.id, None, Some(true))
+        .change_plan(&archived.id, None, Some(true))
         .unwrap();
 
     let info = workspace.workspace_info().unwrap();
@@ -2992,7 +2981,7 @@ fn workspace_info_reports_location_counts_size_and_format() {
     );
     assert_eq!(info.tickets, 1);
     assert_eq!(info.projects, 1);
-    assert_eq!(info.active_efforts, 1);
+    assert_eq!(info.active_plans, 1);
     assert_eq!(i64::from(info.format_version), FORMAT_VERSION);
     assert_eq!(info.size_bytes, std::fs::metadata(&path).unwrap().len());
     assert!(info.size_bytes > 0);
@@ -3406,23 +3395,23 @@ fn a_duplicate_blocker_stays_unresolved_and_is_neither_ready_nor_blocked() {
 }
 
 #[test]
-fn effort_progress_counts_duplicates_separately() {
+fn plan_progress_counts_duplicates_separately() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    let effort = workspace.create_effort("Launch").unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
     let source = workspace.create_ticket("Source").unwrap();
     let target = workspace.create_ticket("Target").unwrap();
     let canceled = workspace.create_ticket("Canceled").unwrap();
     for ticket in [&source, &target, &canceled] {
         workspace
-            .set_effort(&ticket.reference, Some(&effort.id), None)
+            .set_plan(&ticket.reference, Some(&plan.id), None)
             .unwrap();
     }
     set_status(&mut workspace, &canceled.reference, Status::Canceled);
     workspace
         .mark_duplicate(&source.reference, &target.reference, None)
         .unwrap();
-    let counts = workspace.show_effort(&effort.id).unwrap().counts;
+    let counts = workspace.show_plan(&plan.id).unwrap().counts;
     assert_eq!((counts.duplicate, counts.canceled, counts.todo), (1, 1, 1));
 }
 
@@ -4082,6 +4071,69 @@ fn status_counts_serialize_their_total_so_clients_never_sum_them() {
     let value = serde_json::to_value(counts).unwrap();
     assert_eq!(value["total"], 8);
     assert_eq!(value["duplicate"], 1);
+}
+
+#[test]
+fn plan_can_be_created_with_only_a_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    assert_eq!(plan.name, "Launch");
+    assert!(workspace.show_plan(&plan.id).unwrap().members.is_empty());
+}
+
+#[test]
+fn plan_purpose_can_be_edited_and_survives_reopening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    assert_eq!(plan.purpose, "");
+    workspace.set_plan_purpose(&plan.id, "Ship safely").unwrap();
+    drop(workspace);
+    let workspace = Workspace::open(path).unwrap();
+    assert_eq!(
+        workspace.show_plan(&plan.id).unwrap().plan.purpose,
+        "Ship safely"
+    );
+}
+
+#[test]
+fn ticket_created_in_plan_is_a_member_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Launch").unwrap();
+    let ticket = workspace
+        .create_ticket_in_context("Work", None, Some(&plan.id))
+        .unwrap();
+    assert_eq!(ticket.plan_id.as_deref(), Some(plan.id.as_str()));
+    assert!(
+        workspace
+            .create_ticket_in_context("Invalid", None, Some("missing"))
+            .is_err()
+    );
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+}
+
+#[test]
+fn legacy_workspace_is_rejected_without_deleting_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch("CREATE TABLE efforts (id TEXT PRIMARY KEY, name TEXT NOT NULL); INSERT INTO efforts VALUES ('old', 'Existing'); PRAGMA user_version = 29;").unwrap();
+    drop(connection);
+    let error = match Workspace::open(&path) {
+        Ok(_) => panic!("legacy workspace unexpectedly opened"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("previous Effort schema"));
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let name: String = connection
+        .query_row("SELECT name FROM efforts WHERE id = 'old'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(name, "Existing");
 }
 
 #[test]

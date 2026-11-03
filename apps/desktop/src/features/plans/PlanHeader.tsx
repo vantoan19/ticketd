@@ -6,11 +6,11 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { effortsClient, type Effort, type View } from "@/lib/api/efforts";
+import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { AddTicketsDialog } from "./AddTicketsDialog";
-import type { EffortViewState } from "./useEffortView";
-import "./effort.css";
+import type { PlanViewState } from "./usePlanView";
+import "./plan.css";
 
 const list = (names: string[]) =>
   names.length < 3
@@ -18,7 +18,7 @@ const list = (names: string[]) =>
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /** The context line: how many tickets, and which projects they span. */
-function effortContext(
+function planContext(
   members: View["members"],
   projects: { id: string; name: string }[],
 ) {
@@ -27,34 +27,36 @@ function effortContext(
     .map((project) => project.name);
   const tickets = `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`;
   return names.length
-    ? `Effort · ${tickets} across ${list(names)}`
-    : `Effort · ${tickets}`;
+    ? `Plan · ${tickets} across ${list(names)}`
+    : `Plan · ${tickets}`;
 }
 
 /**
- * The Effort's name and state, status counts, and actions, shown above its
+ * The Plan's name and state, status counts, and actions, shown above its
  * member list. Counts include every non-trashed member, subtickets too.
  */
-export function EffortHeader({
-  effort,
-  efforts,
+export function PlanHeader({
+  plan,
+  plans,
   projects,
   state,
   children,
 }: {
   children?: ReactNode;
-  effort: Effort;
-  efforts: Effort[];
+  plan: Plan;
+  plans: Plan[];
   projects: { id: string; name: string }[];
-  state: EffortViewState;
+  state: PlanViewState;
 }) {
   const { view, loadError, pending, actionError, run } = state;
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
+  const [editingPurpose, setEditingPurpose] = useState(false);
+  const [purpose, setPurpose] = useState("");
   const [adding, setAdding] = useState(false);
   // The list's own copy is current after a change; the loaded view adds counts.
-  const current = view?.effort.id === effort.id ? view.effort : effort;
+  const current = view?.plan.id === plan.id ? view.plan : plan;
 
   function startRename() {
     setName(current.name);
@@ -64,29 +66,29 @@ export function EffortHeader({
   async function rename(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) {
-      setNameError("Enter a name for this Effort.");
+      setNameError("Enter a name for this Plan.");
       return;
     }
     setNameError("");
-    if (await run(() => effortsClient.change(effort.id, name, null)))
+    if (await run(() => plansClient.change(plan.id, name, null)))
       setRenaming(false);
   }
   return (
-    <header className="effort-header">
-      <div className="effort-title-row">
-        <div className="effort-title">
-          <div className="effort-name-row">
+    <header className="plan-header">
+      <div className="plan-title-row">
+        <div className="plan-title">
+          <div className="plan-name-row">
             <h1 id="tickets-heading" tabIndex={-1}>
               {current.name}
             </h1>
-            <span className="effort-state">
+            <span className="plan-state">
               <StatusDot tone={current.archived ? "neutral" : "positive"} />
               {current.archived ? "Archived" : "Active"}
             </span>
           </div>
-          <p>{view ? effortContext(view.members, projects) : "Effort"}</p>
+          <p>{view ? planContext(view.members, projects) : "Plan"}</p>
         </div>
-        <div className="effort-actions">
+        <div className="plan-actions">
           <Button
             variant="ghost"
             size="sm"
@@ -107,10 +109,10 @@ export function EffortHeader({
             variant="outline"
             size="sm"
             disabled={pending}
-            aria-describedby="effort-archive-note"
+            aria-describedby="plan-archive-note"
             onClick={() =>
               void run(() =>
-                effortsClient.change(effort.id, null, !current.archived),
+                plansClient.change(plan.id, null, !current.archived),
               )
             }
           >
@@ -125,14 +127,11 @@ export function EffortHeader({
         </div>
       </div>
       {renaming && (
-        <form
-          className="effort-rename"
-          onSubmit={(event) => void rename(event)}
-        >
+        <form className="plan-rename" onSubmit={(event) => void rename(event)}>
           <Field data-invalid={nameError ? true : undefined}>
-            <FieldLabel htmlFor="effort-rename-name">Effort name</FieldLabel>
+            <FieldLabel htmlFor="plan-rename-name">Plan name</FieldLabel>
             <Input
-              id="effort-rename-name"
+              id="plan-rename-name"
               value={name}
               autoFocus
               aria-invalid={nameError ? true : undefined}
@@ -156,13 +155,58 @@ export function EffortHeader({
           </Button>
         </form>
       )}
+      {editingPurpose ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(() => plansClient.setPurpose(plan.id, purpose)).then(
+              (saved) => {
+                if (saved) setEditingPurpose(false);
+              },
+            );
+          }}
+        >
+          <FieldLabel htmlFor="plan-purpose">Purpose</FieldLabel>
+          <Input
+            id="plan-purpose"
+            value={purpose}
+            onChange={(event) => setPurpose(event.target.value)}
+            autoFocus
+          />
+          <Button type="submit" size="sm" disabled={pending}>
+            Save purpose
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setEditingPurpose(false)}
+          >
+            Cancel
+          </Button>
+        </form>
+      ) : (
+        <div>
+          {current.purpose && <p>{current.purpose}</p>}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setPurpose(current.purpose);
+              setEditingPurpose(true);
+            }}
+          >
+            {current.purpose ? "Edit purpose" : "Add purpose"}
+          </Button>
+        </div>
+      )}
       {(actionError || loadError) && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{actionError || loadError}</AlertDescription>
         </Alert>
       )}
       {view && (
-        <dl className="effort-counts" aria-label="Tickets by status">
+        <dl className="plan-counts" aria-label="Tickets by status">
           {ticketStatuses.map((status) => (
             <div key={status}>
               <dt>
@@ -174,15 +218,15 @@ export function EffortHeader({
           ))}
         </dl>
       )}
-      <p id="effort-archive-note" className="effort-note">
+      <p id="plan-archive-note" className="plan-note">
         {current.archived
-          ? "Reactivating returns this Effort to the sidebar. Its tickets keep their status."
-          : "Archiving hides this Effort from the sidebar. Its tickets stay searchable and unchanged."}{" "}
+          ? "Reactivating returns this Plan to the sidebar. Its tickets keep their status."
+          : "Archiving hides this Plan from the sidebar. Its tickets stay searchable and unchanged."}{" "}
         Counts include parents and subtickets equally.
       </p>
       <AddTicketsDialog
-        effort={current}
-        efforts={efforts}
+        plan={current}
+        plans={plans}
         open={adding}
         onOpenChange={setAdding}
         state={state}

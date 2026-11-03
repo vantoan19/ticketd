@@ -208,7 +208,7 @@ function Sidebar({
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
             <SheetDescription>
-              Workspace views, projects, and Efforts.
+              Workspace views, projects, and Plans.
             </SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>

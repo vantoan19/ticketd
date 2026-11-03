@@ -51,7 +51,7 @@ import {
 import { ago } from "./ticket-source";
 import { formatDateTime } from "@/lib/format";
 import { client, type Project, type Ticket } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import "./properties.css";
 
 type Choice = { value: string; label: string };
@@ -153,7 +153,7 @@ export function PropertyPicker({
 export function TicketProperties({
   ticket,
   projects,
-  efforts,
+  plans,
   onSaved,
   refresh,
   onOpenTicket,
@@ -162,7 +162,7 @@ export function TicketProperties({
 }: {
   ticket: Ticket;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   onSaved: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
   /** Sections that follow Tags in the rail, such as Relationships and Attention. */
@@ -257,10 +257,10 @@ export function TicketProperties({
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "Unlinked");
-  const effort = efforts.find((e) => e.id === ticket.effort_id);
-  const effortName = effort
-    ? `${effort.name}${effort.archived ? " (archived)" : ""}`
-    : ticket.effort_id || "No Effort";
+  const plan = plans.find((e) => e.id === ticket.plan_id);
+  const planName = plan
+    ? `${plan.name}${plan.archived ? " (archived)" : ""}`
+    : ticket.plan_id || "No Plan";
   function property(label: string, control: ReactNode) {
     return (
       <RailSection label={label}>
@@ -469,24 +469,24 @@ export function TicketProperties({
         />,
       )}
       {property(
-        "Effort",
+        "Plan",
         <PropertyPicker
           compact
           align="end"
           readOnly={ticket.trashed}
           icon={Layers}
-          label="Effort"
-          value={effortName}
+          label="Plan"
+          value={planName}
           disabled={disabled}
           choices={[
-            { value: "", label: "No Effort" },
-            ...efforts
+            { value: "", label: "No Plan" },
+            ...plans
               .filter((e) => !e.archived)
               .map((e) => ({ value: e.id, label: e.name })),
           ]}
           onChoose={(value) =>
-            void save("Effort", () =>
-              client.setEffort(ticket.reference, value || null),
+            void save("Plan", () =>
+              client.setPlan(ticket.reference, value || null),
             )
           }
         />,
