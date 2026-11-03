@@ -552,3 +552,42 @@ fn shared_support_and_trash_preserve_briefs_and_existing_document_visibility() {
         1
     );
 }
+
+#[test]
+fn activity_support_is_searchable_when_included_and_indexes_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Work").unwrap();
+    let target = workspace.create_document(Some("Target"), "body").unwrap();
+    let body = format!("rarecompass [target](ticketd://document/{})", target.id);
+    let activity = workspace
+        .add_activity_with_details(&ticket.reference, "Progress", None, Some(&body), None)
+        .unwrap();
+    let id = activity.supporting_document_id.unwrap();
+    assert!(
+        workspace
+            .search_documents("rarecompass", None, 10, 0)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        workspace
+            .search_documents_including_support("rarecompass", None, 10, 0, true)
+            .unwrap()[0]
+            .id,
+        id
+    );
+    assert_eq!(
+        workspace.context_backlinks(&target.id, 20, 0).unwrap()[0].source_id,
+        id
+    );
+    assert_eq!(
+        workspace
+            .latest_update(&ticket.reference)
+            .unwrap()
+            .unwrap()
+            .supporting_document_id
+            .as_deref(),
+        Some(id.as_str())
+    );
+}

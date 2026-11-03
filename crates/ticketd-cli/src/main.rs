@@ -68,6 +68,8 @@ enum DocumentCommand {
         query: String,
         #[arg(long)]
         tag: Option<String>,
+        #[arg(long)]
+        include_support: bool,
         #[arg(long, default_value_t = 50)]
         limit: u32,
         #[arg(long, default_value_t = 0)]
@@ -779,13 +781,15 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             DocumentCommand::Search {
                 query,
                 tag,
+                include_support,
                 limit,
                 offset,
-            } => serde_json::to_string(&workspace.search_documents(
+            } => serde_json::to_string(&workspace.search_documents_including_support(
                 &query,
                 tag.as_deref(),
                 limit,
                 offset,
+                include_support,
             )?)?,
             DocumentCommand::Pins { limit, offset } => {
                 serde_json::to_string(&workspace.pinned_documents(limit, offset)?)?

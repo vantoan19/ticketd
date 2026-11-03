@@ -98,6 +98,7 @@ pub(crate) fn read(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LatestUpdate {
     pub activity_id: String,
+    pub supporting_document_id: Option<String>,
     pub brief: UpdateBrief,
     pub reported_at: String,
     pub updated_at: String,
@@ -111,11 +112,11 @@ pub struct UpdateBrief {
 }
 
 pub(crate) fn latest(conn: &Connection, ticket: &str) -> Result<Option<LatestUpdate>, Error> {
-    Ok(conn.query_row("SELECT id, brief, reported_at, updated_at, editing_agent FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [ticket], |row| {
+    Ok(conn.query_row("SELECT id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 ORDER BY number DESC LIMIT 1", [ticket], |row| {
         let brief: String = row.get(1)?;
         let mut chars = brief.chars();
         let text = chars.by_ref().take(1024).collect();
-        Ok(LatestUpdate { activity_id: row.get(0)?, brief: UpdateBrief { text, truncated: chars.next().is_some() }, reported_at: row.get(2)?, updated_at: row.get(3)?, editing_agent: row.get(4)? })
+        Ok(LatestUpdate { activity_id: row.get(0)?, supporting_document_id: row.get(5)?, brief: UpdateBrief { text, truncated: chars.next().is_some() }, reported_at: row.get(2)?, updated_at: row.get(3)?, editing_agent: row.get(4)? })
     }).optional()?)
 }
 

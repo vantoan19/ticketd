@@ -68,9 +68,11 @@ export function Documents({
   }, [recentOffset, pinOffset]);
   useEffect(() => {
     if (target)
-      void documents
-        .open(target.id)
-        .then(setSelected)
+      void Promise.all([documents.open(target.id), documents.tags(target.id)])
+        .then(([doc, values]) => {
+          setSelected(doc);
+          setTags(values);
+        })
         .catch((e: unknown) => setError(String(e)));
   }, [target]);
   useEffect(() => {

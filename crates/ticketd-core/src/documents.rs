@@ -179,18 +179,34 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<DocumentSearchResult>, Error> {
+        self.search_documents_including_support(query, tag, limit, offset, false)
+    }
+
+    pub fn search_documents_including_support(
+        &self,
+        query: &str,
+        tag: Option<&str>,
+        limit: u32,
+        offset: u32,
+        include_support: bool,
+    ) -> Result<Vec<DocumentSearchResult>, Error> {
         let query = query.trim();
         if query.is_empty() {
             let Some(tag) = tag else {
                 return Ok(Vec::new());
             };
             let sql = format!(
-                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 ORDER BY d.id LIMIT ?2 OFFSET ?3"
+                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 AND (?4 OR d.originating_activity_id IS NULL) ORDER BY d.id LIMIT ?2 OFFSET ?3"
             );
             let mut statement = self.connection.prepare(&sql)?;
             return Ok(statement
                 .query_map(
-                    params![tag.trim().to_lowercase(), limit.min(100), offset],
+                    params![
+                        tag.trim().to_lowercase(),
+                        limit.min(100),
+                        offset,
+                        include_support
+                    ],
                     |row| {
                         Ok(DocumentSearchResult {
                             id: row.get(0)?,
@@ -204,17 +220,20 @@ impl Workspace {
         let expression = format!("\"{}\"", query.replace('"', "\"\""));
         let tag = tag.map(|value| value.trim().to_lowercase());
         let sql = format!(
-            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
-            .query_map(params![expression, tag, limit.min(100), offset], |row| {
-                Ok(DocumentSearchResult {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    snippet: row.get(2)?,
-                })
-            })?
+            .query_map(
+                params![expression, tag, limit.min(100), offset, include_support],
+                |row| {
+                    Ok(DocumentSearchResult {
+                        id: row.get(0)?,
+                        heading: row.get(1)?,
+                        snippet: row.get(2)?,
+                    })
+                },
+            )?
             .collect::<Result<_, _>>()?)
     }
 
