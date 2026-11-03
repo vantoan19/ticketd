@@ -8,6 +8,7 @@ const schema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   trashed: z.boolean(),
+  origin_brief: z.string().nullable().optional(),
 });
 export type Document = z.infer<typeof schema>;
 const linkSchema = z.object({

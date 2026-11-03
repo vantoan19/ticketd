@@ -251,7 +251,11 @@ export function DocumentEditor({
       >
         <header>
           <DialogTitle>
-            {initial ? "Document" : "Capture a thought"}
+            {initial
+              ? initial.title?.trim() ||
+                initial.origin_brief?.trim() ||
+                "Document"
+              : "Capture a thought"}
           </DialogTitle>
           <Button
             variant="ghost"
@@ -267,7 +271,7 @@ export function DocumentEditor({
             <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
             <Input
               id="document-title"
-              placeholder="Untitled"
+              placeholder={initial?.origin_brief?.trim() || "Untitled"}
               readOnly={trashed || transitioning}
               value={title}
               onChange={(event) => {

@@ -605,6 +605,30 @@ fn add_activity(reference: String, brief: String) -> Result<Activity, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn add_activity_with_details(
+    reference: String,
+    brief: String,
+    details: Option<String>,
+    existing_document_id: Option<String>,
+    request_id: String,
+) -> Result<Activity, String> {
+    let request = WriteRequest::AddActivityWithDetails {
+        reference,
+        brief,
+        agent: None,
+        details,
+        existing_document_id,
+    };
+    match Workspace::open_default()
+        .and_then(|mut workspace| workspace.write(Some(&request_id), request))
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Activity(activity) => Ok(activity),
+        _ => Err("Unexpected activity result".into()),
+    }
+}
+
+#[tauri::command]
 fn edit_activity(reference: String, id: String, patch: ActivityPatch) -> Result<Activity, String> {
     Workspace::open_default()
         .and_then(|mut workspace| workspace.edit_activity(&reference, &id, patch))
@@ -1260,6 +1284,7 @@ pub fn run() -> Result<(), tauri::Error> {
             list_activities,
             get_activity,
             add_activity,
+            add_activity_with_details,
             edit_activity,
             delete_activity,
             search_tags,

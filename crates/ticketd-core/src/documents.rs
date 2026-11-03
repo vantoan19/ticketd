@@ -12,6 +12,8 @@ pub struct Document {
     pub updated_at: String,
     #[serde(default)]
     pub trashed: bool,
+    #[serde(default)]
+    pub origin_brief: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,7 +110,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                "SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE id = ?1",
+                "SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) FROM documents WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(Document {
@@ -118,6 +120,7 @@ impl Workspace {
                         created_at: row.get(3)?,
                         updated_at: row.get(4)?,
                         trashed: row.get(5)?,
+                        origin_brief: row.get(6)?,
                     })
                 },
             )
@@ -141,7 +144,7 @@ impl Workspace {
         offset: u32,
     ) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id WHERE d.trashed = 0 ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id WHERE d.trashed = 0 AND d.originating_activity_id IS NULL ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -297,7 +300,7 @@ impl Workspace {
         }
     }
     pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
-        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
+        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
         let rows = statement.query_map([], |row| {
             Ok(Document {
                 id: row.get(0)?,
@@ -306,6 +309,7 @@ impl Workspace {
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
                 trashed: row.get(5)?,
+                origin_brief: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

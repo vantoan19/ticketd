@@ -1,3 +1,5 @@
+import { documents, type Document } from "@/features/documents/api";
+import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { useNow } from "@/lib/use-now";
 import {
   useCallback,
@@ -44,6 +46,14 @@ import "./activity.css";
  */
 const noteDrafts = new Map<string, string>();
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+
+function localValue(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
 
 function loadDraft(reference: string): string {
   try {
@@ -123,7 +133,11 @@ export function Activity({
   const [error, setError] = useState("");
   const [draft, setDraftValue] = useState(() => loadDraft(ticketId));
   const [composing, setComposing] = useState(() =>
-    Boolean(loadDraft(ticketId)),
+    Boolean(
+      loadDraft(ticketId) ||
+      localValue(`ticketd:activity-details:${ticketId}`) !== null ||
+      localValue(`ticketd:activity-support:${ticketId}`),
+    ),
   );
   function setDraft(content: string) {
     if (content) noteDrafts.set(ticketId, content);
@@ -136,12 +150,52 @@ export function Activity({
     }
     setDraftValue(content);
   }
+  const detailKey = `ticketd:activity-details:${ticketId}`;
+  const selectionKey = `ticketd:activity-support:${ticketId}`;
+  const requestKey = `ticketd:activity-request:${ticketId}`;
+  const [details, setDetailsValue] = useState(
+    () => localValue(detailKey) ?? "",
+  );
+  const [showDetails, setShowDetails] = useState(
+    () => localValue(detailKey) !== null,
+  );
+  const [support, setSupportValue] = useState(
+    () => localValue(selectionKey) ?? "",
+  );
+  const [availableDocuments, setAvailableDocuments] = useState<Document[]>([]);
+  const [openedDocument, setOpenedDocument] = useState<Document | null>(null);
+  useEffect(() => {
+    if (active && support)
+      void documents
+        .recent()
+        .then(setAvailableDocuments)
+        .catch((reason: unknown) => setError(String(reason)));
+  }, [active, support]);
+  function setDetails(value: string) {
+    setDetailsValue(value);
+    try {
+      localStorage.setItem(detailKey, value);
+    } catch {
+      setError("Could not save the unpublished update on this device.");
+    }
+  }
+  function setSupport(value: string) {
+    setSupportValue(value);
+    try {
+      if (value) localStorage.setItem(selectionKey, value);
+      else localStorage.removeItem(selectionKey);
+      localStorage.removeItem(requestKey);
+    } catch {
+      setError("Could not save the unpublished update on this device.");
+    }
+  }
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
     content: string;
   } | null>(null);
   const [pending, setPending] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const busy = useRef(false);
   const pages = useRef(1);
   const [more, setMore] = useState(false);
@@ -200,10 +254,56 @@ export function Activity({
         setTargetNote((previous) =>
           previous?.id === savedNote.id ? savedNote : previous,
         );
+      } else if (showDetails || support) {
+        const payload = JSON.stringify([
+          reference,
+          draft,
+          showDetails ? details : null,
+          support || null,
+        ]);
+        const previous = localValue(requestKey);
+        let requestId: string = crypto.randomUUID();
+        if (previous) {
+          try {
+            const saved: unknown = JSON.parse(previous);
+            if (
+              typeof saved === "object" &&
+              saved !== null &&
+              "payload" in saved &&
+              "id" in saved &&
+              saved.payload === payload &&
+              typeof saved.id === "string"
+            )
+              requestId = saved.id;
+          } catch {
+            /* Replace malformed local state. */
+          }
+        }
+        localStorage.setItem(
+          requestKey,
+          JSON.stringify({ payload, id: requestId }),
+        );
+        await client.addActivityWithDetails(
+          reference,
+          draft,
+          showDetails ? details : null,
+          support || null,
+          requestId,
+        );
       } else await client.addActivity(reference, draft);
       if (edit) setEdit(null);
       else {
         setDraft("");
+        try {
+          localStorage.removeItem(detailKey);
+          localStorage.removeItem(selectionKey);
+          localStorage.removeItem(requestKey);
+        } catch {
+          setError("Could not clear the unpublished update on this device.");
+        }
+        setDetailsValue("");
+        setSupportValue("");
+        setShowDetails(false);
         setComposing(false);
       }
       await loadNotes();
@@ -221,7 +321,15 @@ export function Activity({
     setPending(true);
     setError("");
     try {
+      const hadSupport = notes.some(
+        (note) => note.id === id && note.supporting_document_id,
+      );
       await client.deleteActivity(reference, id);
+      setFeedback(
+        hadSupport
+          ? "Update deleted. Its supporting Document was preserved."
+          : "Update deleted.",
+      );
       if (targetRequest.current?.id === id) targetRequest.current = null;
       setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
@@ -302,12 +410,19 @@ export function Activity({
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
+      {openedDocument && (
+        <DocumentEditor
+          initial={openedDocument}
+          onClose={() => setOpenedDocument(null)}
+        />
+      )}
       <div className="activity-heading">
         <h3>Activity</h3>
         <span>
           Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
         </span>
       </div>
+      {feedback && <p role="status">{feedback}</p>}
       {(error || loadError) && (
         <Alert variant="destructive">
           <AlertDescription>{error || loadError}</AlertDescription>
@@ -344,6 +459,85 @@ export function Activity({
               <FieldDescription>Markdown is supported.</FieldDescription>
             </Field>
           </FieldGroup>
+          {!edit && (
+            <>
+              {!showDetails && !support && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowDetails(true);
+                    setDetails("");
+                  }}
+                >
+                  Add details
+                </Button>
+              )}
+              {showDetails && (
+                <Field>
+                  <FieldLabel asChild>
+                    <span>Details</span>
+                  </FieldLabel>
+                  <LazyMarkdownEditor
+                    label="Details"
+                    value={details}
+                    onChange={setDetails}
+                    readOnly={pending}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => {
+                      try {
+                        localStorage.removeItem(detailKey);
+                        localStorage.removeItem(requestKey);
+                      } catch {
+                        setError(
+                          "Could not clear the unpublished details on this device.",
+                        );
+                      }
+                      setDetailsValue("");
+                      setShowDetails(false);
+                    }}
+                  >
+                    Remove details
+                  </Button>
+                </Field>
+              )}
+              {!showDetails && (
+                <Field>
+                  <FieldLabel htmlFor="activity-support">
+                    Link existing Document
+                  </FieldLabel>
+                  <select
+                    id="activity-support"
+                    value={support}
+                    onFocus={() =>
+                      void documents
+                        .recent()
+                        .then(setAvailableDocuments)
+                        .catch((reason: unknown) => setError(String(reason)))
+                    }
+                    onChange={(event) => setSupport(event.target.value)}
+                  >
+                    <option value="">None</option>
+                    {availableDocuments.map((document) => (
+                      <option key={document.id} value={document.id}>
+                        {document.title ||
+                          document.body
+                            .split("\n")
+                            .find((line) => line.trim()) ||
+                          "Untitled"}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+            </>
+          )}
           {changed && (
             <p role="status" className="activity-muted">
               The saved update changed while you were editing. Your draft is
@@ -376,6 +570,18 @@ export function Activity({
                 disabled={pending}
                 onClick={() => {
                   setDraft("");
+                  try {
+                    localStorage.removeItem(detailKey);
+                    localStorage.removeItem(selectionKey);
+                    localStorage.removeItem(requestKey);
+                  } catch {
+                    setError(
+                      "Could not clear the unpublished update on this device.",
+                    );
+                  }
+                  setDetailsValue("");
+                  setSupportValue("");
+                  setShowDetails(false);
                   setComposing(false);
                 }}
               >
@@ -473,6 +679,20 @@ export function Activity({
                     revision={revision}
                   />
                 </div>
+                {item.note.supporting_document_id && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    onClick={() =>
+                      void documents
+                        .open(item.note.supporting_document_id!)
+                        .then(setOpenedDocument)
+                        .catch((reason: unknown) => setError(String(reason)))
+                    }
+                  >
+                    Open details
+                  </Button>
+                )}
               </li>
             ) : (
               <li key={`history-${item.index}`} className="activity-history">

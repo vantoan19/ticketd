@@ -61,7 +61,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 36;
+pub const FORMAT_VERSION: i64 = 37;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -158,6 +158,8 @@ pub enum Error {
     InvalidEvidence(String),
     #[error("evidence '{0}' was not found")]
     EvidenceNotFound(String),
+    #[error("choose either new details or an existing Document, not both")]
+    ConflictingActivitySupport,
     #[error("activity brief must not be empty")]
     EmptyActivityBrief,
     #[error("activity '{0}' was not found")]
@@ -511,6 +513,32 @@ impl Workspace {
         if version < 36 {
             documents::migrate_search(&transaction)?;
         }
+        if version < 37 {
+            for (table, column, definition) in [
+                (
+                    "activities",
+                    "supporting_document_id",
+                    "TEXT REFERENCES documents(id)",
+                ),
+                (
+                    "documents",
+                    "originating_activity_id",
+                    "TEXT REFERENCES activities(id) ON DELETE SET NULL",
+                ),
+            ] {
+                let exists: bool = transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+                    [table, column],
+                    |row| row.get(0),
+                )?;
+                if !exists {
+                    transaction.execute_batch(&format!(
+                        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                    ))?;
+                }
+            }
+            transaction.execute_batch("PRAGMA user_version = 37;")?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -714,6 +742,56 @@ impl Workspace {
         tx.commit()?;
         Ok(result)
     }
+    pub fn add_activity_with_details(
+        &mut self,
+        reference: &str,
+        brief: &str,
+        agent: Option<&str>,
+        details: Option<&str>,
+        existing_document_id: Option<&str>,
+    ) -> Result<Activity, Error> {
+        if details.is_some() && existing_document_id.is_some() {
+            return Err(Error::ConflictingActivitySupport);
+        }
+        let tx = self.connection.savepoint()?;
+        transaction_write_lock(&tx)?;
+        let ticket = relationships::id(&tx, reference)?;
+        ensure_editable(&tx, &ticket)?;
+        let activity = activities::add(&tx, &ticket, brief, agent)?;
+        let document_id = if let Some(body) = details {
+            let id = uuid::Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO entities (id, kind) VALUES (?1, 'document')",
+                [&id],
+            )?;
+            tx.execute(
+                "INSERT INTO documents (id, body, originating_activity_id) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, body, activity.id],
+            )?;
+            document_links::index_body(&tx, &id, body)?;
+            Some(id)
+        } else if let Some(id) = existing_document_id {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM documents WHERE id = ?1 AND trashed = 0)",
+                [id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Err(Error::DocumentNotFound(id.to_owned()));
+            }
+            Some(id.to_owned())
+        } else {
+            None
+        };
+        tx.execute(
+            "UPDATE activities SET supporting_document_id = ?1 WHERE id = ?2",
+            rusqlite::params![document_id, activity.id],
+        )?;
+        inbox::record(&tx, &ticket, "activity", &activity.id, brief, agent)?;
+        let result = activities::get(&tx, &ticket, &activity.id)?;
+        tx.commit()?;
+        Ok(result)
+    }
     pub fn edit_activity(
         &mut self,
         reference: &str,
@@ -733,6 +811,7 @@ impl Workspace {
         transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
+        tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 ON CONFLICT(document_id) DO NOTHING", [id])?;
         activities::delete(&tx, &id_ticket, id)?;
         tx.commit()?;
         Ok(())

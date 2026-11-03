@@ -584,3 +584,156 @@ test("reports when a brief cannot be saved locally", async () => {
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Still in the editor");
 });
+
+test("restores unpublished details after remount", async () => {
+  bridge.invoke.mockResolvedValue([]);
+  const props = {
+    reference: "T-990",
+    status: "Todo",
+    revision: 0,
+    projects: [],
+    active: true,
+    trashed: false,
+  };
+  const view = render(<Activity {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add details" }));
+  expect(await screen.findByText("Details")).toBeTruthy();
+  const sourceButtons = await screen.findAllByRole("button", {
+    name: "Edit Markdown source",
+  });
+  fireEvent.click(sourceButtons[1]!);
+  fireEvent.change(screen.getByRole("textbox", { name: "Details source" }), {
+    target: { value: "Evidence **draft**" },
+  });
+  view.unmount();
+  render(<Activity {...props} />);
+  expect(await screen.findByText("Details")).toBeTruthy();
+  const restoredButtons = await screen.findAllByRole("button", {
+    name: "Edit Markdown source",
+  });
+  fireEvent.click(restoredButtons[1]!);
+  expect(
+    screen.getByRole("textbox", { name: "Details source" }),
+  ).toHaveProperty("value", "Evidence **draft**");
+});
+
+test("retries a failed details post with the same request identity and draft", async () => {
+  let attempts = 0;
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "activity_feed") return Promise.resolve([]);
+    if (command === "add_activity_with_details") {
+      attempts++;
+      return Promise.reject(new Error("Connection lost"));
+    }
+    return Promise.resolve([]);
+  });
+  localStorage.setItem("ticketd:activity-draft:T-991", "Brief");
+  localStorage.setItem("ticketd:activity-details:T-991", "Evidence");
+  render(
+    <Activity
+      reference="T-991"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Post update" }));
+  await screen.findByRole("alert");
+  fireEvent.click(screen.getByRole("button", { name: "Post update" }));
+  await waitFor(() => expect(attempts).toBe(2));
+  const calls = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "add_activity_with_details",
+  );
+  expect(calls[0]?.[1]).toMatchObject({ brief: "Brief", details: "Evidence" });
+  expect(calls[1]?.[1]).toEqual(calls[0]?.[1]);
+  expect(localStorage.getItem("ticketd:activity-details:T-991")).toBe(
+    "Evidence",
+  );
+});
+
+test("restores a selected supporting Document after navigation", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "recent_documents")
+      return Promise.resolve([
+        {
+          id: "doc-1",
+          title: "Investigation",
+          body: "Evidence",
+          created_at: "2026-01-01",
+          updated_at: "2026-01-01",
+          trashed: false,
+        },
+      ]);
+    return Promise.resolve([]);
+  });
+  const props = {
+    reference: "T-992",
+    status: "Todo",
+    revision: 0,
+    projects: [],
+    active: true,
+    trashed: false,
+  };
+  const view = render(<Activity {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  const select = screen.getByLabelText("Link existing Document");
+  fireEvent.focus(select);
+  await screen.findByRole("option", { name: "Investigation" });
+  fireEvent.change(select, { target: { value: "doc-1" } });
+  view.unmount();
+  render(<Activity {...props} />);
+  await screen.findByRole("option", { name: "Investigation" });
+  expect(screen.getByLabelText("Link existing Document")).toHaveProperty(
+    "value",
+    "doc-1",
+  );
+});
+
+test("opens the exact supporting Document from its update", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "activity_feed")
+      return Promise.resolve([
+        {
+          type: "authored",
+          activity: {
+            id: "activity-1",
+            ticket_id: "ticket-1",
+            brief: "Progress",
+            reported_at: "2026-01-01",
+            updated_at: "2026-01-01",
+            editing_agent: null,
+            supporting_document_id: "doc-exact",
+          },
+        },
+      ]);
+    if (command === "open_document")
+      return Promise.resolve({
+        id: "doc-exact",
+        title: null,
+        origin_brief: "Progress",
+        body: "Evidence",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+        trashed: true,
+      });
+    return Promise.resolve([]);
+  });
+  render(
+    <Activity
+      reference="T-993"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
+  expect(await screen.findByRole("button", { name: "Restore" })).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("open_document", {
+    id: "doc-exact",
+  });
+});

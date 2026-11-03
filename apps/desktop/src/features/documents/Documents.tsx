@@ -11,6 +11,17 @@ import {
 import { DocumentEditor } from "./DocumentEditor";
 import "./documents.css";
 
+function heading(document: Document) {
+  return (
+    document.title?.trim() ||
+    document.origin_brief?.trim() ||
+    document.body
+      .split("\n")
+      .find((line) => line.trim())
+      ?.trim() ||
+    "Untitled"
+  );
+}
 export function Documents({
   capture,
   active,
@@ -138,12 +149,7 @@ export function Documents({
             {trash.map((doc) => (
               <li key={doc.id}>
                 <Button variant="ghost" onClick={() => open(doc.id)}>
-                  {doc.title?.trim() ||
-                    doc.body
-                      .split("\n")
-                      .find((line) => line.trim())
-                      ?.trim() ||
-                    "Untitled"}
+                  {heading(doc)}
                 </Button>
               </li>
             ))}
