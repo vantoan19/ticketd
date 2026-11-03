@@ -1,0 +1,252 @@
+/* Source cards: schema-rendered form, suggestions, and discovery preview. */
+.source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+.source-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.source-required {
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.source-status {
+  margin-top: 12px;
+}
+.source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 6px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  font-size: 14px;
+}
+.source-chip button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+/* The chip is 24px tall; the hit area still reaches the 32px minimum. */
+.source-chip button::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+.source-chip button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.source-chip button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-suggestions {
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.source-suggestions > p {
+  margin: 0;
+  padding: 6px 8px;
+}
+.source-suggestions ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source-suggestions li button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: left;
+}
+.source-suggestions li button:hover {
+  background: var(--accent);
+}
+.source-suggestions li button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-preview {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--recessed);
+}
+.source-preview-list {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.source-preview-list li {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+.source-preview-ref {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.source-preview-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-form {
+  flex-flow: row wrap;
+}
+.source-field {
+  flex: 1 1 240px;
+  gap: 8px;
+  min-width: 0;
+}
+.source-field[data-field="repositories"] {
+  flex-basis: 100%;
+}
+.source-field > label {
+  font-weight: 400;
+  color: var(--secondary-foreground);
+  line-height: 20px;
+}
+.source-field > .settings-hint {
+  margin-top: -4px;
+}
+.source-chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-border-base);
+}
+.source-chip-input:focus-within {
+  outline: 1px solid var(--input-focus);
+  box-shadow: none;
+}
+.source-chip-input > input {
+  flex: 1 1 120px;
+  width: auto;
+  min-width: 80px;
+  height: 30px;
+  padding: 0;
+  box-shadow: none;
+}
+.source-chip-input > input:focus-visible {
+  outline: none;
+}
+.source-chip {
+  border-radius: 9999px;
+  box-shadow: none;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.source-chip button {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+}
+.source-suggestions {
+  position: absolute;
+  z-index: 10;
+  inset-inline: 0;
+  top: 100%;
+  margin-top: 4px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-menu);
+}
+.source-preview {
+  background: transparent;
+  padding: 0;
+}
+.source-preview-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.source-preview-heading h3 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.source-preview-heading > button {
+  margin-left: auto;
+}
+.source-preview-table-scroll {
+  overflow-x: auto;
+  margin-top: 12px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-border-base);
+}
+.source-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 20px;
+}
+.source-preview th {
+  text-align: left;
+  background: var(--background);
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+.source-preview :is(th, td) {
+  padding: 10px 12px;
+}
+.source-preview th:first-child {
+  width: 140px;
+}
+.source-preview th:last-child {
+  width: 150px;
+}
+.source-preview tr + tr,
+.source-preview tbody {
+  border-top: 1px solid var(--border);
+}
+.source-preview .source-preview-ref {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.source-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}

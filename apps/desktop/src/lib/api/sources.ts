@@ -1,0 +1,335 @@
+import { invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
+import { BridgeFailure, structured, toFailure } from "./bridge-failure";
+import {
+  publicationAttemptSchema,
+  publicationReviewSchema,
+  type PublicationResolution,
+  type ResolveConfirmation,
+} from "./publication";
+
+const choiceOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+  description: z.string().nullish(),
+});
+export type ChoiceOption = z.infer<typeof choiceOptionSchema>;
+
+const fieldBase = {
+  key: z.string(),
+  label: z.string(),
+  help: z.string().nullish(),
+  required: z.boolean(),
+};
+
+const optionSourceSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("static"),
+    options: z.array(choiceOptionSchema),
+  }),
+  z.object({
+    source: z.literal("dynamic"),
+    depends_on: z.array(z.string()),
+  }),
+]);
+
+const schemaFieldSchema = z.discriminatedUnion("type", [
+  z.object({
+    ...fieldBase,
+    type: z.literal("text"),
+    placeholder: z.string().nullish(),
+    format: z.string().nullish(),
+  }),
+  z.object({
+    ...fieldBase,
+    type: z.literal("multi_select"),
+    options: optionSourceSchema,
+    allow_custom: z.boolean(),
+    min_items: z.number(),
+    max_items: z.number(),
+    format: z.string().nullish(),
+  }),
+]);
+export type SchemaField = z.infer<typeof schemaFieldSchema>;
+
+const connectorSchema = z.object({
+  provider: z.string(),
+  name: z.string(),
+  contract_version: z.number(),
+  capabilities: z.array(z.string()),
+  schema: z.object({ fields: z.array(schemaFieldSchema) }),
+});
+export type Connector = z.infer<typeof connectorSchema>;
+
+/** Validated configuration values as the core stores them. */
+const configSchema = z.record(z.string(), z.unknown());
+export type SourceConfig = z.infer<typeof configSchema>;
+
+const savedSourceSchema = z.object({
+  provider: z.string(),
+  config: configSchema,
+  account: z.string(),
+  saved_at: z.string(),
+});
+export type SavedSource = z.infer<typeof savedSourceSchema>;
+
+const sourceEntrySchema = z.object({
+  connector: connectorSchema,
+  saved: savedSourceSchema.nullable(),
+});
+export type SourceEntry = z.infer<typeof sourceEntrySchema>;
+
+const previewSchema = z.object({
+  provider: z.string(),
+  account: z.string(),
+  issues: z.array(
+    z.object({
+      display: z.string(),
+      url: z.string(),
+      title: z.string(),
+      ticket: z.string().nullish(),
+      assignees: z.array(z.string()),
+      labels: z.array(z.string()),
+      updated_at: z.string(),
+    }),
+  ),
+  matched: z.number(),
+  new: z.number().optional(),
+  already_here: z.number().optional(),
+  complete: z.boolean(),
+});
+export type DiscoveryPreview = z.infer<typeof previewSchema>;
+
+const saveOutcomeSchema = z.object({
+  source: savedSourceSchema,
+  preview: previewSchema,
+});
+
+const refreshReportSchema = z.object({
+  imported: z.array(z.string()),
+  updated: z.array(z.string()),
+  unchanged: z.number(),
+  failures: z.array(
+    z.object({
+      provider: z.string(),
+      reference: z.string().nullable(),
+      code: z.string(),
+      message: z.string(),
+      /** What the failure is about: the source, one ticket, one repository or one thread. */
+      scope: z
+        .enum(["source", "ticket", "partition", "conversation"])
+        .catch("source"),
+    }),
+  ),
+  refreshed_at: z.string(),
+});
+export type RefreshReport = z.infer<typeof refreshReportSchema>;
+
+/** How a source is doing, as the core decides it. Clients only word it. */
+export const sourceHealthValues = [
+  "waiting",
+  "synced",
+  "delayed",
+  "unavailable",
+  "partial",
+] as const;
+export type SourceHealthState = (typeof sourceHealthValues)[number];
+
+const sourceStatusSchema = z.object({
+  provider: z.string(),
+  health: z.enum(sourceHealthValues),
+  last_attempt_at: z.string().nullable(),
+  /** The last run in which the source could be read. */
+  last_refreshed_at: z.string().nullable(),
+  last_checked_tickets: z.number().int().nonnegative().nullish(),
+  tracked_tickets: z.number().int().nonnegative().optional(),
+  error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** When the current streak of failed runs began. */
+  failing_since: z.string().nullable(),
+  /** The earliest time the source asked to be contacted again. */
+  retry_after: z.string().nullable(),
+  unavailable_tickets: z.number(),
+  /** The discovery rules the last run skipped because they could not be read. */
+  partial_message: z.string().nullable(),
+});
+export type SourceStatus = z.infer<typeof sourceStatusSchema>;
+
+const sourceHealthSchema = z.object({
+  /** A refresh is running now: startup, periodic, or explicit. */
+  refreshing: z.boolean(),
+  sources: z.array(sourceStatusSchema),
+  /** How often the periodic refresh runs while the app is open, in seconds. */
+  interval_secs: z.number().nullish(),
+});
+export type SourceHealth = z.infer<typeof sourceHealthSchema>;
+
+const connectionSchema = z.object({ account: z.string() });
+
+const eligibilitySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("eligible") }),
+  z.object({
+    kind: z.literal("ineligible"),
+    reason: z.enum([
+      "trashed",
+      "externally_owned",
+      "provenance_retained",
+      "status",
+      "source_not_connected",
+      "unsupported",
+      "attempt_open",
+    ]),
+    message: z.string(),
+  }),
+]);
+/** What publishing would send, exactly, and whether it is allowed. */
+const publicationPreviewSchema = z.object({
+  reference: z.string(),
+  provider: z.string(),
+  provider_name: z.string(),
+  destination: z.string().nullable(),
+  destinations: z.array(z.string()),
+  title: z.string(),
+  body: z.string(),
+  /** Identifies this title, description and destination; handed back to publish exactly this. */
+  fingerprint: z.string(),
+  local: z
+    .object({
+      notes: z.number().int().nonnegative(),
+      effort: z.string().nullable(),
+      tags: z.array(z.string()),
+      subtickets: z.array(z.string()),
+    })
+    .optional(),
+  eligibility: eligibilitySchema,
+  attempt: publicationAttemptSchema.nullable(),
+});
+export type PublicationPreview = z.infer<typeof publicationPreviewSchema>;
+const publishOutcomeSchema = z.object({
+  attempt: publicationAttemptSchema,
+  replayed: z.boolean(),
+});
+
+/** A failed source operation: the same structured failure every bridge command reports. */
+export { BridgeFailure as SourceFailure, toFailure as toSourceFailure };
+
+export const sourcesClient = {
+  /**
+   * Imports matching issues and refreshes every externally owned ticket, or only
+   * `ticket`. Saved content stays in place when the source cannot be reached; the
+   * report names what failed.
+   */
+  async refresh(ticket?: string) {
+    return refreshReportSchema.parse(
+      await structured(invoke("refresh_sources", { ticket: ticket ?? null })),
+    );
+  },
+  /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
+  async health() {
+    return sourceHealthSchema.parse(await structured(invoke("source_health")));
+  },
+  /** What publishing a local ticket would send. Makes no network call. */
+  async previewPublication(
+    reference: string,
+    provider: string,
+    destination?: string,
+  ) {
+    return publicationPreviewSchema.parse(
+      await structured(
+        invoke("preview_publication", {
+          reference,
+          provider,
+          destination: destination ?? null,
+        }),
+      ),
+    );
+  },
+  /**
+   * Publishes a local ticket once. Rejects with a SourceFailure whose code is
+   * `publication_failed` (nothing was created), `publication_unresolved` (the
+   * issue may exist; publishing again is blocked), or `publication_ineligible`.
+   */
+  async publish(
+    reference: string,
+    provider: string,
+    destination: string | undefined,
+    expectedFingerprint: string,
+  ) {
+    return publishOutcomeSchema.parse(
+      await structured(
+        invoke("publish_ticket", {
+          reference,
+          provider,
+          destination: destination ?? null,
+          expectedFingerprint,
+        }),
+      ),
+    );
+  },
+  /**
+   * What is known and unknown about an unresolved publication and the safe next
+   * actions. With `search`, GitHub is asked for issues that may be the one created.
+   */
+  async reviewPublication(reference: string, search: boolean) {
+    return publicationReviewSchema.parse(
+      await structured(invoke("review_publication", { reference, search })),
+    );
+  },
+  /**
+   * Settles an unresolved publication. Rejects, leaving it unresolved, with
+   * `publication_unverified` (the source could not give evidence),
+   * `publication_candidates`, `publication_mismatch`, `publication_settled` or
+   * `publication_different_content` (repeat with `acceptDifferentContent`).
+   */
+  async resolvePublication(
+    reference: string,
+    resolution: PublicationResolution,
+    confirmation: ResolveConfirmation = {},
+  ) {
+    return publishOutcomeSchema.parse(
+      await structured(
+        invoke("resolve_publication", {
+          reference,
+          resolution,
+          acceptDifferentContent: confirmation.acceptDifferentContent ?? false,
+        }),
+      ),
+    );
+  },
+  /** The built-in sources and what is saved for each. */
+  async list() {
+    return z
+      .array(sourceEntrySchema)
+      .parse(await structured(invoke("list_sources")));
+  },
+  async checkConnection(provider: string, config: SourceConfig) {
+    return connectionSchema.parse(
+      await structured(invoke("source_check_connection", { provider, config })),
+    );
+  },
+  async options(
+    provider: string,
+    field: string,
+    query: string,
+    config: SourceConfig,
+  ) {
+    return z
+      .array(choiceOptionSchema)
+      .parse(
+        await structured(
+          invoke("source_options", { provider, field, query, config }),
+        ),
+      );
+  },
+  /** Lists what discovery would match. Imports and saves nothing. */
+  async preview(provider: string, config: SourceConfig) {
+    return previewSchema.parse(
+      await structured(invoke("source_preview", { provider, config })),
+    );
+  },
+  /** Validates, previews, and saves the discovery configuration. Imports nothing. */
+  async save(provider: string, config: SourceConfig) {
+    return saveOutcomeSchema.parse(
+      await structured(invoke("save_source", { provider, config })),
+    );
+  },
+};

@@ -14,12 +14,61 @@ pub enum Status {
     InReview,
     Done,
     Canceled,
+    /// Work that another ticket already covers; always paired with a canonical ticket.
+    Duplicate,
 }
 
 impl Status {
-    /// Only Done satisfies a dependency on a ticket; In review and Canceled still block.
+    /// Only Done satisfies a dependency on a ticket; In review, Canceled and Duplicate still block.
     pub fn satisfies_dependency(self) -> bool {
         self == Self::Done
+    }
+
+    /// Todo, In progress and In review are the statuses a person may set while an
+    /// issue is open at its source, and the only ones that can be published.
+    /// Written as an exhaustive match so a new status cannot fall into either side.
+    pub fn is_local_progress(self) -> bool {
+        match self {
+            Self::Todo | Self::InProgress | Self::InReview => true,
+            Self::Done | Self::Canceled | Self::Duplicate => false,
+        }
+    }
+
+    /// Done and Canceled end work on a ticket. The local choices a person has
+    /// when the source closed an issue with a reason ticketd does not recognize.
+    pub fn ends_work(self) -> bool {
+        match self {
+            Self::Done | Self::Canceled => true,
+            Self::Todo | Self::InProgress | Self::InReview | Self::Duplicate => false,
+        }
+    }
+
+    /// Position in workflow order: the order work is listed in.
+    pub(crate) fn workflow_rank(self) -> u8 {
+        match self {
+            Self::InProgress => 0,
+            Self::InReview => 1,
+            Self::Todo => 2,
+            Self::Done => 3,
+            Self::Canceled => 4,
+            Self::Duplicate => 5,
+        }
+    }
+
+    /// SQL `CASE` ordering a `status` column by [`Self::workflow_rank`].
+    pub(crate) fn workflow_order_sql(column: &str) -> String {
+        let arms: String = [
+            Self::InProgress,
+            Self::InReview,
+            Self::Todo,
+            Self::Done,
+            Self::Canceled,
+            Self::Duplicate,
+        ]
+        .into_iter()
+        .map(|status| format!(" WHEN '{status}' THEN {}", status.workflow_rank()))
+        .collect();
+        format!("CASE {column}{arms} END")
     }
 }
 
@@ -76,6 +125,11 @@ pub(crate) fn availability(
         .iter()
         .map(|status| status.parse::<Status>())
         .collect::<Result<Vec<_>, _>>()?;
+    // A ticket whose issue the source closed for an unrecognized reason awaits a
+    // local decision; it is neither Ready nor Blocked.
+    if crate::source::closure_held(connection, id)? {
+        return Ok(None);
+    }
     Ok(match readiness(status, trashed, blockers) {
         Readiness::Ready => Some("Ready".into()),
         Readiness::Blocked => Some("Blocked".into()),
@@ -102,6 +156,7 @@ impl fmt::Display for Status {
             Self::InReview => "In review",
             Self::Done => "Done",
             Self::Canceled => "Canceled",
+            Self::Duplicate => "Duplicate",
         })
     }
 }
@@ -115,6 +170,7 @@ impl FromStr for Status {
             "In review" => Ok(Self::InReview),
             "Done" => Ok(Self::Done),
             "Canceled" => Ok(Self::Canceled),
+            "Duplicate" => Ok(Self::Duplicate),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("invalid status: {value}"),

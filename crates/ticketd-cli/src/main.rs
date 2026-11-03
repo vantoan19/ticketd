@@ -202,6 +202,9 @@ enum Command {
         evidence: bool,
         #[arg(long)]
         backlinks: bool,
+        /// The source's comments and events (read-only; authors are the source's, not editing agents)
+        #[arg(long)]
+        conversation: bool,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
@@ -217,6 +220,117 @@ enum Command {
     Workspace,
     /// Show a ticket by its reference
     Show { reference: String },
+    /// Connect and configure ticket sources such as GitHub
+    Source {
+        #[command(subcommand)]
+        command: SourceCommand,
+    },
+}
+
+/// Settings given on the command line: schema fields as `key=value` (repeat a
+/// key or separate values with commas to fill a list) and an optional JSON file.
+#[derive(Args, Default)]
+struct SourceSettings {
+    /// A source setting, for example repositories=owner/name or assignee=octocat
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    set: Vec<String>,
+    /// A JSON object of settings from a file or - for stdin; --set values win
+    #[arg(long)]
+    config_file: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum SourceCommand {
+    /// List available sources with their settings schema and saved configuration
+    List,
+    /// Show a source's saved configuration
+    Show { provider: String },
+    /// Verify credentials and permissions and name the account in use
+    Test { provider: String },
+    /// Suggest values for a setting that offers them (such as repositories)
+    Options {
+        provider: String,
+        field: String,
+        #[arg(long, default_value = "")]
+        query: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Preview the issues discovery would match; imports and saves nothing
+    Preview {
+        provider: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Validate, preview, and save a source's discovery configuration; imports nothing
+    Save {
+        provider: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Show each source's last refresh, current failure, and how many tickets are unavailable
+    Status,
+    /// Import matching issues and refresh every externally owned ticket now, or one ticket
+    Refresh {
+        /// Refresh only this externally owned ticket, for example T-12
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// Make an unavailable externally owned ticket local: keeps its content and work, stops synchronizing it
+    TakeOwnership {
+        /// The ticket, for example T-12
+        reference: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Publish a local Todo, In progress or In review ticket as one ordinary issue.
+    /// Use --preview first: it prints exactly what would be sent and sends nothing
+    Publish {
+        /// The local ticket to publish, for example T-12
+        ticket: String,
+        #[arg(long, default_value = "github")]
+        provider: String,
+        /// Where to create the issue, for example owner/name; optional when only
+        /// one repository is configured
+        #[arg(long)]
+        destination: Option<String>,
+        /// Print the title, description, destination and eligibility; create nothing
+        #[arg(long)]
+        preview: bool,
+        /// The `fingerprint` printed by --preview. When given, nothing is sent if the
+        /// title, description or destination changed since
+        #[arg(long)]
+        expect: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Settle a publication whose outcome is unknown, without risking a second issue.
+    /// With no flag it prints what is known and unknown and searches the destination
+    /// for the issue that may have been created; it changes nothing
+    Resolve {
+        /// The ticket with the unresolved publication, for example T-12
+        ticket: String,
+        /// The issue that was created: a number, owner/name#number or a link in the
+        /// destination. GitHub verifies it before it is attached
+        #[arg(long, conflicts_with = "not_created")]
+        issue: Option<String>,
+        /// Attach the issue the attempt already recorded, when it recorded one
+        #[arg(long, conflicts_with = "not_created")]
+        attach: bool,
+        /// Confirm nothing was created. Accepted only when GitHub's recent issues in the
+        /// destination are read completely and none matches; otherwise it stays unresolved
+        #[arg(long)]
+        not_created: bool,
+        /// With no other flag, skip the search of the destination (no network)
+        #[arg(long)]
+        no_search: bool,
+        /// Attach an issue whose title or description differs from what was sent. Its text
+        /// then replaces the ticket's, and the ticket's own text is kept as a note
+        #[arg(long)]
+        accept_different: bool,
+        #[arg(long)]
+        agent: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -243,14 +357,32 @@ struct FindArgs {
     /// Include the named parent ticket and its subtickets
     #[arg(long)]
     family: Option<String>,
+    /// Only tickets owned by a source (for example github) or only local ones (local)
+    #[arg(long)]
+    source: Option<String>,
     #[arg(long, default_value_t = 50)]
     limit: u32,
     #[arg(long, default_value_t = 0)]
     offset: u32,
 }
 impl FindArgs {
-    fn filter(self, query: String) -> TicketFilter {
-        TicketFilter {
+    fn filter(self, query: String) -> Result<TicketFilter, Box<dyn std::error::Error>> {
+        // A source that does not exist would silently list nothing: say so instead.
+        if let Some(source) = self.source.as_deref().filter(|source| *source != "local") {
+            let known: Vec<String> = ticketd_core::source::Engine::builtin()
+                .connectors()
+                .into_iter()
+                .map(|connector| connector.provider)
+                .collect();
+            if !known.iter().any(|provider| provider == source) {
+                return Err(format!(
+                    "unknown source '{source}'; choose local or one of: {}",
+                    known.join(", ")
+                )
+                .into());
+            }
+        }
+        Ok(TicketFilter {
             query,
             project: self.project,
             unlinked: self.unlinked,
@@ -262,9 +394,17 @@ impl FindArgs {
                 AvailabilityArg::Blocked => Availability::Blocked,
             }),
             family: self.family,
+            source: self.source.map(|source| {
+                if source == "local" {
+                    ticketd_core::source::SourceFilter::Local
+                } else {
+                    ticketd_core::source::SourceFilter::Provider(source)
+                }
+            }),
             limit: self.limit,
             offset: self.offset,
-        }
+            ..TicketFilter::default()
+        })
     }
 }
 
@@ -780,10 +920,10 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::List { filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new()))?)?
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new())?)?)?
         }
         Command::Search { query, filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(query))?)?
+            serde_json::to_string(&workspace.find_tickets(&filters.filter(query)?)?)?
         }
         Command::Backlinks {
             reference,
@@ -798,6 +938,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             notes,
             evidence,
             backlinks,
+            conversation,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
             &reference,
@@ -808,6 +949,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 notes,
                 evidence,
                 backlinks,
+                conversation,
                 offset,
             },
         )?)?,
@@ -817,14 +959,257 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
+        Command::Source {
+            command: SourceCommand::Refresh { ticket },
+        } => {
+            let report = workspace.refresh_sources(
+                &ticketd_core::source::Engine::builtin(),
+                &ticketd_core::source::RefreshOptions { ticket, now: None },
+            )?;
+            // The report is always printed; a failed refresh also fails the command so
+            // scripts and agents notice that the saved content is not current.
+            writeln!(output, "{}", serde_json::to_string(&report)?)?;
+            if let Some(failure) = report.failures.first() {
+                return Err(format!(
+                    "refresh failed for {} ({}): {}{}",
+                    failure.reference.as_deref().unwrap_or(&failure.provider),
+                    failure.code,
+                    failure.message,
+                    if failure.code == "unauthenticated" {
+                        TOKEN_HINT
+                    } else {
+                        ""
+                    }
+                )
+                .into());
+            }
+            return Ok(());
+        }
+        Command::Source {
+            command:
+                SourceCommand::Publish {
+                    ticket,
+                    provider,
+                    destination,
+                    preview,
+                    expect,
+                    agent,
+                },
+        } => {
+            let engine = ticketd_core::source::Engine::builtin();
+            if preview {
+                serde_json::to_string(&workspace.preview_publication(
+                    &engine,
+                    &ticket,
+                    &provider,
+                    destination.as_deref(),
+                )?)?
+            } else {
+                let result = workspace.publish_ticket(
+                    &engine,
+                    &ticket,
+                    &ticketd_core::source::PublishOptions {
+                        provider: provider.clone(),
+                        destination,
+                        now: None,
+                        expected_fingerprint: expect,
+                        agent,
+                    },
+                );
+                if let Err(ticketd_core::Error::Publication(error)) = &result {
+                    // The attempt this command made is printed so a script or agent
+                    // can see what was recorded, even though the command fails.
+                    if !matches!(
+                        error,
+                        ticketd_core::source::PublicationError::Ineligible { .. }
+                    ) && let Some(attempt) = workspace.publication_attempts(&ticket)?.first()
+                    {
+                        writeln!(output, "{}", serde_json::to_string(attempt)?)?;
+                    }
+                    return Err(match error {
+                        ticketd_core::source::PublicationError::Ineligible {
+                            reason: ticketd_core::source::IneligibleReason::SourceNotConnected,
+                            ..
+                        } => format!(
+                            "{error}; from the command line, run `ticketd source save {provider} --set repositories=owner/name`"
+                        ),
+                        ticketd_core::source::PublicationError::Unresolved { .. } => format!(
+                            "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
+                        ),
+                        _ => error.to_string(),
+                    }
+                    .into());
+                }
+                serde_json::to_string(&result?)?
+            }
+        }
+        Command::Source {
+            command:
+                SourceCommand::Resolve {
+                    ticket,
+                    issue,
+                    attach,
+                    not_created,
+                    no_search,
+                    accept_different,
+                    agent,
+                },
+        } => {
+            use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
+            let engine = ticketd_core::source::Engine::builtin();
+            let resolution = if not_created {
+                Some(Resolution::NotCreated)
+            } else if attach || issue.is_some() {
+                Some(Resolution::Attach { issue })
+            } else {
+                None
+            };
+            match resolution {
+                None => serde_json::to_string(
+                    &workspace.review_publication(&engine, &ticket, !no_search)?,
+                )?,
+                Some(resolution) => {
+                    let result = workspace.resolve_publication(
+                        &engine,
+                        &ticket,
+                        &ResolveOptions {
+                            resolution,
+                            now: None,
+                            agent,
+                            accept_different_content: accept_different,
+                        },
+                    );
+                    if let Err(ticketd_core::Error::Publication(error)) = &result {
+                        // Whatever happened, print the attempt as it stands so a script
+                        // or agent sees that it is still unresolved (or was settled).
+                        if !matches!(error, PublicationError::NothingToResolve { .. })
+                            && let Some(attempt) = workspace.publication_attempts(&ticket)?.first()
+                        {
+                            writeln!(output, "{}", serde_json::to_string(attempt)?)?;
+                        }
+                        return Err(match error {
+                            PublicationError::DifferentContent { .. } => format!(
+                                "{error}. Run the command again with --accept-different to attach it anyway"
+                            ),
+                            PublicationError::Unverified { .. }
+                            | PublicationError::Candidates { .. }
+                            | PublicationError::Mismatch { .. } => format!(
+                                "{error}. Run `ticketd source resolve {ticket}` to review what is known"
+                            ),
+                            _ => error.to_string(),
+                        }
+                        .into());
+                    }
+                    serde_json::to_string(&result?)?
+                }
+            }
+        }
+        Command::Source { command } => source_command(&mut workspace, command)?,
     };
     writeln!(output, "{text}")?;
     Ok(())
 }
 
+fn source_command(
+    workspace: &mut Workspace,
+    command: SourceCommand,
+) -> Result<String, Box<dyn std::error::Error>> {
+    use ticketd_core::source::{ConfigValues, Engine, SourceError};
+    let engine = Engine::builtin();
+    // Settings given on the command line, or else the saved configuration.
+    let resolve = |workspace: &Workspace,
+                   provider: &str,
+                   settings: SourceSettings|
+     -> Result<ConfigValues, Box<dyn std::error::Error>> {
+        let given = !settings.set.is_empty() || settings.config_file.is_some();
+        if !given {
+            return Ok(workspace
+                .saved_source(provider)?
+                .map(|saved| saved.config)
+                .unwrap_or_default());
+        }
+        let schema = engine.descriptor(provider)?.schema;
+        let mut values = match read_content(None, settings.config_file)? {
+            Some(text) => match serde_json::from_str(&text)? {
+                serde_json::Value::Object(values) => values,
+                _ => return Err("the configuration file must hold a JSON object".into()),
+            },
+            None => ConfigValues::new(),
+        };
+        values.extend(
+            schema
+                .values_from_assignments(&settings.set)
+                .map_err(SourceError::InvalidConfiguration)?,
+        );
+        Ok(values)
+    };
+    Ok(match command {
+        SourceCommand::List => {
+            let mut sources = Vec::new();
+            for descriptor in engine.connectors() {
+                let saved = workspace.saved_source(&descriptor.provider)?;
+                sources.push(serde_json::json!({ "connector": descriptor, "saved": saved }));
+            }
+            serde_json::to_string(&sources)?
+        }
+        SourceCommand::Show { provider } => {
+            engine.descriptor(&provider)?;
+            serde_json::to_string(&workspace.saved_source(&provider)?)?
+        }
+        SourceCommand::Test { provider } => {
+            let values = workspace
+                .saved_source(&provider)?
+                .map(|saved| saved.config)
+                .unwrap_or_default();
+            serde_json::to_string(&engine.check_connection(&provider, &values)?)?
+        }
+        SourceCommand::Options {
+            provider,
+            field,
+            query,
+            settings,
+        } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&engine.options(&provider, &field, &query, &values)?)?
+        }
+        SourceCommand::Preview { provider, settings } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&workspace.preview_source(&engine, &provider, &values)?)?
+        }
+        SourceCommand::Save { provider, settings } => {
+            let values = resolve(workspace, &provider, settings)?;
+            serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
+        }
+        SourceCommand::Status => serde_json::to_string(&workspace.source_statuses()?)?,
+        SourceCommand::TakeOwnership { reference, agent } => {
+            serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
+        }
+        SourceCommand::Refresh { .. }
+        | SourceCommand::Publish { .. }
+        | SourceCommand::Resolve { .. } => unreachable_refresh()?,
+    })
+}
+
+fn unreachable_refresh() -> Result<String, Box<dyn std::error::Error>> {
+    Err("refresh and publish are handled before source configuration commands".into())
+}
+
+/// The command line's own way to sign in; the desktop app's guidance leaves it out.
+const TOKEN_HINT: &str =
+    " From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.";
+
 fn main() {
     if let Err(error) = run(&mut std::io::stdout().lock()) {
-        eprintln!("error: {error}");
+        use ticketd_core::source::SourceError;
+        let unauthenticated = match error.downcast_ref::<ticketd_core::Error>() {
+            Some(ticketd_core::Error::Source(SourceError::Unauthenticated(_))) => true,
+            _ => matches!(
+                error.downcast_ref::<SourceError>(),
+                Some(SourceError::Unauthenticated(_))
+            ),
+        };
+        let hint = if unauthenticated { TOKEN_HINT } else { "" };
+        eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }
 }

@@ -3,19 +3,10 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
+  CircleEqual,
   CircleSlash,
   type LucideIcon,
 } from "lucide-react";
-
-// Kept beside the icon that renders it; Fast Refresh only affects dev reloads.
-// eslint-disable-next-line react-refresh/only-export-components
-export const ticketStatuses = [
-  "Todo",
-  "In progress",
-  "In review",
-  "Done",
-  "Canceled",
-] as const;
 
 const statusIcons: Record<string, LucideIcon> = {
   Todo: Circle,
@@ -23,6 +14,7 @@ const statusIcons: Record<string, LucideIcon> = {
   "In review": CircleDashed,
   Done: CircleCheck,
   Canceled: CircleSlash,
+  Duplicate: CircleEqual,
 };
 
 /** The icon for a ticket status. Named by the status unless it sits beside the status word. */

@@ -1,7 +1,82 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
+import { publicationAttemptSchema } from "@/lib/api/publication";
+import { ticketStatuses } from "@/lib/statuses";
 
+export type { PublicationAttempt } from "@/lib/api/publication";
+
+const statusSchema = z.enum(ticketStatuses);
+const externalStateSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("open") }),
+  z.object({
+    state: z.literal("closed"),
+    reason: z.enum(["completed", "not_planned", "duplicate", "unknown"]),
+  }),
+]);
+const duplicateTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("unknown") }),
+  z.object({
+    kind: z.literal("external"),
+    identity: z.object({ provider: z.string(), id: z.string() }),
+    locator: z.string(),
+    display: z.string(),
+    /** The local ticket the reference resolves to once the canonical issue was imported. */
+    ticket: z.string().nullish(),
+    /** The reference is shown but not followed because it would loop back to this ticket. */
+    problem: z.enum(["cycle"]).nullish(),
+    /** Where the canonical issue can be opened at its source. */
+    url: z.string().nullish(),
+    /** The source no longer supplied it: the last target it named, not a confirmed one. */
+    last_known: z.boolean().nullish(),
+  }),
+]);
+export type DuplicateTarget = z.infer<typeof duplicateTargetSchema>;
+/** The external issue a ticket is or was, with who owns it now and how fresh it is. */
+const ticketSourceSchema = z.object({
+  provider: z.string(),
+  /** What people call the provider, such as "GitHub". */
+  provider_name: z.string(),
+  /** Where the issue lives, such as "owner/repo". */
+  place: z.string(),
+  /** The provider's short number for the issue, such as "#98". */
+  number: z.string(),
+  id: z.string(),
+  locator: z.string(),
+  display: z.string(),
+  url: z.string(),
+  origin: z.enum(["imported", "published"]),
+  discovery_matches: z.boolean().nullish(),
+  ownership_changed_at: z.string().nullish(),
+  /** Who may change the ticket's content now. Retained identity alone is not ownership. */
+  ownership: z.enum(["external", "local"]),
+  state: externalStateSchema,
+  /** The source's latest closure time, only when the core can confirm it. */
+  closed_at: z.string().nullish(),
+  /** The source closed the issue with a reason ticketd does not recognize. */
+  closure_unrecognized: z.boolean(),
+  last_refreshed_at: z.string().nullable(),
+  last_attempt_at: z.string().nullable(),
+  last_error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** The latest read of the issue's comments failed; the ticket itself is fine. */
+  conversation_error: z
+    .object({ code: z.string(), message: z.string() })
+    .nullish(),
+  /**
+   * Set while the source cannot be read: the latest refresh failed with an
+   * unreachable, unauthorized, forbidden, missing or unusable answer. Saved content
+   * and local work are untouched; a rate limit is delayed, not unavailable.
+   */
+  unavailable: z
+    .object({ code: z.string(), message: z.string(), since: z.string() })
+    .nullish(),
+  content_locked: z.boolean(),
+  status_locked: z.boolean(),
+  /** The statuses that may be chosen for this ticket now, decided by the core. */
+  status_choices: z.array(statusSchema),
+  duplicate_target: duplicateTargetSchema.nullable(),
+});
+export type TicketSource = z.infer<typeof ticketSourceSchema>;
 const ticketSchema = z.object({
   id: z.string(),
   trashed: z.boolean(),
@@ -9,10 +84,20 @@ const ticketSchema = z.object({
   title: z.string(),
   status: z.string(),
   body: z.string(),
+  updated_at: z.string().nullish(),
+  latest_update: z
+    .object({
+      note_id: z.string(),
+      reported_at: z.string(),
+      editing_agent: z.string().nullable(),
+    })
+    .nullish(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
   effort_id: z.string().nullable(),
   availability: z.string().nullable(),
+  /** This duplicate's canonical ticket became a Duplicate itself; the ticket that is now the original. */
+  duplicate_redirect: z.string().nullish(),
   parent: z
     .object({ reference: z.string(), title: z.string(), trashed: z.boolean() })
     .nullable(),
@@ -25,6 +110,9 @@ const ticketSchema = z.object({
   ),
   duplicate_of: z.string().nullable().optional(),
   duplicates: z.array(z.string()).optional(),
+  source: ticketSourceSchema.nullish(),
+  /** The publication attempt that is running or whose outcome is unknown. */
+  publication: publicationAttemptSchema.nullish(),
   prerequisites: z.array(
     z.object({
       reference: z.string(),
@@ -51,6 +139,8 @@ const relatedPageSchema = z.object({
 const relationshipsSchema = z.object({
   parent: relatedSchema.nullable(),
   children: relatedPageSchema,
+  /** Subticket progress over all subtickets, not only the page read. */
+  children_progress: z.object({ total: z.number(), done: z.number() }),
   prerequisites: relatedPageSchema,
   blocking: relatedPageSchema,
   related: relatedPageSchema,
@@ -81,13 +171,6 @@ const graphSchema = z.object({
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
 const reviewModeSchema = z.enum(["duplicate", "separate"]);
-const statusSchema = z.enum([
-  "Todo",
-  "In progress",
-  "In review",
-  "Done",
-  "Canceled",
-]);
 const dependencyEdgeSchema = z.object({
   blocker: z.string(),
   dependent: z.string(),
@@ -181,9 +264,53 @@ export type FindFilter = {
   tags: string[];
   availability: string | null;
   family: string | null;
+  /** Only tickets a provider owns, or only local ones; null for all. */
+  source?: "Local" | { Provider: string } | null;
+  /** "Workflow" pages through In progress, In review, Todo, Done, Canceled, Duplicate. */
+  order?: "Newest" | "Workflow";
   limit: number;
   offset: number;
 };
+const statusCountsSchema = z.object({
+  todo: z.number().int().nonnegative(),
+  in_progress: z.number().int().nonnegative(),
+  in_review: z.number().int().nonnegative(),
+  done: z.number().int().nonnegative(),
+  canceled: z.number().int().nonnegative(),
+  duplicate: z.number().int().nonnegative(),
+  /** Every ticket of the result, summed by the core. */
+  total: z.number().int().nonnegative(),
+});
+/** A source comment or timeline event, read-only. Authors are the source's own, never editing agents. */
+const conversationEntrySchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("comment"),
+    id: z.string(),
+    author: z.string(),
+    body: z.string(),
+    url: z.string(),
+    created_at: z.string(),
+    edited_at: z.string().nullable(),
+  }),
+  z.object({
+    type: z.literal("event"),
+    id: z.string(),
+    event: z.string(),
+    actor: z.string().nullable(),
+    subject: z.string().nullable(),
+    created_at: z.string(),
+  }),
+]);
+export type ConversationEntry = z.infer<typeof conversationEntrySchema>;
+const sourceCountsSchema = z.object({
+  all: z.number().int().nonnegative(),
+  local: z.number().int().nonnegative(),
+  providers: z.record(z.string(), z.number().int().nonnegative()),
+});
+/** How many tickets each source filter shows, with the other filters applied. */
+export type SourceCounts = z.infer<typeof sourceCountsSchema>;
+/** Tickets of a whole filtered result, by status. */
+export type StatusCounts = z.infer<typeof statusCountsSchema>;
 export type BulkChange = {
   project_id?: string | null;
   effort_id?: string | null;
@@ -302,6 +429,11 @@ export const client = {
           requestId,
         }),
       ),
+    );
+  },
+  async takeOwnership(reference: string, requestId: string) {
+    return ticketSchema.parse(
+      await invoke("take_ownership", { reference, requestId }),
     );
   },
   async removeDuplicate(source: string, requestId: string) {
@@ -439,6 +571,22 @@ export const client = {
     return z
       .array(ticketSchema)
       .parse(await invoke("find_tickets", { filter }));
+  },
+  /** Counts the whole filtered result by status, ignoring its paging. */
+  async countTickets(filter: FindFilter) {
+    return statusCountsSchema.parse(await invoke("count_tickets", { filter }));
+  },
+  /** The source's comments and events retrieved for a ticket, oldest first. */
+  async sourceConversation(reference: string) {
+    return z
+      .array(conversationEntrySchema)
+      .parse(await invoke("source_conversation", { reference }));
+  },
+  /** Counts the tickets each source filter (All, a provider, Local) would show. */
+  async countBySource(filter: FindFilter) {
+    return sourceCountsSchema.parse(
+      await invoke("count_by_source", { filter }),
+    );
   },
   async searchTickets(query: string, filter: string, offset: number) {
     return z.array(ticketSchema).parse(

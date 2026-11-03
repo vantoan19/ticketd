@@ -1,23 +1,16 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
-import { StatusIcon, ticketStatuses } from "@/features/tickets/StatusIcon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { effortsClient, type Effort, type View } from "@/lib/api/efforts";
+import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import type { EffortViewState } from "./useEffortView";
 import "./effort.css";
-
-const countKeys = {
-  Todo: "todo",
-  "In progress": "in_progress",
-  "In review": "in_review",
-  Done: "done",
-  Canceled: "canceled",
-} as const;
 
 const list = (names: string[]) =>
   names.length < 3
@@ -47,7 +40,9 @@ export function EffortHeader({
   efforts,
   projects,
   state,
+  children,
 }: {
+  children?: ReactNode;
   effort: Effort;
   efforts: Effort[];
   projects: { id: string; name: string }[];
@@ -126,6 +121,7 @@ export function EffortHeader({
             )}
             {current.archived ? "Reactivate" : "Archive"}
           </Button>
+          {children}
         </div>
       </div>
       {renaming && (
@@ -173,7 +169,7 @@ export function EffortHeader({
                 <StatusIcon status={status} size={14} decorative />
                 {status}
               </dt>
-              <dd>{view.counts[countKeys[status]]}</dd>
+              <dd>{view.counts[statusCountKey[status]]}</dd>
             </div>
           ))}
         </dl>

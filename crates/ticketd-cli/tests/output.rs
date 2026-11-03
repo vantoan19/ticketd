@@ -208,8 +208,10 @@ fn cli_marks_and_removes_duplicate_designation() {
     run(&["create", "Source"]);
     run(&["create", "Canonical"]);
     let marked = run(&["mark-duplicate", "T-1", "T-2"]);
-    assert_eq!(marked["status"], "Canceled");
+    assert_eq!(marked["status"], "Duplicate");
     assert_eq!(marked["duplicate_of"], "T-2");
+    let found = run(&["search", "", "--status", "Duplicate"]);
+    assert_eq!(found[0]["reference"], "T-1");
     let removed = run(&["remove-duplicate", "T-1"]);
     assert_eq!(removed["status"], "Todo");
     assert!(removed["duplicate_of"].is_null());
@@ -460,4 +462,29 @@ fn isolated_restore_replaces_only_the_test_workspace() {
     let restored: serde_json::Value = serde_json::from_str(&run(&["list"])).unwrap();
     assert_eq!(restored.as_array().unwrap().len(), 1);
     assert_eq!(restored[0]["title"], "Before backup");
+}
+
+#[test]
+fn cli_requires_a_canonical_ticket_to_choose_duplicate() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["create", "Lonely"]).status.success());
+    let rejected = run(&["change", "T-1", "--status", "Duplicate"]);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("canonical ticket"));
+    let shown = run(&["show", "T-1"]);
+    let ticket: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(ticket["status"], "Todo");
 }

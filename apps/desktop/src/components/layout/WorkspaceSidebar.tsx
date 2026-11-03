@@ -33,6 +33,7 @@ import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
 import type { RefObject } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -143,6 +144,9 @@ export function WorkspaceSidebar({
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
+                {counts.total !== undefined && (
+                  <SidebarCount value={counts.total} />
+                )}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -176,7 +180,7 @@ export function WorkspaceSidebar({
                 label="Manage projects"
                 onClick={() => setView("projects")}
               >
-                <Settings2 size={15} />
+                <Settings2 size={16} />
               </IconButton>
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
@@ -188,7 +192,7 @@ export function WorkspaceSidebar({
                     }
                     onClick={() => scope("all", "unlinked")}
                   >
-                    <Folder size={15} /> Unlinked
+                    <Folder size={16} /> Unlinked
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 {projects.map((p) => (
@@ -199,7 +203,7 @@ export function WorkspaceSidebar({
                       }
                       onClick={() => scope("all", p.id)}
                     >
-                      <Folder size={15} /> {p.name}
+                      <Folder size={16} /> <span>{p.name}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -213,7 +217,7 @@ export function WorkspaceSidebar({
                 label="Manage Efforts"
                 onClick={() => setView("efforts")}
               >
-                <Settings2 size={15} />
+                <Settings2 size={16} />
               </IconButton>
             </div>
             <nav aria-label="Effort scopes" className="sidebar-nav">
@@ -228,7 +232,7 @@ export function WorkspaceSidebar({
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >
-                        <Layers size={15} /> {e.name}
+                        <Layers size={16} /> <span>{e.name}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
@@ -237,7 +241,7 @@ export function WorkspaceSidebar({
                     isActive={view === "archived-efforts"}
                     onClick={() => setView("archived-efforts")}
                   >
-                    <Archive size={15} /> Archived
+                    <Archive size={16} /> Archived Efforts
                     {archivedEfforts > 0 && (
                       <SidebarCount value={archivedEfforts} />
                     )}
@@ -249,6 +253,7 @@ export function WorkspaceSidebar({
         </div>
       </SidebarContent>
       <SidebarFooter className="sidebar-footer">
+        <SourceStatusFooter />
         <nav aria-label="Trash and settings" className="sidebar-nav">
           <SidebarMenu>
             <SidebarMenuItem>

@@ -23,13 +23,13 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 56px minmax(0, 1fr);
+  grid-template-columns: 16px 56px minmax(0, 1fr) auto;
   column-gap: 8px;
   row-gap: 2px;
   width: 100%;
   min-width: 0;
   min-height: 48px;
-  padding: 6px 12px 6px 0;
+  padding: 8px 12px 8px 0;
   text-align: left;
   border-radius: 6px;
   background: transparent;
@@ -58,13 +58,13 @@
 }
 .ticket-row-meta {
   display: flex;
-  grid-column: 3;
+  grid-column: 2 / -1;
   align-items: center;
   gap: 8px;
   min-width: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 20px;
   overflow: hidden;
 }
 .ticket-row-state {
@@ -255,4 +255,136 @@
   .ticket-rows:has(input:checked) .ticket-select input {
     opacity: 1;
   }
+}
+/* A status group's header is a 32px band on the canvas surface. Rows and
+   headers share one list, so a row that changes group is not remounted. */
+.ticket-rows li.ticket-group-header {
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin-top: 12px;
+  margin-bottom: 2px;
+  padding: 0 4px 0 32px;
+  background: var(--background);
+}
+.ticket-rows li.ticket-group-header:hover {
+  background: var(--background);
+}
+.ticket-rows li.ticket-group-header:first-child {
+  margin-top: 0;
+}
+.ticket-group-header svg {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.ticket-group-header h2 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ticket-group-count {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.ticket-group-add {
+  margin-left: auto;
+}
+
+/* The owner of an externally owned ticket, after its title: source mark and number. */
+.ticket-source-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: var(--shadow-border-base);
+  color: var(--secondary-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ticket-source-pill svg {
+  width: 12px;
+  height: 12px;
+}
+.ticket-rows li:hover .ticket-source-pill,
+.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-source-pill {
+  background: var(--surface);
+}
+/* Source filter follows the inset canvas composition. */
+.source-filter {
+  padding: 8px 8px 0;
+}
+.source-filter [data-slot="segmented-control"] {
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+.source-filter [role="radio"] {
+  height: 32px;
+  border-radius: 6px;
+}
+.source-filter [role="radio"][data-state="checked"] {
+  background: var(--accent);
+  box-shadow: none;
+}
+.source-filter [role="radio"]:hover {
+  background: var(--recessed);
+}
+.segmented-count {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.source-refresh {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.ticket-row-time {
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ticket-row-meta:has(.ticket-row-time) {
+  flex-wrap: wrap;
+}
+.ticket-row-tags {
+  font-size: 12px;
+  line-height: 16px;
+}
+.ticket-rows li:has(.ticket-row:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+.ticket-list .ticket-row:focus-visible {
+  box-shadow: none;
+}
+
+.ticket-row-contextual {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-height: 20px;
+  overflow: hidden;
+}
+.ticket-row-contextual .ticket-row-tags {
+  display: contents;
+}
+.ticket-row-contextual .ticket-row-context {
+  flex: none;
+  max-width: 100%;
+}
+.ticket-row-meta:has(.ticket-row-time) {
+  flex-wrap: nowrap;
 }

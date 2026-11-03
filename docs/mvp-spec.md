@@ -12,7 +12,9 @@
 
 The current workflow uses skills and coding agents to create local Markdown tickets. As work grows, reading, editing, navigating hierarchy, and understanding dependencies become difficult. People lack a clear overview, while agents must repeatedly locate and assemble context.
 
-ticketd becomes the primary system of record for tickets. People use a desktop UI; agents use a CLI. Brainstorming, conversations, planning, skill execution, and coding remain in external harnesses such as Claude Code, Codex, and Orca.
+ticketd is the system of record for locally owned tickets. Its future platform integrations also make it a central working surface for externally owned tickets, whose authoritative records remain in their external trackers (section 15.7). People use a desktop UI; agents use a CLI. Brainstorming, conversations, planning, skill execution, and coding remain in external harnesses such as Claude Code, Codex, and Orca.
+
+External trackers can organize and dispatch high-level work, while ticketd gives the finer-grained tickets discovered through decomposition a home where people and agents can manage and visualize them.
 
 ### Goals
 
@@ -124,16 +126,17 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 | In review     | Implementation is finished; review is pending      |
 | Done          | Work is complete and no further review is required |
 | Canceled      | Work will not continue                             |
+| Duplicate     | The same outcome is represented by another ticket  |
 
-People and agents may transition directly between any statuses. Review may be skipped when unnecessary; transitions are recorded in history and do not change related tickets.
+People and agents may transition locally owned tickets between ordinary statuses directly; duplicate designation follows section 15.5. Publication preserves the ticket's status; reconciliation with external status is described in section 15.7. Review may be skipped when unnecessary; transitions are recorded in history and do not change related tickets.
 
 `Ready` and `Blocked` are derived information, not manually maintained statuses:
 
 - **Ready:** a Todo ticket outside the trash without unresolved blocking dependencies.
 - **Blocked:** a Todo ticket outside the trash with unresolved blocking dependencies.
-- In progress, In review, Done, and Canceled tickets have neither indicator. Their dependency lists still show unresolved prerequisites.
+- In progress, In review, Done, Canceled, and Duplicate tickets have neither indicator. Their dependency lists still show unresolved prerequisites.
 - A trashed ticket has neither indicator, whatever its status, in every view (detail, context, dependency graph); the Ready list and sidebar count already exclude it. Restoring it recalculates the indicator.
-- Only a Done prerequisite satisfies an existing dependency. In review and Canceled prerequisites remain unresolved.
+- Only a Done prerequisite satisfies an existing dependency. In review, Canceled, and Duplicate prerequisites remain unresolved.
 - Remove an obsolete dependency or replace it with the appropriate relationship; cancellation does not resolve it.
 - Reopening a prerequisite recalculates availability for Todo dependents. Started dependents retain their status and only show the open prerequisite in their dependency lists.
 - Trashed tickets are excluded from ordinary lists and work selection. Trashing a Done prerequisite leaves it satisfied; trashing an unfinished prerequisite leaves it unresolved.
@@ -452,19 +455,22 @@ behavior still requires design before implementation.
 ### 15.5. Duplicate handling
 
 - Preserve a duplicate ticket's identity, content, and history, and link it to its
-  canonical ticket.
-- Marking a duplicate sets it to Canceled and presents its duplicate relationship
-  explicitly, for example, Canceled · Duplicate of T-10.
+  canonical ticket. Marking a locally owned ticket Duplicate requires selecting
+  its canonical ticket; status and relationship change together.
+- Marking a duplicate sets the dedicated Duplicate status and presents its
+  canonical relationship explicitly, for example, Duplicate of T-10. This
+  replaces the earlier representation as Canceled plus a duplicate relationship.
 - Review affected blocking dependencies when marking a duplicate. Show proposed
   replacements and apply the agreed changes atomically with cycle validation.
 - Cancellation alone never satisfies a prerequisite. For example, if T-30 is
   blocked by T-20 and T-20 duplicates T-10, replacing T-20 with T-10 as the blocker
   makes T-30's readiness depend on T-10's completion.
-- Duplicate identity is separate from status so future integrations can preserve
-  the relationship across platforms with different closure conventions.
+- Preserve canonical identity alongside Duplicate status so integrations can
+  retain the relationship across platforms with different closure conventions.
 - Removing the duplicate designation restores the status held before duplicate
   marking, following [Linear's documented undo behavior](https://linear.app/changelog/2026-06-18-agent-assisted-project-updates).
-  If the status has since been changed independently, preserve that newer choice.
+  Explicitly choosing another status leaves Duplicate and removes the canonical
+  relationship together, keeping the chosen status.
   Reversing dependency replacements requires a separate review of the current
   graph; undo does not silently revert later work.
 - Each duplicate points directly to one canonical ticket, following
@@ -472,6 +478,11 @@ behavior still requires design before implementation.
   If A duplicates B and B is then marked as duplicating C, both A and B point to C.
   Reject self-links and duplicate cycles. Record consolidation and undo in ticket
   history.
+- An imported duplicate may refer to a canonical issue outside the workspace.
+  Preserve and show its external reference without automatically importing it;
+  resolve the reference to a local ticket if that issue is later imported. Show
+  an unknown target when the source does not supply an accessible canonical
+  identity. These imported cases do not require inventing a local canonical ticket.
 
 ### 15.6. Implementation evidence
 
@@ -483,10 +494,112 @@ behavior still requires design before implementation.
 ### 15.7. Future platform synchronization
 
 Future synchronization with external work trackers is an intended direction.
+GitHub Issues is the first provider. Jira and other providers are deferred.
+The first integration synchronizes title, description, status, and external
+comments. External comments are displayed separately from local notes.
+
+Ticket sources are connectors run by a ticketd-owned extension engine. The
+built-in GitHub connector uses the shared, versioned extension interface, designed
+to accommodate future providers. User-developed extensions, custom extension
+installation, and distribution are outside the current integration scope.
+
+The interface covers connection configuration, discovery, ticket and comment
+retrieval, stable external identities, and interpretation of external status.
+Publication is an optional connector capability. ticketd owns scheduling, identity
+preservation, local data, and persistence; connectors translate provider data and
+operations without directly modifying ticketd's database. Provider-specific
+configuration and filters use schemas describing fields, selectors, dynamic
+options, and validation. ticketd renders those forms and supports configuration
+through the CLI. Arbitrary extension-rendered UI is deferred.
+
+The agreed authority model is:
+
+- Tickets synchronized from an external tracker are externally owned.
+- Ongoing synchronization is one-way: external tracker to ticketd. Synchronized
+  fields are read-only in ticketd; people and agents change them in the external
+  tracker and those changes flow back into ticketd. Local progress while an
+  external issue remains open is the status exception described below.
+- Locally owned tickets can be published to an external tracker once. Publication
+  transfers authority for those tickets to that tracker while preserving their
+  ticketd identity, references, notes, dependencies, and subtickets. Subsequent
+  synchronization is inbound only; publication does not establish ongoing
+  outbound updates.
+- Initial publication is limited to Todo, In progress, and In review tickets.
+  Publishing Done, Canceled, or Duplicate tickets is deferred.
+- Publication transfers ownership only after ticketd confirms the external ticket
+  exists and records its identity. Failed publication leaves the ticket locally
+  owned. An uncertain result must be resolved before retrying creation, to avoid
+  duplicate external tickets.
+- Publication previews a normal GitHub issue using the ticket's title and
+  description. Local notes, Effort membership, dependencies, and subtickets stay
+  in ticketd; publication adds no ticketd-specific metadata to the external issue.
+- Publication preserves the existing ticketd status. Creating an open GitHub
+  issue must not reset a published ticket to Todo. Repeated open-state refreshes
+  preserve local progress; Open-to-Todo initialization applies only to newly
+  imported tickets.
+- Ownership belongs to each ticket independently. Subtickets created in ticketd
+  remain locally owned unless explicitly published, including when their parent
+  is externally owned. Publishing a parent does not publish its subtickets.
+- Externally owned tickets retain ticketd-specific organization, including Effort
+  membership and relationships to local subtickets. This organization stays local;
+  the external tracker must not need awareness of ticketd.
+- The first platform integration includes automatic discovery of external tickets,
+  rather than only explicit ticket selection. Users configure discovery rules,
+  preview matches during setup, and matching tickets are brought in automatically.
+  Repeated discovery preserves the existing ticket's identity and organization.
+- GitHub discovery starts with selected repositories and optional assignee and
+  label filters, implemented through the ticket source extension interface.
+- Automatic discovery and refresh run on desktop startup and periodically while
+  the desktop is open. Manual refresh is available through both the UI and CLI.
+  Retain the last synchronized content offline and show when it was refreshed.
+  An always-running background synchronization service is deferred.
+- Saving changed discovery rules makes prior match membership unknown until a
+  complete refresh under the new rules. A run using replaced rules cannot import
+  new tickets or advance discovery membership and source health; successful reads
+  of already tracked tickets still refresh their content.
+- Tickets that stop matching a discovery rule remain in ticketd and continue
+  synchronizing while access remains available. Stopping synchronization is a
+  separate action, not a consequence of leaving discovery scope.
+- Externally owned tickets have no outbound edit queue or two-way edit-conflict
+  reconciliation. This replaces the earlier bidirectional editing direction.
+- External status changes happen in the tracker. Ticketd reflects those changes;
+  the first GitHub integration uses issue state and closure reason rather than
+  labels or GitHub Projects columns: newly imported Open issues start as Todo,
+  completed closure maps to Done, not-planned closure to Canceled, and duplicate
+  closure to Duplicate.
+  Preserve duplicate information. Missing or unrecognized closure reasons are
+  flagged rather than assumed to mean Done.
+- While a GitHub issue remains open, people and agents can manage Todo,
+  In progress, and In review locally in ticketd. These changes are not sent to
+  GitHub. External closure determines Done, Canceled, or Duplicate.
+- When GitHub reopens a previously closed issue, ticketd moves it to Todo and
+  removes any active duplicate designation. Later open-state refreshes preserve
+  local progress rather than resetting it again.
+- Show each ticket's source clearly. When an external ticket becomes unavailable,
+  retain its last synchronized content and local work, show a Source unavailable
+  warning, and offer an explicit transfer of ownership to ticketd. Unavailability
+  does not automatically delete, complete, or transfer the ticket.
+- Taking ownership preserves ticket identity, last synchronized content, local
+  work, and the external ticket identity as provenance. The ticket becomes locally
+  editable and its source indicator becomes Local; it no longer carries the
+  external-provider ownership indicator. The retained external reference does
+  not imply active synchronization.
+- Taking ownership stops synchronization with that external record. Rediscovery
+  must not create a second ticket or silently restore external ownership when
+  access returns. Reconnecting requires an explicit choice.
+- Notes and ticketd-specific organization remain locally editable, including for
+  externally owned tickets. Incoming synchronization does not overwrite them.
+  Posting external comments is outside this one-way integration.
+- Agent sessions, branches, and worktrees remain the responsibility of external
+  coding harnesses. Integrations do not change ticketd's execution boundary.
+- Exact extension interface signatures and execution mechanics remain technical
+  design work. These decisions do not move platform integrations into the initial
+  MVP.
+
 Design these extensions with compatible meanings and preserve enough information
 to distinguish duplicate closure from completion or ordinary cancellation.
-Platforms differ, so exact status mappings, unsupported relationships, conflict
-handling, and synchronization behavior require explicit integration design.
+Platforms differ, so exact status mappings, unsupported relationships, and
+synchronization behavior require explicit integration design.
 
 In particular, the current official documentation describes different duplicate
 conventions:

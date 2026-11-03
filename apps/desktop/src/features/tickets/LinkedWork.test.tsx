@@ -9,7 +9,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { LinkedWork } from "@/features/tickets/LinkedWork";
+import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
+import { Subtickets } from "@/features/tickets/Subtickets";
+import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import type { Ticket } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -66,6 +68,7 @@ function bridge(
     blocking?: Item[];
     related?: Item[];
     parent?: Item;
+    children?: Item[];
     duplicate_of?: Item;
     duplicates?: Item[];
     more?: number;
@@ -81,7 +84,13 @@ function bridge(
       return {
         relationships: {
           parent: options.parent ? related(options.parent) : null,
-          children: page,
+          children: pageOf(options.children),
+          children_progress: {
+            total: options.children?.length ?? 0,
+            done:
+              options.children?.filter((item) => item.status === "Done")
+                .length ?? 0,
+          },
           prerequisites: pageOf(options.prerequisites),
           blocking: pageOf(options.blocking),
           related: pageOf(options.related, options.more ?? null),
@@ -99,29 +108,44 @@ function bridge(
     return base;
   });
 }
+/** The rail's Relationships and the Subtickets section share one read. */
+function Section({
+  ticket,
+  refresh,
+  onOpenGraph,
+}: {
+  ticket: Ticket;
+  refresh: () => Promise<void>;
+  onOpenGraph: () => void;
+}) {
+  const work = useLinkedWork(ticket, 0, refresh);
+  return (
+    <>
+      <Subtickets work={work} select={vi.fn()} />
+      <LinkedWork work={work} select={vi.fn()} onOpenGraph={onOpenGraph} />
+      <LinkedWorkDialogs work={work} />
+    </>
+  );
+}
 function renderSection(
   ticket: Ticket,
   refresh = vi.fn(async () => {}),
   onOpenGraph = vi.fn(),
 ) {
   render(
-    <LinkedWork
-      ticket={ticket}
-      revision={0}
-      refresh={refresh}
-      select={vi.fn()}
-      onOpenGraph={onOpenGraph}
-    />,
+    <Section ticket={ticket} refresh={refresh} onOpenGraph={onOpenGraph} />,
   );
   return refresh;
 }
 
-test("a ticket with no links shows only Link ticket once the read succeeds", async () => {
+test("a ticket with no links shows only Add relationship once the read succeeds", async () => {
   bridge();
   renderSection(base);
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-  expect(screen.getByRole("button", { name: "Link ticket" })).toBeTruthy();
-  expect(screen.queryByRole("heading")).toBeNull();
+  expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Relationships" }).textContent,
+  ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
 });
@@ -129,20 +153,16 @@ test("a ticket with no links shows only Link ticket once the read succeeds", asy
 test("loading and a failed read are distinct from having no links", async () => {
   bridge({ never: true });
   const view = render(
-    <LinkedWork
-      ticket={base}
-      revision={0}
-      refresh={async () => {}}
-      select={() => {}}
-      onOpenGraph={() => {}}
-    />,
+    <Section ticket={base} refresh={async () => {}} onOpenGraph={() => {}} />,
   );
-  expect(screen.getByRole("status").textContent).toContain("Loading linked");
+  expect(screen.getByRole("status").textContent).toContain(
+    "Loading relationships",
+  );
   view.unmount();
   bridge({ fail: { contextual_relationships: "database busy" } });
   renderSection(base);
   expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not load linked work: database busy",
+    "Could not load relationships: database busy",
   );
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
 });
@@ -163,21 +183,32 @@ test("builds every row from the one relationships read, including all dependents
       },
     ],
     parent: { reference: "T-3", title: "Epic" },
-    duplicate_of: { reference: "T-9", title: "Original", status: "Canceled" },
+    duplicate_of: { reference: "T-9", title: "Original", status: "Duplicate" },
   });
   renderSection(base);
   await screen.findByText("Sibling");
   const rows = screen.getAllByRole("listitem");
   expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
+    "parent",
     "blocked_by",
     "blocks",
     "blocks",
-    "parent",
     "related",
     "duplicate_of",
   ]);
   expect(screen.getByText("In progress · not done · in trash")).toBeTruthy();
-  expect(screen.getByRole("heading").textContent).toContain("6");
+  const blocker = screen
+    .getByRole("button", { name: "Blocker" })
+    .closest("li")!;
+  expect(
+    within(blocker).getByRole("img", {
+      name: "In progress · not done · in trash",
+    }),
+  ).toBeTruthy();
+  const dependent = screen
+    .getByRole("button", { name: "Waiting" })
+    .closest("li")!;
+  expect(within(dependent).getByRole("img", { name: "Todo" })).toBeTruthy();
   const commands = vi.mocked(invoke).mock.calls.map((call) => call[0]);
   expect(commands).not.toContain("dependency_graph");
   expect(commands).not.toContain("show_ticket");
@@ -187,7 +218,6 @@ test("shows n+ and loads the next page when more links exist", async () => {
   bridge({ related: [{ reference: "T-4", title: "Sibling" }], more: 20 });
   renderSection(base);
   await screen.findByText("Sibling");
-  expect(screen.getByRole("heading").textContent).toContain("1+");
   expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
@@ -248,7 +278,7 @@ test("removing a duplicate link explains the result before anything changes", as
 });
 
 async function chooseTarget() {
-  fireEvent.click(screen.getByRole("button", { name: "Link ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
   fireEvent.change(await screen.findByLabelText("Ticket"), {
     target: { value: "target" },
   });
@@ -298,7 +328,7 @@ test("choosing a new parent says it replaces the current one", async () => {
     ...base,
     parent: { reference: "T-3", title: "Epic", trashed: false },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Link ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
   fireEvent.change(within(dialog).getByLabelText("Relationship"), {
@@ -307,4 +337,107 @@ test("choosing a new parent says it replaces the current one", async () => {
   expect(within(dialog).getByRole("status").textContent).toBe(
     "This replaces the current parent T-3.",
   );
+});
+
+test("subtickets read under the description with local progress, not in the rail", async () => {
+  bridge({
+    children: [
+      { reference: "T-8", title: "Finished part", status: "Done" },
+      { reference: "T-9", title: "Open part", status: "In progress" },
+    ],
+  });
+  renderSection(base);
+  expect(await screen.findByText("1 of 2 done")).toBeTruthy();
+  const progress = screen.getByRole("progressbar", {
+    name: "Subticket progress",
+  });
+  expect(progress.getAttribute("max")).toBe("2");
+  expect(progress.getAttribute("value")).toBe("1");
+  // The rail's Relationships holds no subtickets, so it collapses to its action.
+  expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
+  expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual(
+    [expect.stringContaining("T-8"), expect.stringContaining("T-9")],
+  );
+});
+
+test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
+  bridge({
+    children: [{ reference: "T-8", title: "Part", status: "Todo" }],
+  });
+  renderSection(base);
+  fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(
+    (within(dialog).getByLabelText("Relationship") as HTMLSelectElement).value,
+  ).toBe("subticket");
+});
+
+test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {
+  bridge();
+  const target = (extra: object) => ({
+    kind: "external" as const,
+    identity: { provider: "github", id: "9" },
+    locator: "acme/api#9",
+    display: "acme/api#9",
+    ...extra,
+  });
+  const duplicate = (duplicate_target: object) =>
+    ({
+      ...base,
+      status: "Duplicate",
+      source: {
+        provider: "github",
+        provider_name: "GitHub",
+        place: "acme/api",
+        number: "#1",
+        status_choices: ["Todo", "In progress", "In review"],
+        id: "1",
+        locator: "acme/api#1",
+        display: "acme/api#1",
+        url: "",
+        origin: "imported",
+        ownership: "external",
+        state: { state: "closed", reason: "duplicate" },
+        closure_unrecognized: false,
+        last_refreshed_at: null,
+        last_attempt_at: null,
+        last_error: null,
+        content_locked: true,
+        status_locked: true,
+        duplicate_target,
+      },
+    }) as unknown as Ticket;
+  const view = render(
+    <Section
+      ticket={duplicate(target({}))}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  const row = (await screen.findByText("acme/api#9")).closest("li")!;
+  expect(within(row).getByText("Duplicate of")).toBeTruthy();
+  expect(within(row).getByText("Not imported into ticketd.")).toBeTruthy();
+  expect(within(row).queryByRole("button")).toBeNull();
+  view.rerender(
+    <Section
+      ticket={duplicate(target({ ticket: "T-7" }))}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  const resolved = (await screen.findByRole("button", { name: "T-7" })).closest(
+    "li",
+  )!;
+  expect(within(resolved).getByText("acme/api#9")).toBeTruthy();
+  view.rerender(
+    <Section
+      ticket={duplicate({ kind: "unknown" })}
+      refresh={async () => {}}
+      onOpenGraph={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByText("The source did not name an accessible original."),
+  ).toBeTruthy();
+  expect(screen.getByText("Unknown")).toBeTruthy();
 });

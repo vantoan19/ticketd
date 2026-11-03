@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use ticketd_core::FORMAT_VERSION;
 use ticketd_core::{
     BackupCheck, EvidenceInput, EvidenceKind, SafetyBackupKind, Workspace, WorkspaceSummary,
 };
@@ -51,7 +52,7 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     else {
         panic!("expected a valid backup, got {:?}", inspection.check);
     };
-    assert_eq!(format_version, 20);
+    assert_eq!(i64::from(format_version), FORMAT_VERSION);
     assert_eq!(
         (
             summary.tickets,
@@ -89,7 +90,7 @@ fn an_empty_workspace_has_no_last_change() {
     assert_eq!(
         inspection.check,
         BackupCheck::Valid {
-            format_version: 20,
+            format_version: FORMAT_VERSION as u32,
             summary: expected
         }
     );
@@ -102,16 +103,17 @@ fn a_newer_format_names_both_versions() {
     let newer = dir.path().join("newer.sqlite3");
     let connection = Connection::open(&newer).unwrap();
     connection
-        .execute_batch(
-            "CREATE TABLE tickets (number INTEGER PRIMARY KEY); PRAGMA user_version = 21;",
-        )
+        .execute_batch(&format!(
+            "CREATE TABLE tickets (number INTEGER PRIMARY KEY); PRAGMA user_version = {};",
+            FORMAT_VERSION + 1
+        ))
         .unwrap();
     drop(connection);
     assert_eq!(
         workspace.inspect_backup(&newer).unwrap().check,
         BackupCheck::NewerFormat {
-            backup_version: 21,
-            supported_version: 20
+            backup_version: (FORMAT_VERSION + 1) as u32,
+            supported_version: FORMAT_VERSION as u32
         }
     );
 }

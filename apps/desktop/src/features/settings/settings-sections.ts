@@ -1,4 +1,4 @@
-export type SettingsGroup = "Preferences" | "Workspace" | "Help";
+export type SettingsGroup = "Preferences" | "Workspace" | "Sources" | "Help";
 
 /**
  * The Settings cards in page order. The section list is built from the same
@@ -23,12 +23,23 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Preferences",
+  "Sources",
   "Workspace",
   "Help",
 ];
 
-/** A card id: a Settings section, or another page borrowing the card (Projects). */
-export type SettingsCardKey = SettingsSectionId | `project-${string}`;
+/** A card id: a Settings section, another page borrowing the card (Projects), or a source. */
+export type SettingsCardKey =
+  SettingsSectionId | `project-${string}` | `source-${string}`;
+
+/** The section for an available source, listed under Sources beside its card. */
+export function sourceSection(provider: string, name: string) {
+  return {
+    id: `source-${provider}` as SettingsCardKey,
+    label: name,
+    group: "Sources" as SettingsGroup,
+  };
+}
 
 export function settingsCardId(id: SettingsCardKey) {
   return `settings-${id}`;

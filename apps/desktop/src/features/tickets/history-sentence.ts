@@ -86,6 +86,28 @@ export function describeChange(
           : from === to
             ? `Updated evidence ${quote(to)}`
             : `Renamed evidence ${quote(from)} to ${quote(to)}`;
+    case "external_duplicate":
+      return from && to
+        ? `Its source now names ${to} as the original, not ${from}`
+        : to
+          ? `Its source named ${to} as the original`
+          : `Its source no longer names ${from} as the original`;
+    case "source_import":
+      return `Imported from ${to}${from ? ` as ${from}` : ""}`;
+    case "source_unavailable":
+      return `Source unavailable (${to.replaceAll("_", " ")})`;
+    case "publication_unresolved":
+      return `Publish to ${to} — no response, outcome unknown`;
+    case "publication":
+      return to === "not created"
+        ? "Confirmed that nothing was created by the earlier publication attempt"
+        : "Publication attempt updated";
+    case "ownership":
+      return `Took ownership from ${from === "github" ? "GitHub" : from}; the ticket is now local`;
+    case "source":
+      return from === "attached"
+        ? `Linked to ${to} after an uncertain publication`
+        : `Published to ${to}`;
     case "trash":
       return to === "trashed" ? "Moved to trash" : "Restored from trash";
     default:

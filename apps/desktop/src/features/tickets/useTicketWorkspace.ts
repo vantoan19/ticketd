@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { client, type Project, type Ticket } from "@/lib/api/client";
+import {
+  client,
+  type FindFilter,
+  type Project,
+  type SourceCounts,
+  type StatusCounts,
+  type Ticket,
+} from "@/lib/api/client";
+import {
+  sourcesClient,
+  type RefreshReport,
+  type SourceEntry,
+  type SourceHealth,
+} from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
 import type { MentionTarget } from "./Backlinks";
+export const PAGE_SIZE = 50;
 type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
@@ -40,8 +54,35 @@ export function useTicketWorkspace(
   const [tags, setTags] = useState("");
   const [availability, setAvailability] = useState("");
   const [family, setFamily] = useState("");
+  // "all", "local", or a provider id such as "github".
+  const [source, setSourceFilter] = useState("all");
+  // The connectors and what is saved for each. The source filter appears once one is saved.
+  const [sourceEntries, setSourceEntries] = useState<SourceEntry[]>([]);
+  const configuredSources = sourceEntries
+    .filter((entry) => entry.saved)
+    .map((entry) => entry.connector.provider);
+  const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
+  // What the core persisted about each source's freshness, and whether a refresh
+  // (startup, periodic or explicit) is running. Kept when a read fails, so a
+  // transient error never blanks the footer or claims a refresh succeeded.
+  const [sourceHealth, setSourceHealth] = useState<SourceHealth>({
+    refreshing: false,
+    sources: [],
+  });
+  const [sourceRefresh, setSourceRefresh] = useState<{
+    running: boolean;
+    report: RefreshReport | null;
+    error: string;
+    errorAt: string | null;
+  }>({ running: false, report: null, error: "", errorAt: null });
   const [trash, setTrash] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  // The counts describe the whole filtered result; they are null in Trash,
+  // which lists tickets flat.
+  const [counts, setCounts] = useState<StatusCounts | null>(null);
+  // The offset the displayed tickets were read at, for page-edge navigation.
+  const [loadedOffset, setLoadedOffset] = useState(0);
+  const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null);
   const [selected, selectTicket] = useState<string | null>(null);
   const [mention, setMention] = useState<FollowedMention | null>(null);
   // Counts every selection, including of the ticket already open, so each one
@@ -67,28 +108,40 @@ export function useTicketWorkspace(
     const request = ++generation.current;
     let timeout = 0;
     try {
+      // A search lists newest first, like Trash; every other list is grouped by
+      // status, so it pages through workflow order.
+      const filterArgs: FindFilter = {
+        query,
+        project: filter === "all" || filter === "unlinked" ? null : filter,
+        unlinked: filter === "unlinked",
+        effort: effort || null,
+        status: status || null,
+        tags: tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        availability: availability || null,
+        family: family || null,
+        source:
+          source === "all"
+            ? null
+            : source === "local"
+              ? "Local"
+              : { Provider: source },
+        order: query ? "Newest" : "Workflow",
+        limit: PAGE_SIZE,
+        offset,
+      };
       const result = await Promise.race([
         Promise.all([
-          trash
-            ? client.listTrash()
-            : client.findTickets({
-                query,
-                project:
-                  filter === "all" || filter === "unlinked" ? null : filter,
-                unlinked: filter === "unlinked",
-                effort: effort || null,
-                status: status || null,
-                tags: tags
-                  .split(",")
-                  .map((tag) => tag.trim())
-                  .filter(Boolean),
-                availability: availability || null,
-                family: family || null,
-                limit: 50,
-                offset,
-              }),
+          trash ? client.listTrash() : client.findTickets(filterArgs),
           client.listProjects(),
           client.listEfforts(),
+          trash ? Promise.resolve(null) : client.countTickets(filterArgs),
+          // Source counts only decorate the filter, so they never fail the list.
+          trash
+            ? Promise.resolve(null)
+            : client.countBySource(filterArgs).catch(() => null),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -98,8 +151,23 @@ export function useTicketWorkspace(
         }),
       ]);
       if (request !== generation.current) return;
+      const found = result[3];
+      if (!trash && found && offset > 0 && offset >= found.total) {
+        // The page this view was on no longer exists (its last tickets left the
+        // result): go to the last page that does instead of showing an empty list
+        // under a non-zero total.
+        setOffset(
+          found.total === 0
+            ? 0
+            : Math.floor((found.total - 1) / PAGE_SIZE) * PAGE_SIZE,
+        );
+        return;
+      }
       setQueryError(false);
       setTickets(result[0]);
+      setLoadedOffset(offset);
+      setCounts(result[3]);
+      setSourceCounts(result[4]);
       setProjects(result[1]);
       setEfforts(result[2]);
       setRevision((value) => value + 1);
@@ -124,7 +192,32 @@ export function useTicketWorkspace(
     tags,
     availability,
     family,
+    source,
   ]);
+  useEffect(() => {
+    let active = true;
+    void sourcesClient.list().then(
+      (entries) => {
+        if (active) setSourceEntries(entries);
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [revision]);
+  useEffect(() => {
+    let active = true;
+    void sourcesClient.health().then(
+      (health) => {
+        if (active) setSourceHealth(health);
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [revision]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => {
@@ -138,6 +231,13 @@ export function useTicketWorkspace(
       generationRef.current++;
     };
   }, [refresh]);
+  // Previous or Next at the edge of a page moves to the neighboring page and
+  // opens the ticket at its near edge once that page has loaded.
+  if (pendingEdge && loadedOffset === offset) {
+    const target = pendingEdge === "first" ? tickets[0] : tickets.at(-1);
+    setPendingEdge(null);
+    if (target) setSelected(target.reference);
+  }
   useEffect(() => {
     if (!selected) return;
     let active = true;
@@ -175,6 +275,29 @@ export function useTicketWorkspace(
       if (seen?.reference === selected) setMention(null);
     }
   }
+  /**
+   * Imports matching issues and refreshes tracked tickets now, optionally only
+   * one. Saved content stays visible while it runs and when it fails.
+   */
+  async function refreshSources(ticket?: string) {
+    setSourceRefresh({ running: true, report: null, error: "", errorAt: null });
+    try {
+      const report = await sourcesClient.refresh(ticket);
+      setSourceRefresh({ running: false, report, error: "", errorAt: null });
+    } catch (reason) {
+      setSourceRefresh({
+        running: false,
+        report: null,
+        error: reason instanceof Error ? reason.message : String(reason),
+        errorAt: new Date().toISOString(),
+      });
+    }
+    await refresh();
+  }
+  function setSource(next: string) {
+    setSourceFilter(next);
+    setOffset(0);
+  }
   async function create(
     title: string,
     body: string,
@@ -209,6 +332,32 @@ export function useTicketWorkspace(
       items.map((item) => (item.id === updated.id ? updated : item)),
     );
   }, []);
+  const total = counts ? counts.total : tickets.length;
+  const selectedIndex = tickets.findIndex(
+    (item) => item.reference === selected,
+  );
+  /**
+   * The selected ticket's place in the visible list, across pages. It is read
+   * against the page that is loaded, so it stays put (and the Previous/Next
+   * buttons stay mounted, keeping focus) while the neighboring page loads.
+   */
+  const position =
+    selectedIndex >= 0
+      ? { index: loadedOffset + selectedIndex + 1, total }
+      : null;
+  function openAdjacent(direction: 1 | -1) {
+    if (selectedIndex < 0) return;
+    const next = tickets[selectedIndex + direction];
+    if (next) {
+      setSelected(next.reference);
+    } else if (direction === 1 && offset + tickets.length < total) {
+      setPendingEdge("first");
+      setOffset(offset + PAGE_SIZE);
+    } else if (direction === -1 && offset > 0) {
+      setPendingEdge("last");
+      setOffset(Math.max(0, offset - PAGE_SIZE));
+    }
+  }
   const scopeName =
     navigation.kind === "trash"
       ? "Trash"
@@ -232,6 +381,7 @@ export function useTicketWorkspace(
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
+    setSourceFilter("all");
     setOffset(0);
   }
   function scope(
@@ -248,10 +398,19 @@ export function useTicketWorkspace(
     setAvailability(next === "ready" ? "Ready" : "");
     setTags("");
     setFamily("");
+    setSourceFilter("all");
     setQuery("");
     setOffset(0);
   }
   return {
+    source,
+    setSource,
+    sourceCounts,
+    configuredSources,
+    sourceEntries,
+    sourceRefresh,
+    sourceHealth,
+    refreshSources,
     projects,
     efforts,
     filter,
@@ -273,6 +432,11 @@ export function useTicketWorkspace(
     trash,
     setTrash,
     tickets,
+    counts,
+    total,
+    grouped: !trash && !query,
+    position,
+    openAdjacent,
     selected,
     mention,
     clearMention,

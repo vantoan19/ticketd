@@ -11,6 +11,24 @@ The local boundary containing tickets, projects, Efforts, and their shared tag v
 A unit of work describing an intended outcome, optionally linked to one project. A ticket with subtickets still has its own outcome rather than serving only as a container.
 _Avoid_: Issue, task
 
+**Locally owned ticket**:
+A ticket whose authoritative record is maintained by ticketd.
+
+**Externally owned ticket**:
+A ticket whose authoritative record is maintained by an external tracker and synchronized into ticketd, with local progress, notes, and organization maintained separately.
+
+**Ticket publication**:
+A one-time outward transfer of a locally owned ticket to an external tracker, after which that tracker is authoritative and changes flow into ticketd while its ticketd identity is preserved.
+
+**Ticket source**:
+The system that currently owns a ticket's authoritative record: ticketd or an external tracker.
+
+**Ticket source extension**:
+A connector to an external ticket source, run by ticketd through a shared extension interface.
+
+**External ticket identity**:
+The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
+
 **Ticket reference**:
 A short, workspace-unique reference to a ticket that stays unchanged when its project or Effort links change.
 
@@ -18,10 +36,10 @@ A short, workspace-unique reference to a ticket that stays unchanged when its pr
 A ticket whose outcome is broken into subtickets. It may be Done while subtickets remain open, and completing all subtickets does not necessarily fulfill its own outcome.
 
 **Subticket**:
-A ticket describing part of its parent ticket's work, possibly linked to a different project or belonging to a different Effort. Its Effort membership is independent of its parent's membership.
+A ticket describing part of its parent ticket's work, possibly linked to a different project or belonging to a different Effort. Its ownership and Effort membership are independent of its parent's.
 
 **Blocking dependency**:
-A directed relationship in which one ticket must be Done before another is considered Ready, including across projects. A canceled blocker remains unresolved until the relationship is removed; readiness guides selection without preventing work from starting.
+A directed relationship in which one ticket must be Done before another is considered Ready, including across projects. A canceled or duplicate blocker remains unresolved until the relationship is removed; readiness guides selection without preventing work from starting.
 
 **Ready**:
 A Todo ticket that is not in the trash and has no unresolved blocking dependencies.
@@ -50,7 +68,7 @@ A ticket removed from ordinary lists and work selection while preserved for rest
 Returning a trashed ticket to ordinary visibility. A trashed ticket must be restored before editing, except that visible tickets may detach relationships to it; hierarchy and dependency validity continue to apply while tickets are in trash.
 
 **Ticket status**:
-The recorded state of a ticket: Todo, In progress, In review, Done, or Canceled. People and agents may change directly between any statuses without automatically changing related tickets.
+The recorded state of a ticket: Todo, In progress, In review, Done, Canceled, or Duplicate. Publication preserves this status; status changes do not automatically change related tickets.
 
 **In review**:
 A ticket status indicating that implementation is finished but review is pending. An In review ticket remains an unresolved blocker for its dependents.
@@ -95,7 +113,7 @@ A directed relationship recording that a ticket was discovered while working on 
 A person's request to bring a ticket back to their attention at a chosen time, independent of its status and readiness.
 
 **Duplicate ticket**:
-A ticket recognized as describing the same intended outcome as a canonical ticket, with its own identity and history preserved.
+A ticket in Duplicate status, recognized as describing the same intended outcome as a canonical ticket, with its own identity and history preserved.
 
 **Canonical ticket**:
 The ticket selected to represent an intended outcome shared by duplicate tickets. It is the direct destination of those duplicate relationships and is not itself a duplicate.

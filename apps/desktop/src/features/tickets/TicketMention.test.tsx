@@ -13,6 +13,7 @@ import { TicketWorkspaceView } from "./TicketWorkspaceView";
 import { useBulkEdit } from "./useBulkEdit";
 import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
+import { bridgeDefault } from "@/test/bridge-defaults";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -118,6 +119,8 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                 },
               ]
             : [];
+        case "count_tickets":
+          return bridgeDefault(command);
         case "get_note":
           return null;
         case "is_following":
@@ -178,6 +181,8 @@ test("trashing and restoring the revealed ticket does not reveal it again", asyn
   );
   await followBacklink();
   await waitFor(() => expect(marked()).not.toBeNull());
+  const scroller = document.querySelector<HTMLElement>(".detail-scroll")!;
+  scroller.scrollTop = 33;
   current = ticket("T-2", STORED, true);
   await waitFor(() => expect(marked()).toBeNull(), { timeout: 4000 });
   current = ticket("T-2", STORED, false);
@@ -189,7 +194,7 @@ test("trashing and restoring the revealed ticket does not reveal it again", asyn
     { timeout: 4000 },
   );
   expect(marked()).toBeNull();
-  expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(1);
+  expect(scroller.scrollTop).toBe(33);
 }, 15000);
 
 test("switching to another view and back drops the highlight", async () => {

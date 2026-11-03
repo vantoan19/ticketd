@@ -1,10 +1,11 @@
-import { createContext, createElement, useContext } from "react";
+import { createContext, createElement, useContext, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { CopySourceButton } from "./CopySourceButton";
@@ -46,11 +47,44 @@ function DocumentLink({
       <>{children}</>
     );
   return href ? (
-    <a href={href} rel="noreferrer">
-      {children}
-    </a>
+    <ExternalLink href={href}>{children}</ExternalLink>
   ) : (
     <span>{children}</span>
+  );
+}
+
+/**
+ * A link in Markdown, including text written at a source such as GitHub. The app
+ * window never navigates: an https link opens in the default browser, and any
+ * other address does nothing, so a link in someone else's text cannot replace the app.
+ */
+function ExternalLink({
+  href,
+  children,
+}: {
+  href: string;
+  children?: React.ReactNode;
+}) {
+  const [error, setError] = useState("");
+  return (
+    <>
+      <a
+        href={href}
+        rel="noreferrer"
+        onClick={(event) => {
+          event.preventDefault();
+          if (!href.startsWith("https://")) return;
+          workspaceClient.openLink(href).then(
+            () => setError(""),
+            (reason: unknown) =>
+              setError(`Could not open the link: ${String(reason)}`),
+          );
+        }}
+      >
+        {children}
+      </a>
+      {error && <small role="alert">{error}</small>}
+    </>
   );
 }
 

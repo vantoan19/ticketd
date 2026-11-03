@@ -36,12 +36,236 @@
 .ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
   display: none;
 }
-.ticket-detail[data-expanded] .detail-content {
-  max-width: 864px;
+/* Expanded: the document column stays at most 800px and centered, and the
+   rail keeps its place beside it. */
+/* A 420px document and 232px rail share a row only where both fit. */
+@container ticket-detail (min-width: 652px) {
+  .ticket-detail[data-expanded] .detail-content {
+    grid-template-columns: minmax(420px, 1fr) 232px;
+  }
+  .ticket-detail[data-expanded] .detail-document {
+    width: 100%;
+    max-width: 800px;
+    justify-self: center;
+  }
 }
 .ticket-detail[data-expanded] .description-document,
 .ticket-detail[data-expanded] .description-document :is(p, li),
 .ticket-detail[data-expanded] .editor-body [role="textbox"] {
   font-size: 16px;
   line-height: 24px;
+}
+.ticket-state-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 0 24px;
+  color: var(--secondary-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.ticket-source-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+.editor-title {
+  margin-bottom: 8px;
+}
+.list-position {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.list-position-text {
+  padding-inline: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.header-source-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-link {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--link-foreground);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.source-link:hover {
+  text-decoration: underline;
+}
+.source-link:focus-visible {
+  border-radius: 4px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* Content owned by an external source: a read-only card whose header bar names the owner. */
+.source-card {
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: var(--shadow-border-base);
+}
+.source-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 16px;
+  background: var(--background);
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.source-card .description-document {
+  margin-top: 0;
+  min-height: 0;
+  padding: 16px;
+}
+.source-unavailable-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 24px;
+  padding: 16px;
+  border-radius: 6px;
+  box-shadow: var(--shadow-border-base);
+  background: var(--recessed);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.source-unavailable-notice p {
+  margin: 0;
+}
+.source-unavailable-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--secondary-foreground);
+  font-weight: 500;
+}
+.source-unavailable-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: -12px;
+  margin-top: 0;
+}
+.take-ownership-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.source-caption {
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.source-link-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.source-number,
+.rail-source-identity .source-link {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.header-source-link {
+  max-width: 240px;
+}
+.source-title-trigger {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  letter-spacing: inherit;
+  border-radius: 6px;
+}
+.source-title-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.source-readonly-explanation {
+  display: grid;
+  gap: 8px;
+  box-shadow: var(--shadow-tooltip);
+  font-size: 14px;
+  line-height: 20px;
+}
+.source-readonly-explanation .source-caption {
+  margin: 0;
+}
+.source-card-header .source-link {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.source-description-clip[data-collapsed] {
+  max-height: 260px;
+  overflow: hidden;
+}
+.source-description-toggle {
+  margin: 0 4px 8px;
+  color: var(--link-foreground);
+}
+.source-card-actions {
+  margin-left: auto;
+}
+.source-card-actions .ui-button {
+  font-size: 12px;
+  gap: 4px;
+  padding: 0 4px;
+}
+.source-card-actions .ui-button svg {
+  width: 12px;
+  height: 12px;
+}
+.rail-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: -12px;
+}
+.rail-source > .ui-button {
+  margin-left: -12px;
+}
+.take-ownership-effects {
+  list-style: disc;
+  color: var(--secondary-foreground);
+}
+.take-ownership-popover {
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+  box-shadow: var(--shadow-large);
+}
+.take-ownership-title {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
 }

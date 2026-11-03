@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,14 +16,13 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { client, type Ticket } from "@/lib/api/client";
+import type { Ticket } from "@/lib/api/client";
+import { useTicketSearch } from "./useTicketSearch";
 import {
   addableKinds,
   addLink,
   type AddableKind,
 } from "@/features/tickets/linked-work";
-
-const referencePattern = /^t-\d+$/i;
 
 /** One focused flow: choose the relationship and its direction, then the ticket. */
 export function LinkTicketDialog({
@@ -31,19 +30,26 @@ export function LinkTicketDialog({
   open,
   onOpenChange,
   onLinked,
+  initialKind,
 }: {
   ticket: Ticket;
+  /** The relationship the dialog opens on, such as Add subticket's. */
+  initialKind?: AddableKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onLinked: () => Promise<void>;
 }) {
   const [kind, setKind] = useState<AddableKind>("blocked_by");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Ticket[]>([]);
   const [chosen, setChosen] = useState<Ticket | null>(null);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const attempt = useRef<{ key: string; id: string } | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setKind(initialKind ?? "blocked_by");
+  }
 
   // A ticket has one parent, so a link that gives it a new parent moves it.
   const replacedParent =
@@ -53,52 +59,17 @@ export function LinkTicketDialog({
         ? chosen?.parent?.reference
         : undefined;
 
-  useEffect(() => {
-    const text = query.trim();
-    if (!open || !text) return;
-    let active = true;
-    const timer = window.setTimeout(() => {
-      const lookups: Promise<Ticket[]>[] = [
-        client.searchTickets(text, "all", 0),
-      ];
-      if (referencePattern.test(text))
-        lookups.push(
-          client.showTicket(text.toUpperCase()).then(
-            (found) => [found],
-            () => [],
-          ),
-        );
-      void Promise.all(lookups).then(
-        (lists) => {
-          if (!active) return;
-          const seen = new Set<string>();
-          setResults(
-            lists
-              .flat()
-              .filter(
-                (item) =>
-                  item.reference !== ticket.reference &&
-                  !seen.has(item.reference) &&
-                  seen.add(item.reference),
-              )
-              .slice(0, 8),
-          );
-        },
-        (reason: unknown) => {
-          if (active) setError(`Search failed: ${String(reason)}`);
-        },
-      );
-    }, 150);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [query, open, ticket.reference]);
+  const search = useTicketSearch(
+    query,
+    open,
+    (item) => item.reference !== ticket.reference,
+  );
+  const { results } = search;
 
   function change(next: boolean) {
     if (!next) {
       setQuery("");
-      setResults([]);
+      search.reset();
       setChosen(null);
       setError("");
       attempt.current = null;
@@ -162,7 +133,7 @@ export function LinkTicketDialog({
                 </select>
               </div>
             </Field>
-            <Field data-invalid={!!error}>
+            <Field data-invalid={!!(error || search.error)}>
               <FieldLabel htmlFor={`link-search-${ticket.id}`}>
                 Ticket
               </FieldLabel>
@@ -220,7 +191,7 @@ export function LinkTicketDialog({
                   )}
                 </>
               )}
-              <FieldError>{error}</FieldError>
+              <FieldError>{error || search.error}</FieldError>
             </Field>
           </FieldGroup>
           {replacedParent && (

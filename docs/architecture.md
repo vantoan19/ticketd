@@ -79,6 +79,113 @@ The desktop must detect writes committed by CLI processes and refresh affected v
 
 ## Verification and future evolution
 
+Future ticket source integrations use a ticketd-owned extension engine and a
+shared, versioned connector interface, beginning with a built-in GitHub Issues
+connector. Connectors handle provider-specific connection configuration,
+discovery, ticket/comment retrieval, external identity, status interpretation,
+and optional publication. ticketd owns scheduling, identity preservation, local
+data, and persistence; connectors do not modify the database directly.
+
+Provider-specific configuration and filter forms are described by schemas for
+fields, selectors, dynamic options, and validation, rendered by ticketd and
+usable through the CLI. Custom extension development, installation/distribution,
+and arbitrary extension-rendered UI are deferred. Keep the interface suitable for
+future providers without building a general plugin system. Exact interface
+signatures and execution mechanics are described next.
+
+### Source connector layers
+
+The code lives in `ticketd_core::source`, from the inside out:
+
+- **Contract** (`contract.rs`): the `Connector` trait and its provider-neutral
+  types (`ExternalIssue`, `ExternalIdentity`, `ExternalState`, `ClosureReason`,
+  `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
+  a connector that declares another version. Changing a signature or the meaning
+  of a type bumps the version. Adding an optional capability does not. Publication
+  is an optional capability with a default "unsupported" implementation.
+- **Schema** (`schema.rs`): fields, selectors, dynamic options, and validation,
+  shared by every client. Desktop forms and CLI `--set key=value` flags both build
+  raw values that `ConfigSchema::validate` checks and normalizes.
+- **Engine** (`engine.rs`): the only caller of connectors. It validates
+  configuration, walks pages with a progress guard, de-duplicates by external
+  identity, bounds previews, and holds no database handle.
+- **Connectors** (`github/`): provider translation over an `HttpTransport` seam
+  with deterministic fixtures in tests. GitHub uses the person's own credential
+  (environment token or `gh auth token`), which is never stored, exported,
+  backed up, logged, or sent to any host other than the API.
+- **Workflows** (`source/mod.rs`): methods on `Workspace` that call the engine
+  first and then write in one short transaction, so no network I/O happens while
+  the database is locked. `save_source` validates and previews before it saves.
+
+Saved source configuration is workspace data (`source_configurations`), is
+included in export and backups, and is separate from any imported ticket.
+
+An imported ticket stores three things apart, each keyed by the ticket:
+`external_identities` (provenance: which external issue it is or was, never
+deleted), `external_ownership` (authority: `external` means synchronized and
+read-only, `local` means ticketd owns it), and `source_sync` (the last observed
+external state and freshness). Imported title and description live in the
+ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
+with no transaction open and then applies the result in one short write that
+re-reads each ticket's ownership; the core rejects title, description and
+closure-owned status edits to externally owned tickets. The same write re-reads
+the saved configuration. If it changed during the network work, successful reads
+of existing tickets can still apply, while discovery imports, membership, failures
+and source-run health from the replaced rules are discarded. Saving changed rules
+invalidates match membership until the next complete discovery walk.
+
+The source conversation (an external ticket's comments and timeline events) is
+a read-only mirror in `source_conversation`, keyed by ticket and the source's
+own entry id. It has no write workflow: refresh replaces it in the same short
+write as the ticket, only when the issue changed since it was last read, and a
+failed read keeps what was retrieved. Authors are the source's identities, never
+an editing agent, and the rows survive takeover as provenance. Agents read it
+with `ticketd context T-n --conversation`.
+
+Freshness and availability are persisted, not inferred: `source_sync` records the
+start of each ticket's failure streak and `source_status` records each source's
+last run, current error and any rate-limit hold. A ticket reads _Source
+unavailable_ exactly when its latest recorded attempt failed with an unreachable,
+unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
+limit is delayed, not unavailable. Neither changes content, status or ownership.
+A successful or partial whole-source run persists its distinct checked-issue
+count with its refresh time; a failed or single-ticket run does not replace it.
+The current tracked-ticket count is read separately. A source closure time comes
+only from the latest close event in a conversation retrieved for the currently
+observed source update; missing or stale evidence remains unknown.
+A refresh ignores an observation older than the one it holds, so a slower
+overlapping run cannot move confirmed state backwards. The desktop starts
+refreshing on launch and periodically through one in-process
+`RefreshCoordinator` (one run at a time, exponential backoff on failure, rate
+limits honored across restarts); there is no daemon, and `ticketd source refresh`
+and `ticketd source status` work without the desktop.
+
+Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
+is built on a durable attempt (`publication_attempts`). One short write checks
+eligibility and saves the attempt as `in_flight` with the exact title,
+description and destination; a unique partial index allows one open attempt per
+ticket. The connector's create call then runs with no transaction open. A second
+short write links the confirmed issue (`external_identities` with origin
+`published`, ownership `external`) and marks the attempt `succeeded`. A refusal
+the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
+leaves the ticket local. Anything else (timeout, server error, unreadable
+answer, an issue that could not be recorded, a crash) leaves it `in_flight` past
+its lease or `unresolved`: the ticket stays local and a second create is
+refused until the attempt is resolved. Replaying a request for an already
+published ticket returns it without calling the connector.
+
+Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
+replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
+while a ticket reads _Source unavailable_. It flips `external_ownership` to
+`local`, clears the failure columns of `source_sync` and records an `ownership`
+history entry; the identity, content, status, relationships and notes are
+untouched. Because every refresh path re-reads authority inside its own write,
+rediscovery, restored access and a refresh already in flight neither resume
+synchronization nor import a second ticket, and nothing turns a local row back
+into `external` for an existing identity: reconnecting needs a future explicit
+action. A taken-over Duplicate keeps its status and the source's last canonical
+as provenance until it leaves Duplicate.
+
 Test core behavior through its public interface using temporary SQLite databases, including multiple-process concurrency tests. UI and CLI tests focus on their respective interactions and translation of requests/results.
 
 A future server may call the same core workflow interface. Cloud synchronization, accounts, and authorization require additional design; preserving this interface does not make synchronization automatic. GitHub Issues tracks development of ticketd and is separate from the application's local ticket storage.
@@ -139,11 +246,11 @@ canonical appears when the duplicate is a dependent): its status, `before` and
 `after` readiness (`ready`, `blocked`, or `no_ready_state`), and the blockers
 still unresolved afterwards. Readiness uses `Status::satisfies_dependency`; a
 started, finished, or trashed ticket has no Ready state, matching the Ready list.
-The duplicate counts as Canceled afterwards in a duplicate review.
+The duplicate has the Duplicate status afterwards in a duplicate review.
 For a separate graph edit after undo, preview the current endpoint against the
 replacement endpoint with `--separate` and submit the same fields with operation
 `edit_dependencies_reviewed`. Neither operation silently moves newly arrived
-edges; a retained canceled prerequisite remains unresolved.
+edges; a retained duplicate prerequisite remains unresolved.
 Personal reminders are exported in `ticket_reminders`, scoped to `local-person`.
 `ticketd reminder show|set|snooze|dismiss` manages one reminder per ticket.
 Set and snooze take an RFC 3339 instant with an explicit offset; show displays

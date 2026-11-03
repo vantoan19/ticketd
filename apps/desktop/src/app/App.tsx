@@ -1,3 +1,4 @@
+import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
@@ -15,6 +16,7 @@ import { EffortList } from "@/features/efforts/EffortList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SourceActivityContext } from "@/features/tickets/source-activity";
 
 export function App() {
   const [view, setView] = useState<
@@ -25,6 +27,8 @@ export function App() {
     | "settings"
     | "inbox"
   >("tickets");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsCardKey>("appearance");
   useThemeSync();
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
   const [viewBeforeSettings, setViewBeforeSettings] =
@@ -39,7 +43,10 @@ export function App() {
     }
   }, [view]);
   const openView = (next: typeof view) => {
-    if (next === "settings" && view !== "settings") setViewBeforeSettings(view);
+    if (next === "settings" && view !== "settings") {
+      setViewBeforeSettings(view);
+      setSettingsSection("appearance");
+    }
     setView(next);
   };
   const [inboxTarget, setInboxTarget] = useState<{
@@ -69,6 +76,8 @@ export function App() {
     };
   }, []);
   const [creating, setCreating] = useState(false);
+  // The status a group's Add action asked for; the sidebar's New ticket has none.
+  const [createStatus, setCreateStatus] = useState<string | undefined>();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
   const workspace = useTicketWorkspace(setView, setCreating);
   const {
@@ -80,6 +89,10 @@ export function App() {
     loading,
     revision,
     refresh,
+    sourceHealth,
+    sourceEntries,
+    sourceRefresh,
+    refreshSources,
     create,
     scope,
     navigation,
@@ -92,121 +105,143 @@ export function App() {
   });
   const isMobile = useIsMobile();
   return (
-    <SidebarProvider>
-      <a
-        className="skip-link"
-        href="#main-content"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById("main-content")?.focus();
-        }}
-      >
-        Skip to content
-      </a>
-      <div
-        className={
-          view === "settings" ? "workspace settings-open" : "workspace"
-        }
-      >
-        {view === "settings" ? (
-          <SettingsNav
-            onBack={() => {
-              returnToSettingsEntry.current = true;
-              setView(viewBeforeSettings);
-            }}
-          />
-        ) : (
-          <WorkspaceSidebar
-            counts={counts}
-            view={view}
-            setView={openView}
-            projects={projects}
-            efforts={efforts}
-            scope={scope}
-            navigation={navigation}
-            setCreating={setCreating}
-            createTriggerRef={createTriggerRef}
-          />
-        )}
-        <main id="main-content" tabIndex={-1} className="content-panel">
-          {isMobile && view !== "settings" && (
-            <div className="mobile-nav-bar">
-              <SidebarTrigger
-                className="mobile-nav-trigger"
-                variant="ghost"
-                size="sm"
-                aria-label="Open navigation"
-              >
-                <Menu /> Navigation
-              </SidebarTrigger>
-            </div>
-          )}
-          {error && (
-            <p role="alert" className="global-error">
-              {error}
-            </p>
-          )}
-          <CreateTicketDialog
-            open={creating}
-            onOpenChange={setCreating}
-            triggerRef={createTriggerRef}
-            navigation={navigation}
-            projects={projects}
-            efforts={efforts}
-            create={create}
-          />
-          {view === "settings" && (
-            <SettingsView
-              onOpenInbox={() => setView("inbox")}
-              onRestore={async () => {
-                setSelected(null);
-                setDetails({});
-                bulk.reset();
-                await refresh();
-              }}
-            />
-          )}
-          {
-            <div className="management" hidden={view !== "projects"}>
-              <Projects
-                projects={projects}
-                loading={loading}
-                onChange={refresh}
-              />
-            </div>
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: sourceHealth.refreshing || sourceRefresh.running,
+        sources: sourceHealth.sources,
+        entries: sourceEntries,
+        intervalSecs: sourceHealth.interval_secs ?? null,
+        openSettings: () => {
+          openView("settings");
+          setSettingsSection("source-github");
+        },
+        refreshAll: () => refreshSources(),
+      }}
+    >
+      <SidebarProvider>
+        <a
+          className="skip-link"
+          href="#main-content"
+          onClick={(event) => {
+            event.preventDefault();
+            document.getElementById("main-content")?.focus();
+          }}
+        >
+          Skip to content
+        </a>
+        <div
+          className={
+            view === "settings" ? "workspace settings-open" : "workspace"
           }
-          {(view === "efforts" || view === "archived-efforts") && (
-            <EffortList
-              efforts={efforts}
-              archived={view === "archived-efforts"}
-              onOpen={(id) => scope("all", "all", id)}
-              refresh={refresh}
-            />
-          )}
-          {view === "inbox" && (
-            <Inbox
-              revision={revision}
-              select={(reference, noteId) => {
-                setInboxTarget(
-                  noteId ? { reference, id: noteId, key: Date.now() } : null,
-                );
-                setSelected(reference);
-                setView("tickets");
+        >
+          {view === "settings" ? (
+            <SettingsNav
+              selected={settingsSection}
+              onSelect={setSettingsSection}
+              onBack={() => {
+                returnToSettingsEntry.current = true;
+                setView(viewBeforeSettings);
               }}
             />
+          ) : (
+            <WorkspaceSidebar
+              counts={counts}
+              view={view}
+              setView={openView}
+              projects={projects}
+              efforts={efforts}
+              scope={scope}
+              navigation={navigation}
+              setCreating={(value) => {
+                if (value) setCreateStatus(undefined);
+                setCreating(value);
+              }}
+              createTriggerRef={createTriggerRef}
+            />
           )}
-          <TicketWorkspaceView
-            workspace={workspace}
-            bulk={bulk}
-            hidden={view !== "tickets"}
-            inboxTarget={inboxTarget}
-            onCreate={(trigger) => {
-              createTriggerRef.current = trigger;
-              setCreating(true);
-            }}
-          />
-        </main>
-      </div>
-    </SidebarProvider>
+          <main id="main-content" tabIndex={-1} className="content-panel">
+            {isMobile && view !== "settings" && (
+              <div className="mobile-nav-bar">
+                <SidebarTrigger
+                  className="mobile-nav-trigger"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Open navigation"
+                >
+                  <Menu /> Navigation
+                </SidebarTrigger>
+              </div>
+            )}
+            {error && (
+              <p role="alert" className="global-error">
+                {error}
+              </p>
+            )}
+            <CreateTicketDialog
+              open={creating}
+              onOpenChange={setCreating}
+              triggerRef={createTriggerRef}
+              navigation={navigation}
+              {...(createStatus && { initialStatus: createStatus })}
+              projects={projects}
+              efforts={efforts}
+              create={create}
+            />
+            {view === "settings" && (
+              <SettingsView
+                selected={settingsSection}
+                onOpenInbox={() => setView("inbox")}
+                onRestore={async () => {
+                  setSelected(null);
+                  setDetails({});
+                  bulk.reset();
+                  await refresh();
+                }}
+              />
+            )}
+            {
+              <div className="management" hidden={view !== "projects"}>
+                <Projects
+                  projects={projects}
+                  loading={loading}
+                  onChange={refresh}
+                />
+              </div>
+            }
+            {(view === "efforts" || view === "archived-efforts") && (
+              <EffortList
+                efforts={efforts}
+                archived={view === "archived-efforts"}
+                onOpen={(id) => scope("all", "all", id)}
+                refresh={refresh}
+              />
+            )}
+            {view === "inbox" && (
+              <Inbox
+                revision={revision}
+                select={(reference, noteId) => {
+                  setInboxTarget(
+                    noteId ? { reference, id: noteId, key: Date.now() } : null,
+                  );
+                  setSelected(reference);
+                  setView("tickets");
+                }}
+              />
+            )}
+            <TicketWorkspaceView
+              workspace={workspace}
+              bulk={bulk}
+              hidden={view !== "tickets"}
+              inboxTarget={inboxTarget}
+              onCreate={(trigger, status) => {
+                createTriggerRef.current = trigger;
+                setCreateStatus(status);
+                setCreating(true);
+              }}
+            />
+          </main>
+        </div>
+      </SidebarProvider>
+    </SourceActivityContext.Provider>
   );
 }

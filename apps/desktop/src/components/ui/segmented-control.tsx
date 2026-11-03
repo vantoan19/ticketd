@@ -6,6 +6,7 @@ export type SegmentedOption<T extends string> = {
   value: T;
   label: string;
   icon?: ReactNode;
+  count?: number;
   disabled?: boolean;
   title?: string;
 };
@@ -48,7 +49,10 @@ export function SegmentedControl<T extends string>({
           className="inline-flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0"
         >
           {option.icon}
-          {option.label}
+          {option.label}{" "}
+          {option.count !== undefined && (
+            <span className="segmented-count">{option.count}</span>
+          )}
         </RadioGroup.Item>
       ))}
     </RadioGroup.Root>

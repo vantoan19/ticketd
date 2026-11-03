@@ -1,3 +1,4 @@
+import { externalDuplicateTarget } from "./ticket-source";
 import type { Ticket } from "@/lib/api/client";
 
 export type RowScope = {
@@ -34,8 +35,14 @@ export function readinessLabel(value: Readiness) {
 /** At most one context item: duplicate, parent, Effort, then project. */
 export function rowContext(ticket: Ticket, scope: RowScope): string | null {
   if (ticket.duplicate_of) return `Duplicate of ${ticket.duplicate_of}`;
+  // An externally closed duplicate names the source's canonical issue, or says it is unknown.
+  const target = externalDuplicateTarget(ticket);
+  if (target)
+    return target.kind === "external"
+      ? `Duplicate of ${target.ticket ?? target.display}`
+      : "Duplicate · target unknown";
   if (ticket.parent)
-    return `Parent ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
+    return `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
   const effort =
     scope.showEffort && ticket.effort_id
       ? scope.efforts.find((item) => item.id === ticket.effort_id)

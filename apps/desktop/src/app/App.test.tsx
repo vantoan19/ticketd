@@ -85,6 +85,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
       if (command === "list_projects" || command === "list_efforts") return [];
       if (command === "list_notes") return [];
       if (command === "find_tickets") return [saved];
+      if (command === "count_tickets") return bridgeDefault(command);
       if (command === "show_ticket") return saved;
       if (command === "ticket_history") return [];
       if (command === "change_ticket" && args?.patch?.title) {
@@ -199,6 +200,10 @@ test("opens a related ticket outside the filtered list and preserves drafts when
         return {
           relationships: {
             parent: null,
+            children_progress: {
+              total: args?.reference === first.reference ? 1 : 0,
+              done: 0,
+            },
             children:
               args?.reference === first.reference
                 ? {
@@ -340,7 +345,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
-  bridge.invoke.mockResolvedValue([]);
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
   render(<App />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -418,8 +425,9 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  const first = screen.getByRole("button", { name: /A very long title/ });
-  const second = screen.getByRole("button", { name: /Second/ });
+  // The In progress group lists before the Todo group.
+  const first = screen.getByRole("button", { name: /Second/ });
+  const second = screen.getByRole("button", { name: /A very long title/ });
   first.focus();
   fireEvent.keyDown(first, { key: "ArrowDown" });
   expect(document.activeElement).toBe(second);
@@ -429,16 +437,18 @@ test("moves focus between ticket rows without opening them until Enter, and reta
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(second.getAttribute("aria-pressed")).toBe("true");
-  tickets = [tickets[0]!, { ...tickets[1]!, status: "Done" }];
+  tickets = [{ ...tickets[0]!, status: "Done" }, tickets[1]!];
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
   expect(
-    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+    screen
+      .getByRole("button", { name: /A very long title/ })
+      .getAttribute("aria-pressed"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
-    "Done",
-  );
+  // The row moved to the Done group; the group header names its status.
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
 });
 
 test("clears additional filters while preserving the selected Effort", async () => {
@@ -483,6 +493,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
+  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
     target: { value: "zebra" },
   });
@@ -589,7 +600,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
       });
     }
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -632,7 +643,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -673,7 +684,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   render(<App />);
   await act(async () => {
@@ -723,6 +734,7 @@ async function renderBulk(handlers: Record<string, unknown>) {
   bridge.invoke.mockImplementation(async (command: string, args?: unknown) => {
     const handler = handlers[command];
     if (typeof handler === "function") return handler(args);
+    if (command === "count_tickets") return handler ?? bridgeDefault(command);
     return handler ?? [];
   });
   render(<App />);
@@ -752,15 +764,13 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   fireEvent.click(screen.getByRole("button", { name: "Select all 2" }));
   expect(screen.getByText("2 selected")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Select all 2" })).toBeNull();
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   expect(
     screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
   ).toBe("true");
-  expect(screen.getByRole("button", { name: /Second/ }).textContent).toContain(
-    "Done",
-  );
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
   expect(screen.queryByText("2 selected")).toBeNull();
   expect(
     within(screen.getByRole("region", { name: "Bulk edit" })).getByRole(
@@ -790,7 +800,7 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
-  openMenu("Change status of selected tickets");
+  openMenu("Status of selected tickets");
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert").textContent;
@@ -962,7 +972,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "find_tickets") return [ticket];
     if (command === "show_ticket") return ticket;
-    return [];
+    return command === "count_tickets" ? bridgeDefault(command) : [];
   });
   const { container } = render(<App />);
   await act(async () => {
@@ -1061,6 +1071,7 @@ test("a selection ends when the search or filters change, and the bar can be ski
   expect(document.activeElement).toBe(
     screen.getByRole("region", { name: "Bulk edit" }),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Search tickets" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Search tickets" }), {
     target: { value: "second" },
   });
@@ -1071,4 +1082,442 @@ test("a selection ends when the search or filters change, and the bar can be ski
   expect(
     screen.queryByRole("link", { name: "Skip to selection actions" }),
   ).toBeNull();
+});
+
+const zeroCounts = {
+  total: 0,
+  todo: 0,
+  in_progress: 0,
+  in_review: 0,
+  done: 0,
+  canceled: 0,
+  duplicate: 0,
+};
+/** Counts as the core reports them, with `total` summed over the statuses. */
+const counted = (counts: Partial<typeof zeroCounts>) => {
+  const merged = { ...zeroCounts, ...counts, total: 0 };
+  merged.total =
+    merged.todo +
+    merged.in_progress +
+    merged.in_review +
+    merged.done +
+    merged.canceled +
+    merged.duplicate;
+  return merged;
+};
+
+test("totals and group counts describe the whole result, not the loaded page", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "In progress", availability: null }),
+      bulkTicket(2),
+    ],
+    count_tickets: counted({ in_progress: 1, todo: 119 }),
+  });
+  expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
+  expect(screen.getByText("120 tickets")).toBeTruthy();
+  // One Todo ticket is on this page of the 119 in the result.
+  expect(screen.getByText("1 of 119")).toBeTruthy();
+  expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
+  const next = screen.getByRole("button", { name: "Next" });
+  expect((next as HTMLButtonElement).disabled).toBe(false);
+  // The list is requested in workflow order and counted with the same filter.
+  const asked = bridge.invoke.mock.calls
+    .filter(([command]) => command === "find_tickets")
+    .map(([, args]) => args.filter.order);
+  expect(new Set(asked)).toEqual(new Set(["Workflow"]));
+  const countCall = bridge.invoke.mock.calls.find(
+    ([command]) => command === "count_tickets",
+  );
+  expect(countCall?.[1].filter.order).toBe("Workflow");
+});
+
+test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
+  const github = bulkTicket(1, {
+    source: {
+      provider: "github",
+      provider_name: "GitHub",
+      place: "acme/api",
+      number: "#98",
+      status_choices: ["Todo", "In progress", "In review"],
+      id: "9",
+      locator: "acme/api#98",
+      display: "acme/api#98",
+      url: "https://github.com/acme/api/issues/98",
+      origin: "imported",
+      ownership: "external",
+      state: { state: "open" },
+      closure_unrecognized: false,
+      last_refreshed_at: null,
+      last_attempt_at: null,
+      last_error: null,
+      content_locked: true,
+      status_locked: false,
+      duplicate_target: null,
+    },
+  });
+  await renderBulk({
+    find_tickets: () => [github],
+    count_tickets: counted({ todo: 1 }),
+    count_by_source: { all: 3, local: 2, providers: { github: 1 } },
+    list_sources: [
+      {
+        connector: {
+          provider: "github",
+          name: "GitHub",
+          contract_version: 1,
+          capabilities: ["discover", "fetch"],
+          schema: { fields: [] },
+        },
+        saved: {
+          provider: "github",
+          config: {},
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      },
+    ],
+    refresh_sources: {
+      imported: ["T-1"],
+      updated: [],
+      unchanged: 0,
+      failures: [],
+      refreshed_at: "2026-02-01T00:00:00Z",
+    },
+  });
+  const filter = screen.getByRole("radiogroup", { name: "Ticket source" });
+  expect(
+    within(filter)
+      .getAllByRole("radio")
+      .map((radio) => radio.textContent),
+  ).toEqual(["All 3", "GitHub 1", "Local 2"]);
+  expect(screen.getByText("#98")).toBeTruthy();
+  fireEvent.click(within(filter).getByRole("radio", { name: /GitHub/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const sourceOf = (command: string) =>
+    bridge.invoke.mock.calls
+      .filter(([name]) => name === command)
+      .map(([, args]) => args.filter.source)
+      .at(-1);
+  expect(sourceOf("find_tickets")).toEqual({ Provider: "github" });
+  expect(sourceOf("count_tickets")).toEqual({ Provider: "github" });
+  // The list's one Refresh also imports from the configured sources.
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await act(async () => {});
+  expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
+    ticket: null,
+  });
+  expect(screen.queryByText("1 new, 0 updated")).toBeNull();
+  expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+});
+
+test("the sidebar footer follows persisted source health and keeps the list", async () => {
+  let health: unknown = {
+    refreshing: false,
+    sources: [
+      {
+        provider: "github",
+        last_attempt_at: "2026-02-01T00:10:00Z",
+        last_refreshed_at: "2026-02-01T00:00:00Z",
+        error: { code: "unavailable", message: "Network is down." },
+        failing_since: "2026-02-01T00:10:00Z",
+        retry_after: null,
+        unavailable_tickets: 1,
+        health: "unavailable",
+        partial_message: null,
+      },
+    ],
+  };
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    count_tickets: counted({ todo: 1 }),
+    source_health: () => health,
+  });
+  const footer = screen.getByRole("group", { name: "Ticket sources" });
+  expect(within(footer).getByText("1 source issue")).toBeTruthy();
+  // The failure never empties the list.
+  expect(screen.getByText("First")).toBeTruthy();
+  // A refresh started elsewhere (startup or periodic) shows up on the next poll.
+  health = { ...(health as object), refreshing: true };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2100);
+  });
+  expect(within(footer).getByText("Refreshing GitHub…")).toBeTruthy();
+  health = {
+    refreshing: false,
+    sources: [
+      {
+        provider: "github",
+        last_attempt_at: "2026-02-01T00:20:00Z",
+        last_refreshed_at: "2026-02-01T00:20:00Z",
+        error: null,
+        failing_since: null,
+        retry_after: null,
+        unavailable_tickets: 0,
+        health: "synced",
+        partial_message: null,
+      },
+    ],
+  };
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2100);
+  });
+  expect(within(footer).queryByText("GitHub unavailable")).toBeNull();
+  expect(within(footer).getByText(/GitHub synced/)).toBeTruthy();
+});
+
+test("Previous and Next follow the visible list across groups and keep the selection", async () => {
+  const tickets = [
+    bulkTicket(2, { status: "In progress", availability: null }),
+    bulkTicket(1),
+    bulkTicket(3),
+  ];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: (args: { reference: string }) =>
+      tickets.find((item) => item.reference === args.reference),
+    count_tickets: counted({ in_progress: 1, todo: 2 }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  expect(screen.getByText("2 of 3")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  await act(async () => {});
+  expect(screen.getByText("3 of 3")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Next ticket" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Previous ticket" }));
+  await act(async () => {});
+  expect(screen.getByText("1 of 3")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /Second/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+});
+
+test("a status move between groups keeps the selected ticket, its draft, and focus", async () => {
+  let tickets: (Omit<ReturnType<typeof bulkTicket>, "availability"> & {
+    availability: string | null;
+  })[] = [bulkTicket(1)];
+  await renderBulk({
+    find_tickets: () => tickets,
+    show_ticket: () => tickets[0],
+    count_tickets: () =>
+      counted({ [tickets[0]?.status === "Done" ? "done" : "todo"]: 1 }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {});
+  const title = screen.getByRole("textbox", { name: "Title" });
+  title.focus();
+  fireEvent.change(title, { target: { value: "My unsaved title" } });
+  tickets = [{ ...bulkTicket(1), status: "Done", availability: null }];
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(screen.getByRole("heading", { name: "Done" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /First/ }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Title" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "My unsaved title",
+  );
+});
+
+test("a group's Add action starts a ticket in that status", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "In review", availability: null }),
+    ],
+    count_tickets: counted({ in_review: 1 }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add In review ticket" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", { name: "New ticket" });
+  expect(
+    within(dialog).getByRole("combobox", { name: "Status" }).textContent,
+  ).toContain("In review");
+});
+
+test("the Duplicate group's Add action chooses a ticket and then reviews its canonical ticket", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "Duplicate", availability: null }),
+    ],
+    count_tickets: counted({ duplicate: 1 }),
+    search_tickets: () => [bulkTicket(2)],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", {
+    name: "Mark a ticket as duplicate",
+  });
+  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
+    target: { value: "second" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  expect(
+    within(dialog).getByText(/Choose the canonical ticket for T-2/),
+  ).toBeTruthy();
+  // The cursor is where the next answer goes, not on the dialog's frame.
+  expect(document.activeElement).toBe(
+    within(dialog).getByLabelText("Canonical ticket reference"),
+  );
+  // Nothing is marked until the review names a canonical ticket.
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+});
+
+test("an exact reference leads the matches in the mark-duplicate search", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1, { status: "Duplicate", availability: null }),
+    ],
+    count_tickets: counted({ duplicate: 1 }),
+    search_tickets: () => [bulkTicket(2)],
+    show_ticket: () => bulkTicket(3),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", {
+    name: "Mark a ticket as duplicate",
+  });
+  fireEvent.change(within(dialog).getByLabelText("Ticket to mark"), {
+    target: { value: "T-3" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  const matches = within(dialog).getByRole("list", { name: "Matches" });
+  expect(within(matches).getAllByRole("button")[0]?.textContent).toContain(
+    "T-3",
+  );
+});
+
+test("Next at the end of a page opens the first ticket of the next page", async () => {
+  const page = (offset: number, size: number) =>
+    Array.from({ length: size }, (_, index) => ({
+      ...bulkTicket(1),
+      id: String(offset + index + 1),
+      reference: `T-${offset + index + 1}`,
+      title: `Ticket ${offset + index + 1}`,
+    }));
+  const rows = (offset: number) => page(offset, offset === 0 ? 50 : 10);
+  const position = () =>
+    document.querySelector(".list-position-text")?.textContent;
+  let offset = 0;
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) => {
+      offset = args.filter.offset;
+      return rows(offset);
+    },
+    show_ticket: (args: { reference: string }) => ({
+      ...bulkTicket(1),
+      id: args.reference,
+      reference: args.reference,
+      title: args.reference,
+    }),
+    count_tickets: counted({ todo: 60 }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Ticket 50/ }));
+  await act(async () => {});
+  expect(position()).toBe("50 of 60");
+  const nextTicket = screen.getByRole("button", { name: "Next ticket" });
+  nextTicket.focus();
+  fireEvent.click(nextTicket);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offset).toBe(50);
+  expect(position()).toBe("51 of 60");
+  // Keyboard focus stays on the control across the page edge.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Next ticket" }),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: /Ticket 51/ })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+});
+
+test("pressing Next on the last page keeps focus in the pagination, on Previous", async () => {
+  const all = Array.from({ length: 50 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+  }));
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) =>
+      args.filter.offset === 0
+        ? all
+        : [{ ...bulkTicket(1), id: "51", reference: "T-51" }],
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: 51 }),
+  });
+  const next = screen.getByRole("button", { name: "Next" });
+  next.focus();
+  fireEvent.click(next);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect((next as HTMLButtonElement).disabled).toBe(true);
+  // Never the document root: the person can keep paging with the keyboard.
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Previous" }),
+  );
+});
+
+test("a later page that empties moves back to the last page that exists", async () => {
+  const all = Array.from({ length: 50 }, (_, index) => ({
+    ...bulkTicket(1),
+    id: String(index + 1),
+    reference: `T-${index + 1}`,
+    title: `Ticket ${index + 1}`,
+  }));
+  let total = 51;
+  const offsets: number[] = [];
+  await renderBulk({
+    find_tickets: (args: { filter: { offset: number } }) => {
+      offsets.push(args.filter.offset);
+      if (args.filter.offset === 0) return all;
+      return total > 50
+        ? [{ ...bulkTicket(1), id: "51", reference: "T-51" }]
+        : [];
+    },
+    show_ticket: () => all[0],
+    count_tickets: () => counted({ todo: total }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offsets.at(-1)).toBe(50);
+  // The only ticket on page 2 leaves the result (trashed, or closed by an agent).
+  total = 50;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2500);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(offsets.at(-1)).toBe(0);
+  expect(screen.getByText("50 tickets")).toBeTruthy();
+  expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });

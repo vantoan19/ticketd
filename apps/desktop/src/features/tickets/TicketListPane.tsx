@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -6,14 +6,17 @@ import { EffortHeader } from "@/features/efforts/EffortHeader";
 import { useEffortView } from "@/features/efforts/useEffortView";
 import { effortsClient } from "@/lib/api/efforts";
 import { BulkControls } from "@/features/tickets/BulkControls";
+import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
+import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { Ticket } from "@/lib/api/client";
-import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
-
-const PAGE_SIZE = 50;
+import {
+  PAGE_SIZE,
+  type TicketWorkspace,
+} from "@/features/tickets/useTicketWorkspace";
 
 /** The list header, filters, bulk editing, result states, and pagination. */
 export function TicketListPane({
@@ -27,7 +30,7 @@ export function TicketListPane({
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
   onOpen: (reference: string) => void;
-  onCreate: (trigger: HTMLButtonElement) => void;
+  onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
   const {
     projects,
@@ -47,8 +50,17 @@ export function TicketListPane({
     setAvailability,
     family,
     setFamily,
+    source,
+    setSource,
+    sourceCounts,
+    configuredSources,
+    sourceRefresh,
+    refreshSources,
     trash,
     tickets,
+    counts,
+    total,
+    grouped,
     selected,
     loading,
     refresh,
@@ -59,6 +71,7 @@ export function TicketListPane({
     revision,
   } = workspace;
   // An Effort scope shows the Effort's own header instead of a plain title.
+  const [markingDuplicate, setMarkingDuplicate] = useState(false);
   const effortScope = !trash && navigation.effort ? navigation.effort : "";
   const scopedEffort = efforts.find((item) => item.id === effortScope);
   const effortState = useEffortView(effortScope, revision, refresh);
@@ -66,7 +79,8 @@ export function TicketListPane({
     navigation.effort !== effort ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
-    Boolean(query || tags || family);
+    Boolean(query || tags || family) ||
+    source !== "all";
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -86,10 +100,29 @@ export function TicketListPane({
     tags,
     availability,
     family,
+    source,
     trash,
     navigation,
   ]);
   const previousView = useRef(viewKey);
+  // Pressing Previous or Next can disable that very button (the first or last
+  // page). Focus then moves to the other button, or to the list, never to the
+  // document root.
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  const paged = useRef<"previous" | "next" | null>(null);
+  useEffect(() => {
+    const which = paged.current;
+    if (!which || loading) return;
+    const own = which === "previous" ? previousButton : nextButton;
+    const other = which === "previous" ? nextButton : previousButton;
+    if (!own.current?.disabled) return;
+    paged.current = null;
+    (other.current && !other.current.disabled
+      ? other.current
+      : listRef.current
+    )?.focus();
+  });
   const { clearSelection } = bulk;
   useEffect(() => {
     if (previousView.current === viewKey) return;
@@ -99,10 +132,29 @@ export function TicketListPane({
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
+  const filterProps = {
+    query,
+    setQuery,
+    effort,
+    setEffort,
+    status,
+    setStatus,
+    tags,
+    setTags,
+    availability,
+    setAvailability,
+    family,
+    setFamily,
+    efforts,
+    setOffset,
+    navigation,
+    clearFilters,
+  };
   return (
     <section
       className="ticket-list"
       ref={listRef}
+      tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
       {scopedEffort ? (
@@ -111,47 +163,48 @@ export function TicketListPane({
           efforts={efforts}
           projects={projects}
           state={effortState}
-        />
+        >
+          <TicketFilters part="controls" {...filterProps} />
+        </EffortHeader>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
             {scopeName}
           </h1>
           <p>
-            {tickets.length} {tickets.length === 1 ? "ticket" : "tickets"}
-            {tickets.length === PAGE_SIZE ? " shown" : ""}
+            {total} {total === 1 ? "ticket" : "tickets"}
           </p>
           <IconButton
             className="list-refresh"
             label="Refresh"
-            onClick={() => void refresh()}
+            disabled={sourceRefresh.running}
+            onClick={() =>
+              void (configuredSources.length > 0 ? refreshSources() : refresh())
+            }
           >
             <RefreshCw />
           </IconButton>
+          {!trash && <TicketFilters part="controls" {...filterProps} />}
+          {configuredSources.length > 0 && (
+            <SourceRefresh
+              providers={configuredSources}
+              state={sourceRefresh}
+              tickets={tickets}
+            />
+          )}
         </div>
       )}
-      {!trash && (
-        <TicketFilters
-          {...{
-            query,
-            setQuery,
-            effort,
-            setEffort,
-            status,
-            setStatus,
-            tags,
-            setTags,
-            availability,
-            setAvailability,
-            family,
-            setFamily,
-            efforts,
-            setOffset,
-            navigation,
-            clearFilters,
-          }}
-        />
+      {!trash && (configuredSources.length > 0 || source !== "all") && (
+        <>
+          <SourceFilter
+            value={source}
+            onChange={setSource}
+            counts={sourceCounts}
+            providers={configuredSources}
+          />
+        </>
       )}
+      {!trash && <TicketFilters part="chips" {...filterProps} />}
 
       {queryError ? (
         <div className="empty-state" role="alert">
@@ -182,7 +235,14 @@ export function TicketListPane({
                 <p>Nothing matches the current filters.</p>
               )}
               <Button variant="outline" onClick={clearFilters}>
-                Clear filters
+                {query &&
+                !tags &&
+                !status &&
+                !availability &&
+                !family &&
+                !effort
+                  ? "Clear search"
+                  : "Clear filters"}
               </Button>
             </>
           ) : effortScope ? (
@@ -237,6 +297,16 @@ export function TicketListPane({
               projects,
             }}
             selected={selected}
+            {...(grouped &&
+              counts && {
+                grouping: {
+                  counts,
+                  onAdd: (status: string, trigger: HTMLButtonElement) => {
+                    if (status === "Duplicate") setMarkingDuplicate(true);
+                    else onCreate(trigger, status);
+                  },
+                },
+              })}
             selectable={!trash}
             selectionDisabled={bulk.pending}
             bulkSelection={bulk.selection}
@@ -263,29 +333,43 @@ export function TicketListPane({
           />
         </>
       )}
-      {!trash && (offset > 0 || tickets.length === PAGE_SIZE) && (
+      {!trash && (offset > 0 || total > PAGE_SIZE) && (
         <div className="pagination">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            ref={previousButton}
             disabled={offset === 0}
             onClick={() => {
+              paged.current = "previous";
               setOffset(Math.max(0, offset - PAGE_SIZE));
             }}
           >
             Previous
-          </button>
-          <span> Page {Math.floor(offset / PAGE_SIZE) + 1} </span>
-          <button
-            type="button"
-            disabled={tickets.length < PAGE_SIZE}
+          </Button>
+          <span>
+            {" "}
+            Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            ref={nextButton}
+            disabled={offset + tickets.length >= total}
             onClick={() => {
+              paged.current = "next";
               setOffset(offset + PAGE_SIZE);
             }}
           >
             Next
-          </button>
+          </Button>
         </div>
       )}
+      <MarkDuplicateDialog
+        open={markingDuplicate}
+        onOpenChange={setMarkingDuplicate}
+        refresh={refresh}
+      />
       {showBulk && (
         <BulkControls
           bulk={bulk}

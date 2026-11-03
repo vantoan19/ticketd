@@ -52,6 +52,28 @@ test("words subticket changes, and the Inbox shares the same sentences", () => {
   ).toBe("Added subticket T-7 · codex");
 });
 
+test("an attached issue reads apart from a publication", () => {
+  expect(sentence("source", "", "acme/api#7")).toBe("Published to acme/api#7");
+  expect(sentence("source", "attached", "acme/api#7")).toBe(
+    "Linked to acme/api#7 after an uncertain publication",
+  );
+});
+
 test("falls back to a generic sentence for unknown kinds", () => {
   expect(sentence("future:kind", "a", "b")).not.toContain("future:kind");
+});
+
+test("source and publication history explain observations without inventing an import status", () => {
+  expect(sentence("publication_unresolved", "attempt", "acme/api")).toBe(
+    "Publish to acme/api — no response, outcome unknown",
+  );
+  expect(sentence("source_unavailable", "", "not_found")).toBe(
+    "Source unavailable (not found)",
+  );
+  expect(sentence("source_import", "Todo", "acme/api#98")).toBe(
+    "Imported from acme/api#98 as Todo",
+  );
+  expect(sentence("source_import", "", "acme/api#98")).toBe(
+    "Imported from acme/api#98",
+  );
 });

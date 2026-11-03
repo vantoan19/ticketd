@@ -1,15 +1,10 @@
 import { TicketHeader } from "@/features/tickets/TicketHeader";
-import { Evidence } from "@/features/tickets/Evidence";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
-import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
+import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
-import { TicketProperties } from "@/features/tickets/TicketProperties";
 import type { Effort } from "@/lib/api/efforts";
-import { LinkedWork } from "@/features/tickets/LinkedWork";
-import { Activity } from "@/features/tickets/Activity";
-import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
-import { TicketEditor } from "@/features/tickets/TicketEditor";
+import { TicketPage } from "@/features/tickets/TicketPage";
 type NoteTarget = { id: string; key: number };
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
@@ -38,7 +33,15 @@ export function TicketDetails({
   revision,
   refresh,
   updateTicket,
+  position = null,
+  onAdjacent,
+  outsideResults = false,
 }: {
+  outsideResults?: boolean;
+  /** The selected ticket's place in the visible list, across pages. */
+  position?: { index: number; total: number } | null;
+  /** Open the ticket before (-1) or after (1) the selected one in the list. */
+  onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
   /** The mention being followed, if any; the workspace clears it on navigation. */
   mention: FollowedMention | null;
@@ -54,6 +57,17 @@ export function TicketDetails({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  // Relationship links unmount their focused control. Keep keyboard navigation
+  // on the selected reference without stealing focus from Previous/Next.
+  useEffect(() => {
+    if (
+      selected &&
+      (document.activeElement === document.body ||
+        document.activeElement?.id === "detail-heading")
+    ) {
+      document.getElementById("detail-heading")?.focus();
+    }
+  }, [selected]);
   const [graphReference, setGraphReference] = useState<string | null>(null);
   // The graph belongs to the ticket it opened from; selecting another closes it.
   const graphOpen = graphReference !== null && graphReference === selected;
@@ -107,114 +121,56 @@ export function TicketDetails({
         selected={selected}
         ticket={ticket}
         expanded={expanded}
-        revision={revision}
         onExpand={onExpand}
         onReturn={onReturn}
         onClose={() => open(null)}
         onOpenGraph={() => setGraphReference(selected)}
         refresh={refresh}
         updateTicket={updateTicket}
+        position={position}
+        {...(onAdjacent && { onAdjacent })}
       />
-      {selected === null && (
-        <div className="detail-empty">
-          <strong>Select a ticket</strong>
-          <p>Read its description, links, and activity here.</p>
-        </div>
-      )}
-      {Object.values(details).map((item) => (
-        <div
-          className="detail-content"
-          key={item.id}
-          hidden={item.reference !== selected}
-        >
-          {item.trashed ? (
-            <>
-              <h3>{item.title}</h3>
-              <TicketProperties
-                ticket={item}
-                projects={projects}
-                efforts={efforts}
-                onSaved={updateTicket}
-                refresh={refresh}
-                onOpenTicket={open}
-              />
-              <div className="editor-body">
-                <p className="description-heading">Description</p>
-                <div className="markdown-preview description-document">
-                  <MarkdownDocument
-                    source={item.body}
-                    select={open}
-                    revision={revision}
-                  />
-                </div>
-              </div>
-            </>
-          ) : (
-            <TicketEditor
-              ticket={item}
-              onSaved={updateTicket}
-              select={open}
-              revision={revision}
-              mention={
-                mention?.reference === item.reference &&
-                !mention.noteId &&
-                mention.ready
-                  ? mention
-                  : null
-              }
-            >
-              <TicketProperties
-                ticket={item}
-                projects={projects}
-                efforts={efforts}
-                onSaved={updateTicket}
-                refresh={refresh}
-                onOpenTicket={open}
-              />
-            </TicketEditor>
-          )}
-          {item.reference === selected && !item.trashed && (
-            <LinkedWork
-              ticket={item}
-              revision={revision}
-              refresh={refresh}
-              select={open}
-              onOpenGraph={() => setGraphReference(item.reference)}
-            />
-          )}
-          {item.reference === selected && (
-            <Evidence
-              reference={item.reference}
-              revision={revision}
-              trashed={item.trashed}
-              refresh={refresh}
-            />
-          )}
-          {item.reference === selected && (
-            <Backlinks
-              reference={item.reference}
-              revision={revision}
-              select={(target) => setSelected(target.reference, target)}
-            />
-          )}
-          <Activity
-            reference={item.reference}
-            target={newest(
+      <div className="detail-scroll">
+        {outsideResults && (
+          <p className="selection-context" role="status">
+            This ticket is outside the current results.
+          </p>
+        )}
+        {selected === null && (
+          <div className="detail-empty">
+            <strong>Select a ticket</strong>
+            <p>Read its description, links, and activity here.</p>
+          </div>
+        )}
+        {Object.values(details).map((item) => (
+          <TicketPage
+            key={item.id}
+            ticket={item}
+            active={item.reference === selected}
+            projects={projects}
+            efforts={efforts}
+            revision={revision}
+            refresh={refresh}
+            updateTicket={updateTicket}
+            select={open}
+            onOpenGraph={() => setGraphReference(item.reference)}
+            noteTarget={newest(
               inboxTarget?.reference === item.reference ? inboxTarget : null,
               mention?.reference === item.reference && mention.noteId
                 ? { id: mention.noteId, key: mention.key }
                 : null,
             )}
-            projects={projects}
-            efforts={efforts}
-            status={item.status}
-            revision={revision}
-            active={item.reference === selected}
-            trashed={item.trashed}
-            select={open}
+            mention={
+              mention?.reference === item.reference &&
+              !mention.noteId &&
+              mention.ready
+                ? mention
+                : null
+            }
+            onMention={(target) => setSelected(target.reference, target)}
           />
-        </div>
-      ))}
+        ))}
+      </div>
     </section>
   );
 }

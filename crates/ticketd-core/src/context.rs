@@ -16,6 +16,9 @@ pub struct ContextOptions {
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
+    /// The source's comments and events for an externally sourced ticket.
+    #[serde(default)]
+    pub conversation: bool,
     pub offset: u32,
 }
 #[derive(Debug, Serialize)]
@@ -53,16 +56,26 @@ pub struct ContextRelated {
     pub trashed: bool,
     pub unresolved: bool,
 }
+/// How far along a ticket's subtickets are, over all of them rather than the page shown.
+#[derive(Debug, Serialize)]
+pub struct ContextProgress {
+    pub total: u64,
+    pub done: u64,
+}
 #[derive(Debug, Serialize)]
 pub struct ContextRelationships {
     pub parent: Option<ContextRelated>,
     pub children: ContextPage<ContextRelated>,
+    pub children_progress: ContextProgress,
     pub prerequisites: ContextPage<ContextRelated>,
     pub blocking: ContextPage<ContextRelated>,
     pub related: ContextPage<ContextRelated>,
     pub discovered_while: ContextPage<ContextRelated>,
     pub discoveries: ContextPage<ContextRelated>,
     pub duplicate_of: Option<ContextRelated>,
+    /// The canonical issue an external source named for this duplicate: an
+    /// external reference (possibly resolved to a local ticket) or explicitly unknown.
+    pub external_duplicate_of: Option<crate::source::DuplicateTarget>,
     pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
@@ -83,6 +96,27 @@ pub struct ContextEvidence {
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
 }
+/// One entry of the source conversation. Authors here are the source's own
+/// identities; they are never the `editing_agent` of a note.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContextSourceEntry {
+    Comment {
+        id: String,
+        author: String,
+        body: BoundedText,
+        url: String,
+        created_at: String,
+        edited_at: Option<String>,
+    },
+    Event {
+        id: String,
+        event: String,
+        actor: Option<String>,
+        subject: Option<String>,
+        created_at: String,
+    },
+}
 #[derive(Debug, Serialize)]
 pub struct TicketContext {
     pub ticket: ContextTicket,
@@ -98,6 +132,8 @@ pub struct TicketContext {
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backlinks: Option<ContextPage<crate::Backlink>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_conversation: Option<ContextPage<ContextSourceEntry>>,
 }
 fn text(value: String, limit: usize) -> BoundedText {
     let mut chars = value.chars();
@@ -217,7 +253,16 @@ impl Workspace {
                 discovered_while: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.source_id WHERE r.kind='discovered' AND r.target_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 discoveries: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM contextual_relationships r JOIN tickets t ON t.id=r.target_id WHERE r.kind='discovered' AND r.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
                 duplicate_of: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.canonical_id WHERE d.source_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, 0)?.items.into_iter().next(),
+                external_duplicate_of: crate::source::duplicate_target(&tx, &id)?,
                 duplicates: related(&tx, "SELECT t.number,t.title,t.status,t.trashed FROM duplicate_tickets d JOIN tickets t ON t.id=d.source_id WHERE d.canonical_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3", &id, options.offset)?,
+                children_progress: {
+                    let (total, done) = tx.query_row(
+                        "SELECT COUNT(*), COALESCE(SUM(t.status = 'Done'), 0) FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1",
+                        [&id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?;
+                    ContextProgress { total, done }
+                },
                 children: related(
                     &tx,
                     "SELECT t.number,t.title,t.status,t.trashed FROM ticket_parents p JOIN tickets t ON t.id=p.child_id WHERE p.parent_id=?1 ORDER BY t.number LIMIT ?2 OFFSET ?3",
@@ -284,6 +329,46 @@ impl Workspace {
         } else {
             None
         };
+        let source_conversation = if options.conversation {
+            let entries = crate::source::conversation_entries(&tx, &id)?
+                .into_iter()
+                .skip(options.offset as usize)
+                .take(PAGE + 1)
+                .map(|entry| match entry {
+                    crate::source::ConversationEntry::Comment {
+                        id,
+                        author,
+                        body,
+                        url,
+                        created_at,
+                        edited_at,
+                    } => ContextSourceEntry::Comment {
+                        id,
+                        author: text(author, LABEL).text,
+                        body: text(body, TEXT),
+                        url,
+                        created_at,
+                        edited_at,
+                    },
+                    crate::source::ConversationEntry::Event {
+                        id,
+                        event,
+                        actor,
+                        subject,
+                        created_at,
+                    } => ContextSourceEntry::Event {
+                        id,
+                        event,
+                        actor,
+                        subject,
+                        created_at,
+                    },
+                })
+                .collect();
+            Some(page(entries, options.offset))
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -302,6 +387,7 @@ impl Workspace {
             notes,
             evidence,
             backlinks,
+            source_conversation,
         })
     }
 }

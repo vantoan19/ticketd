@@ -76,11 +76,13 @@ test("shows Ready once prerequisites are done", () => {
 
 test("shows only the status word outside Todo", () => {
   renderList(
-    ["In progress", "In review", "Done", "Canceled"].map((status, index) => ({
-      ...ticket({ status, availability: null }),
-      id: String(index),
-      reference: `T-${index + 1}`,
-    })),
+    ["In progress", "In review", "Done", "Canceled", "Duplicate"].map(
+      (status, index) => ({
+        ...ticket({ status, availability: null }),
+        id: String(index),
+        reference: `T-${index + 1}`,
+      }),
+    ),
   );
   expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.queryByText(/Blocked/)).toBeNull();
@@ -88,7 +90,7 @@ test("shows only the status word outside Todo", () => {
 });
 
 test("names the canonical ticket of a duplicate", () => {
-  renderList([ticket({ status: "Canceled", duplicate_of: "T-9" })]);
+  renderList([ticket({ status: "Duplicate", duplicate_of: "T-9" })]);
   expect(screen.getByText("Duplicate of T-9")).toBeTruthy();
 });
 
@@ -101,7 +103,7 @@ test("shows one context item and tags as pills", () => {
     }),
     ticket({ id: "2", reference: "T-2", effort_id: "e1", project_id: "p1" }),
   ]);
-  expect(screen.getByText("Parent T-7")).toBeTruthy();
+  expect(screen.getByText("Subticket of T-7")).toBeTruthy();
   expect(screen.getAllByText("Launch")).toHaveLength(1);
   expect(screen.queryByText("Website")).toBeNull();
   expect(screen.getByText("ui")).toBeTruthy();
@@ -126,4 +128,104 @@ test("names the status icon and toggles selection", () => {
   expect((box as HTMLInputElement).checked).toBe(true);
   fireEvent.click(box);
   expect(onToggle).toHaveBeenCalledWith("T-1");
+});
+
+const counts = {
+  total: 0,
+  todo: 0,
+  in_progress: 0,
+  in_review: 0,
+  done: 0,
+  canceled: 0,
+  duplicate: 0,
+};
+const inStatus = (id: number, status: string) =>
+  ticket({
+    id: String(id),
+    reference: `T-${id}`,
+    title: `Ticket ${id}`,
+    status,
+    availability: null,
+  });
+
+test("groups rows in workflow order with whole-result counts and an Add action each", () => {
+  const onAdd = vi.fn();
+  renderList(
+    [inStatus(4, "In progress"), inStatus(3, "Todo"), inStatus(2, "Done")],
+    {
+      grouping: {
+        counts: { ...counts, in_progress: 1, todo: 9, done: 1 },
+        onAdd,
+      },
+    },
+  );
+  const headings = screen.getAllByRole("heading", { level: 2 });
+  expect(headings.map((item) => item.textContent)).toEqual([
+    "In progress",
+    "Todo",
+    "Done",
+  ]);
+  // The page holds one of nine Todo tickets; the header says so.
+  expect(screen.getByText("1 of 9")).toBeTruthy();
+  // A group header already names the status, so its rows do not repeat it.
+  expect(screen.queryByText("In progress", { selector: "span" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Add Todo ticket" }));
+  expect(onAdd).toHaveBeenCalledWith("Todo", expect.any(HTMLButtonElement));
+});
+
+test("a Duplicate group's Add action is worded like every group's and hands over its status", () => {
+  const onAdd = vi.fn();
+  renderList([inStatus(5, "Duplicate")], {
+    grouping: { counts: { ...counts, duplicate: 1 }, onAdd },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add Duplicate ticket" }));
+  expect(onAdd).toHaveBeenCalledWith(
+    "Duplicate",
+    expect.any(HTMLButtonElement),
+  );
+});
+
+test("moves keyboard focus across group boundaries and omits empty groups", () => {
+  renderList([inStatus(4, "In progress"), inStatus(3, "Done")], {
+    grouping: {
+      counts: { ...counts, in_progress: 1, done: 1 },
+      onAdd: vi.fn(),
+    },
+  });
+  expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
+  const first = screen.getByRole("button", { name: /Ticket 4/ });
+  first.focus();
+  fireEvent.keyDown(first, { key: "ArrowDown" });
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: /Ticket 3/ }),
+  );
+});
+
+test("a flat list has no group headers and names each status", () => {
+  renderList([inStatus(4, "In progress")]);
+  expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  expect(screen.getByText("In progress", { selector: "span" })).toBeTruthy();
+});
+
+test("rows show core update times and authored progress instead of an empty second line", () => {
+  const when = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+  renderList([
+    ticket({ id: "updated", reference: "T-1", updated_at: when }),
+    ticket({
+      id: "reported",
+      reference: "T-2",
+      status: "In progress",
+      latest_update: {
+        note_id: "n1",
+        reported_at: when,
+        editing_agent: "agent",
+      },
+    }),
+    ticket({ id: "unreported", reference: "T-3", status: "In review" }),
+  ]);
+  expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
+  expect(
+    screen.getByText(/Reported 3 h ago/).parentElement?.textContent,
+  ).toContain("agent");
+  expect(screen.getByText("No update reported")).toBeTruthy();
 });

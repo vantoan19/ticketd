@@ -24,7 +24,41 @@ export function bridgeDefault(
     case "inbox":
     case "safety_backups":
     case "search_tags":
+    case "source_conversation":
+    case "list_sources": // no built-in connector unless a test supplies one
       return [];
+    case "count_tickets":
+      return {
+        total: 0,
+        todo: 0,
+        in_progress: 0,
+        in_review: 0,
+        done: 0,
+        canceled: 0,
+        duplicate: 0,
+      };
+    case "source_health":
+      return { refreshing: false, sources: [] };
+    case "preview_publication":
+      // GitHub is not connected unless a test says so.
+      return {
+        reference: args?.reference ?? "",
+        provider: "github",
+        provider_name: "GitHub",
+        destination: null,
+        destinations: [],
+        title: "",
+        body: "",
+        fingerprint: "0000000000000000",
+        eligibility: {
+          kind: "ineligible",
+          reason: "source_not_connected",
+          message: "connect GitHub first",
+        },
+        attempt: null,
+      };
+    case "count_by_source":
+      return { all: 0, local: 0, providers: {} };
     case "sidebar_counts":
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":
@@ -39,7 +73,7 @@ export function bridgeDefault(
         projects: 0,
         active_efforts: 0,
         size_bytes: 4096,
-        format_version: 20,
+        format_version: 26,
       };
     case "check_cli":
       return {
@@ -58,13 +92,21 @@ export function bridgeDefault(
       return {
         effort: { id: args?.id ?? "", name: "Effort", archived: false },
         members: [],
-        counts: { todo: 0, in_progress: 0, in_review: 0, done: 0, canceled: 0 },
+        counts: {
+          todo: 0,
+          in_progress: 0,
+          in_review: 0,
+          done: 0,
+          canceled: 0,
+          duplicate: 0,
+        },
       };
     case "contextual_relationships":
       return {
         relationships: {
           parent: null,
           children: emptyPage,
+          children_progress: { total: 0, done: 0 },
           prerequisites: emptyPage,
           blocking: emptyPage,
           related: emptyPage,

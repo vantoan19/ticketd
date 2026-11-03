@@ -17,7 +17,7 @@ impl Workspace {
             ("efforts", "id, name, archived"),
             (
                 "tickets",
-                "number, id, title, status, body, project_id, effort_id, trashed",
+                "number, id, title, status, body, project_id, effort_id, trashed, updated_at",
             ),
             (
                 "notes",
@@ -46,6 +46,35 @@ impl Workspace {
             ("dependencies", "blocker_id, dependent_id"),
             ("contextual_relationships", "kind, source_id, target_id"),
             ("ticket_parents", "child_id, parent_id"),
+            (
+                "source_configurations",
+                "provider, configuration, account, contract_version, saved_at",
+            ),
+            (
+                "external_identities",
+                "ticket_id, provider, external_id, locator, display, url, origin, linked_at",
+            ),
+            ("external_ownership", "ticket_id, authority, changed_at"),
+            (
+                "source_sync",
+                "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches",
+            ),
+            (
+                "external_duplicate_targets",
+                "ticket_id, provider, external_id, locator, display",
+            ),
+            (
+                "source_conversation",
+                "ticket_id, kind, entry_id, position, actor, event, subject, body, url, created_at, edited_at",
+            ),
+            (
+                "source_status",
+                "provider, last_attempt_at, last_refreshed_at, error_code, error_message, failing_since, retry_after, last_checked_tickets",
+            ),
+            (
+                "publication_attempts",
+                "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url",
+            ),
         ] {
             let mut statement =
                 tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;

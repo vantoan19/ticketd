@@ -57,7 +57,7 @@ These values come directly from the linked reference. The semantic names map the
 
 Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
 
-Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue.
+Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue. Source links use the accessible text-link role `--link-foreground`: `#005FCC` in light and `#52AEFF` in dark; focus and decorative interactive accents keep their existing tokens. Recessed notices and footer bands retain a shadow boundary when their fill alone is too close to the surrounding surface.
 
 The reference also supplies indicator colors: blue `#0062D1`, cyan `#52AEFF`, teal `#45DEC5` / `#067A6E`, green `#398E4A` / `#45A557` / `#6CDA75`, orange `#FF990A`, red `#E5484D`, pink `#EA3E83`, and purple `#7820BC` / `#BF89EC`. Reserve these for small indicators, approximately 10px, when the meaning requires color. Do not introduce colored status panels. Ticketd keeps status icons neutral; status color appears only as a small dot beside a word (see Status and state vocabulary), never as a fill, panel, or icon tint.
 
@@ -88,20 +88,20 @@ Normal text must meet 4.5:1 contrast against its actual surface; large text and 
 
 Use a 16px Lucide status icon plus text. Keep icons neutral; shape and label provide the distinction. Where color adds meaning (Ready, Blocked, unread, checked), use a small status dot (about 10px or less) placed beside a word. A dot never appears alone, and it is the only place status color is used.
 
-| Meaning            | Icon treatment                              | Visible label      |
-| ------------------ | ------------------------------------------- | ------------------ |
-| Todo               | Empty circle                                | Todo               |
-| In progress        | Circle with center mark                     | In progress        |
-| In review          | Dashed circle                               | In review          |
-| Done               | Circle with check                           | Done               |
-| Canceled           | Circle with slash                           | Canceled           |
-| Ready              | Status dot beside the word, on Todo tickets | Ready              |
-| Blocked            | Status dot beside the word, with the reason | Blocked by T-18    |
-| Duplicate          | Circle with two horizontal lines            | Duplicate of T-10  |
-| Source unavailable | Status dot beside the words                 | Source unavailable |
-| Unread             | Status dot plus accessible unread state     | Unread             |
+| Meaning            | Icon treatment                                          | Visible label      |
+| ------------------ | ------------------------------------------------------- | ------------------ |
+| Todo               | Empty circle                                            | Todo               |
+| In progress        | Circle with center mark                                 | In progress        |
+| In review          | Dashed circle                                           | In review          |
+| Done               | Circle with check                                       | Done               |
+| Canceled           | Circle with slash                                       | Canceled           |
+| Ready              | Status dot beside the word, on Todo tickets             | Ready              |
+| Blocked            | Status dot beside the word, with the reason             | Blocked by T-18    |
+| Duplicate          | Circle with equals sign, beside a canonical-ticket link | Duplicate of T-10  |
+| Source unavailable | Status dot beside the words                             | Source unavailable |
+| Unread             | Status dot plus accessible unread state                 | Unread             |
 
-Ready and Blocked are availability indicators, not extra statuses. Canceled must never look completed. Duplicate is a status of its own: it never looks Canceled or Done, and it always names its canonical ticket, or the source’s reference when that ticket is not in the workspace. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
+Ready and Blocked are availability indicators, not extra statuses. Canceled and Duplicate must never look completed. Duplicate is a status of its own: it never looks Canceled or Done, and it always names its canonical ticket, or the source’s reference when that ticket is not in the workspace. Trashed tickets remain readable and show a restoration action; avoid a full-page faded treatment.
 
 Each dot color keeps one meaning across every view:
 
@@ -234,19 +234,19 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 
 The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
-| Region          | Geometry and behavior                                                                           |
-| --------------- | ----------------------------------------------------------------------------------------------- |
-| Navigation      | 208px default width on the canvas; 12px outer inset; independently scrollable groups            |
-| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                   |
-| List header     | 48px: view title, Refresh, then search and Filters (32px small controls)                        |
-| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts           |
-| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)             |
-| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                    |
-| Detail pane     | At least 480px in split mode; start near 55% of content panel width                             |
-| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters   |
-| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding             |
-| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                  |
-| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context |
+| Region          | Geometry and behavior                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups |
+| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                           |
+| List header     | 48px: view title, Refresh, then search and Filters (32px small controls)                                |
+| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                   |
+| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                     |
+| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                            |
+| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                     |
+| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters           |
+| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                     |
+| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                          |
+| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context         |
 
 List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty note editor must not push the title down.
 
@@ -306,8 +306,10 @@ Search retains its query while opening details. Filter controls show active cons
 4. **Description:** primary reading surface, with editing on demand. An externally owned description is a read-only source card (see Documents and activity).
 5. **Subtickets:** directly under the description, a heading with a compact neutral progress bar and “1 of 2 done”, rows with status icon, reference, title, and status word, and Add subticket. On an externally owned ticket, a caption states that subtickets stay local.
 6. **Evidence and backlinks:** flat sections with concise existing information and contextual add/edit actions.
-7. **Source conversation:** externally owned tickets only. The source’s comments and events, read-only, with a link to comment at the source.
+7. **Source conversation:** tickets that have an external source. The source’s comments and events, read-only, with a link to comment at the source. After ownership is taken the retrieved conversation stays, as the history of the source; it is no longer refreshed.
 8. **Notes and history:** authored notes, distinguishable recorded changes, and explicit note submission. On an externally owned ticket, a caption states that notes stay in ticketd and are never sent to the source.
+
+For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored note, with its relative reporting time and supplied editing agent, and opens that note; with none it says “No update reported”. Editing an older note does not make it the latest report.
 
 The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Effort, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
 
@@ -406,20 +408,20 @@ Settings are described in the next section.
 
 Settings is a dedicated page. It replaces the sidebar with its own section list and a Back to tickets action; the content panel keeps the same inset and shadow ring.
 
-| Group       | Sections                                |
-| ----------- | --------------------------------------- |
-| Preferences | Appearance, Attention                   |
-| Sources     | GitHub                                  |
-| Workspace   | Location, Backups, Export, Command line |
-| Help        | Keyboard shortcuts, About               |
+| Group       | Sections                                  |
+| ----------- | ----------------------------------------- |
+| Preferences | Appearance, Attention                     |
+| Workspace   | Location, Backups, Export, Command line   |
+| Sources     | One section per available source (GitHub) |
+| Help        | Keyboard shortcuts, About                 |
 
 - **Page:** one centered column of cards. Each card has a 12px radius and the shadow ring (no separate border), with 32px between cards.
 - **Card footer:** a card may end with a recessed footer (recessed surface) for explanations and secondary actions. Keep export and backup explanations in the footer beside their actions.
 - **Controls:** use a segmented control for an exclusive choice among two to four options and a switch for an on/off preference.
 - **Applying changes:** changes apply immediately. There is no Save button for preferences; show a failure beside the control if one cannot be applied.
+- **Sources:** one section per available source, added only when its connector exists. Its card is the exception to immediate application: it shows Saved configuration or Unsaved changes, and Save stays unavailable until Preview matches has run for the current rules. Saving turns discovery on and says that matching issues are imported on the next refresh. A saved source also shows its refresh schedule and its last refresh.
 - **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
 - **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
-- **Sources:** add a source’s section only when its connector exists. It shows the connection, discovery filters with a preview of matching issues before saving, the refresh schedule, and the last refresh.
 
 ## 11. Shared control and state recipes
 

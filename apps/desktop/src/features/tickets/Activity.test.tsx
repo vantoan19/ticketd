@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -36,6 +37,7 @@ vi.mock("@uiw/react-codemirror", () => ({
 afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
+  vi.restoreAllMocks();
 });
 
 test("preserves a note draft on a failed save and prevents repeated submissions", async () => {
@@ -109,8 +111,245 @@ test("opens the selected note even when it is outside the loaded page", async ()
   );
   const note = await screen.findByLabelText("Selected note");
   expect(note.textContent).toContain("Edited finding");
+  expect(note.closest("ol")).not.toBeNull();
+  expect(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+  ).toBeTruthy();
   // Revealing a note also moves focus to it, so the keyboard lands there.
   expect(document.activeElement).toBe(note);
+});
+
+test("reveals the existing chronological note without scrolling the workspace", async () => {
+  const selected = {
+    id: "selected",
+    content: "A single update",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "get_note") return selected;
+    if (command === "list_notes") return [selected];
+    if (command === "ticket_history") return [];
+    throw new Error(`Unexpected command: ${command}`);
+  });
+  const workspace = document.createElement("div");
+  const scroller = document.createElement("div");
+  workspace.scrollTop = 17;
+  scroller.className = "detail-scroll";
+  workspace.append(scroller);
+  document.body.append(workspace);
+  Object.defineProperty(scroller, "clientHeight", { value: 300 });
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      if (this === scroller) return new DOMRect(0, 100, 500, 300);
+      if (this.getAttribute("aria-label") === "Selected note")
+        return new DOMRect(0, 500, 500, 100);
+      return new DOMRect();
+    },
+  );
+  render(
+    <Activity
+      reference="T-1"
+      status="In progress"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+      latestNoteId="selected"
+      target={{ id: "selected", key: 1 }}
+    />,
+    { container: scroller },
+  );
+  const note = await screen.findByLabelText("Selected note");
+  await waitFor(() =>
+    expect(screen.getAllByText("A single update")).toHaveLength(1),
+  );
+  expect(note.closest("ol")).not.toBeNull();
+  expect(document.activeElement).toBe(note);
+  expect(scroller.scrollTop).toBe(300);
+  expect(workspace.scrollTop).toBe(17);
+  workspace.remove();
+});
+
+test("does not duplicate an unloaded target when its page is later loaded", async () => {
+  const selected = {
+    id: "older",
+    content: "Earlier update",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  const firstPage = Array.from({ length: 50 }, (_, index) => ({
+    ...selected,
+    id: `recent-${index}`,
+    content: `Recent update ${index}`,
+    created_at: "2026-10-01T00:00:00Z",
+    updated_at: "2026-10-01T00:00:00Z",
+  }));
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { offset: number }) => {
+      if (command === "get_note") return selected;
+      if (command === "list_notes")
+        return args?.offset ? [selected] : firstPage;
+      if (command === "ticket_history") return [];
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  );
+  render(
+    <Activity
+      reference="T-1"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+      target={{ id: "older", key: 1 }}
+    />,
+  );
+  const note = await screen.findByLabelText("Selected note");
+  expect(note.closest("ol")).not.toBeNull();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Load more notes" }),
+  );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("list_notes", {
+      reference: "T-1",
+      limit: 50,
+      offset: 50,
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getAllByText("Earlier update")).toHaveLength(1),
+  );
+});
+
+test("an unloaded targeted note can be edited and deleted without a stale copy", async () => {
+  let saved: {
+    id: string;
+    content: string;
+    created_at: string;
+    updated_at: string;
+    editing_agent: string | null;
+  } | null = {
+    id: "older",
+    content: "Earlier update",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { patch: { content: string } }) => {
+      if (command === "get_note") return saved;
+      if (command === "list_notes" || command === "ticket_history") return [];
+      if (command === "edit_note" && saved) {
+        saved = { ...saved, content: args!.patch.content };
+        return saved;
+      }
+      if (command === "delete_note") {
+        saved = null;
+        return;
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  );
+  const targetProps = {
+    reference: "T-1",
+    status: "Todo",
+    revision: 0,
+    projects: [],
+    active: true,
+    trashed: false,
+    target: { id: "older", key: 1 },
+  };
+  const view = render(<Activity {...targetProps} />);
+  await screen.findByText("Earlier update");
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
+  expect(screen.queryByText(/The saved note changed/)).toBeNull();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Edit note source" }), {
+    target: { value: "Edited earlier update" },
+  });
+  saved = { ...saved!, content: "Changed externally" };
+  view.rerender(<Activity {...targetProps} revision={1} />);
+  await screen.findByText(/The saved note changed/);
+  expect(
+    screen.getByRole("textbox", { name: "Edit note source" }),
+  ).toHaveProperty("value", "Edited earlier update");
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await screen.findByText("Edited earlier update");
+  expect(screen.queryByText("Earlier update")).toBeNull();
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Delete note" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Edited earlier update")).toBeNull(),
+  );
+});
+
+test("finishing a note edit does not discard a newer note navigation", async () => {
+  const first = {
+    id: "first",
+    content: "First target",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+  };
+  const second = { ...first, id: "second", content: "Second target" };
+  let finishSave: (note: typeof first) => void = () => {};
+  let finishSecond: (note: typeof first) => void = () => {};
+  const save = new Promise<typeof first>((resolve) => (finishSave = resolve));
+  const secondRead = new Promise<typeof first>(
+    (resolve) => (finishSecond = resolve),
+  );
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id: string }) => {
+      if (command === "get_note")
+        return args?.id === "second" ? secondRead : first;
+      if (command === "list_notes" || command === "ticket_history") return [];
+      if (command === "edit_note") return save;
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  );
+  const targetProps = {
+    reference: "T-1",
+    status: "Todo",
+    revision: 0,
+    projects: [],
+    active: true,
+    trashed: false,
+  };
+  const view = render(
+    <Activity {...targetProps} target={{ id: "first", key: 1 }} />,
+  );
+  await screen.findByText("First target");
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for note from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Edit note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  view.rerender(
+    <Activity {...targetProps} target={{ id: "second", key: 2 }} />,
+  );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("get_note", {
+      reference: "T-1",
+      id: "second",
+    }),
+  );
+  await act(async () => finishSave({ ...first, content: "Saved first" }));
+  await waitFor(() => expect(screen.queryByText("Saving…")).toBeNull());
+  await act(async () => finishSecond(second));
+  expect(await screen.findByText("Second target")).toBeTruthy();
 });
 
 const props = {

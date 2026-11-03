@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { client, type Project } from "@/lib/api/client";
 import type { Effort } from "@/lib/api/efforts";
+import { directStatuses } from "@/lib/statuses";
 import { PropertyPicker } from "./TicketProperties";
 import "./create-ticket.css";
 
@@ -47,11 +48,14 @@ export function CreateTicketDialog({
   onOpenChange,
   triggerRef,
   navigation,
+  initialStatus,
   projects,
   efforts,
   create,
 }: {
   open: boolean;
+  /** The status a status group's Add action starts the ticket with. */
+  initialStatus?: string;
   onOpenChange: (open: boolean) => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
   navigation: { project: string; effort: string };
@@ -84,14 +88,24 @@ export function CreateTicketDialog({
   const [tagQuery, setTagQuery] = useState("");
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(false);
+  // Escape in the tag field puts the suggestions away before it closes the dialog.
+  const [suggestionsHidden, setSuggestionsHidden] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  // Opening from a status group's Add action sets that status, even on a
+  // draft kept from an earlier close.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open && draft && initialStatus)
+      setDraft({ ...draft, status: initialStatus });
+  }
   if (open && !draft)
     setDraft({
       title: "",
       body: "",
-      status: "Todo",
+      status: initialStatus ?? "Todo",
       project:
         navigation.project === "all" || navigation.project === "unlinked"
           ? ""
@@ -168,9 +182,9 @@ export function CreateTicketDialog({
       setPending(false);
     }
   }
-  const suggestions = vocabulary
-    .filter((tag) => !draft.tags.includes(tag))
-    .slice(0, 6);
+  const suggestions = suggestionsHidden
+    ? []
+    : vocabulary.filter((tag) => !draft.tags.includes(tag)).slice(0, 6);
   const projectName =
     projects.find((p) => p.id === draft.project)?.name ??
     (draft.project || "Unlinked");
@@ -186,6 +200,16 @@ export function CreateTicketDialog({
         className="create-panel"
         showCloseButton={false}
         aria-describedby={undefined}
+        onEscapeKeyDown={(event) => {
+          // Escape closes only the foremost surface: the open suggestions.
+          if (
+            suggestions.length > 0 &&
+            document.activeElement === tagInputRef.current
+          ) {
+            event.preventDefault();
+            setSuggestionsHidden(true);
+          }
+        }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           triggerRef.current?.focus();
@@ -307,13 +331,7 @@ export function CreateTicketDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {[
-                      "Todo",
-                      "In progress",
-                      "In review",
-                      "Done",
-                      "Canceled",
-                    ].map((status) => (
+                    {directStatuses.map((status) => (
                       <SelectItem key={status} value={status}>
                         {status}
                       </SelectItem>
@@ -378,7 +396,11 @@ export function CreateTicketDialog({
                   placeholder="Add a tag"
                   disabled={pending}
                   value={tagQuery}
-                  onChange={(event) => setTagQuery(event.target.value)}
+                  onFocus={() => setSuggestionsHidden(false)}
+                  onChange={(event) => {
+                    setSuggestionsHidden(false);
+                    setTagQuery(event.target.value);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === ",") {
                       if (event.ctrlKey || event.metaKey) return;

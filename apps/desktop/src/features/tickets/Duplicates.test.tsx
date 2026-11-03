@@ -74,7 +74,7 @@ beforeEach(() => {
     if (command === "show_ticket")
       return { ...ticket, id: "2", reference: "T-2", title: "Canonical" };
     if (reviewError) throw reviewError;
-    return { ...ticket, status: "Canceled", duplicate_of: "T-2" };
+    return { ...ticket, status: "Duplicate", duplicate_of: "T-2" };
   });
 });
 afterEach(() => {
@@ -123,6 +123,25 @@ test("disables an invalid Replace with the reason", async () => {
   ).toBe(false);
 });
 
+test("a waiting ticket that is itself a Duplicate does not break the review", async () => {
+  // T-2 was marked a duplicate earlier and kept its dependency, which is a supported state.
+  current = {
+    ...preview,
+    waiting: [
+      {
+        ticket: "T-3",
+        status: "Duplicate",
+        trashed: false,
+        readiness: "no_ready_state",
+        unresolved: ["T-1"],
+      },
+    ],
+  };
+  await openReview();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("Affected dependencies")).toBeTruthy();
+});
+
 test("the summary and the apply label follow the choices", async () => {
   await openReview();
   const apply = () =>
@@ -137,12 +156,12 @@ test("the summary and the apply label follow the choices", async () => {
   await waitFor(() => expect(apply().disabled).toBe(false));
   expect(
     screen.getByText(
-      /Cancel T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
+      /Mark T-1 as a duplicate of T-2, replace 1 dependency, remove 1 dependency, keep 1 dependency/,
     ),
   ).toBeTruthy();
   expect(screen.getByText("T-3 now waits on T-2")).toBeTruthy();
   expect(
-    screen.getByText("T-4 keeps waiting on a canceled ticket"),
+    screen.getByText("T-4 keeps waiting on a duplicate ticket"),
   ).toBeTruthy();
 });
 
@@ -256,12 +275,14 @@ test("shows both tickets with their statuses, and the duplicate's status change"
   await openReview();
   expect(screen.getByText("Canonical")).toBeTruthy();
   const duplicate = screen.getByRole("group", { name: "Duplicate" });
-  expect(duplicate.textContent).toContain("Todo → Canceled · Duplicate of T-2");
+  expect(duplicate.textContent).toContain(
+    "Todo → Duplicate · Duplicate of T-2",
+  );
   const canonical = screen.getByRole("group", { name: "Canonical ticket" });
   expect(canonical.textContent).toContain("Todo · unchanged");
 });
 
-test("a separate review does not claim the kept endpoint is canceled", async () => {
+test("a separate review does not claim the kept endpoint is a duplicate", async () => {
   current = {
     source: "T-9",
     mode: "separate",
@@ -281,7 +302,7 @@ test("a separate review does not claim the kept endpoint is canceled", async () 
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
-  expect(screen.queryByText(/canceled ticket/)).toBeNull();
+  expect(screen.queryByText(/duplicate ticket/)).toBeNull();
 });
 
 const outcome = (ticket: string, overrides: Record<string, unknown> = {}) => ({
@@ -342,7 +363,7 @@ test("each choice words the core's outcome for the whole set of choices", async 
   choose("T-1 blocks T-7", "retain");
   expect(
     await screen.findByText(
-      "T-7 is in the trash and has no Ready state; it keeps waiting on a canceled ticket",
+      "T-7 is in the trash and has no Ready state; it keeps waiting on a duplicate ticket",
     ),
   ).toBeTruthy();
 });
@@ -368,13 +389,13 @@ test("the canonical's readiness is shown when the duplicate is the dependent", a
   choose("T-5 blocks T-1", "retain");
   expect(
     await screen.findByText(
-      "T-1 is Canceled and has no Ready state; it keeps its dependency on T-5",
+      "T-1 is Duplicate and has no Ready state; it keeps its dependency on T-5",
     ),
   ).toBeTruthy();
   choose("T-5 blocks T-1", "remove");
   expect(
     await screen.findByText(
-      "T-1 is Canceled and has no Ready state; T-5 no longer blocks T-1",
+      "T-1 is Duplicate and has no Ready state; T-5 no longer blocks T-1",
     ),
   ).toBeTruthy();
 });
@@ -512,7 +533,7 @@ test("a failed evaluate clears the earlier lines and Apply waits for each answer
   expect(await screen.findByText("database is locked")).toBeTruthy();
   expect(screen.queryByText(/becomes Ready/)).toBeNull();
   expect(
-    screen.getByText("T-3 keeps waiting on a canceled ticket"),
+    screen.getByText("T-3 keeps waiting on a duplicate ticket"),
   ).toBeTruthy();
 });
 

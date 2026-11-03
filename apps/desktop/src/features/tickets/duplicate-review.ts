@@ -36,8 +36,8 @@ export function replacementIssueReason(
 /**
  * One line describing what a choice does to the ticket that waits on the edge.
  * `outcomes` come from the core, which judges every choice together, so this only
- * words them. In a separate review the existing endpoint is not canceled, so Keep
- * leaves a live dependency rather than one on a canceled ticket.
+ * words them. In a separate review the existing endpoint is not a duplicate, so Keep
+ * leaves a live dependency rather than one on a duplicate ticket.
  */
 export function consequence(
   source: string,
@@ -60,7 +60,7 @@ export function consequence(
       if (choice === "remove") return `${subject} no longer waits on ${source}`;
       return separate
         ? `${subject} keeps waiting on ${source}`
-        : `${subject} keeps waiting on a canceled ticket`;
+        : `${subject} keeps waiting on a duplicate ticket`;
     }
     if (choice === "replace")
       return `${subject} takes over ${source}'s dependency on ${edge.blocker}`;
@@ -71,7 +71,7 @@ export function consequence(
   if (!outcome) return effect(waiting);
   const { unresolved_after: unresolved } = outcome;
   if (waiting === source && !separate)
-    return `${waiting} is Canceled and has no Ready state; ${effect("it")}`;
+    return `${waiting} is Duplicate and has no Ready state; ${effect("it")}`;
   if (outcome.after === "no_ready_state")
     return `${waiting} is ${outcome.trashed ? "in the trash" : outcome.status} and has no Ready state; ${effect("it")}`;
   if (outcome.after === "ready")
@@ -109,7 +109,7 @@ export function summarize(
   const tally = (choice: string) =>
     choices.filter((value) => value === choice).length;
   const parts = [
-    `Cancel ${source} as a duplicate of ${canonical}`,
+    `Mark ${source} as a duplicate of ${canonical}`,
     ...(
       [
         ["replace", "replace"],

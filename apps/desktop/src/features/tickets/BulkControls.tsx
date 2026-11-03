@@ -13,7 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BulkTagDialog } from "@/features/tickets/BulkTagDialog";
-import { StatusIcon, ticketStatuses } from "@/features/tickets/StatusIcon";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { directStatuses } from "@/lib/statuses";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
@@ -95,14 +96,14 @@ export function BulkControls({
                 variant="ghost"
                 size="sm"
                 disabled={pending}
-                aria-label="Change status of selected tickets"
+                aria-label="Status of selected tickets"
               >
                 Status
                 <ChevronDown data-icon="inline-end" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top">
-              {ticketStatuses.map((status) => (
+              {directStatuses.map((status) => (
                 <DropdownMenuItem
                   key={status}
                   onSelect={() =>

@@ -74,7 +74,7 @@ test("a duplicate links to its canonical ticket beside the status, even in trash
         reference: "T-1",
         title: "Ticket",
         body: "",
-        status: "Canceled",
+        status: "Duplicate",
         tags: [],
         project_id: null,
         effort_id: null,
@@ -94,4 +94,49 @@ test("a duplicate links to its canonical ticket beside the status, even in trash
   );
   fireEvent.click(screen.getByRole("button", { name: "Duplicate of T-9" }));
   expect(open).toHaveBeenCalledWith("T-9");
+});
+
+test("choosing Duplicate from the status menu opens the duplicate review instead of saving", async () => {
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+  });
+  bridge.invoke.mockResolvedValue({});
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-1",
+        title: "Ticket",
+        body: "",
+        status: "Todo",
+        tags: [],
+        project_id: null,
+        effort_id: null,
+        trashed: false,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+      }}
+      projects={[]}
+      efforts={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Status: Todo" }), {
+    key: "Enter",
+  });
+  fireEvent.click(
+    await screen.findByRole("option", { name: "Mark as duplicate…" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Mark as duplicate" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
 });

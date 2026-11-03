@@ -102,6 +102,10 @@ pub enum WriteRequest {
         source: String,
         agent: Option<String>,
     },
+    TakeOwnership {
+        reference: String,
+        agent: Option<String>,
+    },
     AddContextualRelationship {
         source: String,
         target: String,
@@ -328,6 +332,9 @@ impl Workspace {
             )?),
             WriteRequest::RemoveDuplicate { source, agent } => {
                 WriteResult::Ticket(self.remove_duplicate(&source, agent.as_deref())?)
+            }
+            WriteRequest::TakeOwnership { reference, agent } => {
+                WriteResult::Ticket(self.take_ownership(&reference, agent.as_deref())?)
             }
             WriteRequest::AddContextualRelationship {
                 source,

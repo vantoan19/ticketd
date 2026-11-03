@@ -22,6 +22,7 @@ pub use location::{WorkspaceFile, WorkspaceInfo, default_workspace_file, workspa
 
 mod efforts;
 mod retry;
+pub mod source;
 pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
@@ -30,7 +31,7 @@ mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
 mod search;
-pub use search::{Availability, TicketFilter};
+pub use search::{Availability, TicketFilter, TicketOrder};
 mod tags;
 pub use efforts::{Effort, EffortCounts, EffortView};
 
@@ -46,17 +47,17 @@ use uuid::Uuid;
 
 mod counts;
 mod history;
-pub use counts::SidebarCounts;
+pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod notes;
 pub use history::{HistoryEntry, Readiness, Status};
-pub use notes::{Note, NotePatch};
+pub use notes::{Note, NotePatch, ReportedUpdate};
 pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 20;
+pub const FORMAT_VERSION: i64 = 29;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -113,6 +114,12 @@ pub enum Error {
         "remove or review the source ticket’s blocking dependencies before marking it as a duplicate"
     )]
     DuplicateDependencies,
+    #[error("choose a canonical ticket to mark a ticket as Duplicate")]
+    DuplicateNeedsCanonical,
+    #[error(
+        "{0} is itself a duplicate of an issue that is not a known ticket (or that loops back), so it cannot be the original; choose the original ticket directly"
+    )]
+    DuplicateCanonicalUnresolved(String),
     #[error("a ticket cannot be related to itself")]
     RelationshipSelfLink,
     #[error("dependency review has changed; preview and choose again")]
@@ -143,6 +150,29 @@ pub enum Error {
     EvidenceNotFound(String),
     #[error("note '{0}' was not found")]
     NoteNotFound(String),
+    #[error(
+        "{reference} is owned by {provider}; edit its title and description there, and ticketd will synchronize the change"
+    )]
+    ExternalContent { reference: String, provider: String },
+    #[error("{}", external_status_message(.reference, .provider, *.open, *.closure_unrecognized))]
+    ExternalStatus {
+        reference: String,
+        provider: String,
+        open: bool,
+        /// The issue is closed for a reason ticketd does not recognize, so Done or
+        /// Canceled may be chosen here.
+        closure_unrecognized: bool,
+    },
+    #[error("{0} is not owned by an external source, so there is nothing to refresh")]
+    NotSynchronized(String),
+    #[error(
+        "{reference} can still be read from {provider}, so ticketd cannot take ownership of it; refresh it or retry later"
+    )]
+    SourceAvailable { reference: String, provider: String },
+    #[error(transparent)]
+    Source(#[from] source::SourceError),
+    #[error(transparent)]
+    Publication(#[from] source::PublicationError),
     #[error("could not determine the application data directory")]
     NoDataDirectory,
     #[error("a file already exists at {}; ticketd never replaces an existing file, so choose a new name", .0.display())]
@@ -163,6 +193,12 @@ pub struct Ticket {
     pub title: String,
     pub status: Status,
     pub body: String,
+    /// Last content or organization change; unknown for legacy tickets with no dated records.
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    /// Latest authored note, selected by the core independently of ticket history.
+    #[serde(default)]
+    pub latest_update: Option<ReportedUpdate>,
     pub tags: Vec<String>,
     pub effort_id: Option<String>,
     pub project_id: Option<String>,
@@ -172,6 +208,18 @@ pub struct Ticket {
     pub duplicate_of: Option<String>,
     #[serde(default)]
     pub duplicates: Vec<String>,
+    /// Set when this duplicate's canonical ticket has itself become a Duplicate
+    /// (its source closed it as one): the ticket that is now the original, so the
+    /// designation can be moved there. Never changed automatically.
+    #[serde(default)]
+    pub duplicate_redirect: Option<String>,
+    /// The external issue this ticket is or was, with current ownership and freshness.
+    #[serde(default)]
+    pub source: Option<source::TicketSource>,
+    /// The publication attempt that is running or whose outcome is unknown. While
+    /// it is set the ticket cannot be published again.
+    #[serde(default)]
+    pub publication: Option<source::PublicationAttempt>,
     pub parent: Option<hierarchy::RelatedTicket>,
     pub children: Vec<hierarchy::RelatedTicket>,
 }
@@ -200,6 +248,27 @@ fn deserialize_project_patch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
+}
+
+fn external_status_message(
+    reference: &str,
+    provider: &str,
+    open: bool,
+    closure_unrecognized: bool,
+) -> String {
+    if closure_unrecognized {
+        format!(
+            "{reference} is closed on {provider} for a reason ticketd does not recognize; choose Done or Canceled here, or reopen it there"
+        )
+    } else if open {
+        format!(
+            "{reference} is open on {provider}; locally choose Todo, In progress or In review. Closing is done on {provider}"
+        )
+    } else {
+        format!(
+            "{reference} is closed on {provider}, so its status follows the external issue; reopen it there to change it"
+        )
+    }
 }
 
 fn wait_for_migration_lock(deadline: Instant) -> Result<(), Error> {
@@ -360,6 +429,33 @@ impl Workspace {
         if version < 20 {
             transaction.execute_batch("CREATE TABLE last_backup (id INTEGER PRIMARY KEY CHECK (id = 1), path TEXT NOT NULL, completed_at TEXT NOT NULL); PRAGMA user_version = 20;")?;
         }
+        if version < 21 {
+            duplicates::migrate_status(&transaction)?;
+        }
+        if version < 22 {
+            source::migrate(&transaction)?;
+        }
+        if version < 23 {
+            source::migrate_tracking(&transaction)?;
+        }
+        if version < 24 {
+            source::migrate_conversation(&transaction)?;
+        }
+        if version < 25 {
+            source::migrate_freshness(&transaction)?;
+        }
+        if version < 26 {
+            source::migrate_publication(&transaction)?;
+        }
+        if version < 27 {
+            source::migrate_details(&transaction)?;
+        }
+        if version < 28 {
+            notes::migrate_updates(&transaction)?;
+        }
+        if version < 29 {
+            source::migrate_run_counts(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -392,23 +488,7 @@ impl Workspace {
             history::record(&transaction, &id, "project", "", project_id, None)?;
         }
         transaction.commit()?;
-        Ok(Ticket {
-            id,
-            trashed: false,
-            reference: format!("T-{number}"),
-            title: title.to_owned(),
-            status: Status::Todo,
-            body: String::new(),
-            tags: Vec::new(),
-            effort_id: None,
-            project_id: project_id.map(str::to_owned),
-            availability: Some("Ready".into()),
-            prerequisites: Vec::new(),
-            duplicate_of: None,
-            duplicates: Vec::new(),
-            parent: None,
-            children: Vec::new(),
-        })
+        self.show_ticket(&format!("T-{number}"))
     }
 
     pub fn change_ticket(&mut self, reference: &str, patch: TicketPatch) -> Result<Ticket, Error> {
@@ -430,6 +510,13 @@ impl Workspace {
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
         ensure_editable(&transaction, &ticket.id)?;
+        source::guard_change(
+            &transaction,
+            &ticket,
+            title,
+            patch.body.as_deref(),
+            patch.status.unwrap_or(ticket.status),
+        )?;
         if let Some(ref effort_id) = patch.effort_id {
             if let Some(id) = effort_id {
                 efforts::get(&transaction, id)?;
@@ -468,13 +555,15 @@ impl Workspace {
                 )?;
             }
         }
-        if patch.status.is_some() && patch.status != Some(ticket.status) {
-            transaction.execute(
-                "UPDATE duplicate_tickets SET restore_status = NULL WHERE source_id = ?1",
-                [&ticket.id],
-            )?;
-        }
         let status = patch.status.unwrap_or(ticket.status);
+        if status != ticket.status {
+            if status == Status::Duplicate {
+                return Err(Error::DuplicateNeedsCanonical);
+            }
+            if ticket.status == Status::Duplicate {
+                duplicates::clear(&transaction, &ticket.id, patch.editing_agent.as_deref())?;
+            }
+        }
         transaction.execute("UPDATE tickets SET title = COALESCE(?1, title), body = COALESCE(?2, body), status = ?3 WHERE number = ?4", params![title, patch.body, status.to_string(), number])?;
         if status != ticket.status {
             history::record(
@@ -495,6 +584,8 @@ impl Workspace {
         relationships::populate(&transaction, &mut updated)?;
         hierarchy::populate(&transaction, &mut updated)?;
         duplicates::populate(&transaction, &mut updated)?;
+        source::populate(&transaction, &mut updated)?;
+        notes::populate_update(&transaction, &mut updated)?;
         transaction.commit()?;
         Ok(updated)
     }
@@ -603,6 +694,8 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             duplicates::populate(&self.connection, ticket)?;
+            source::populate(&self.connection, ticket)?;
+            notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }
@@ -624,6 +717,8 @@ impl Workspace {
         relationships::populate(&self.connection, &mut ticket)?;
         hierarchy::populate(&self.connection, &mut ticket)?;
         duplicates::populate(&self.connection, &mut ticket)?;
+        source::populate(&self.connection, &mut ticket)?;
+        notes::populate_update(&self.connection, &mut ticket)?;
         Ok(ticket)
     }
 }
@@ -642,6 +737,8 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
             )
         })?,
         body: row.get(4)?,
+        updated_at: None,
+        latest_update: None,
         tags: Vec::new(),
         project_id: row.get(5)?,
         effort_id: row.get(6)?,
@@ -649,6 +746,9 @@ fn ticket_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Ticket> {
         prerequisites: Vec::new(),
         duplicate_of: None,
         duplicates: Vec::new(),
+        duplicate_redirect: None,
+        source: None,
+        publication: None,
         parent: None,
         children: Vec::new(),
     })

@@ -91,6 +91,7 @@ beforeEach(() => {
         relationships: {
           parent: null,
           children: empty,
+          children_progress: { total: 0, done: 0 },
           prerequisites: empty,
           blocking: {
             items: [item("T-99", "Beyond the graph")],

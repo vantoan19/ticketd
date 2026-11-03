@@ -1,6 +1,8 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   Check,
   Copy,
   Maximize2,
@@ -26,9 +28,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PublishDialog } from "./PublishToSource";
+import {
+  publicationReason,
+  usePublishTarget,
+  usePublicationPreview,
+} from "./use-publication-preview";
 import { Duplicates } from "@/features/tickets/Duplicates";
-import { Follow } from "@/features/tickets/Inbox";
-import { Reminder } from "@/features/tickets/Reminder";
+import { SourceLink } from "@/features/tickets/SourceLink";
+import { externalSource } from "@/features/tickets/ticket-source";
 import { client, type Ticket } from "@/lib/api/client";
 import "./ticket-detail.css";
 
@@ -42,18 +50,22 @@ export function TicketHeader({
   selected,
   ticket,
   expanded,
-  revision,
   onExpand,
   onReturn,
   onClose,
   onOpenGraph,
   refresh,
   updateTicket,
+  position = null,
+  onAdjacent,
 }: {
+  /** The selected ticket's place in the visible list, across pages. */
+  position?: { index: number; total: number } | null;
+  /** Opens the ticket before (-1) or after (1) this one in the list. */
+  onAdjacent?: (direction: 1 | -1) => void;
   selected: string | null;
   ticket: Ticket | undefined;
   expanded: boolean;
-  revision: number;
   onExpand: () => void;
   onReturn: () => void;
   onClose: () => void;
@@ -61,9 +73,28 @@ export function TicketHeader({
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
 }) {
+  const target = usePublishTarget();
+  const preview = usePublicationPreview(ticket, target);
+  const [publishing, setPublishing] = useState(false);
   const { copied, error: copyError, copy } = useCopy();
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const actionsTrigger = useRef<HTMLButtonElement>(null);
+  // Previous/Next replace the ticket (and, at a page edge, the page), which
+  // remounts this group. Remember which one the keyboard used and give it focus back.
+  const listPosition = useRef<HTMLDivElement>(null);
+  const adjacentFocus = useRef<{
+    label: "Previous ticket" | "Next ticket";
+    from: string | null;
+  } | null>(null);
+  useEffect(() => {
+    const wanted = adjacentFocus.current;
+    // Wait for the neighboring ticket to be the loaded, selected one.
+    if (!wanted || !ticket || selected === wanted.from) return;
+    adjacentFocus.current = null;
+    listPosition.current
+      ?.querySelector<HTMLButtonElement>(`button[aria-label="${wanted.label}"]`)
+      ?.focus();
+  }, [selected, ticket, position]);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
   async function setTrashed(value: boolean) {
@@ -81,6 +112,7 @@ export function TicketHeader({
       setPending(false);
     }
   }
+  const owner = ticket ? externalSource(ticket) : null;
   const message = actionError || copyError;
   return (
     <div className="detail-header">
@@ -110,19 +142,54 @@ export function TicketHeader({
             {copied === "Reference" ? <Check /> : <Copy />}
           </IconButton>
         )}
+        {owner && (
+          <SourceLink url={owner.url} className="header-source-link">
+            <span className="sr-only">Open on {owner.provider_name}: </span>
+            <span>{owner.place.replace("/", " / ")}</span>{" "}
+            <span className="source-number">{owner.number}</span>
+          </SourceLink>
+        )}
       </div>
       {ticket && (
         <div className="ticket-personal-actions">
-          <Follow
-            key={`follow-${ticket.reference}`}
-            reference={ticket.reference}
-            revision={revision}
-          />
-          <Reminder
-            key={`reminder-${ticket.reference}`}
-            reference={ticket.reference}
-            revision={revision}
-          />
+          {position && onAdjacent && (
+            <div
+              ref={listPosition}
+              className="list-position"
+              role="group"
+              aria-label="Position in the list"
+            >
+              <span className="list-position-text">
+                {position.index} of {position.total}
+              </span>
+              <IconButton
+                label="Previous ticket"
+                disabled={position.index <= 1}
+                onClick={() => {
+                  adjacentFocus.current = {
+                    label: "Previous ticket",
+                    from: selected,
+                  };
+                  onAdjacent(-1);
+                }}
+              >
+                <ChevronUp />
+              </IconButton>
+              <IconButton
+                label="Next ticket"
+                disabled={position.index >= position.total}
+                onClick={() => {
+                  adjacentFocus.current = {
+                    label: "Next ticket",
+                    from: selected,
+                  };
+                  onAdjacent(1);
+                }}
+              >
+                <ChevronDown />
+              </IconButton>
+            </div>
+          )}
           {ticket.trashed && (
             <Button
               variant="outline"
@@ -143,7 +210,11 @@ export function TicketHeader({
                 <MoreHorizontal />
               </IconButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
+            <DropdownMenuContent
+              className="ticket-actions-menu"
+              align="end"
+              sideOffset={4}
+            >
               <DropdownMenuGroup>
                 <DropdownMenuItem
                   onSelect={() => void copy("Reference", ticket.reference)}
@@ -160,13 +231,27 @@ export function TicketHeader({
                 >
                   Copy context command
                 </DropdownMenuItem>
+                {!ticket.source && target && (
+                  <DropdownMenuItem
+                    disabled={
+                      !preview || preview.eligibility.kind !== "eligible"
+                    }
+                    onSelect={() => setPublishing(true)}
+                    className="publication-menu-item"
+                  >
+                    <span>Publish to GitHub…</span>
+                    {preview && preview.eligibility.kind !== "eligible" && (
+                      <small>{publicationReason(preview)}</small>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 {!ticket.trashed && (
                   <>
                     <DropdownMenuItem onSelect={() => setDuplicateOpen(true)}>
                       Mark as duplicate…
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={onOpenGraph}>
-                      Open dependency graph
+                      Show in dependency graph
                     </DropdownMenuItem>
                   </>
                 )}
@@ -182,7 +267,7 @@ export function TicketHeader({
                     variant="destructive"
                     onSelect={() => void setTrashed(true)}
                   >
-                    Move to trash
+                    Trash ticket
                   </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
@@ -217,6 +302,14 @@ export function TicketHeader({
         >
           {message || `${copied} copied`}
         </p>
+      )}
+      {ticket && publishing && target && (
+        <PublishDialog
+          ticket={ticket}
+          provider={target.provider}
+          refresh={refresh}
+          onOpenChange={setPublishing}
+        />
       )}
       {ticket && (
         <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>

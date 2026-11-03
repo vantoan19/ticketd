@@ -1,5 +1,5 @@
-use crate::Status;
 use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, ticket_from_row};
+use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +7,17 @@ use serde::{Deserialize, Serialize};
 pub enum Availability {
     Ready,
     Blocked,
+}
+
+/// How a result set is ordered before paging.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TicketOrder {
+    /// Descending ticket reference.
+    #[default]
+    Newest,
+    /// Workflow order of status (In progress, In review, Todo, Done, Canceled, Duplicate), then
+    /// descending reference. A list grouped by status pages through this order.
+    Workflow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +31,9 @@ pub struct TicketFilter {
     pub tags: Vec<String>,
     pub availability: Option<Availability>,
     pub family: Option<String>,
+    /// Only externally owned tickets of one provider, or only local ones.
+    pub source: Option<crate::source::SourceFilter>,
+    pub order: TicketOrder,
     pub limit: u32,
     pub offset: u32,
 }
@@ -34,6 +48,8 @@ impl Default for TicketFilter {
             tags: vec![],
             availability: None,
             family: None,
+            source: None,
+            order: TicketOrder::Newest,
             limit: 50,
             offset: 0,
         }
@@ -41,8 +57,13 @@ impl Default for TicketFilter {
 }
 
 impl Workspace {
-    /// Find non-trashed tickets in descending reference order. Tags use AND semantics.
-    pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
+    /// The conditions a filter adds to `tickets t WHERE t.trashed = 0`, as `" AND ..."` clauses.
+    /// Listing and counting share them, so a count always describes the tickets the list pages
+    /// through.
+    pub(crate) fn filter_conditions(
+        &self,
+        filter: &TicketFilter,
+    ) -> Result<(String, Vec<Value>), Error> {
         if let Some(project) = &filter.project {
             self.show_project(project)?;
         }
@@ -54,9 +75,7 @@ impl Workspace {
             .as_ref()
             .map(|reference| relationships::id(&self.connection, reference))
             .transpose()?;
-        let mut sql = String::from(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.effort_id, t.trashed FROM tickets t WHERE t.trashed = 0",
-        );
+        let mut sql = String::new();
         let mut values: Vec<Value> = Vec::new();
         if !filter.query.is_empty() {
             sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM notes n WHERE n.ticket_id = t.id AND instr(lower(n.content), lower(?)) > 0))");
@@ -88,7 +107,10 @@ impl Workspace {
             values.push(tag.into());
         }
         if let Some(availability) = filter.availability {
-            sql.push_str(" AND t.status = 'Todo' AND ");
+            sql.push_str(&format!(
+                " AND t.status = 'Todo' AND NOT {} AND ",
+                crate::source::held_sql("t.id")
+            ));
             if matches!(availability, Availability::Ready) {
                 sql.push_str("NOT ");
             }
@@ -102,7 +124,34 @@ impl Workspace {
             values.push(family.clone().into());
             values.push(family.into());
         }
-        sql.push_str(" ORDER BY t.number DESC LIMIT ? OFFSET ?");
+        match &filter.source {
+            None => {}
+            Some(crate::source::SourceFilter::Local) => sql.push_str(
+                " AND NOT EXISTS (SELECT 1 FROM external_ownership o WHERE o.ticket_id = t.id AND o.authority = 'external')",
+            ),
+            Some(crate::source::SourceFilter::Provider(provider)) => {
+                sql.push_str(" AND EXISTS (SELECT 1 FROM external_ownership o JOIN external_identities i ON i.ticket_id = o.ticket_id WHERE o.ticket_id = t.id AND o.authority = 'external' AND i.provider = ?)");
+                values.push(provider.clone().into());
+            }
+        }
+        Ok((sql, values))
+    }
+
+    /// Find non-trashed tickets, newest first unless the filter asks for workflow order.
+    /// Tags use AND semantics.
+    pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
+        let (conditions, mut values) = self.filter_conditions(filter)?;
+        let mut sql = format!(
+            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.effort_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
+        );
+        match filter.order {
+            TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
+            TicketOrder::Workflow => sql.push_str(&format!(
+                " ORDER BY {}, t.number DESC",
+                Status::workflow_order_sql("t.status")
+            )),
+        }
+        sql.push_str(" LIMIT ? OFFSET ?");
         values.push(i64::from(filter.limit.clamp(1, 100)).into());
         values.push(i64::from(filter.offset).into());
         let mut statement = self.connection.prepare(&sql)?;
@@ -114,8 +163,37 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
+            crate::source::populate(&self.connection, ticket)?;
+            crate::notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
+    }
+
+    /// Count the tickets of the whole filtered result set by status, ignoring its paging.
+    /// Uses the same conditions as [`Workspace::find_tickets`].
+    pub fn count_tickets(&self, filter: &TicketFilter) -> Result<StatusCounts, Error> {
+        let (conditions, values) = self.filter_conditions(filter)?;
+        let sql = format!(
+            "SELECT t.status, COUNT(*) FROM tickets t WHERE t.trashed = 0{conditions} GROUP BY t.status"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement
+            .query_map(params_from_iter(values), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut counts = StatusCounts::default();
+        for (status, count) in rows {
+            match status.parse::<Status>()? {
+                Status::Todo => counts.todo = count,
+                Status::InProgress => counts.in_progress = count,
+                Status::InReview => counts.in_review = count,
+                Status::Done => counts.done = count,
+                Status::Canceled => counts.canceled = count,
+                Status::Duplicate => counts.duplicate = count,
+            }
+        }
+        Ok(counts)
     }
 
     /// Search saved content using a literal, ASCII case-insensitive substring.
@@ -148,6 +226,8 @@ impl Workspace {
             relationships::populate(&self.connection, ticket)?;
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
+            crate::source::populate(&self.connection, ticket)?;
+            crate::notes::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }

@@ -1,10 +1,14 @@
 .linked-work {
-  margin-top: 24px;
-  /* Rows follow the section's own width, which a split view narrows. */
+  /* Rows follow the section's own width, which the rail narrows. */
   container-type: inline-size;
+  width: 100%;
 }
-.linked-work[data-empty] {
-  margin-top: 16px;
+.linked-work-actions {
+  flex-wrap: wrap;
+  margin-left: -12px;
+}
+.linked-work[data-empty] > button {
+  margin-left: -12px;
 }
 .linked-work-state {
   margin-left: 8px;
@@ -94,7 +98,7 @@
 .linked-work-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: 13px;
 }
 .linked-work-title {
   height: auto;
@@ -154,9 +158,61 @@
     grid-column: 4;
   }
 }
+/* Compact rail groups: a label followed by one icon/reference/title row. */
+@container (max-width: 260px) {
+  .linked-work-row {
+    grid-template-columns: 16px 3rem minmax(0, 1fr);
+    min-height: 32px;
+    padding: 0;
+    gap: 4px 8px;
+  }
+  .linked-work-label {
+    grid-column: 1 / -1;
+    padding-top: 8px;
+  }
+  .linked-work-icon {
+    grid-column: 1;
+  }
+  .linked-work-reference {
+    grid-column: 2;
+  }
+  .linked-work-title {
+    grid-column: 3;
+    white-space: nowrap;
+  }
+  .linked-work-remove {
+    position: absolute;
+    top: 24px;
+    right: 0;
+    background: var(--background);
+  }
+  .linked-work-row:has(.linked-work-label[data-repeat]) .linked-work-remove {
+    top: 0;
+  }
+  .linked-work-row:hover .linked-work-remove,
+  .linked-work-row:focus-within .linked-work-remove {
+    background: var(--accent);
+  }
+  .linked-work-status {
+    display: none;
+  }
+  .linked-work-status[data-qualified] {
+    display: block;
+    grid-column: 2 / -1;
+    white-space: normal;
+  }
+  .linked-work-external {
+    grid-column: 1 / -1;
+  }
+}
 @media (hover: none), (max-width: 767px) {
   .linked-work-remove {
     opacity: 1;
+  }
+  @container (max-width: 260px) {
+    .linked-work-title {
+      padding-right: 32px;
+    }
   }
 }
 .link-ticket-note {
@@ -222,4 +278,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.linked-work-external {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.linked-work-note {
+  color: var(--muted-foreground);
+  font-size: 12px;
 }

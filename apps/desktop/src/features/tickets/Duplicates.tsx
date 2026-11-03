@@ -72,8 +72,11 @@ export function Duplicates({
   onDone,
   onCancel,
   startSeparate = false,
+  initialCanonical = "",
 }: {
   ticket: Ticket;
+  /** The canonical ticket to review first, when the caller already knows it. */
+  initialCanonical?: string;
   /** Opens on the separate dependency review rather than on marking a duplicate. */
   startSeparate?: boolean;
   refresh: () => Promise<void>;
@@ -82,7 +85,7 @@ export function Duplicates({
   onCancel?: () => void;
 }) {
   const canonicalInput = useRef<HTMLInputElement>(null);
-  const [canonical, setCanonical] = useState("");
+  const [canonical, setCanonical] = useState(initialCanonical);
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
@@ -99,6 +102,12 @@ export function Duplicates({
     null,
   );
   const [separate, setSeparate] = useState(startSeparate);
+
+  // Arriving at the form (for example after picking the ticket to mark) puts the
+  // cursor where the next answer goes, not on the dialog's frame.
+  useEffect(() => {
+    canonicalInput.current?.focus();
+  }, []);
   const target = canonical.trim();
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
   // The preview's normalized form of the source, which its edges refer to; the typed
@@ -243,8 +252,8 @@ export function Duplicates({
               <TicketSummary
                 label="Duplicate"
                 ticket={ticket}
-                icon="Canceled"
-                note={`${ticket.status} → Canceled · Duplicate of ${preview.canonical}`}
+                icon="Duplicate"
+                note={`${ticket.status} → Duplicate · Duplicate of ${preview.canonical}`}
               />
               <TicketSummary
                 label="Canonical ticket"
@@ -281,7 +290,7 @@ export function Duplicates({
               <p className="duplicate-note">
                 {separate
                   ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
-                  : "A canceled ticket never satisfies a blocking dependency, so each of these needs a decision."}
+                  : "A duplicate ticket never satisfies a blocking dependency, so each of these needs a decision."}
               </p>
               <ul>
                 {preview.edges.map((edge, index) => {

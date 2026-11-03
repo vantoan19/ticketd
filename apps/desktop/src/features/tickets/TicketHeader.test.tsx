@@ -67,7 +67,6 @@ function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
     selected: "T-1",
     ticket,
     expanded: false,
-    revision: 0,
     onExpand: vi.fn(),
     onReturn: vi.fn(),
     onClose: vi.fn(),
@@ -109,30 +108,9 @@ test("copies the reference from the header and the context command from the menu
   );
 });
 
-test("Follow exposes a pressed state and reads Following", async () => {
-  header();
-  const follow = await screen.findByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
-  fireEvent.click(follow);
-  const pressed = await screen.findByRole("button", { name: "Following" });
-  expect(pressed.getAttribute("aria-pressed")).toBe("true");
-});
-
 // The summary follows the locale's time format, so expectations use it too.
 const localTime = (date: Date) =>
   date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-
-test("the reminder trigger shows the scheduled time", async () => {
-  const due = new Date();
-  due.setDate(due.getDate() + 1);
-  due.setHours(9, 0, 0, 0);
-  reminder = due.toISOString();
-  header();
-  const trigger = await screen.findByRole("button", {
-    name: /Manage reminder, scheduled/,
-  });
-  expect(trigger.textContent).toBe(`Tomorrow, ${localTime(due)}`);
-});
 
 test("summarizes reminder times relative to today in the locale's format", () => {
   const now = new Date(2030, 0, 10, 12, 0);
@@ -158,7 +136,7 @@ test("a reminder whose time has passed says it is due, not scheduled", () => {
 
 test("the actions menu opens the graph, the duplicate dialog, and trash", async () => {
   const props = header();
-  await chooseAction("Open dependency graph");
+  await chooseAction("Show in dependency graph");
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
@@ -169,7 +147,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Ticket actions" }),
   );
-  await chooseAction("Move to trash");
+  await chooseAction("Trash ticket");
   await waitFor(() => expect(props.updateTicket).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("set_trashed", {
     reference: "T-1",
@@ -188,10 +166,26 @@ test("a trashed ticket offers Restore without graph or duplicate actions", async
     },
   );
   expect(await screen.findByRole("menuitem", { name: "Restore" })).toBeTruthy();
-  expect(screen.queryByRole("menuitem", { name: "Move to trash" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Trash ticket" })).toBeNull();
   expect(
-    screen.queryByRole("menuitem", { name: "Open dependency graph" }),
+    screen.queryByRole("menuitem", { name: "Show in dependency graph" }),
   ).toBeNull();
+});
+
+test("shows the position in the list and moves to the neighboring ticket", () => {
+  const onAdjacent = vi.fn();
+  header({ position: { index: 1, total: 11 }, onAdjacent });
+  expect(screen.getByText("1 of 11")).toBeTruthy();
+  // The first ticket has nothing before it.
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Previous ticket",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Next ticket" }));
+  expect(onAdjacent).toHaveBeenCalledWith(1);
 });
 
 test("expanded view offers Show beside the list instead of Expand", () => {
