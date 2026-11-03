@@ -23,7 +23,8 @@ impl Workspace {
             ("document_tags", "document_id, tag_name"),
             ("projects", "id, name, path"),
             ("project_checkouts", "project_id, path"),
-            ("plans", "id, name, archived, purpose"),
+            ("plans", "id, name, archived, purpose, spec_document_id"),
+            ("plan_documents", "plan_id, document_id"),
             (
                 "tickets",
                 "number, id, title, status, body, project_id, plan_id, trashed, updated_at",

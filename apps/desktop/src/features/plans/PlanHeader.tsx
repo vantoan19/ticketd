@@ -8,6 +8,7 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { plansClient, type Plan, type View } from "@/lib/api/plans";
 import { statusCountKey, ticketStatuses } from "@/lib/statuses";
+import { PlanDocuments } from "./PlanDocuments";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import type { PlanViewState } from "./usePlanView";
 import "./plan.css";
@@ -200,6 +201,7 @@ export function PlanHeader({
           </Button>
         </div>
       )}
+      {view && <PlanDocuments view={view} state={state} />}
       {(actionError || loadError) && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{actionError || loadError}</AlertDescription>

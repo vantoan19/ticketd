@@ -8,7 +8,14 @@ const planSchema = z.object({
   purpose: z.string().default(""),
 });
 const viewSchema = z.object({
-  plan: planSchema,
+  plan: planSchema.extend({
+    spec_document_id: z.string().nullable().default(null),
+  }),
+  documents: z
+    .array(
+      z.object({ id: z.string(), heading: z.string(), trashed: z.boolean() }),
+    )
+    .default([]),
   counts: z.object({
     todo: z.number(),
     in_progress: z.number(),
@@ -30,6 +37,21 @@ const viewSchema = z.object({
 export type Plan = z.infer<typeof planSchema>;
 export type View = z.infer<typeof viewSchema>;
 export const plansClient = {
+  async setDocument(planId: string, documentId: string, present: boolean) {
+    await invoke("set_plan_document", {
+      planId,
+      documentId,
+      present,
+      requestId: crypto.randomUUID(),
+    });
+  },
+  async setSpec(planId: string, documentId: string | null) {
+    await invoke("set_plan_spec", {
+      planId,
+      documentId,
+      requestId: crypto.randomUUID(),
+    });
+  },
   async graph(id: string) {
     return graphSchema.parse(await invoke("plan_dependency_graph", { id }));
   },

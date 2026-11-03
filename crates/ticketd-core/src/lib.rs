@@ -64,7 +64,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 38;
+pub const FORMAT_VERSION: i64 = 39;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -554,6 +554,12 @@ impl Workspace {
                 )?;
             }
             transaction.execute_batch("PRAGMA user_version = 38;")?;
+        }
+        if version < 39 {
+            transaction.execute_batch("ALTER TABLE plans ADD COLUMN spec_document_id TEXT REFERENCES documents(id);
+                CREATE TABLE plan_documents (plan_id TEXT NOT NULL REFERENCES plans(id), document_id TEXT NOT NULL REFERENCES documents(id), PRIMARY KEY(plan_id, document_id));
+                CREATE INDEX plan_documents_by_document ON plan_documents(document_id, plan_id);
+                PRAGMA user_version = 39;")?;
         }
         transaction.commit()?;
         Ok(())

@@ -536,6 +536,21 @@ impl FindArgs {
 
 #[derive(Subcommand)]
 enum PlanCommand {
+    Context {
+        id: String,
+        #[arg(long)]
+        bodies: bool,
+    },
+    Document {
+        id: String,
+        document_id: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    Spec {
+        id: String,
+        document_id: Option<String>,
+    },
     Create {
         name: String,
     },
@@ -1146,6 +1161,19 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             agent.as_deref(),
         )?)?,
         Command::Plan { command } => match command {
+            PlanCommand::Context { id, bodies } => {
+                serde_json::to_string(&workspace.plan_context(&id, bodies)?)?
+            }
+            PlanCommand::Document {
+                id,
+                document_id,
+                remove,
+            } => {
+                serde_json::to_string(&workspace.set_plan_document(&id, &document_id, !remove)?)?
+            }
+            PlanCommand::Spec { id, document_id } => {
+                serde_json::to_string(&workspace.set_plan_spec(&id, document_id.as_deref())?)?
+            }
             PlanCommand::Create { name } => serde_json::to_string(&workspace.create_plan(&name)?)?,
             PlanCommand::List { all } => serde_json::to_string(&workspace.list_plans(all)?)?,
             PlanCommand::Show { id } => serde_json::to_string(&workspace.show_plan(&id)?)?,
