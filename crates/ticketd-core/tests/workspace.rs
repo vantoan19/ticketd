@@ -4083,3 +4083,51 @@ fn status_counts_serialize_their_total_so_clients_never_sum_them() {
     assert_eq!(value["total"], 8);
     assert_eq!(value["duplicate"], 1);
 }
+
+#[test]
+fn dependency_graph_reports_hub_omissions_and_can_recenter() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("hub.sqlite")).unwrap();
+    let hub = workspace.create_ticket("Hub").unwrap();
+    let mut leaves = Vec::new();
+    for _ in 0..55 {
+        let leaf = workspace.create_ticket("Leaf").unwrap();
+        workspace
+            .add_dependency(&hub.reference, &leaf.reference, None)
+            .unwrap();
+        leaves.push(leaf);
+    }
+    let graph = workspace.dependency_graph(&hub.reference).unwrap();
+    assert!(graph.truncated);
+    assert!(graph.omitted_neighbors);
+    assert_eq!(graph.nodes.len(), graph.max_nodes);
+    assert_eq!(graph.edges.len(), graph.nodes.len() - 1);
+    let recentered = workspace.dependency_graph(&leaves[54].reference).unwrap();
+    assert!(
+        recentered
+            .nodes
+            .iter()
+            .any(|node| node.reference == hub.reference)
+    );
+}
+
+#[test]
+fn dependency_graph_reports_omitted_edges_in_dense_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("dense.sqlite")).unwrap();
+    let tickets: Vec<_> = (0..26)
+        .map(|_| workspace.create_ticket("Node").unwrap())
+        .collect();
+    for i in 0..tickets.len() {
+        for j in i + 1..tickets.len() {
+            workspace
+                .add_dependency(&tickets[i].reference, &tickets[j].reference, None)
+                .unwrap();
+        }
+    }
+    let graph = workspace.dependency_graph(&tickets[0].reference).unwrap();
+    assert_eq!(graph.nodes.len(), 26);
+    assert_eq!(graph.edges.len(), graph.max_edges);
+    assert!(graph.omitted_edges);
+    assert!(graph.truncated);
+}

@@ -29,5 +29,5 @@ export function layoutGraph(graph: DependencyGraph) {
 /** How far a limited graph reaches, or null when nothing was cut off. */
 export function scopeNotice(graph: DependencyGraph, origin: string) {
   if (!graph.truncated) return null;
-  return `This graph is limited. It reaches up to ${graph.max_depth} links from ${origin} and at most ${graph.max_nodes} tickets, so some relationships are not shown.`;
+  return `This graph is limited. It reaches up to ${graph.max_depth} links from ${origin} and at most ${graph.max_nodes} tickets and ${graph.max_edges} relationships. Some tickets or relationships may be missing. Select a ticket and center the graph on it to explore further.`;
 }
