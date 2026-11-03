@@ -21,12 +21,14 @@ export function DocumentEditor({
   currentTicket,
   onOpenDocument,
   onOpenTicket,
+  onOpenPlan,
 }: {
   initial: Document | null;
   onClose: () => void;
   currentTicket?: string | null;
   onOpenDocument?: (id: string) => void;
   onOpenTicket?: (reference: string) => void;
+  onOpenPlan?: (id: string) => void;
 }) {
   const [linkTarget, setLinkTarget] = useState("");
   const [ticketTitle, setTicketTitle] = useState("");
@@ -51,7 +53,11 @@ export function DocumentEditor({
   const id = useRef(initial?.id ?? null);
   const pending = useRef<Pending | null>(null);
   const saving = useRef(false);
+  const ticketRequest = useRef<{ title: string; id: string } | null>(null);
+  const creatingTicket = useRef(false);
   const closeRequested = useRef(false);
+  const afterSave = useRef<(() => void) | null>(null);
+  const finish = () => (afterSave.current ?? close.current)();
   const close = useRef(onClose);
   useEffect(() => {
     close.current = onClose;
@@ -75,7 +81,7 @@ export function DocumentEditor({
     const titleChanged = snapshot.title !== saved.current.title;
     const bodyChanged = snapshot.body !== saved.current.body;
     if (!pending.current && !titleChanged && !bodyChanged) {
-      if (closeRequested.current) close.current();
+      if (closeRequested.current) finish();
       return;
     }
     if (
@@ -84,7 +90,7 @@ export function DocumentEditor({
       !snapshot.title.trim() &&
       !snapshot.body.trim()
     ) {
-      if (closeRequested.current) close.current();
+      if (closeRequested.current) finish();
       return;
     }
     const request = pending.current ?? {
@@ -117,7 +123,7 @@ export function DocumentEditor({
         draft.current.body !== saved.current.body
       )
         void save();
-      else if (closeRequested.current) close.current();
+      else if (closeRequested.current) finish();
     } catch (error) {
       saving.current = false;
       closeRequested.current = false;
@@ -173,7 +179,13 @@ export function DocumentEditor({
     }, 2000);
     return () => window.clearInterval(timer);
   }, []);
+  const navigate = (action: () => void) => {
+    afterSave.current = action;
+    closeRequested.current = true;
+    void save();
+  };
   const requestClose = () => {
+    afterSave.current = null;
     closeRequested.current = true;
     void save();
   };
@@ -303,8 +315,12 @@ export function DocumentEditor({
                       <Button
                         variant="ghost"
                         onClick={() => {
-                          if (kind === "document") onOpenDocument?.(target);
-                          else if (kind === "ticket") onOpenTicket?.(label);
+                          if (kind === "document")
+                            navigate(() => onOpenDocument?.(target));
+                          else if (kind === "ticket")
+                            navigate(() => onOpenTicket?.(label));
+                          else if (kind === "plan")
+                            navigate(() => onOpenPlan?.(target));
                         }}
                       >
                         {label}
@@ -327,12 +343,31 @@ export function DocumentEditor({
             </Field>
             <Button
               disabled={!ticketTitle.trim()}
-              onClick={() =>
+              onClick={() => {
+                if (creatingTicket.current) return;
+                if (
+                  !ticketRequest.current ||
+                  ticketRequest.current.title !== ticketTitle
+                )
+                  ticketRequest.current = {
+                    title: ticketTitle,
+                    id: crypto.randomUUID(),
+                  };
+                creatingTicket.current = true;
                 void documents
-                  .createTicket(initial.id, ticketTitle, crypto.randomUUID())
-                  .then((ticket) => onOpenTicket?.(ticket.reference))
+                  .createTicket(
+                    initial.id,
+                    ticketTitle,
+                    ticketRequest.current.id,
+                  )
+                  .then((ticket) =>
+                    navigate(() => onOpenTicket?.(ticket.reference)),
+                  )
                   .catch((error: unknown) => setLinkError(String(error)))
-              }
+                  .finally(() => {
+                    creatingTicket.current = false;
+                  });
+              }}
             >
               Create ticket
             </Button>

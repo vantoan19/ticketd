@@ -23,6 +23,9 @@ const remarkPlugins = [remarkGfm, references];
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
+export const DocumentNavigation = createContext<((id: string) => void) | null>(
+  null,
+);
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -36,6 +39,27 @@ function DocumentLink({
   children?: React.ReactNode;
 }) {
   const { select, revision } = useContext(TicketNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  if (href?.startsWith("ticketd://document/")) {
+    const id = href.slice("ticketd://document/".length);
+    return openDocument ? (
+      <button type="button" onClick={() => openDocument(id)}>
+        {children}
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
+  if (href?.startsWith("ticketd://ticket/"))
+    return select ? (
+      <TicketReference
+        reference={href.slice("ticketd://ticket/".length)}
+        select={select}
+        revision={revision}
+      />
+    ) : (
+      <>{children}</>
+    );
   if (href?.startsWith("ticketd:"))
     return select ? (
       <TicketReference

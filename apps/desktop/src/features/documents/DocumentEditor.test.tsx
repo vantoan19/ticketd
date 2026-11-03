@@ -144,3 +144,38 @@ it("inserts a validated link into the draft", async () => {
     ).toBe("[T-4](ticketd://ticket/T-4)"),
   );
 });
+it("opens a connected ticket after saving a document draft", async () => {
+  const document = {
+    id: "d1",
+    title: null,
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+  };
+  vi.mocked(documents.links).mockResolvedValue([
+    [],
+    [
+      {
+        source_id: "t1",
+        target_id: "d1",
+        source_kind: "ticket",
+        target_kind: "document",
+        source_label: "T-4",
+        target_label: "Document",
+        passage: "Source",
+      },
+    ],
+  ]);
+  vi.mocked(documents.save).mockResolvedValue({ ...document, body: "Updated" });
+  const open = vi.fn();
+  render(
+    <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
+  );
+  await screen.findByText("Source");
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Updated" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "T-4" }));
+  await waitFor(() => expect(open).toHaveBeenCalledWith("T-4"));
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Updated");
+});

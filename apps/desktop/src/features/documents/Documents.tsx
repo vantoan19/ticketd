@@ -21,12 +21,16 @@ export function Documents({
   onCaptureClose,
   currentTicket,
   onOpenTicket,
+  onOpenPlan,
+  target,
 }: {
   capture: boolean;
   active: boolean;
   onCaptureClose: () => void;
   currentTicket: string | null;
   onOpenTicket: (reference: string) => void;
+  onOpenPlan: (id: string) => void;
+  target: { id: string; key: number } | null;
 }) {
   const [recent, setRecent] = useState<Document[]>([]);
   const [selected, setSelected] = useState<Document | null>(null);
@@ -36,6 +40,13 @@ export function Documents({
       .recent()
       .then(setRecent)
       .catch((e: unknown) => setError(String(e)));
+  useEffect(() => {
+    if (target)
+      void documents
+        .open(target.id)
+        .then(setSelected)
+        .catch((e: unknown) => setError(String(e)));
+  }, [target]);
   useEffect(() => {
     if (active) void refresh();
   }, [active, capture]);
@@ -80,6 +91,10 @@ export function Documents({
               .then(setSelected)
               .catch((e: unknown) => setError(String(e)))
           }
+          onOpenPlan={(id) => {
+            setSelected(null);
+            onOpenPlan(id);
+          }}
           onOpenTicket={(reference) => {
             setSelected(null);
             onOpenTicket(reference);
