@@ -234,6 +234,7 @@ export function App() {
             )}
             <div hidden={view !== "documents"}>
               <Documents
+                active={view === "documents"}
                 capture={capture}
                 onCaptureClose={() => setCapture(false)}
               />

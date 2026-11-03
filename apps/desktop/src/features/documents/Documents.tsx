@@ -17,9 +17,11 @@ function heading(document: Document) {
 }
 export function Documents({
   capture,
+  active,
   onCaptureClose,
 }: {
   capture: boolean;
+  active: boolean;
   onCaptureClose: () => void;
 }) {
   const [recent, setRecent] = useState<Document[]>([]);
@@ -31,8 +33,8 @@ export function Documents({
       .then(setRecent)
       .catch((e: unknown) => setError(String(e)));
   useEffect(() => {
-    void refresh();
-  }, [capture]);
+    if (active) void refresh();
+  }, [active, capture]);
   return (
     <div className="documents-page">
       <h1>Documents</h1>
