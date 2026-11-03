@@ -58,7 +58,12 @@ enum DocumentCommand {
     Open {
         id: String,
     },
+    Keep {
+        id: String,
+    },
     Recent {
+        #[arg(long)]
+        include_support: bool,
         #[arg(long, default_value_t = 50)]
         limit: u32,
         #[arg(long, default_value_t = 0)]
@@ -775,9 +780,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             )?)?,
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
-            DocumentCommand::Recent { limit, offset } => {
-                serde_json::to_string(&workspace.recent_documents_page(limit, offset)?)?
+            DocumentCommand::Keep { id } => {
+                serde_json::to_string(&workspace.write(None, WriteRequest::KeepDocument { id })?)?
             }
+            DocumentCommand::Recent {
+                limit,
+                offset,
+                include_support,
+            } => serde_json::to_string(&workspace.recent_documents_including_support(
+                limit,
+                offset,
+                include_support,
+            )?)?,
             DocumentCommand::Search {
                 query,
                 tag,

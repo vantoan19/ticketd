@@ -14,12 +14,15 @@ pub struct Document {
     pub trashed: bool,
     #[serde(default)]
     pub origin_brief: Option<String>,
+    #[serde(default)]
+    pub kept: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentSummary {
     pub id: String,
     pub heading: String,
+    pub origin_ticket: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,6 +30,7 @@ pub struct DocumentSearchResult {
     pub id: String,
     pub heading: String,
     pub snippet: String,
+    pub origin_ticket: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -76,7 +80,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
 }
 
 // Limit headings in list results even when a document has a very long first line.
-const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
+const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 1, 200), ''), nullif(trim(substr(ltrim(d.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(d.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), ''), 'Untitled')";
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {
@@ -110,7 +114,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                "SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) FROM documents WHERE id = ?1",
+                "SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id)  , kept FROM documents WHERE id = ?1",
                 [id],
                 |row| {
                     Ok(Document {
@@ -121,6 +125,7 @@ impl Workspace {
                         updated_at: row.get(4)?,
                         trashed: row.get(5)?,
                         origin_brief: row.get(6)?,
+                        kept: row.get(7)?,
                     })
                 },
             )
@@ -143,15 +148,25 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<DocumentSummary>, Error> {
+        self.recent_documents_including_support(limit, offset, false)
+    }
+
+    pub fn recent_documents_including_support(
+        &self,
+        limit: u32,
+        offset: u32,
+        include_support: bool,
+    ) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING} FROM document_opens o JOIN documents d ON d.id = o.document_id WHERE d.trashed = 0 AND d.originating_activity_id IS NULL ORDER BY o.sequence DESC LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
-            .query_map(params![limit.min(100), offset], |row| {
+            .query_map(params![limit.min(100), offset, include_support], |row| {
                 Ok(DocumentSummary {
                     id: row.get(0)?,
                     heading: row.get(1)?,
+                    origin_ticket: row.get(2)?,
                 })
             })?
             .collect::<Result<_, _>>()?)
@@ -159,7 +174,7 @@ impl Workspace {
 
     pub fn pinned_documents(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING} FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 ORDER BY d.id LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 AND (d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -167,6 +182,7 @@ impl Workspace {
                 Ok(DocumentSummary {
                     id: row.get(0)?,
                     heading: row.get(1)?,
+                    origin_ticket: row.get(2)?,
                 })
             })?
             .collect::<Result<_, _>>()?)
@@ -196,7 +212,7 @@ impl Workspace {
                 return Ok(Vec::new());
             };
             let sql = format!(
-                "SELECT d.id, {HEADING} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 AND (?4 OR d.originating_activity_id IS NULL) ORDER BY d.id LIMIT ?2 OFFSET ?3"
+                "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 AND (?4 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?2 OFFSET ?3"
             );
             let mut statement = self.connection.prepare(&sql)?;
             return Ok(statement
@@ -212,6 +228,7 @@ impl Workspace {
                             id: row.get(0)?,
                             heading: row.get(1)?,
                             snippet: String::new(),
+                            origin_ticket: row.get(2)?,
                         })
                     },
                 )?
@@ -220,7 +237,7 @@ impl Workspace {
         let expression = format!("\"{}\"", query.replace('"', "\"\""));
         let tag = tag.map(|value| value.trim().to_lowercase());
         let sql = format!(
-            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300), (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL OR d.kept = 1) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -231,10 +248,21 @@ impl Workspace {
                         id: row.get(0)?,
                         heading: row.get(1)?,
                         snippet: row.get(2)?,
+                        origin_ticket: row.get(3)?,
                     })
                 },
             )?
             .collect::<Result<_, _>>()?)
+    }
+
+    pub fn keep_document(&mut self, id: &str) -> Result<Document, Error> {
+        let doc = self.show_document(id)?;
+        if doc.trashed {
+            return Err(Error::Trashed(id.to_owned()));
+        }
+        self.connection
+            .execute("UPDATE documents SET kept = 1 WHERE id = ?1", [id])?;
+        self.open_document(id)
     }
 
     pub fn set_document_pin(&mut self, id: &str, pinned: bool) -> Result<(), Error> {
@@ -319,7 +347,7 @@ impl Workspace {
         }
     }
     pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
-        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
+        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) , kept FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
         let rows = statement.query_map([], |row| {
             Ok(Document {
                 id: row.get(0)?,
@@ -329,6 +357,7 @@ impl Workspace {
                 updated_at: row.get(4)?,
                 trashed: row.get(5)?,
                 origin_brief: row.get(6)?,
+                kept: row.get(7)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
