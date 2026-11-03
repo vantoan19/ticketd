@@ -4189,16 +4189,26 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("plan-graph.sqlite")).unwrap();
     let plan = workspace.create_plan("Launch").unwrap();
-    let member = workspace.create_ticket("Member").unwrap();
+    let first = workspace.create_project("First", "/first").unwrap();
+    let second = workspace.create_project("Second", "/second").unwrap();
+    let member = workspace
+        .create_ticket_in_project("Member", Some(&first.id))
+        .unwrap();
+    let other = workspace
+        .create_ticket_in_project("Other member", Some(&second.id))
+        .unwrap();
     let outside = workspace.create_ticket("Outside").unwrap();
     workspace
         .set_plan(&member.reference, Some(&plan.id), None)
         .unwrap();
     workspace
+        .set_plan(&other.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace
         .add_dependency(&outside.reference, &member.reference, None)
         .unwrap();
     let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
-    assert_eq!(graph.nodes.len(), 2);
+    assert_eq!(graph.nodes.len(), 3);
     assert!(
         graph
             .nodes
@@ -4208,12 +4218,39 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
     assert!(graph.nodes.iter().any(|n| n.reference == member.reference
         && !n.boundary
         && n.availability.as_deref() == Some("Blocked")));
-    assert_eq!(workspace.show_plan(&plan.id).unwrap().counts.todo, 1);
+    assert_eq!(workspace.show_plan(&plan.id).unwrap().counts.todo, 2);
     assert!(
         workspace
             .add_dependency(&member.reference, &outside.reference, None)
             .is_err()
     );
+    workspace
+        .change_ticket(
+            &outside.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|n| n.reference == member.reference && n.availability.as_deref() == Some("Ready"))
+    );
+    workspace
+        .change_ticket(
+            &other.reference,
+            TicketPatch {
+                status: Some(Status::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let counts = workspace.show_plan(&plan.id).unwrap().counts;
+    assert_eq!((counts.todo, counts.done), (1, 1));
 }
 
 #[test]
