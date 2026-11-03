@@ -104,6 +104,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
       .map((heading) => heading.textContent),
   ).toEqual([
     "Status",
+    "Latest update",
     "Source",
     "Project",
     "Plan",
@@ -206,6 +207,15 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   };
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
     if (command === "get_activity") return note;
+    if (command === "latest_update")
+      return {
+        activity_id: note.id,
+        brief: { text: note.brief, truncated: false },
+        reported_at: note.reported_at,
+        updated_at: note.updated_at,
+        editing_agent: note.editing_agent,
+        supporting_document_id: null,
+      };
     return bridgeDefault(command, args as { reference?: string });
   });
   renderDetails({
@@ -220,8 +230,12 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   });
   const heading = screen.getByRole("heading", { name: "Latest update" });
   fireEvent.click(
-    within(heading.closest("section")!).getByRole("button", { name: /agent/ }),
+    await within(heading.closest("section")!).findByRole("button", {
+      name: "Open update",
+    }),
   );
-  expect(await screen.findByText("Reported progress")).toBeTruthy();
+  expect(
+    (await screen.findByLabelText("Selected update")).textContent,
+  ).toContain("Reported progress");
   expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
 });

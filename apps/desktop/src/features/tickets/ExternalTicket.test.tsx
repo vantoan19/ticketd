@@ -285,15 +285,17 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
 
 test("the Source section shows the owner, the state, freshness and refreshes one ticket", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "refresh_sources"
-      ? {
-          imported: [],
-          updated: ["T-1"],
-          unchanged: 0,
-          failures: [],
-          refreshed_at: "2026-02-02T00:00:00Z",
-        }
-      : [],
+    command === "latest_update"
+      ? null
+      : command === "refresh_sources"
+        ? {
+            imported: [],
+            updated: ["T-1"],
+            unchanged: 0,
+            failures: [],
+            refreshed_at: "2026-02-02T00:00:00Z",
+          }
+        : [],
   );
   const refresh = properties(ticket());
   const section = screen
@@ -324,22 +326,24 @@ test("the Source section shows the owner, the state, freshness and refreshes one
 
 test("a failed refresh keeps the content and says the last attempt failed", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
-    command === "refresh_sources"
-      ? {
-          imported: [],
-          updated: [],
-          unchanged: 0,
-          failures: [
-            {
-              provider: "github",
-              reference: "T-1",
-              code: "unavailable",
-              message: "GitHub is down.",
-            },
-          ],
-          refreshed_at: "2026-02-02T00:00:00Z",
-        }
-      : [],
+    command === "latest_update"
+      ? null
+      : command === "refresh_sources"
+        ? {
+            imported: [],
+            updated: [],
+            unchanged: 0,
+            failures: [
+              {
+                provider: "github",
+                reference: "T-1",
+                code: "unavailable",
+                message: "GitHub is down.",
+              },
+            ],
+            refreshed_at: "2026-02-02T00:00:00Z",
+          }
+        : [],
   );
   properties(
     ticket({

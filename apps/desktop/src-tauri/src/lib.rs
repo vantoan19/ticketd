@@ -4,9 +4,9 @@ mod cli_status;
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph,
     Document, DocumentPatch, DocumentSearchResult, DocumentSummary, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status,
-    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceInfo,
-    WriteRequest, WriteResult,
+    HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup, SidebarCounts,
+    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so

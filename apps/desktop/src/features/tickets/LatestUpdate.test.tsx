@@ -38,3 +38,22 @@ test("distinguishes an absent update from a failed read and allows retry", async
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("No update reported");
 });
+
+test("refreshes the preview when the workspace revision changes", async () => {
+  const report = {
+    activity_id: "a-1",
+    brief: { text: "First report", truncated: false },
+    reported_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    editing_agent: null,
+    supporting_document_id: null,
+  };
+  bridge.invoke.mockResolvedValueOnce(report).mockResolvedValueOnce({
+    ...report,
+    brief: { text: "Corrected report", truncated: true },
+  });
+  const view = render(<LatestUpdate reference="T-1" active revision={0} />);
+  await screen.findByText("First report");
+  view.rerender(<LatestUpdate reference="T-1" active revision={1} />);
+  await screen.findByText("Corrected report…");
+});
