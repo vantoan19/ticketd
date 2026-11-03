@@ -460,6 +460,9 @@ impl Workspace {
         if version < 29 {
             source::migrate_run_counts(&transaction)?;
         }
+        if version < 30 {
+            transaction.execute_batch("CREATE INDEX IF NOT EXISTS dependencies_dependent ON dependencies(dependent_id, blocker_id); PRAGMA user_version = 30;")?;
+        }
         if version < 31 {
             documents::migrate(&transaction)?;
         }

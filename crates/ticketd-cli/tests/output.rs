@@ -488,3 +488,34 @@ fn cli_requires_a_canonical_ticket_to_choose_duplicate() {
     let ticket: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(ticket["status"], "Todo");
 }
+
+#[test]
+fn graph_cli_reports_relationships_and_limits() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    {
+        let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+        let a = workspace.create_ticket("A").unwrap();
+        let b = workspace.create_ticket("B").unwrap();
+        workspace
+            .add_dependency(&a.reference, &b.reference, None)
+            .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["graph", "T-1"])
+        .env("TICKETD_TEST_WORKSPACE", path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(graph["edges"][0]["blocker"], "T-1");
+    assert_eq!(graph["edges"][0]["dependent"], "T-2");
+    assert_eq!(graph["omitted_neighbors"], false);
+    assert_eq!(graph["omitted_edges"], false);
+    assert_eq!(graph["max_edges"], 300);
+}

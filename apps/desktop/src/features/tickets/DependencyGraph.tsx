@@ -209,6 +209,7 @@ function SelectionPanel({
   efforts,
   onOpen,
   onBack,
+  onCenter,
 }: {
   ticket: GraphTicket;
   origin: string;
@@ -216,6 +217,7 @@ function SelectionPanel({
   efforts: Effort[];
   onOpen: (reference: string) => void;
   onBack: () => void;
+  onCenter: (reference: string) => void;
 }) {
   const [loaded, setLoaded] = useState<{
     ticket: Ticket;
@@ -280,6 +282,13 @@ function SelectionPanel({
         <dd>{effort?.name ?? placeholder}</dd>
       </dl>
       <div className="graph-panel-actions">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onCenter(ticket.reference)}
+        >
+          Center graph on {ticket.reference}
+        </Button>
         {ticket.reference !== origin && (
           <Button size="sm" onClick={() => onOpen(ticket.reference)}>
             Open {ticket.reference}
@@ -310,13 +319,14 @@ export default function DependencyGraph({
   onOpen: (reference: string) => void;
 }) {
   const [graph, setGraph] = useState<Graph | null>(null);
+  const [center, setCenter] = useState(reference);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
   useEffect(() => {
     let active = true;
-    void client.dependencyGraph(reference).then(
+    void client.dependencyGraph(center).then(
       (value) => {
         if (active) {
           setGraph(value);
@@ -330,8 +340,8 @@ export default function DependencyGraph({
     return () => {
       active = false;
     };
-  }, [reference, revision]);
-  const notice = graph ? scopeNotice(graph, reference) : null;
+  }, [center, revision]);
+  const notice = graph ? scopeNotice(graph, center) : null;
   const selectedTicket = graph?.nodes.find(
     (node) => node.reference === selected,
   );
@@ -359,7 +369,7 @@ export default function DependencyGraph({
           <div className="graph-canvas">
             <Canvas
               graph={graph}
-              origin={reference}
+              origin={center}
               selected={selected}
               onSelect={setSelected}
             />
@@ -372,6 +382,7 @@ export default function DependencyGraph({
               efforts={efforts}
               onOpen={onOpen}
               onBack={onBack}
+              onCenter={setCenter}
             />
           ) : (
             <aside className="graph-panel" aria-label="Selected ticket">
