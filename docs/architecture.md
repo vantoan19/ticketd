@@ -264,3 +264,19 @@ edited or deleted. `editing_agent` is descriptive attribution. Relationship
 history kinds `parent`, `dependency`, and those prefixed `relationship:` also
 produce inbox entries for followed tickets, in the same transaction as the
 change. New relationship types use that prefix to participate.
+
+## Context-management extension
+
+The confirmed target model adds Documents and Activities and replaces Effort with
+Plan; see [product behavior](mvp-spec.md#16-context-management) and
+[ADR 0007](adr/0007-context-storage-and-graph-queries.md). Earlier implementation
+names and command examples in this architecture describe the current runtime,
+not compatibility requirements for the extension. No migration of development
+data or legacy command aliases is required.
+
+The core owns atomic Activity/supporting-Document creation, origin cleanup,
+Document search and mention indexing, Plan associations, and bounded context and
+graph queries. The desktop owns capture/editing state and graph presentation;
+the CLI exposes the same operations without coordinating their transactions.
+Explicit relationship tables remain authoritative. Shared entity identities
+support cross-type references while concrete records retain domain invariants.
