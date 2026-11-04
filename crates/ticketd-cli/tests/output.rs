@@ -703,3 +703,43 @@ fn cli_plan_context_shows_associated_document_and_opt_in_body() {
     let with_bodies = run(&["plan", "context", plan_id, "--bodies"]);
     assert_eq!(with_bodies["documents"][0]["body"], "# Details");
 }
+
+#[test]
+fn context_graph_cli_reads_new_connections() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "First"]);
+    run(&["create", "Second"]);
+    run(&["change", "T-1", "--body", "See T-2"]);
+    let graph = run(&["graph", "T-2", "--context"]);
+    assert!(
+        graph["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["label"].as_str().unwrap().contains("First"))
+    );
+    assert!(
+        graph["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "mention")
+    );
+}

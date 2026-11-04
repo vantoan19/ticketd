@@ -1,7 +1,9 @@
 import {
+  ContextGraphNavigation,
   DocumentNavigation,
   PlanNavigation,
 } from "@/features/documents/navigation";
+import { ContextGraph } from "@/features/documents/ContextGraph";
 import { Documents } from "@/features/documents/Documents";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -81,6 +83,7 @@ export function App() {
       window.clearInterval(timer);
     };
   }, []);
+  const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [capture, setCapture] = useState(false);
   const [documentTarget, setDocumentTarget] = useState<{
     id: string;
@@ -116,179 +119,203 @@ export function App() {
   });
   const isMobile = useIsMobile();
   return (
-    <PlanNavigation.Provider
-      value={(id) => {
-        scope("all", "all", id);
-        setView("tickets");
-      }}
-    >
-      <DocumentNavigation.Provider
+    <ContextGraphNavigation.Provider value={setGraphOrigin}>
+      <PlanNavigation.Provider
         value={(id) => {
-          setDocumentTarget({ id, key: Date.now() });
-          setView("documents");
+          scope("all", "all", id);
+          setView("tickets");
         }}
       >
-        <SourceActivityContext.Provider
-          value={{
-            refreshing: sourceHealth.refreshing || sourceRefresh.running,
-            sources: sourceHealth.sources,
-            entries: sourceEntries,
-            intervalSecs: sourceHealth.interval_secs ?? null,
-            openSettings: () => {
-              openView("settings");
-              setSettingsSection("source-github");
-            },
-            refreshAll: () => refreshSources(),
+        <DocumentNavigation.Provider
+          value={(id) => {
+            setDocumentTarget({ id, key: Date.now() });
+            setView("documents");
           }}
         >
-          <SidebarProvider>
-            <a
-              className="skip-link"
-              href="#main-content"
-              onClick={(event) => {
-                event.preventDefault();
-                document.getElementById("main-content")?.focus();
-              }}
-            >
-              Skip to content
-            </a>
-            <div
-              className={
-                view === "settings" ? "workspace settings-open" : "workspace"
-              }
-            >
-              {view === "settings" ? (
-                <SettingsNav
-                  selected={settingsSection}
-                  onSelect={setSettingsSection}
-                  onBack={() => {
-                    returnToSettingsEntry.current = true;
-                    setView(viewBeforeSettings);
-                  }}
-                />
-              ) : (
-                <WorkspaceSidebar
-                  onCapture={() => setCapture(true)}
-                  counts={counts}
-                  view={view}
-                  setView={openView}
-                  projects={projects}
-                  plans={plans}
-                  scope={scope}
-                  navigation={navigation}
-                  setCreating={(value) => {
-                    if (value) setCreateStatus(undefined);
-                    setCreating(value);
-                  }}
-                  createTriggerRef={createTriggerRef}
-                />
-              )}
-              <main id="main-content" tabIndex={-1} className="content-panel">
-                {isMobile && view !== "settings" && (
-                  <div className="mobile-nav-bar">
-                    <SidebarTrigger
-                      className="mobile-nav-trigger"
-                      variant="ghost"
-                      size="sm"
-                      aria-label="Open navigation"
-                    >
-                      <Menu /> Navigation
-                    </SidebarTrigger>
-                  </div>
-                )}
-                {error && (
-                  <p role="alert" className="global-error">
-                    {error}
-                  </p>
-                )}
-                <CreateTicketDialog
-                  open={creating}
-                  onOpenChange={setCreating}
-                  triggerRef={createTriggerRef}
-                  navigation={navigation}
-                  {...(createStatus && { initialStatus: createStatus })}
-                  projects={projects}
-                  plans={plans}
-                  create={create}
-                />
-                {view === "settings" && (
-                  <SettingsView
+          <SourceActivityContext.Provider
+            value={{
+              refreshing: sourceHealth.refreshing || sourceRefresh.running,
+              sources: sourceHealth.sources,
+              entries: sourceEntries,
+              intervalSecs: sourceHealth.interval_secs ?? null,
+              openSettings: () => {
+                openView("settings");
+                setSettingsSection("source-github");
+              },
+              refreshAll: () => refreshSources(),
+            }}
+          >
+            <SidebarProvider>
+              <a
+                className="skip-link"
+                href="#main-content"
+                onClick={(event) => {
+                  event.preventDefault();
+                  document.getElementById("main-content")?.focus();
+                }}
+              >
+                Skip to content
+              </a>
+              <div
+                className={
+                  view === "settings" ? "workspace settings-open" : "workspace"
+                }
+              >
+                {view === "settings" ? (
+                  <SettingsNav
                     selected={settingsSection}
-                    onOpenInbox={() => setView("inbox")}
-                    onRestore={async () => {
-                      setSelected(null);
-                      setDetails({});
-                      bulk.reset();
-                      await refresh();
+                    onSelect={setSettingsSection}
+                    onBack={() => {
+                      returnToSettingsEntry.current = true;
+                      setView(viewBeforeSettings);
                     }}
                   />
+                ) : (
+                  <WorkspaceSidebar
+                    onCapture={() => setCapture(true)}
+                    counts={counts}
+                    view={view}
+                    setView={openView}
+                    projects={projects}
+                    plans={plans}
+                    scope={scope}
+                    navigation={navigation}
+                    setCreating={(value) => {
+                      if (value) setCreateStatus(undefined);
+                      setCreating(value);
+                    }}
+                    createTriggerRef={createTriggerRef}
+                  />
                 )}
-                {
-                  <div className="management" hidden={view !== "projects"}>
-                    <Projects
-                      projects={projects}
-                      loading={loading}
-                      onChange={refresh}
+                <main id="main-content" tabIndex={-1} className="content-panel">
+                  {isMobile && view !== "settings" && (
+                    <div className="mobile-nav-bar">
+                      <SidebarTrigger
+                        className="mobile-nav-trigger"
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Open navigation"
+                      >
+                        <Menu /> Navigation
+                      </SidebarTrigger>
+                    </div>
+                  )}
+                  {error && (
+                    <p role="alert" className="global-error">
+                      {error}
+                    </p>
+                  )}
+                  <CreateTicketDialog
+                    open={creating}
+                    onOpenChange={setCreating}
+                    triggerRef={createTriggerRef}
+                    navigation={navigation}
+                    {...(createStatus && { initialStatus: createStatus })}
+                    projects={projects}
+                    plans={plans}
+                    create={create}
+                  />
+                  {view === "settings" && (
+                    <SettingsView
+                      selected={settingsSection}
+                      onOpenInbox={() => setView("inbox")}
+                      onRestore={async () => {
+                        setSelected(null);
+                        setDetails({});
+                        bulk.reset();
+                        await refresh();
+                      }}
+                    />
+                  )}
+                  {
+                    <div className="management" hidden={view !== "projects"}>
+                      <Projects
+                        projects={projects}
+                        loading={loading}
+                        onChange={refresh}
+                      />
+                    </div>
+                  }
+                  {(view === "plans" || view === "archived-plans") && (
+                    <PlanList
+                      plans={plans}
+                      archived={view === "archived-plans"}
+                      onOpen={(id) => scope("all", "all", id)}
+                      refresh={refresh}
+                    />
+                  )}
+                  {view === "inbox" && (
+                    <Inbox
+                      revision={revision}
+                      select={(reference, noteId) => {
+                        setInboxTarget(
+                          noteId
+                            ? { reference, id: noteId, key: Date.now() }
+                            : null,
+                        );
+                        setSelected(reference);
+                        setView("tickets");
+                      }}
+                    />
+                  )}
+                  <div hidden={view !== "documents" || graphOrigin !== null}>
+                    <Documents
+                      active={view === "documents"}
+                      target={documentTarget}
+                      capture={capture}
+                      currentTicket={
+                        view === "tickets" ? workspace.selected : null
+                      }
+                      onOpenPlan={(id) => {
+                        scope("all", "all", id);
+                        setView("tickets");
+                      }}
+                      onOpenTicket={(reference) => {
+                        setSelected(reference);
+                        setView("tickets");
+                      }}
+                      onCaptureClose={() => setCapture(false)}
                     />
                   </div>
-                }
-                {(view === "plans" || view === "archived-plans") && (
-                  <PlanList
-                    plans={plans}
-                    archived={view === "archived-plans"}
-                    onOpen={(id) => scope("all", "all", id)}
-                    refresh={refresh}
-                  />
-                )}
-                {view === "inbox" && (
-                  <Inbox
-                    revision={revision}
-                    select={(reference, noteId) => {
-                      setInboxTarget(
-                        noteId
-                          ? { reference, id: noteId, key: Date.now() }
-                          : null,
-                      );
-                      setSelected(reference);
-                      setView("tickets");
+                  {graphOrigin && (
+                    <ContextGraph
+                      origin={graphOrigin}
+                      onBack={() => setGraphOrigin(null)}
+                      onOpen={(node) => {
+                        setGraphOrigin(null);
+                        if (node.kind === "document") {
+                          setDocumentTarget({ id: node.id, key: Date.now() });
+                          setView("documents");
+                        } else if (node.kind === "plan") {
+                          scope("all", "all", node.id);
+                          setView("tickets");
+                        } else {
+                          const reference = node.label.match(/^T-\d+/)?.[0];
+                          if (reference) {
+                            setSelected(reference);
+                            setView("tickets");
+                          }
+                        }
+                      }}
+                    />
+                  )}
+                  <TicketWorkspaceView
+                    workspace={workspace}
+                    bulk={bulk}
+                    hidden={view !== "tickets" || graphOrigin !== null}
+                    inboxTarget={inboxTarget}
+                    onCreate={(trigger, status) => {
+                      createTriggerRef.current = trigger;
+                      setCreateStatus(status);
+                      setCreating(true);
                     }}
                   />
-                )}
-                <div hidden={view !== "documents"}>
-                  <Documents
-                    active={view === "documents"}
-                    target={documentTarget}
-                    capture={capture}
-                    currentTicket={
-                      view === "tickets" ? workspace.selected : null
-                    }
-                    onOpenPlan={(id) => {
-                      scope("all", "all", id);
-                      setView("tickets");
-                    }}
-                    onOpenTicket={(reference) => {
-                      setSelected(reference);
-                      setView("tickets");
-                    }}
-                    onCaptureClose={() => setCapture(false)}
-                  />
-                </div>
-                <TicketWorkspaceView
-                  workspace={workspace}
-                  bulk={bulk}
-                  hidden={view !== "tickets"}
-                  inboxTarget={inboxTarget}
-                  onCreate={(trigger, status) => {
-                    createTriggerRef.current = trigger;
-                    setCreateStatus(status);
-                    setCreating(true);
-                  }}
-                />
-              </main>
-            </div>
-          </SidebarProvider>
-        </SourceActivityContext.Provider>
-      </DocumentNavigation.Provider>
-    </PlanNavigation.Provider>
+                </main>
+              </div>
+            </SidebarProvider>
+          </SourceActivityContext.Provider>
+        </DocumentNavigation.Provider>
+      </PlanNavigation.Provider>
+    </ContextGraphNavigation.Provider>
   );
 }

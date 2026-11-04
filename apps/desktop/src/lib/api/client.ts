@@ -154,6 +154,42 @@ const relationshipsSchema = z.object({
 export type Relationships = z.infer<typeof relationshipsSchema>;
 export type RelatedTicket = z.infer<typeof relatedSchema>;
 
+export const contextGraphSchema = z.object({
+  center: z.string(),
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(["ticket", "document", "plan"]),
+      label: z.string(),
+      state: z.string().nullable(),
+      trashed: z.boolean(),
+      activity_detail: z.boolean(),
+    }),
+  ),
+  edges: z.array(
+    z.object({
+      source: z.string(),
+      target: z.string(),
+      kind: z.enum([
+        "blocks",
+        "membership",
+        "document",
+        "spec",
+        "mention",
+        "activity",
+        "support",
+      ]),
+      explanation: z.string().nullable(),
+    }),
+  ),
+  omitted: z.boolean(),
+  hidden_details: z.boolean(),
+  max_nodes: z.number(),
+  max_edges: z.number(),
+  max_work: z.number(),
+});
+export type ContextGraph = z.infer<typeof contextGraphSchema>;
+
 export const graphSchema = z.object({
   nodes: z.array(
     z.object({
@@ -342,6 +378,11 @@ export type BulkChange = {
   remove_tags?: string[];
 };
 export const client = {
+  async contextGraph(reference: string, includeDetails: boolean) {
+    return contextGraphSchema.parse(
+      await invoke("context_graph", { reference, includeDetails }),
+    );
+  },
   async bulkChange(
     references: string[],
     change: BulkChange,

@@ -2,11 +2,11 @@
 mod cli_status;
 
 use ticketd_core::{
-    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, DependencyGraph,
-    Document, DocumentPatch, DocumentSearchResult, DocumentSummary, Evidence, EvidenceInput,
-    HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup, SidebarCounts,
-    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
-    WorkspaceInfo, WriteRequest, WriteResult,
+    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
+    DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary, Evidence,
+    EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup,
+    SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch,
+    Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -316,6 +316,13 @@ fn create_project(name: String, path: String) -> Result<Project, String> {
 fn edit_project(id: String, name: String, path: String) -> Result<Project, String> {
     Workspace::open_default()
         .and_then(|mut w| w.edit_project(&id, &name, &path))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| w.context_graph(&reference, include_details))
         .map_err(|e| e.to_string())
 }
 
@@ -1344,6 +1351,7 @@ pub fn run() -> Result<(), tauri::Error> {
             find_tickets,
             find_tickets_with_updates,
             count_tickets,
+            context_graph,
             dependency_graph,
             plan_dependency_graph,
             list_trash,
