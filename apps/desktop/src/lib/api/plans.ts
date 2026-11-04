@@ -30,6 +30,7 @@ const viewSchema = z.object({
       title: z.string(),
       status: z.string(),
       project_id: z.string().nullable(),
+      availability: z.string().nullable().default(null),
     }),
   ),
 });

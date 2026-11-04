@@ -3,7 +3,6 @@ import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
@@ -25,12 +24,16 @@ export function TicketListPane({
   workspace,
   bulk,
   listRef,
+  planMode,
+  setPlanMode,
   onOpen,
   onCreate,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
+  planMode: "list" | "dependencies";
+  setPlanMode: (mode: "list" | "dependencies") => void;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
@@ -74,7 +77,11 @@ export function TicketListPane({
   } = workspace;
   // An Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const [planMode, setPlanMode] = useState<"list" | "dependencies">("list");
+  const [removed, setRemoved] = useState<{
+    reference: string;
+    plan: string;
+    name: string;
+  } | null>(null);
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   const planState = usePlanView(planScope, revision, refresh);
@@ -167,9 +174,7 @@ export function TicketListPane({
           projects={projects}
           state={planState}
         >
-          {planMode === "list" && (
-            <TicketFilters part="controls" {...filterProps} />
-          )}
+          <TicketFilters part="controls" {...filterProps} />
         </PlanHeader>
       ) : (
         <div className="list-header">
@@ -200,24 +205,38 @@ export function TicketListPane({
         </div>
       )}
       {scopedPlan && (
-        <SegmentedControl
-          aria-label="Plan view"
-          value={planMode}
-          onValueChange={setPlanMode}
-          options={[
-            { value: "list", label: "List" },
-            { value: "dependencies", label: "Dependencies" },
-          ]}
-        />
+        <div className="plan-view-switch">
+          <SegmentedControl
+            aria-label="Plan view"
+            value={planMode}
+            onValueChange={setPlanMode}
+            options={[
+              { value: "list", label: "List" },
+              { value: "dependencies", label: "Dependencies" },
+            ]}
+          />
+        </div>
       )}
-      {scopedPlan && planMode === "dependencies" ? (
-        <PlanDependencies
-          id={scopedPlan.id}
-          revision={revision}
-          state={planState}
-          onOpen={onOpen}
-        />
-      ) : (
+      {removed && removed.plan === planScope && (
+        <p className="plan-undo" role="status">
+          Removed {removed.reference} from {removed.name}.{" "}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={planState.pending}
+            onClick={() =>
+              void planState
+                .run(() =>
+                  plansClient.setMember(removed.reference, removed.plan),
+                )
+                .then(() => setRemoved(null))
+            }
+          >
+            Undo
+          </Button>
+        </p>
+      )}
+      {
         <>
           {!trash && (configuredSources.length > 0 || source !== "all") && (
             <>
@@ -273,7 +292,18 @@ export function TicketListPane({
               ) : planScope ? (
                 <>
                   <strong>No tickets in this Plan</strong>
-                  <p>Use Add tickets to bring existing tickets into it.</p>
+                  <p>Start with a new ticket, or bring in existing ones.</p>
+                  <div className="plan-empty-actions">
+                    <Button onClick={(event) => onCreate(event.currentTarget)}>
+                      <Plus data-icon="inline-start" /> Create ticket
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => planState.setAdding(true)}
+                    >
+                      Add existing tickets
+                    </Button>
+                  </div>
                 </>
               ) : navigation.project !== "all" ||
                 navigation.plan ||
@@ -348,9 +378,18 @@ export function TicketListPane({
                       aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
                       title="Remove from Plan"
                       onClick={() =>
-                        void planState.run(() =>
-                          plansClient.setMember(ticket.reference, null),
-                        )
+                        void planState
+                          .run(() =>
+                            plansClient.setMember(ticket.reference, null),
+                          )
+                          .then((done) => {
+                            if (done)
+                              setRemoved({
+                                reference: ticket.reference,
+                                plan: scopedPlan.id,
+                                name: scopedPlan.name,
+                              });
+                          })
                       }
                     >
                       <X />
@@ -393,7 +432,7 @@ export function TicketListPane({
             </div>
           )}
         </>
-      )}
+      }
       <MarkDuplicateDialog
         open={markingDuplicate}
         onOpenChange={setMarkingDuplicate}

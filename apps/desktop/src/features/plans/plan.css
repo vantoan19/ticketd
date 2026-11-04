@@ -218,3 +218,134 @@
   text-align: left;
   overflow-wrap: anywhere;
 }
+.plan-dependencies {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 24px 24px;
+}
+.plan-dependencies-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.plan-dependencies-header h2 {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+.plan-graph-canvas {
+  height: 340px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
+}
+.plan-callout {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-callout button {
+  text-decoration: underline;
+}
+.plan-dependency-rows,
+.plan-blockers ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-dependency-row,
+.plan-blocker-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+.plan-dependency-title,
+.plan-blocker-main > button {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 22px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--recessed);
+}
+.plan-blocker-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.plan-blocker-form [data-slot="field"] {
+  width: 100%;
+}
+.plan-document-row {
+  gap: 4px 8px;
+}
+.plan-document-row > button:first-of-type {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.plan-document-row > button + button {
+  flex: none;
+}
+.plan-document-choices li {
+  min-width: 0;
+}
+.plan-document-choices li > button {
+  max-width: 100%;
+  justify-content: flex-start;
+}
+.plan-document-choices li > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-purpose {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+.plan-rename {
+  align-items: flex-start;
+}
+.plan-rename > button {
+  margin-top: 22px;
+}
+.plan-blocker-form {
+  margin-top: 4px;
+}
+.plan-view-switch {
+  padding: 0 20px;
+}
+.plan-undo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 20px;
+  font-size: 13px;
+}
+.plan-empty-actions {
+  display: flex;
+  gap: 8px;
+}
+.plan-add-done {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}

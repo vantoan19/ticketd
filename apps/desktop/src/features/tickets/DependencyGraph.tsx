@@ -40,6 +40,7 @@ type NodeData = {
   ticket: GraphTicket;
   origin: boolean;
   selected: boolean;
+  project?: string | undefined;
   onSelect: (reference: string) => void;
 };
 
@@ -54,7 +55,7 @@ function AvailabilityMark({ availability }: { availability: string | null }) {
 }
 
 function TicketNode({ data }: NodeProps<Node<NodeData>>) {
-  const { ticket, origin, selected, onSelect } = data;
+  const { ticket, origin, selected, project, onSelect } = data;
   return (
     <>
       <Handle type="target" position={Position.Top} isConnectable={false} />
@@ -63,6 +64,7 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
         className="graph-node"
         data-selected={selected || undefined}
         data-origin={origin || undefined}
+        data-boundary={ticket.boundary || undefined}
         aria-pressed={selected}
         onClick={() => onSelect(ticket.reference)}
       >
@@ -77,7 +79,10 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
           )}
         </span>{" "}
         <span className="graph-node-title">{ticket.title}</span>{" "}
-        <AvailabilityMark availability={ticket.availability} />
+        <span className="graph-node-foot">
+          <AvailabilityMark availability={ticket.availability} />
+          {project && <span className="graph-node-status">{project}</span>}
+        </span>
       </button>
       <Handle type="source" position={Position.Bottom} isConnectable={false} />
     </>
@@ -116,41 +121,72 @@ export function Canvas({
   origin,
   selected,
   onSelect,
+  projects,
+  readable = false,
 }: {
   graph: Graph;
   origin: string;
   selected: string | null;
   onSelect: (reference: string) => void;
+  /** When given, each node names its project. */
+  projects?: Project[];
+  /** Keep text legible: large graphs scroll instead of shrinking past it. */
+  readable?: boolean;
 }) {
   const positions = useMemo(() => layoutGraph(graph), [graph]);
-  const nodes: Node<NodeData>[] = graph.nodes.map((ticket) => ({
-    id: ticket.reference,
-    type: "ticket",
-    position: positions.get(ticket.reference) ?? { x: 0, y: 0 },
-    width: NODE_WIDTH,
-    height: NODE_HEIGHT,
-    data: {
-      ticket,
-      origin: ticket.reference === origin,
-      selected: ticket.reference === selected,
-      onSelect,
-    },
-  }));
-  const edges: Edge[] = graph.edges.map((edge) => ({
-    id: `${edge.blocker}-${edge.dependent}`,
-    source: edge.blocker,
-    target: edge.dependent,
-    type: "smoothstep",
-    markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
-  }));
+  // Nodes and edges keep their identity until the graph or selection changes,
+  // and the flow remounts for a new graph so every handle is measured afresh;
+  // otherwise arrows can vanish after a blocker is added or removed.
+  const shape = useMemo(
+    () =>
+      JSON.stringify([
+        graph.nodes.map((node) => [node.reference, node.status]),
+        graph.edges,
+      ]),
+    [graph],
+  );
+  const nodes: Node<NodeData>[] = useMemo(
+    () =>
+      graph.nodes.map((ticket) => ({
+        id: ticket.reference,
+        type: "ticket",
+        position: positions.get(ticket.reference) ?? { x: 0, y: 0 },
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+        data: {
+          ticket,
+          origin: ticket.reference === origin,
+          selected: ticket.reference === selected,
+          project: projects?.find((item) => item.id === ticket.project_id)
+            ?.name,
+          onSelect,
+        },
+      })),
+    [graph, positions, origin, selected, onSelect, projects],
+  );
+  const edges: Edge[] = useMemo(
+    () =>
+      graph.edges.map((edge) => ({
+        id: `${edge.blocker}-${edge.dependent}`,
+        source: edge.blocker,
+        target: edge.dependent,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+      })),
+    [graph],
+  );
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={shape}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={
+          readable
+            ? { padding: 0.1, minZoom: 0.7, maxZoom: 1 }
+            : { padding: 0.2 }
+        }
         minZoom={0.2}
         nodesDraggable={false}
         nodesConnectable={false}

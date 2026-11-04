@@ -40,10 +40,34 @@ export function TicketWorkspaceView({
   const { openTickets } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
+  const listRef = useRef<HTMLElement>(null);
+  // Plan dependencies take the detail pane. Each Plan opens on its list.
+  const [planMode, setPlanModeState] = useState<"list" | "dependencies">(
+    "list",
+  );
+  const planScope = workspace.trash ? "" : workspace.navigation.plan;
+  const [shownPlan, setShownPlan] = useState(planScope);
+  if (shownPlan !== planScope) {
+    setShownPlan(planScope);
+    setPlanModeState("list");
+  }
+  useEffect(() => {
+    // A new Plan opens with its title in view, not where the last one scrolled.
+    for (
+      let node: HTMLElement | null = listRef.current;
+      node && !node.classList.contains("ticket-workspace");
+      node = node.parentElement
+    )
+      node.scrollTop = 0;
+  }, [planScope]);
+  const setPlanMode = (mode: "list" | "dependencies") => {
+    setPlanModeState(mode);
+    if (mode === "dependencies") setNarrowDetail(true);
+    else setNarrowDetail(selected !== null);
+  };
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "ticketd.workspace",
   });
-  const listRef = useRef<HTMLElement>(null);
   const focusPane = useRef<"detail" | "list" | null>(null);
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
@@ -92,8 +116,11 @@ export function TicketWorkspaceView({
           workspace={workspace}
           bulk={bulk}
           listRef={listRef}
+          planMode={planMode}
+          setPlanMode={setPlanMode}
           onCreate={onCreate}
           onOpen={(reference) => {
+            setPlanModeState("list");
             setSelected(reference);
             setNarrowDetail(true);
             const narrow = window.matchMedia(NARROW_QUERY).matches;
@@ -115,6 +142,8 @@ export function TicketWorkspaceView({
         <TicketDetailPane
           workspace={workspace}
           expanded={expanded}
+          planMode={planMode}
+          closePlanMode={() => setPlanMode("list")}
           inboxTarget={inboxTarget}
           onExpand={() => {
             setExpanded(true);

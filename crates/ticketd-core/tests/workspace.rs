@@ -4296,6 +4296,22 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
     assert!(graph.nodes.iter().any(|n| n.reference == member.reference
         && !n.boundary
         && n.availability.as_deref() == Some("Blocked")));
+    // A member that blocks an outside ticket shows that ticket too.
+    let waiting = workspace.create_ticket("Waiting outside").unwrap();
+    workspace
+        .add_dependency(&member.reference, &waiting.reference, None)
+        .unwrap();
+    let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
+    assert!(
+        graph
+            .nodes
+            .iter()
+            .any(|n| n.reference == waiting.reference && n.boundary)
+    );
+    assert_eq!(graph.total_members, Some(2));
+    workspace
+        .remove_dependency(&member.reference, &waiting.reference, None)
+        .unwrap();
     assert_eq!(workspace.show_plan(&plan.id).unwrap().counts.todo, 2);
     assert!(
         workspace
@@ -4352,6 +4368,7 @@ fn plan_graph_discloses_omissions_and_cycle_validation_uses_full_graph() {
     let graph = workspace.plan_dependency_graph(&plan.id).unwrap();
     assert!(graph.omitted_neighbors);
     assert_eq!(graph.nodes.len(), 50);
+    assert_eq!(graph.total_members, Some(55));
     assert!(
         workspace
             .add_dependency(&tickets[54], &tickets[0], None)

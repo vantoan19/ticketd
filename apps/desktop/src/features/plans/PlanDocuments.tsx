@@ -1,4 +1,5 @@
 import { useContext, useState } from "react";
+import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { documents, type DocumentSummary } from "@/features/documents/api";
@@ -37,10 +38,11 @@ export function PlanDocuments({
   function documentRow(doc: View["documents"][number]) {
     return (
       <li key={doc.id} className="plan-document-row">
+        <FileText aria-hidden="true" size={14} />
         <button type="button" onClick={() => openDocument?.(doc.id)}>
           {doc.heading}
+          {doc.trashed && " (Trashed)"}
         </button>
-        {doc.trashed && " (Trashed)"}
         {doc.id === spec?.id ? (
           <Button
             variant="ghost"
@@ -50,7 +52,7 @@ export function PlanDocuments({
               void state.run(() => plansClient.setSpec(view.plan.id, null))
             }
           >
-            Clear spec
+            Stop using as spec
           </Button>
         ) : (
           <Button
@@ -74,7 +76,7 @@ export function PlanDocuments({
             )
           }
         >
-          Remove
+          Remove from Plan
         </Button>
       </li>
     );
@@ -125,7 +127,7 @@ export function PlanDocuments({
             </Button>
           </form>
           {error && <p role="alert">{error}</p>}
-          <ul>
+          <ul className="plan-document-choices">
             {choices
               .filter(
                 (doc) => !view.documents.some((linked) => linked.id === doc.id),
@@ -142,7 +144,7 @@ export function PlanDocuments({
                       )
                     }
                   >
-                    {doc.heading}
+                    <span title={doc.heading}>{doc.heading}</span>
                   </Button>
                 </li>
               ))}

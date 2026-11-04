@@ -229,6 +229,7 @@ export const graphSchema = z.object({
       status: z.string(),
       availability: z.string().nullable(),
       boundary: z.boolean().optional(),
+      project_id: z.string().nullable().optional(),
     }),
   ),
   edges: z.array(z.object({ blocker: z.string(), dependent: z.string() })),
@@ -239,6 +240,7 @@ export const graphSchema = z.object({
   omitted_neighbors: z.boolean(),
   omitted_edges: z.boolean(),
   truncated: z.boolean(),
+  total_members: z.number().nullable().optional(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);

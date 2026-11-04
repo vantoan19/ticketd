@@ -8,7 +8,7 @@ import "./subtickets.css";
 
 /**
  * The ticket's subtickets directly under its description, with local progress.
- * With none, only the Add subticket action shows.
+ * With none, only the Link subticket action shows.
  */
 export function Subtickets({
   work,
@@ -30,7 +30,7 @@ export function Subtickets({
       onClick={() => work.openLink("subticket")}
     >
       <Plus aria-hidden="true" />
-      Add subticket
+      Link subticket
     </Button>
   );
   // Progress comes from the core over every subticket, not the page read.

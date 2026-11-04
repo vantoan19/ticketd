@@ -148,7 +148,7 @@ test("shows status counts and members for the Plan, and updates both when a memb
   await waitFor(() => expect(group.textContent).toContain("Done1"));
   expect(group.textContent).toContain("Todo1");
   expect(group.textContent).toContain("Duplicate1");
-  expect(screen.getByText("Plan · 3 tickets")).toBeTruthy();
+  expect(screen.getByText(/^Plan · 3 tickets/)).toBeTruthy();
   expect(screen.getByText("Active")).toBeTruthy();
 
   fireEvent.click(
@@ -158,7 +158,7 @@ test("shows status counts and members for the Plan, and updates both when a memb
     expect(screen.queryByRole("button", { name: /^T-1/ })).toBeNull(),
   );
   await waitFor(() =>
-    expect(screen.getByText("Plan · 2 tickets")).toBeTruthy(),
+    expect(screen.getByText(/^Plan · 2 tickets/)).toBeTruthy(),
   );
   expect(calls).toContainEqual(["set_plan", { reference: "T-1", plan: null }]);
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
@@ -168,7 +168,7 @@ test("shows status counts and members for the Plan, and updates both when a memb
 
 test("an empty name shows an inline error and changes nothing", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Plan" }));
   fireEvent.change(screen.getByLabelText("Plan name"), {
     target: { value: "   " },
   });
@@ -182,7 +182,7 @@ test("an empty name shows an inline error and changes nothing", async () => {
 
 test("renames the Plan", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Plan" }));
   fireEvent.change(screen.getByLabelText("Plan name"), {
     target: { value: "Release" },
   });
@@ -196,6 +196,7 @@ test("renames the Plan", async () => {
 
 test("archiving moves the Plan to Archived, where it can be reactivated", async () => {
   await openLaunch();
+  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
   expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
   await screen.findByText("Archived", { selector: ".plan-state" });

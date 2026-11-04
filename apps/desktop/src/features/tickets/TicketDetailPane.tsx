@@ -1,3 +1,4 @@
+import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { TicketDetails } from "@/features/tickets/TicketDetails";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -6,6 +7,8 @@ import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 export function TicketDetailPane({
   workspace,
   expanded,
+  planMode,
+  closePlanMode,
   inboxTarget,
   onExpand,
   onReturn,
@@ -13,6 +16,8 @@ export function TicketDetailPane({
 }: {
   workspace: TicketWorkspace;
   expanded: boolean;
+  planMode: "list" | "dependencies";
+  closePlanMode: () => void;
   inboxTarget: { reference: string; id: string; key: number } | null;
   onExpand: () => void;
   onReturn: () => void;
@@ -33,6 +38,21 @@ export function TicketDetailPane({
     position,
     openAdjacent,
   } = workspace;
+  const planScope = workspace.trash ? "" : workspace.navigation.plan;
+  if (planMode === "dependencies" && planScope)
+    return (
+      <PlanDependencies
+        id={planScope}
+        revision={revision}
+        projects={projects}
+        refresh={refresh}
+        onClose={closePlanMode}
+        onOpen={(reference) => {
+          closePlanMode();
+          onSelect(reference);
+        }}
+      />
+    );
   return (
     <>
       <TicketDetails
