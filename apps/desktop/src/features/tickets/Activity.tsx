@@ -264,7 +264,7 @@ export function Activity({
         setTargetNote((previous) =>
           previous?.id === savedNote.id ? savedNote : previous,
         );
-      } else if (showDetails || support) {
+      } else {
         const payload = JSON.stringify([
           reference,
           draft,
@@ -300,7 +300,7 @@ export function Activity({
           support || null,
           requestId,
         );
-      } else await client.addActivity(reference, draft);
+      }
       if (edit) setEdit(null);
       else {
         setDraft("");
