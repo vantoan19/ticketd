@@ -80,21 +80,73 @@ it("keeps a failed capture open and retries the same request before returning", 
 });
 it("notices saved changes beneath a focused draft and offers reload", async () => {
   vi.useFakeTimers();
-  const original = { id: "d1", title: null, body: "Original", created_at: "now", updated_at: "now", trashed: false };
+  const original = {
+    id: "d1",
+    title: null,
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
   vi.mocked(documents.save).mockRejectedValue("offline");
-  vi.mocked(documents.show).mockResolvedValue({ ...original, body: "Changed externally" });
+  vi.mocked(documents.show).mockResolvedValue({
+    ...original,
+    body: "Changed externally",
+  });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
   fireEvent.change(editor, { target: { value: "Local draft" } });
-  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
   expect(documents.show).toHaveBeenCalled();
   expect(editor).toHaveProperty("value", "Local draft");
   expect(document.activeElement).toBe(editor);
   expect(screen.getByText(/Saved content changed/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
   expect(editor).toHaveProperty("value", "Changed externally");
+});
+it("preserves an unrelated saved title when saving over a conflicting body", async () => {
+  vi.useFakeTimers();
+  const original = {
+    id: "d1",
+    title: "Original title",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save)
+    .mockRejectedValueOnce("offline")
+    .mockResolvedValueOnce({
+      ...original,
+      title: "External title",
+      body: "Draft",
+    });
+  vi.mocked(documents.show).mockResolvedValue({
+    ...original,
+    title: "External title",
+    body: "External body",
+  });
+  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save over saved content" }),
+  );
+  await act(async () => {});
+  expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
+    "External title",
+    "Draft",
+    false,
+  ]);
 });
 it("suggests only the current ticket and lets it be removed before capture", async () => {
   vi.mocked(documents.save).mockResolvedValue({
@@ -254,14 +306,25 @@ it("removes a suggested connection after the first save", async () => {
 });
 
 it("saves a draft before opening the context graph without a dialog", async () => {
-  const doc = { id: "d1", title: "Context", body: "Original", created_at: "now", updated_at: "now", trashed: false };
+  const doc = {
+    id: "d1",
+    title: "Context",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
   vi.mocked(documents.save).mockResolvedValue({ ...doc, body: "Draft" });
   const graph = vi.fn();
-  render(<DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />);
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
+  );
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.getByText("Original")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
-  fireEvent.change(screen.getByLabelText("Your thought"), { target: { value: "Draft" } });
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");

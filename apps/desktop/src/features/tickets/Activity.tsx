@@ -1,7 +1,4 @@
-import {
-  documents,
-  type DocumentSummary,
-} from "@/features/documents/api";
+import { documents, type DocumentSummary } from "@/features/documents/api";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { useNow } from "@/lib/use-now";
 import {
@@ -713,7 +710,9 @@ export function Activity({
                   <Button
                     type="button"
                     variant="link"
-                    onClick={() => openDocument?.(item.note.supporting_document_id!)}
+                    onClick={() =>
+                      openDocument?.(item.note.supporting_document_id!)
+                    }
                   >
                     Open details
                   </Button>

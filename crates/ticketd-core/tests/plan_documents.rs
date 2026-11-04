@@ -128,12 +128,29 @@ fn plan_spec_and_keep_do_not_record_a_browsing_visit() {
     let plan = workspace.create_plan("Plan").unwrap();
     let earlier = workspace.create_document(Some("Earlier"), "").unwrap();
     let latest = workspace.create_document(Some("Latest"), "").unwrap();
-    workspace.set_plan_spec(&plan.id, Some(&earlier.id)).unwrap();
+    workspace
+        .set_plan_spec(&plan.id, Some(&earlier.id))
+        .unwrap();
     workspace.keep_document(&earlier.id).unwrap();
-    let ids: Vec<_> = workspace.recent_documents().unwrap().into_iter().map(|d| d.id).collect();
+    let ids: Vec<_> = workspace
+        .recent_documents()
+        .unwrap()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
     assert_eq!(ids, vec![latest.id, earlier.id]);
     let ticket = workspace.create_ticket("Ticket").unwrap();
-    let detail = workspace.add_activity_with_details(&ticket.reference, "Brief", None, Some("Body"), None).unwrap().supporting_document_id.unwrap();
+    let detail = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("Body"), None)
+        .unwrap()
+        .supporting_document_id
+        .unwrap();
     workspace.keep_document(&detail).unwrap();
-    assert!(workspace.recent_documents().unwrap().iter().any(|d| d.id == detail));
+    assert!(
+        workspace
+            .recent_documents()
+            .unwrap()
+            .iter()
+            .any(|d| d.id == detail)
+    );
 }

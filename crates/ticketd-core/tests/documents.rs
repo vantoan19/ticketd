@@ -717,7 +717,9 @@ fn trash_pages_return_bounded_summaries_and_open_retains_body() {
     let body = "long body".repeat(10000);
     let mut ids = Vec::new();
     for n in 0..3 {
-        let doc = workspace.create_document(Some(&format!("Document {n}")), &body).unwrap();
+        let doc = workspace
+            .create_document(Some(&format!("Document {n}")), &body)
+            .unwrap();
         workspace.set_document_trashed(&doc.id, true).unwrap();
         ids.push(doc.id);
     }

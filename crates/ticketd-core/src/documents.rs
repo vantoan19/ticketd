@@ -350,12 +350,24 @@ impl Workspace {
         self.trashed_documents_page(50, 0)
     }
 
-    pub fn trashed_documents_page(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
-        let sql = format!("SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d WHERE d.trashed = 1 ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2");
+    pub fn trashed_documents_page(
+        &self,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<DocumentSummary>, Error> {
+        let sql = format!(
+            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d WHERE d.trashed = 1 ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2"
+        );
         let mut statement = self.connection.prepare(&sql)?;
-        Ok(statement.query_map(params![limit.min(100), offset], |row| Ok(DocumentSummary {
-            id: row.get(0)?, heading: row.get(1)?, origin_ticket: row.get(2)?,
-        }))?.collect::<Result<_, _>>()?)
+        Ok(statement
+            .query_map(params![limit.min(100), offset], |row| {
+                Ok(DocumentSummary {
+                    id: row.get(0)?,
+                    heading: row.get(1)?,
+                    origin_ticket: row.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?)
     }
 
     pub fn set_document_trashed(&mut self, id: &str, trashed: bool) -> Result<Document, Error> {

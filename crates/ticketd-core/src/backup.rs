@@ -119,6 +119,28 @@ pub(crate) fn missing_tables(
             missing.push(table);
         }
     }
+    // FTS tables also need their maintenance triggers; without them, later edits
+    // silently make search results stale even though the backup opens normally.
+    for (trigger, introduced) in [
+        ("document_fts_insert", 36),
+        ("document_fts_delete", 36),
+        ("document_fts_update", 36),
+        ("ticket_graph_fts_insert", 43),
+        ("ticket_graph_fts_delete", 43),
+        ("ticket_graph_fts_update", 43),
+        ("plan_graph_fts_insert", 43),
+        ("plan_graph_fts_delete", 43),
+        ("plan_graph_fts_update", 43),
+    ] {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
+            [trigger],
+            |row| row.get(0),
+        )?;
+        if version >= introduced && !exists {
+            missing.push(trigger);
+        }
+    }
     if version >= 32 && !table_exists(connection, "activities")? {
         missing.push("activities");
     }
@@ -139,7 +161,7 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
         }
         BackupCheck::NotTicketd => Err(Error::Backup("not a ticketd workspace backup".into())),
         BackupCheck::MissingTables { tables } => Err(Error::Backup(format!(
-            "missing table {}",
+            "missing schema object {}",
             tables.join(", ")
         ))),
         BackupCheck::Damaged { reason } => Err(Error::Backup(reason)),

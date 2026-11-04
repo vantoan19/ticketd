@@ -61,7 +61,11 @@ export function Documents({
   }, [recentOffset, pinOffset, includeSupport]);
   useEffect(() => {
     if (!active || !showTrash) return;
-    const load = () => void documents.trash(trashOffset).then(setTrash).catch((e: unknown) => setError(String(e)));
+    const load = () =>
+      void documents
+        .trash(trashOffset)
+        .then(setTrash)
+        .catch((e: unknown) => setError(String(e)));
     load();
     const timer = window.setInterval(load, 5000);
     return () => window.clearInterval(timer);
@@ -140,129 +144,139 @@ export function Documents({
   return (
     <div className="documents-page">
       <div hidden={selected !== null}>
-      <h1>Documents</h1>
-      {error && <p role="alert">{error}</p>}
-      <Button variant="outline" onClick={() => setShowTrash(!showTrash)}>
-        {showTrash ? "Recently opened" : "Trash"}
-      </Button>
-      {showTrash ? (
-        <section>
-          <h2>Trash</h2>
-          {trash.length === 0 && <p>Trash is empty.</p>}
-          <ul>
-            {trash.map((doc) => (
-              <li key={doc.id}>
-                <Button variant="ghost" onClick={() => open(doc.id)}>
-                  {doc.heading}
-                </Button>
-              </li>
-            ))}
-          </ul>
-          <Button disabled={trashOffset === 0} onClick={() => setTrashOffset(Math.max(0, trashOffset - 50))}>Previous trash</Button>
-          <Button disabled={trash.length < 50} onClick={() => setTrashOffset(trashOffset + 50)}>Next trash</Button>
-        </section>
-      ) : (
-        <>
-          <label>
-            <input
-              type="checkbox"
-              checked={includeSupport}
+        <h1>Documents</h1>
+        {error && <p role="alert">{error}</p>}
+        <Button variant="outline" onClick={() => setShowTrash(!showTrash)}>
+          {showTrash ? "Recently opened" : "Trash"}
+        </Button>
+        {showTrash ? (
+          <section>
+            <h2>Trash</h2>
+            {trash.length === 0 && <p>Trash is empty.</p>}
+            <ul>
+              {trash.map((doc) => (
+                <li key={doc.id}>
+                  <Button variant="ghost" onClick={() => open(doc.id)}>
+                    {doc.heading}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <Button
+              disabled={trashOffset === 0}
+              onClick={() => setTrashOffset(Math.max(0, trashOffset - 50))}
+            >
+              Previous trash
+            </Button>
+            <Button
+              disabled={trash.length < 50}
+              onClick={() => setTrashOffset(trashOffset + 50)}
+            >
+              Next trash
+            </Button>
+          </section>
+        ) : (
+          <>
+            <label>
+              <input
+                type="checkbox"
+                checked={includeSupport}
+                onChange={(e) => {
+                  setIncludeSupport(e.target.checked);
+                  setOffset(0);
+                  setRecentOffset(0);
+                }}
+              />{" "}
+              Include Activity details
+            </label>
+            <label htmlFor="document-search">Search Documents</label>
+            <Input
+              id="document-search"
+              value={query}
               onChange={(e) => {
-                setIncludeSupport(e.target.checked);
+                setQuery(e.target.value);
                 setOffset(0);
-                setRecentOffset(0);
               }}
-            />{" "}
-            Include Activity details
-          </label>
-          <label htmlFor="document-search">Search Documents</label>
-          <Input
-            id="document-search"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setOffset(0);
-            }}
-          />
-          <label htmlFor="document-tag-filter">Filter by tag</label>
-          <Input
-            id="document-tag-filter"
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-              setOffset(0);
-            }}
-          />
-          {query.trim() || filter.trim() ? (
-            <section>
-              <h2>Search results</h2>
-              {list(results)}
-              <Button
-                disabled={offset === 0}
-                onClick={() => setOffset(Math.max(0, offset - 50))}
-              >
-                Previous
-              </Button>
-              <Button
-                disabled={results.length < 50}
-                onClick={() => setOffset(offset + 50)}
-              >
-                Next
-              </Button>
-            </section>
-          ) : (
-            <>
-              {(pins.length > 0 || pinOffset > 0) && (
-                <section>
-                  <h2>Pinned</h2>
-                  {list(pins)}
-                  <Button
-                    disabled={pinOffset === 0}
-                    onClick={() => setPinOffset(Math.max(0, pinOffset - 50))}
-                  >
-                    Previous pins
-                  </Button>
-                  <Button
-                    disabled={pins.length < 50}
-                    onClick={() => setPinOffset(pinOffset + 50)}
-                  >
-                    Next pins
-                  </Button>
-                </section>
-              )}
+            />
+            <label htmlFor="document-tag-filter">Filter by tag</label>
+            <Input
+              id="document-tag-filter"
+              value={filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+                setOffset(0);
+              }}
+            />
+            {query.trim() || filter.trim() ? (
               <section>
-                <h2>Recently opened</h2>
-                {recent.length === 0 && (
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyDescription>
-                        Your captured thoughts will appear here.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )}
-                {list(
-                  recent.filter((doc) => !pins.some((p) => p.id === doc.id)),
-                )}
+                <h2>Search results</h2>
+                {list(results)}
                 <Button
-                  disabled={recentOffset === 0}
-                  onClick={() =>
-                    setRecentOffset(Math.max(0, recentOffset - 50))
-                  }
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - 50))}
                 >
-                  Previous recent
+                  Previous
                 </Button>
                 <Button
-                  disabled={recent.length < 50}
-                  onClick={() => setRecentOffset(recentOffset + 50)}
+                  disabled={results.length < 50}
+                  onClick={() => setOffset(offset + 50)}
                 >
-                  Next recent
+                  Next
                 </Button>
               </section>
-            </>
-          )}
-        </>
-      )}
+            ) : (
+              <>
+                {(pins.length > 0 || pinOffset > 0) && (
+                  <section>
+                    <h2>Pinned</h2>
+                    {list(pins)}
+                    <Button
+                      disabled={pinOffset === 0}
+                      onClick={() => setPinOffset(Math.max(0, pinOffset - 50))}
+                    >
+                      Previous pins
+                    </Button>
+                    <Button
+                      disabled={pins.length < 50}
+                      onClick={() => setPinOffset(pinOffset + 50)}
+                    >
+                      Next pins
+                    </Button>
+                  </section>
+                )}
+                <section>
+                  <h2>Recently opened</h2>
+                  {recent.length === 0 && (
+                    <Empty>
+                      <EmptyHeader>
+                        <EmptyDescription>
+                          Your captured thoughts will appear here.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  )}
+                  {list(
+                    recent.filter((doc) => !pins.some((p) => p.id === doc.id)),
+                  )}
+                  <Button
+                    disabled={recentOffset === 0}
+                    onClick={() =>
+                      setRecentOffset(Math.max(0, recentOffset - 50))
+                    }
+                  >
+                    Previous recent
+                  </Button>
+                  <Button
+                    disabled={recent.length < 50}
+                    onClick={() => setRecentOffset(recentOffset + 50)}
+                  >
+                    Next recent
+                  </Button>
+                </section>
+              </>
+            )}
+          </>
+        )}
       </div>
       {selected && (
         <DocumentEditor

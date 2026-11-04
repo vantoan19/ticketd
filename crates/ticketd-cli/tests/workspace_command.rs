@@ -247,3 +247,39 @@ fn activity_details_can_be_found_and_kept_through_cli() {
         serde_json::from_str(&run(dir.path(), &["document", "search", "distinct"])).unwrap();
     assert_eq!(found[0]["id"], id);
 }
+
+#[test]
+fn plan_progress_recent_context_and_spec_recency_work_through_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let invoke = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&run(dir.path(), args)).unwrap()
+    };
+    let plan = invoke(&["plan", "create", "Plan"]);
+    let id = plan["id"].as_str().unwrap();
+    assert_eq!(
+        invoke(&["list", "--plan", id, "--latest-update"]),
+        serde_json::json!([])
+    );
+    invoke(&["create", "Work", "--plan", id]);
+    for n in 1..=22 {
+        invoke(&["activity", "add", "T-1", "--brief", &format!("Report {n}")]);
+    }
+    let list = invoke(&["list", "--plan", id, "--latest-update"]);
+    assert_eq!(list[0]["latest_update"]["brief"]["text"], "Report 22");
+    let context = invoke(&["context", "T-1", "--activities"]);
+    assert_eq!(
+        context["activities"]["items"][0]["brief"]["text"],
+        "Report 22"
+    );
+    assert_eq!(
+        context["activities"]["items"][19]["brief"]["text"],
+        "Report 3"
+    );
+    assert_eq!(context["activities"]["next_offset"], 20);
+    let earlier = invoke(&["document", "create", "--title", "Earlier", "--body", "a"]);
+    let latest = invoke(&["document", "create", "--title", "Latest", "--body", "b"]);
+    invoke(&["plan", "spec", id, earlier["id"].as_str().unwrap()]);
+    let recent = invoke(&["document", "recent"]);
+    assert_eq!(recent[0]["id"], latest["id"]);
+    assert_eq!(recent[1]["id"], earlier["id"]);
+}

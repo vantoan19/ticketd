@@ -85,7 +85,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   );
   expect(composer).toHaveProperty("readOnly", false);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity_with_details"),
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "add_activity_with_details",
+    ),
   ).toHaveLength(1);
 });
 
@@ -420,7 +422,9 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   fireEvent.change(source, { target: { value: " \n\t" } });
   fireEvent.submit(add.closest("form")!);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity_with_details"),
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "add_activity_with_details",
+    ),
   ).toHaveLength(0);
   fireEvent.change(source, { target: { value: "## Finding\n\n- [x] Done" } });
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
@@ -429,7 +433,9 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   ).toContain("Finding");
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "add_activity_with_details"),
+    bridge.invoke.mock.calls.filter(
+      ([command]) => command === "add_activity_with_details",
+    ),
   ).toHaveLength(0);
   fireEvent.click(add);
   await waitFor(() =>
@@ -560,7 +566,9 @@ test("recovers an unpublished brief after the desktop restarts", async () => {
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "A recovered **brief**");
   expect(
-    bridge.invoke.mock.calls.some(([command]) => command === "add_activity_with_details"),
+    bridge.invoke.mock.calls.some(
+      ([command]) => command === "add_activity_with_details",
+    ),
   ).toBe(false);
   localStorage.removeItem("ticketd:activity-draft:T-987");
 });
@@ -657,17 +665,39 @@ test("retries a failed details post with the same request identity and draft", a
 
 test("retries a brief-only post with the same request identity", async () => {
   bridge.invoke.mockImplementation((command: string) => {
-    if (command === "add_activity_with_details") return Promise.reject(new Error("Connection lost"));
+    if (command === "add_activity_with_details")
+      return Promise.reject(new Error("Connection lost"));
     return Promise.resolve([]);
   });
   localStorage.setItem("ticketd:activity-draft:T-993", "Brief");
-  render(<Activity reference="T-993" status="Todo" revision={0} projects={[]} active trashed={false} />);
+  render(
+    <Activity
+      reference="T-993"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Post update" }));
   await screen.findByRole("alert");
   fireEvent.click(screen.getByRole("button", { name: "Post update" }));
-  await waitFor(() => expect(bridge.invoke.mock.calls.filter(([command]) => command === "add_activity_with_details")).toHaveLength(2));
-  const calls = bridge.invoke.mock.calls.filter(([command]) => command === "add_activity_with_details");
-  expect(calls[0]?.[1]).toMatchObject({ brief: "Brief", details: null, existingDocumentId: null });
+  await waitFor(() =>
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) => command === "add_activity_with_details",
+      ),
+    ).toHaveLength(2),
+  );
+  const calls = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "add_activity_with_details",
+  );
+  expect(calls[0]?.[1]).toMatchObject({
+    brief: "Brief",
+    details: null,
+    existingDocumentId: null,
+  });
   expect(calls[1]?.[1]).toEqual(calls[0]?.[1]);
 });
 
@@ -735,7 +765,18 @@ test("opens the exact supporting Document from its update", async () => {
     return Promise.resolve([]);
   });
   const open = vi.fn();
-  render(<DocumentNavigation.Provider value={open}><Activity reference="T-993" status="Todo" revision={0} projects={[]} active trashed={false} /></DocumentNavigation.Provider>);
+  render(
+    <DocumentNavigation.Provider value={open}>
+      <Activity
+        reference="T-993"
+        status="Todo"
+        revision={0}
+        projects={[]}
+        active
+        trashed={false}
+      />
+    </DocumentNavigation.Provider>,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
   expect(open).toHaveBeenCalledWith("doc-exact");
 });
