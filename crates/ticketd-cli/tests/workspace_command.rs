@@ -283,3 +283,28 @@ fn plan_progress_recent_context_and_spec_recency_work_through_cli() {
     assert_eq!(recent[0]["id"], latest["id"]);
     assert_eq!(recent[1]["id"], earlier["id"]);
 }
+
+#[test]
+fn document_trash_cli_pages_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let invoke = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&run(dir.path(), args)).unwrap()
+    };
+    for title in ["One", "Two", "Three"] {
+        let doc = invoke(&[
+            "document",
+            "create",
+            "--title",
+            title,
+            "--body",
+            "Large body",
+        ]);
+        invoke(&["document", "trash", doc["id"].as_str().unwrap()]);
+    }
+    let first = invoke(&["document", "trash-list", "--limit", "2"]);
+    let second = invoke(&["document", "trash-list", "--limit", "2", "--offset", "2"]);
+    assert_eq!(first.as_array().unwrap().len(), 2);
+    assert_eq!(second.as_array().unwrap().len(), 1);
+    assert!(first[0].get("body").is_none());
+    assert_ne!(first[0]["id"], second[0]["id"]);
+}
