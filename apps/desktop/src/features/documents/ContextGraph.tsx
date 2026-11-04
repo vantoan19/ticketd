@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Background,
-  Controls,
-  ReactFlow,
-  type Edge,
-  type Node,
-} from "@xyflow/react";
+import { type Edge, type Viewport } from "@xyflow/react";
+import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
+import type { Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 import "./context-graph.css";
+
+const edgeLabels: Record<string, string> = {
+  blocks: "Blocks",
+  membership: "Plan membership",
+  document: "Plan document",
+  spec: "Primary spec",
+  mention: "References",
+  activity: "Activity references",
+  support: "Activity support",
+};
 
 export function ContextGraph({
   origin,
@@ -23,55 +29,97 @@ export function ContextGraph({
   const [center, setCenter] = useState(origin);
   const [selected, setSelected] = useState<string | null>(null);
   const [includeDetails, setIncludeDetails] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [pages, setPages] = useState<
+    { anchor: string; group: number; offset: number }[]
+  >([]);
+  const [positions, setPositions] = useState<Record<string, Point>>({});
+  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, zoom: 1 });
+  const [history, setHistory] = useState<
+    {
+      center: string;
+      selected: string | null;
+      includeDetails: boolean;
+      expandedIds: string[];
+      pages: { anchor: string; group: number; offset: number }[];
+      positions: Record<string, Point>;
+      viewport: Viewport;
+    }[]
+  >([]);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [error, setError] = useState("");
+  const [layoutError, setLayoutError] = useState("");
   useEffect(() => {
     let active = true;
-    void client
-      .contextGraph(center, includeDetails)
-      .then((value) => {
-        if (active) {
+    let latest = 0;
+    function refresh() {
+      const request = ++latest;
+      void client
+        .contextGraphExpanded(center, includeDetails, expandedIds, pages)
+        .then((value) => {
+          if (!active || request !== latest) return;
           setGraph(value);
-          setSelected(value.center);
+          setSelected((previous) =>
+            previous && value.nodes.some((node) => node.id === previous)
+              ? previous
+              : value.center,
+          );
           setError("");
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(String(reason));
-      });
+        })
+        .catch((reason: unknown) => {
+          if (active && request === latest) setError(String(reason));
+        });
+    }
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
-  }, [center, includeDetails]);
-  const nodes = useMemo<Node[]>(
-    () =>
-      (graph?.nodes ?? []).map((node, _index, all) => {
-        const count = Math.max(all.length - 1, 1);
-        const neighbors = all.filter((item) => item.id !== graph?.center);
-        const position = neighbors.findIndex((item) => item.id === node.id);
-        const angle = (2 * Math.PI * Math.max(position, 0)) / count;
-        return {
-          id: node.id,
-          position:
-            node.id === graph?.center
-              ? { x: 400, y: 240 }
-              : {
-                  x: 400 + 300 * Math.cos(angle),
-                  y: 240 + 180 * Math.sin(angle),
-                },
-          data: { label: `${node.kind.toUpperCase()} · ${node.label}` },
-          selected: node.id === selected,
-        };
-      }),
-    [graph, selected],
-  );
+  }, [center, includeDetails, expandedIds, pages]);
+  function focus(id: string) {
+    setHistory((entries) => [
+      ...entries,
+      {
+        center,
+        selected,
+        includeDetails,
+        expandedIds,
+        pages,
+        positions,
+        viewport,
+      },
+    ]);
+    setGraph(null);
+    setExpandedIds([]);
+    setPages([]);
+    setPositions({});
+    setSelected(id);
+    setCenter(id);
+  }
+  function back() {
+    const previous = history.at(-1);
+    if (!previous) {
+      onBack();
+      return;
+    }
+    setHistory((entries) => entries.slice(0, -1));
+    setGraph(null);
+    setExpandedIds(previous.expandedIds);
+    setPages(previous.pages);
+    setPositions(previous.positions);
+    setSelected(previous.selected);
+    setIncludeDetails(previous.includeDetails);
+    setViewport(previous.viewport);
+    setCenter(previous.center);
+  }
   const edges = useMemo<Edge[]>(
     () =>
       (graph?.edges ?? []).map((edge, index) => ({
         id: `${index}`,
         source: edge.source,
         target: edge.target,
-        label: edge.kind,
+        label: edgeLabels[edge.kind] ?? edge.kind,
         animated: false,
         style:
           edge.kind === "mention" || edge.kind === "activity"
@@ -90,27 +138,33 @@ export function ContextGraph({
         </Button>
       </div>
       <div className="context-graph-toolbar">
-        <Button variant="ghost" onClick={onBack}>
-          Back to source
+        <Button variant="ghost" onClick={back}>
+          {history.length ? "Back" : "Back to source"}
         </Button>
         <span>
           {graph?.nodes.find((node) => node.id === graph.center)?.label}
         </span>
       </div>
       {error && <p role="alert">{error}</p>}
+      {layoutError && <p role="alert">{layoutError}</p>}
       <div className="context-graph-main">
-        <div className="context-graph-canvas" aria-label="Connections canvas">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodeClick={(_, node) => setSelected(node.id)}
-            fitView
-            nodesDraggable={false}
-          >
-            <Background />
-            <Controls />
-          </ReactFlow>
-        </div>
+        <ContextGraphCanvas
+          nodes={(graph?.nodes ?? []).map((node) => ({
+            id: node.id,
+            label: `${node.kind.toUpperCase()} · ${node.label}`,
+          }))}
+          edges={edges}
+          selected={selected}
+          positions={positions}
+          onPositions={(value) => {
+            setLayoutError("");
+            setPositions(value);
+          }}
+          viewport={viewport}
+          onViewport={setViewport}
+          onSelect={setSelected}
+          onError={setLayoutError}
+        />
         <aside className="context-graph-preview">
           {preview ? (
             <>
@@ -123,9 +177,20 @@ export function ContextGraph({
               </p>
               <Button onClick={() => onOpen(preview)}>Open item</Button>
               <Button
+                variant="outline"
+                disabled={
+                  preview.id === graph?.center ||
+                  expandedIds.includes(preview.id) ||
+                  expandedIds.length + pages.length >= 8
+                }
+                onClick={() => setExpandedIds((ids) => [...ids, preview.id])}
+              >
+                Expand connections
+              </Button>
+              <Button
                 variant="ghost"
                 disabled={preview.id === graph?.center}
-                onClick={() => setCenter(preview.id)}
+                onClick={() => focus(preview.id)}
               >
                 Center on this item
               </Button>
@@ -144,20 +209,82 @@ export function ContextGraph({
           <input
             type="checkbox"
             checked={includeDetails}
-            onChange={(event) => setIncludeDetails(event.target.checked)}
+            onChange={(event) => {
+              const include = event.target.checked;
+              if (!include) {
+                setExpandedIds([]);
+                setPages([]);
+                setGraph(null);
+              }
+              setIncludeDetails(include);
+            }}
           />{" "}
           Include Activity details
         </label>
       </div>
       {graph?.omitted && (
         <p role="status">
-          Some connections may be omitted because this view uses bounded checks.
+          Some connections may be omitted because this view uses bounded checks:{" "}
+          {graph.omitted_groups.join(", ")}.
         </p>
       )}
+      {graph &&
+        (graph.nodes.length >= graph.max_nodes ||
+          graph.edges.length >= graph.max_edges) && (
+          <p role="status">
+            This view reached its limit. Center on an item to explore further.
+          </p>
+        )}
+      {graph?.continuations.map((item) => {
+        const anchor = graph.nodes.find((node) => node.id === item.anchor);
+        return (
+          <p key={`${item.anchor}:${item.group}`}>
+            More {edgeLabels[item.kind] ?? item.kind} connections may exist for{" "}
+            {anchor?.label ?? item.anchor}.{" "}
+            {item.kind === "support" &&
+            graph.hidden_details &&
+            !includeDetails ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIncludeDetails(true)}
+              >
+                Show Activity details
+              </Button>
+            ) : item.next_offset !== null &&
+              expandedIds.length + pages.length < 8 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setPages((previous) => [
+                    ...previous,
+                    {
+                      anchor: item.anchor,
+                      group: item.group,
+                      offset: item.next_offset!,
+                    },
+                  ])
+                }
+              >
+                Show more
+              </Button>
+            ) : (
+              "View limit reached; center on an item to explore further."
+            )}
+          </p>
+        );
+      })}
       {graph?.hidden_details && (
         <p>
-          Additional Activity details are hidden. Include Activity details to
-          show them.
+          Additional Activity details are hidden.{" "}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIncludeDetails(true)}
+          >
+            Show Activity details
+          </Button>
         </p>
       )}
       <h2>Connected items</h2>
@@ -169,13 +296,16 @@ export function ContextGraph({
               <button type="button" onClick={() => setSelected(node.id)}>
                 {node.label}
               </button>
+              <Button variant="ghost" size="sm" onClick={() => focus(node.id)}>
+                Center on {node.label}
+              </Button>
               {graph.edges
                 .filter(
                   (edge) => edge.source === node.id || edge.target === node.id,
                 )
                 .map((edge, index) => (
                   <p key={index}>
-                    {edge.kind}
+                    {edgeLabels[edge.kind] ?? edge.kind}
                     {edge.explanation ? ` · ${edge.explanation}` : ""}
                   </p>
                 ))}

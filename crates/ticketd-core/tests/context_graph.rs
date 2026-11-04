@@ -76,3 +76,96 @@ fn activity_details_are_hidden_until_requested_and_direct_focus_stays_connected(
     let graph = workspace.context_graph(&ticket.reference, false).unwrap();
     assert!(graph.nodes.iter().any(|node| node.id == detail));
 }
+
+#[test]
+fn deliberate_expansion_reaches_a_second_hop() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let third = workspace.create_ticket("Third").unwrap();
+    let second = workspace
+        .create_document(Some("Second"), &third.reference)
+        .unwrap();
+    let first = workspace.create_plan("First").unwrap();
+    workspace
+        .set_plan_spec(&first.id, Some(&second.id))
+        .unwrap();
+    let graph = workspace
+        .context_graph_expanded(&first.id, false, std::slice::from_ref(&second.id))
+        .unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == third.id));
+}
+
+#[test]
+fn graph_continues_a_bounded_membership_group() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Hub").unwrap();
+    for n in 0..60 {
+        let ticket = workspace.create_ticket(&format!("Member {n}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+    }
+    let first = workspace.context_graph(&plan.id, false).unwrap();
+    let continuation = first
+        .continuations
+        .iter()
+        .find(|item| item.kind == "membership")
+        .unwrap();
+    assert_eq!(continuation.next_offset, Some(50));
+    let page = ticketd_core::ContextGraphPage {
+        anchor: continuation.anchor.clone(),
+        group: continuation.group,
+        offset: continuation.next_offset.unwrap(),
+    };
+    let more = workspace
+        .context_graph_with_pages(&plan.id, false, &[], &[page])
+        .unwrap();
+    assert_eq!(more.nodes.len(), 61);
+    assert!(
+        !more
+            .continuations
+            .iter()
+            .any(|item| item.kind == "membership")
+    );
+}
+
+#[test]
+fn activity_graph_mentions_follow_edits_and_deletion() {
+    use ticketd_core::ActivityPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Source").unwrap();
+    let doc = workspace.create_document(Some("Target"), "").unwrap();
+    let activity = workspace
+        .add_activity(
+            &ticket.reference,
+            &format!("See [target](ticketd://document/{}) and T-2", doc.id),
+            None,
+        )
+        .unwrap();
+    let late = workspace.create_ticket("Late").unwrap();
+    let graph = workspace.context_graph(&ticket.reference, false).unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == doc.id));
+    assert!(graph.nodes.iter().any(|node| node.id == late.id));
+    workspace
+        .edit_activity(
+            &ticket.reference,
+            &activity.id,
+            ActivityPatch {
+                brief: Some("No references".into()),
+                editing_agent: None,
+            },
+        )
+        .unwrap();
+    let graph = workspace.context_graph(&ticket.reference, false).unwrap();
+    assert!(
+        !graph
+            .nodes
+            .iter()
+            .any(|node| node.id == doc.id || node.id == late.id)
+    );
+    workspace
+        .delete_activity(&ticket.reference, &activity.id)
+        .unwrap();
+}
