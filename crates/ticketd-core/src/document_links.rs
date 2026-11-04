@@ -216,6 +216,69 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
     Ok(())
 }
 
+/// The first plain-text line of Markdown: markers, emphasis and link syntax removed, whitespace
+/// collapsed, at most 120 characters. This is the one rule for a Document's derived heading.
+pub fn derive_heading(markdown: &str) -> Option<String> {
+    const MAX: usize = 120;
+    let mut line = String::new();
+    let mut found = None;
+    for event in Parser::new_ext(
+        markdown,
+        pulldown_cmark::Options::ENABLE_STRIKETHROUGH | pulldown_cmark::Options::ENABLE_TASKLISTS,
+    ) {
+        match event {
+            Event::Text(text) | Event::Code(text) | Event::InlineMath(text) => {
+                line.push_str(&text);
+            }
+            Event::End(
+                TagEnd::Emphasis
+                | TagEnd::Strong
+                | TagEnd::Strikethrough
+                | TagEnd::Link
+                | TagEnd::Image,
+            ) => {}
+            Event::SoftBreak | Event::HardBreak | Event::End(_) | Event::Rule => {
+                let collapsed = line.split_whitespace().collect::<Vec<_>>().join(" ");
+                line.clear();
+                if !collapsed.is_empty() {
+                    found = Some(collapsed);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let collapsed = found?;
+    if collapsed.chars().count() <= MAX {
+        return Some(collapsed);
+    }
+    let cut: String = collapsed.chars().take(MAX - 1).collect();
+    Some(format!("{}…", cut.trim_end()))
+}
+
+pub(crate) fn register_heading_function(connection: &Connection) -> Result<(), Error> {
+    use rusqlite::functions::FunctionFlags;
+    connection.create_scalar_function(
+        "ticketd_heading",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .and_then(|text| derive_heading(&text)))
+        },
+    )?;
+    Ok(())
+}
+
+/// Markdown link text must not contain brackets that would end the label early.
+fn link_text(heading: &str) -> String {
+    heading
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
 impl Workspace {
     pub fn context_link_markdown(&self, reference: &str) -> Result<String, Error> {
         if reference.starts_with("T-") {
@@ -235,12 +298,15 @@ impl Workspace {
             .optional()?;
         match kind.as_deref() {
             Some("document") => {
-                self.show_document(reference)?;
-                Ok(format!("[Document](ticketd://document/{reference})"))
+                let heading = link_text(&self.show_document(reference)?.heading);
+                Ok(format!("[{heading}](ticketd://document/{reference})"))
             }
             Some("plan") => {
-                crate::plans::get(&self.connection, reference)?;
-                Ok(format!("[Plan](ticketd://plan/{reference})"))
+                let plan = crate::plans::get(&self.connection, reference)?;
+                Ok(format!(
+                    "[{}](ticketd://plan/{reference})",
+                    link_text(&plan.name)
+                ))
             }
             _ => Err(Error::NotFound(reference.to_owned())),
         }
@@ -249,14 +315,18 @@ impl Workspace {
         self.connection
             .execute_batch("SAVEPOINT create_ticket_from_document")?;
         let result = (|| {
-            if self.show_document(id)?.trashed {
+            let source = self.show_document(id)?;
+            if source.trashed {
                 return Err(Error::Trashed(id.to_owned()));
             }
             let ticket = self.create_ticket(title)?;
             self.change_ticket(
                 &ticket.reference,
                 TicketPatch {
-                    body: Some(format!("[Source Document](ticketd://document/{id})")),
+                    body: Some(format!(
+                        "[{}](ticketd://document/{id})",
+                        link_text(&source.heading)
+                    )),
                     ..Default::default()
                 },
             )

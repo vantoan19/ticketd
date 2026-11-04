@@ -18,6 +18,9 @@
   padding: 4px;
   background: var(--background);
 }
+.rich-toolbar[hidden] {
+  display: none;
+}
 .rich-document {
   padding: 16px;
   min-height: 160px;
@@ -55,6 +58,14 @@
 .rich-document ol {
   list-style-type: decimal;
   padding-left: 20px;
+}
+.rich-document li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -20px;
+}
+.rich-document [data-slate-placeholder] {
+  color: var(--muted-foreground);
+  opacity: 1 !important;
 }
 .rich-document li > input {
   margin-right: 8px;

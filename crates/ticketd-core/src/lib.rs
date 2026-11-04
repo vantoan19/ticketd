@@ -15,7 +15,7 @@ pub use context_graph::{
     WorkspaceGraph, WorkspaceGraphRequest,
 };
 mod document_links;
-pub use document_links::{ContextLink, DocumentBacklink};
+pub use document_links::{ContextLink, DocumentBacklink, derive_heading};
 mod documents;
 pub use documents::{Document, DocumentPatch, DocumentSearchResult, DocumentSummary};
 mod duplicates;
@@ -328,6 +328,7 @@ impl Workspace {
                 continue;
             }
             let connection = Connection::open(path)?;
+            document_links::register_heading_function(&connection)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -359,6 +360,7 @@ impl Workspace {
                 continue;
             }
             let mut connection = Connection::open(path)?;
+            document_links::register_heading_function(&connection)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;

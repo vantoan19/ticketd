@@ -45,7 +45,11 @@ function DocumentLink({
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
-      <button type="button" onClick={() => openPlan(id)}>
+      <button
+        type="button"
+        className="context-link"
+        onClick={() => openPlan(id)}
+      >
         {children}
       </button>
     ) : (
@@ -55,7 +59,11 @@ function DocumentLink({
   if (href?.startsWith("ticketd://document/")) {
     const id = href.slice("ticketd://document/".length);
     return openDocument ? (
-      <button type="button" onClick={() => openDocument(id)}>
+      <button
+        type="button"
+        className="context-link"
+        onClick={() => openDocument(id)}
+      >
         {children}
       </button>
     ) : (

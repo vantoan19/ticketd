@@ -94,8 +94,9 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
     Ok(())
 }
 
-// Limit headings in list results even when a document has a very long first line.
-pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 1, 200), ''), d.body_heading, 'Untitled')";
+// A Document's heading: its explicit title, else the first plain-text line of its body, else
+// of the originating Activity's brief. `ticketd_heading` is registered on every workspace connection.
+pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_heading(substr(d.body, 1, 4096)), ticketd_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 'Untitled')";
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(

@@ -144,7 +144,7 @@ test("reading, selection, focus and editor mode changes preserve source without 
 
 test("keeps a failed Unicode rich draft visible and retries only the description patch", async () => {
   vi.useFakeTimers();
-  const ticket = { ...initial, body: "# Xin chào\n\n- [ ] Second line 🌿\n" };
+  const ticket = { ...initial, body: "# Xin chào\n\n- [ ] Second line 🌿" };
   bridge.invoke.mockRejectedValueOnce(new Error("Disk full"));
   const onSaved = vi.fn();
   const { rerender } = render(
@@ -171,13 +171,13 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   bridge.invoke.mockResolvedValueOnce({
     ...ticket,
     title: "External title",
-    body: "# Xin chào\n\n- [x] Second line 🌿\n",
+    body: "# Xin chào\n\n- [x] Second line 🌿",
   });
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenLastCalledWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "# Xin chào\n\n- [x] Second line 🌿\n" },
+    patch: { body: "# Xin chào\n\n- [x] Second line 🌿" },
   });
   expect(screen.getByRole("status").textContent).toBe("Saved");
 });
@@ -220,13 +220,13 @@ test("external description changes pause a rich draft until reload or overwrite 
   );
   bridge.invoke.mockResolvedValueOnce({
     ...external,
-    body: "- [x] External content\n",
+    body: "- [x] External content",
   });
   fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "- [x] External content\n" },
+    patch: { body: "- [x] External content" },
   });
 });
 

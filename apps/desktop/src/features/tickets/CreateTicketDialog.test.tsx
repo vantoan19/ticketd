@@ -115,6 +115,9 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   fireEvent.keyDown(source, { key: "Enter", metaKey: true });
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+  fireEvent.focus(
+    screen.getByRole("textbox", { name: "Description rich text" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
