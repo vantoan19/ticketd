@@ -76,3 +76,24 @@ fn activity_details_are_hidden_until_requested_and_direct_focus_stays_connected(
     let graph = workspace.context_graph(&ticket.reference, false).unwrap();
     assert!(graph.nodes.iter().any(|node| node.id == detail));
 }
+
+#[test]
+fn graph_identifies_limited_relationship_groups() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Large plan").unwrap();
+    for index in 0..52 {
+        let ticket = workspace.create_ticket(&format!("Ticket {index}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+    }
+    let graph = workspace.context_graph(&plan.id, false).unwrap();
+    assert!(graph.omitted);
+    assert!(
+        graph
+            .omitted_groups
+            .iter()
+            .any(|group| group == "membership")
+    );
+}

@@ -29,6 +29,8 @@ pub struct ContextGraph {
     pub nodes: Vec<ContextGraphNode>,
     pub edges: Vec<ContextGraphEdge>,
     pub omitted: bool,
+    /// Relationship kinds whose bounded checks or output omitted candidates.
+    pub omitted_groups: Vec<String>,
     pub hidden_details: bool,
     pub max_nodes: usize,
     pub max_edges: usize,
@@ -128,6 +130,7 @@ impl Workspace {
         ];
         let mut candidate_groups = Vec::new();
         let mut omitted = false;
+        let mut omitted_groups = BTreeSet::new();
         for (sql, kind) in groups {
             let mut statement = tx.prepare(sql)?;
             let rows = statement
@@ -141,6 +144,7 @@ impl Workspace {
                 .collect::<Result<Vec<_>, _>>()?;
             if rows.len() > GROUP_LIMIT {
                 omitted = true;
+                omitted_groups.insert(kind.to_owned());
             }
             let mut candidates = Vec::new();
             for (source, target, explanation) in rows.into_iter().take(GROUP_LIMIT) {
@@ -202,13 +206,15 @@ impl Workspace {
                 }
                 if !ids.contains(other) && ids.len() == MAX_NODES {
                     omitted = true;
+                    omitted_groups.insert(kind.clone());
                     continue;
                 }
                 ids.insert(other.clone());
             }
             if edges.len() == MAX_EDGES {
                 omitted = true;
-                break;
+                omitted_groups.insert(kind.clone());
+                continue;
             }
             edges.push(ContextGraphEdge {
                 source,
@@ -248,6 +254,7 @@ impl Workspace {
                 *count += 1;
                 if *count > INDUCED_QUOTA {
                     omitted = true;
+                    omitted_groups.insert(kind.to_owned());
                     continue;
                 }
                 if !ids.contains(&source) || !ids.contains(&target) {
@@ -268,7 +275,8 @@ impl Workspace {
                 }
                 if edges.len() == MAX_EDGES {
                     omitted = true;
-                    break;
+                    omitted_groups.insert(kind.to_owned());
+                    continue;
                 }
                 edges.push(ContextGraphEdge {
                     source,
@@ -285,6 +293,7 @@ impl Workspace {
             nodes,
             edges,
             omitted,
+            omitted_groups: omitted_groups.into_iter().collect(),
             hidden_details,
             max_nodes: MAX_NODES,
             max_edges: MAX_EDGES,
