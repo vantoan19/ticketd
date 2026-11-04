@@ -135,7 +135,7 @@ export function ContextGraph({
   return (
     <section className="context-graph-page" aria-label="Context graph">
       <div className="context-graph-heading">
-        <h1>Context graph</h1>
+        <h1>Local context graph</h1>
         <Button disabled={!preview} onClick={() => preview && onOpen(preview)}>
           Open selected item
         </Button>

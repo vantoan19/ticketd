@@ -1,3 +1,4 @@
+import { progressBrief } from "./progress-brief";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
@@ -57,7 +58,7 @@ export function LatestUpdate({
       ) : update ? (
         <div className="latest-update">
           <p>
-            {update.brief.text}
+            {progressBrief(update.brief.text)}
             {update.brief.truncated && "…"}
           </p>
           <small>

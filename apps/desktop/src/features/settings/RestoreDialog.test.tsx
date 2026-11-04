@@ -36,6 +36,7 @@ const BACKUP = "/Users/me/Backups/ticketd-2026-10-31.sqlite3";
 const current = {
   last_change: "2026-11-01T09:41:00Z",
   tickets: 128,
+  documents: 8,
   activities: 361,
   evidence: 54,
   projects: 4,
@@ -50,6 +51,7 @@ const valid: BackupInspection = {
     summary: {
       last_change: "2026-10-31T18:04:00Z",
       tickets: 121,
+      documents: 7,
       activities: 342,
       evidence: 50,
       projects: 4,
@@ -62,6 +64,7 @@ beforeEach(() => {
   vi.mocked(workspaceClient.info).mockResolvedValue({
     path: "/w/workspace.sqlite3",
     tickets: 1,
+    documents: 0,
     projects: 1,
     active_plans: 1,
     size_bytes: 10,
@@ -116,12 +119,13 @@ test("a valid backup shows both sides' counts and what replacing means", async (
       .getAllByRole("cell")
       .map((cell) => cell.textContent);
   expect(row("Tickets")).toEqual(["128", "121"]);
+  expect(row("Documents")).toEqual(["8", "7"]);
   expect(row("Activities")).toEqual(["361", "342"]);
   expect(row("Implementation evidence")).toEqual(["54", "50"]);
   expect(row("Projects")).toEqual(["4", "4"]);
   expect(row("Plans")).toEqual(["3", "3"]);
   expect(dialog.textContent).toContain(
-    "The backup has 7 fewer tickets, 19 fewer activities and 4 fewer evidence items.",
+    "The backup has 7 fewer tickets, 1 fewer Document, 19 fewer activities and 4 fewer evidence items.",
   );
   expect(dialog.textContent).toContain("follows, reminders, and inbox state");
   expect(dialog.textContent).toContain("safety backup");

@@ -300,7 +300,10 @@ export function App() {
                       }}
                     />
                   )}
-                  <div hidden={view !== "documents" || graphOrigin !== null}>
+                  <div
+                    className="context-view-wrapper"
+                    hidden={view !== "documents" || graphOrigin !== null}
+                  >
                     <Documents
                       active={view === "documents"}
                       target={documentTarget}
@@ -326,7 +329,10 @@ export function App() {
                     />
                   </div>
                   {workspaceGraphOpen && (
-                    <div hidden={graphOrigin !== "__workspace__"}>
+                    <div
+                      className="context-view-wrapper"
+                      hidden={graphOrigin !== "__workspace__"}
+                    >
                       <WorkspaceGraph
                         active={graphOrigin === "__workspace__"}
                         revision={revision}
@@ -343,7 +349,10 @@ export function App() {
                     </div>
                   )}
                   {localGraphOrigin && (
-                    <div hidden={graphOrigin !== localGraphOrigin}>
+                    <div
+                      className="context-view-wrapper"
+                      hidden={graphOrigin !== localGraphOrigin}
+                    >
                       <ContextGraph
                         key={localGraphOrigin}
                         active={graphOrigin === localGraphOrigin}

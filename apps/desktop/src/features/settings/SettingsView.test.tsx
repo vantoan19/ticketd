@@ -48,6 +48,7 @@ const info = {
   tickets: 42,
   projects: 3,
   active_plans: 2,
+  documents: 0,
   size_bytes: 2_621_440,
   format_version: 20,
 };

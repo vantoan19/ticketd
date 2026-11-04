@@ -71,6 +71,44 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
 }
 
 #[test]
+fn document_counts_and_changes_are_visible_in_backup_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .create_document(Some("Before"), "Context")
+        .unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    workspace
+        .create_document(Some("After"), "More context")
+        .unwrap();
+    let inspection = workspace.inspect_backup(&backup).unwrap();
+    let BackupCheck::Valid { summary, .. } = inspection.check else {
+        panic!("valid backup")
+    };
+    assert_eq!(summary.documents, 1);
+    assert_eq!(inspection.current.documents, 2);
+    assert!(summary.last_change.is_some());
+    assert_eq!(workspace.workspace_info().unwrap().documents, 2);
+}
+
+#[test]
+fn a_pre_document_backup_reports_zero_documents() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("old.sqlite3");
+    Connection::open(&backup)
+        .unwrap()
+        .execute_batch("CREATE TABLE tickets (id TEXT PRIMARY KEY); PRAGMA user_version = 1;")
+        .unwrap();
+    let BackupCheck::Valid { summary, .. } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("expected a valid old backup")
+    };
+    assert_eq!(summary.documents, 0);
+}
+
+#[test]
 fn an_empty_workspace_has_no_last_change() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
@@ -82,6 +120,7 @@ fn an_empty_workspace_has_no_last_change() {
         last_change: None,
         tickets: 0,
         activities: 0,
+        documents: 0,
         evidence: 0,
         projects: 0,
         plans: 0,
