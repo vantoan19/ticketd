@@ -124,3 +124,17 @@ fn filtered_page_and_reopened_workspace_preserve_latest_progress() {
         "Checkpoint"
     );
 }
+
+#[test]
+fn plan_filter_with_latest_updates_uses_one_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    let filter = TicketFilter { plan: Some(plan.id.clone()), ..Default::default() };
+    assert!(workspace.find_tickets_with_updates(&filter).unwrap().is_empty());
+    let ticket = workspace.create_ticket_in_context("Work", None, Some(&plan.id)).unwrap();
+    workspace.add_activity(&ticket.reference, "Progress", None).unwrap();
+    let result = workspace.find_tickets_with_updates(&filter).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].latest_update.as_ref().unwrap().brief.text, "Progress");
+}
