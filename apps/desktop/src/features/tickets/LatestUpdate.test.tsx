@@ -13,7 +13,10 @@ afterEach(() => {
 test("shows the reported brief and opens its exact Activity", async () => {
   bridge.invoke.mockResolvedValue({
     activity_id: "a-1",
-    brief: { text: "Made progress", truncated: false },
+    brief: {
+      text: "**Review complete:** [details](https://example.com)",
+      truncated: false,
+    },
     reported_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
     editing_agent: "Agent",
@@ -21,7 +24,7 @@ test("shows the reported brief and opens its exact Activity", async () => {
   });
   const open = vi.fn();
   render(<LatestUpdate reference="T-1" active revision={0} onOpen={open} />);
-  await screen.findByText("Made progress");
+  await screen.findByText("Review complete: details");
   expect(screen.getByText(/Agent/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open update" }));
   expect(open).toHaveBeenCalledWith("a-1");

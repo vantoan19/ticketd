@@ -188,6 +188,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
   const manager = fileManagerName();
   const facts = info && [
     ["Tickets", String(info.tickets)],
+    ["Documents (including details and Trash)", String(info.documents)],
     ["Projects", String(info.projects)],
     ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],

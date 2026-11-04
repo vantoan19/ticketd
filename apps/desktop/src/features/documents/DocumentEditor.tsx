@@ -406,7 +406,7 @@ export function DocumentEditor({
         </p>
       )}
       {external && (
-        <div role="alert">
+        <div role="alert" className="document-conflict">
           <p>Saved content changed while you were editing.</p>
           <Button
             variant="outline"

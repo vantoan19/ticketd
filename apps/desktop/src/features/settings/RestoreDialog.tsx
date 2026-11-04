@@ -56,6 +56,12 @@ function splitPath(path: string) {
 
 const COUNTS = [
   ["tickets", "Tickets", "ticket", "tickets"],
+  [
+    "documents",
+    "Documents (including details and Trash)",
+    "Document",
+    "Documents",
+  ],
   ["activities", "Activities", "activity", "activities"],
   ["evidence", "Implementation evidence", "evidence item", "evidence items"],
   ["projects", "Projects", "project", "projects"],
@@ -126,7 +132,8 @@ function Comparison({
   return (
     <table className="restore-compare">
       <caption className="sr-only">
-        This workspace compared with the backup
+        This workspace compared with the backup. Document counts include
+        supporting details and Trash.
       </caption>
       <thead>
         <tr>
@@ -141,9 +148,9 @@ function Comparison({
         <tr>
           <th
             scope="row"
-            title="The latest ticket history, activity, or evidence change. Edits to titles, descriptions, tags, follows and reminders are not dated."
+            title="The latest ticket history, Activity, Document, or evidence change. Some other edits are not dated."
           >
-            Last recorded activity
+            Last recorded change
           </th>
           <td>{formatWhen(current.last_change)}</td>
           <td>{formatWhen(backup.last_change)}</td>

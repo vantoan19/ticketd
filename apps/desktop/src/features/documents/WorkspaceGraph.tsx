@@ -194,7 +194,7 @@ export function WorkspaceGraph({
       aria-label="Workspace context graph"
     >
       <div className="context-graph-heading">
-        <h1>Context graph</h1>
+        <h1>Workspace context graph</h1>
         <Button onClick={onBack}>Back</Button>
       </div>
       <div className="context-graph-toolbar">

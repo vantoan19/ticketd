@@ -1030,6 +1030,7 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
         return {
           path: "/data/ticketd.sqlite3",
           tickets,
+          documents: 0,
           projects: 0,
           active_plans: 0,
           size_bytes: 4096,
