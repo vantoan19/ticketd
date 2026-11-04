@@ -116,3 +116,30 @@ it("searches and opens a result using keyboard accessible controls", async () =>
   fireEvent.click(result);
   await waitFor(() => expect(documents.open).toHaveBeenCalledWith("1"));
 });
+
+it("offers a clear way back from an empty Document search", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.search).mockResolvedValue([]);
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("Search Documents"), {
+    target: { value: "missing" },
+  });
+  await screen.findByText("No Documents match your search or filters.");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Clear search and filters" }),
+  );
+  expect(
+    (screen.getByLabelText("Search Documents") as HTMLInputElement).value,
+  ).toBe("");
+  expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+});

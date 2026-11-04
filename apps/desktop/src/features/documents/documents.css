@@ -14,15 +14,6 @@
   list-style: none;
   padding: 0;
 }
-.documents-page li button {
-  width: 100%;
-  padding: 12px;
-  text-align: left;
-  border-radius: 6px;
-}
-.documents-page li button:hover {
-  background: var(--accent);
-}
 .document-dialog {
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
@@ -139,5 +130,122 @@
   .document-workspace {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "header" "mode" "title" "body" "rail" "footer";
+  }
+}
+
+.documents-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.documents-heading h1 {
+  margin-bottom: 0;
+}
+.documents-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 24px 0 32px;
+}
+.documents-include {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.documents-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.documents-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+.documents-page section {
+  margin-bottom: 24px;
+}
+.documents-page .document-list {
+  max-width: 760px;
+  margin: 0;
+}
+.document-list li {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.document-list-content {
+  flex: 1;
+  min-width: 0;
+}
+.documents-page .document-list-open {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.document-list-content p {
+  margin: 0 12px 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.document-list > li > button {
+  flex: none;
+  margin: 6px;
+}
+.document-pagination {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.document-rail .document-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.document-rail .document-tags li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding-left: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.document-rail .document-tags button {
+  flex: none;
+}
+.document-tag-form,
+.document-create-ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.document-create-ticket[hidden] {
+  display: none;
+}
+.document-passage {
+  overflow-wrap: anywhere;
+}
+.document-rail .document-passage p {
+  margin: 4px 0 12px;
+}
+@media (max-width: 767px) {
+  .documents-page {
+    padding: 20px 16px;
+  }
+  .documents-filters label {
+    max-width: none;
   }
 }
