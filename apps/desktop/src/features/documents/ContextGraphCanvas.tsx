@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import {
   Background,
   Controls,
   ReactFlow,
   type Edge,
   type Node,
+  type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
 import type { Point } from "./context-layout";
@@ -20,8 +27,10 @@ export function ContextGraphCanvas({
   onViewport,
   onSelect,
   onError,
+  fit = false,
+  onFitted,
 }: {
-  nodes: { id: string; label: string; color?: string }[];
+  nodes: { id: string; label: string }[];
   edges: Edge[];
   selected: string | null;
   positions: Record<string, Point>;
@@ -30,6 +39,9 @@ export function ContextGraphCanvas({
   onViewport: (viewport: Viewport) => void;
   onSelect: (id: string) => void;
   onError: (error: string) => void;
+  /** Ask the canvas to fit all items once positions exist; reported by onFitted. */
+  fit?: boolean;
+  onFitted?: () => void;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -92,6 +104,22 @@ export function ContextGraphCanvas({
       worker.terminate();
     };
   }, [topology]);
+  const instance = useRef<ReactFlowInstance | null>(null);
+  const onFittedRef = useRef(onFitted);
+  useEffect(() => {
+    onFittedRef.current = onFitted;
+  }, [onFitted]);
+  const placed = nodes.some((node) => positions[node.id]);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!fit || !placed || !ready) return;
+    // Let React Flow measure the new nodes before fitting them.
+    const frame = window.requestAnimationFrame(() => {
+      void instance.current?.fitView({ padding: 0.2, duration: 200 });
+      onFittedRef.current?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [fit, placed, ready, positions]);
   const flowNodes = useMemo<Node[]>(
     () =>
       nodes
@@ -100,22 +128,39 @@ export function ContextGraphCanvas({
           id: node.id,
           position: positions[node.id]!,
           data: { label: node.label },
+          ariaLabel: node.label,
           selected: node.id === selected,
-          ...(node.color
-            ? { style: { borderColor: node.color, borderWidth: 3 } }
-            : {}),
         })),
     [nodes, positions, selected],
   );
+  // React Flow selects a focused node on Enter or Space without calling
+  // onNodeClick, so the keyboard path reports the selection itself.
+  function selectFromKey(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const element = (event.target as HTMLElement).closest(".react-flow__node");
+    const id = element?.getAttribute("data-id");
+    if (!id) return;
+    event.preventDefault();
+    onSelect(id);
+  }
   return (
-    <div className="context-graph-canvas" aria-label="Connections canvas">
+    <div
+      className="context-graph-canvas"
+      aria-label="Connections canvas"
+      onKeyDown={selectFromKey}
+    >
       <ReactFlow
         nodes={flowNodes}
         edges={edges}
         onNodeClick={(_, node) => onSelect(node.id)}
+        onInit={(value) => {
+          instance.current = value;
+          setReady(true);
+        }}
         viewport={viewport}
         onViewportChange={onViewport}
         nodesDraggable={false}
+        edgesFocusable={false}
       >
         <Background />
         <Controls />

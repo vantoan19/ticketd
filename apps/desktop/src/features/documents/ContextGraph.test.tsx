@@ -9,6 +9,7 @@ vi.mock("@xyflow/react", () => ({
   ReactFlow: () => <div>Canvas</div>,
   Background: () => null,
   Controls: () => null,
+  MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 vi.mock("@/lib/api/client", () => ({
   client: { contextGraphExpanded: vi.fn() },

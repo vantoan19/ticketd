@@ -1540,6 +1540,7 @@ test.each(["ticket", "document", "plan"] as const)(
       show_ticket: () => ticket,
       workspace_graph: () => ({
         node_tags: {},
+        total: 1,
         nodes: [
           {
             id: "1",
@@ -1557,7 +1558,7 @@ test.each(["ticket", "document", "plan"] as const)(
         omitted_groups: [],
       }),
     });
-    fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
@@ -1578,6 +1579,31 @@ test.each(["ticket", "document", "plan"] as const)(
   },
 );
 
+test("a sidebar view leaves an open workspace graph", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      total: 0,
+      nodes: [],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("region", { name: "Workspace graph" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
+  expect(screen.queryByRole("region", { name: "Workspace graph" })).toBeNull();
+  expect(screen.queryByText("Back to context graph")).toBeNull();
+});
+
 test("returns to local graph state after opening an item", async () => {
   const ticket = bulkTicket(1);
   const node = {
@@ -1594,6 +1620,7 @@ test("returns to local graph state after opening an item", async () => {
     show_ticket: () => ticket,
     workspace_graph: () => ({
       node_tags: {},
+      total: 1,
       nodes: [node],
       edges: [],
       next_cursor: null,
@@ -1613,17 +1640,17 @@ test("returns to local graph state after opening an item", async () => {
       max_work: 1000,
     }),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
-  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(
-    screen.getByRole("checkbox", { name: "Include Activity details" }),
+    screen.getByRole("checkbox", { name: "Include update details" }),
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1635,7 +1662,7 @@ test("returns to local graph state after opening an item", async () => {
   expect(
     (
       screen.getByRole("checkbox", {
-        name: "Include Activity details",
+        name: "Include update details",
       }) as HTMLInputElement
     ).checked,
   ).toBe(true);

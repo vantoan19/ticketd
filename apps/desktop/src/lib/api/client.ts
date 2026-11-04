@@ -203,6 +203,7 @@ export const workspaceGraphSchema = contextGraphSchema
   .pick({ nodes: true, edges: true, omitted: true })
   .extend({
     next_cursor: z.string().nullable(),
+    total: z.number(),
     omitted_groups: z.array(z.string()),
     node_tags: z.record(z.string(), z.string()),
   });

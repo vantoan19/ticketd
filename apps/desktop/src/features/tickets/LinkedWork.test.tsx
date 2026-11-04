@@ -147,7 +147,7 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
     screen.getByRole("heading", { name: "Relationships" }).textContent,
   ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
 });
 
 test("loading and a failed read are distinct from having no links", async () => {
@@ -221,11 +221,11 @@ test("shows n+ and loads the next page when more links exist", async () => {
   expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
-test("the Graph action opens the dependency graph", async () => {
+test("the Dependencies action opens the dependency graph", async () => {
   bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
   renderSection(base, undefined, onOpenGraph);
-  fireEvent.click(await screen.findByRole("button", { name: "Graph" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Dependencies" }));
   expect(onOpenGraph).toHaveBeenCalled();
 });
 

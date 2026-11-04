@@ -330,6 +330,7 @@ impl Workspace {
         // per-anchor quota. Each subquery can stop on its adjacency index.
         let anchors: Vec<_> = ids.iter().filter(|id| *id != &center).cloned().collect();
         const INDUCED_QUOTA: usize = 2;
+        let mut over_quota = Vec::new();
         for (sql, kind) in groups {
             if anchors.is_empty() {
                 break;
@@ -355,25 +356,25 @@ impl Workspace {
             for (anchor, source, target, explanation) in rows {
                 let count = counts.entry(anchor).or_default();
                 *count += 1;
-                if *count > INDUCED_QUOTA {
-                    omitted = true;
-                    omitted_groups.insert(kind.to_owned());
-                    continue;
-                }
-                if !ids.contains(&source) || !ids.contains(&target) {
-                    continue;
-                }
                 let kind = if kind == "document" && explanation.is_some() {
                     "spec"
                 } else {
                     kind
                 };
-                if !seen.insert((
+                let key = (
                     source.clone(),
                     target.clone(),
                     kind.to_owned(),
                     explanation.clone(),
-                )) {
+                );
+                if *count > INDUCED_QUOTA {
+                    over_quota.push(key);
+                    continue;
+                }
+                if !ids.contains(&source) || !ids.contains(&target) {
+                    continue;
+                }
+                if !seen.insert(key) {
                     continue;
                 }
                 if edges.len() == MAX_EDGES {
@@ -387,6 +388,15 @@ impl Workspace {
                     kind: kind.to_owned(),
                     explanation,
                 });
+            }
+        }
+        // The quota only hides a connection that joins two visible items and that
+        // no other row drew; a plan's tickets are usually emitted from each
+        // ticket's own membership row.
+        for key in over_quota {
+            if ids.contains(&key.0) && ids.contains(&key.1) && !seen.contains(&key) {
+                omitted = true;
+                omitted_groups.insert(key.2);
             }
         }
         for continuation in continuations.values_mut() {
@@ -469,6 +479,8 @@ pub struct WorkspaceGraphRequest {
 pub struct WorkspaceGraph {
     pub node_tags: BTreeMap<String, String>,
     pub nodes: Vec<ContextGraphNode>,
+    /// Items matching the search, type and tag filters across the workspace.
+    pub total: usize,
     pub edges: Vec<ContextGraphEdge>,
     pub next_cursor: Option<String>,
     pub omitted: bool,
@@ -484,17 +496,62 @@ impl Workspace {
         let visible_truncated = request.visible_ids.len() > 100;
         let mut ids: BTreeSet<String> = request.visible_ids.iter().take(100).cloned().collect();
         let remaining = 100_usize.saturating_sub(ids.len()).min(50);
+        // Filters select candidates before paging so a match anywhere in the
+        // workspace is reachable, not only within the first page of identities.
+        let mut filter =
+            String::from("FROM entities e WHERE e.kind IN ('ticket','document','plan')");
+        let mut args: Vec<rusqlite::types::Value> = Vec::new();
+        if let Some(kind) = request.kind.as_deref().filter(|s| !s.is_empty()) {
+            filter.push_str(" AND e.kind = ?");
+            args.push(kind.to_owned().into());
+        }
+        if !request.include_details {
+            filter.push_str(" AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = e.id AND d.originating_activity_id IS NOT NULL AND NOT d.kept)");
+        }
+        if let Some(search) = request.search.as_deref().filter(|s| !s.trim().is_empty()) {
+            let phrase = format!("\"{}\"", search.replace('"', "\"\""));
+            filter.push_str(" AND (");
+            for (index, (table, fts)) in [
+                ("tickets", "ticket_graph_fts"),
+                ("documents", "document_fts"),
+                ("plans", "plan_graph_fts"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if index > 0 {
+                    filter.push_str(" OR ");
+                }
+                filter.push_str(&format!(
+                    "e.id IN (SELECT {table}.id FROM {table} CROSS JOIN {fts} ON {fts}.rowid = {table}.rowid WHERE {fts} MATCH ?)"
+                ));
+                args.push(phrase.clone().into());
+            }
+            filter.push(')');
+        }
+        if let Some(tag) = request.tag.as_deref().filter(|s| !s.is_empty()) {
+            let tag = tag.trim().to_lowercase();
+            filter.push_str(" AND (e.id IN (SELECT ticket_id FROM ticket_tags WHERE tag_name = ?) OR e.id IN (SELECT document_id FROM document_tags WHERE tag_name = ?))");
+            args.push(tag.clone().into());
+            args.push(tag.into());
+        }
+        let total: usize = tx.query_row(
+            &format!("SELECT COUNT(*) {filter}"),
+            rusqlite::params_from_iter(args.iter()),
+            |row| row.get::<_, i64>(0),
+        )? as usize;
         let mut candidates = if request.hydrate_only {
             Vec::new()
         } else {
-            let mut stmt = tx.prepare("SELECT id FROM entities WHERE id > ?1 AND kind IN ('ticket','document','plan') ORDER BY id LIMIT ?2")?;
-            stmt.query_map(
-                params![
-                    request.cursor.as_deref().unwrap_or(""),
-                    (remaining + 1) as i64
-                ],
-                |row| row.get::<_, String>(0),
-            )?
+            let mut page_args = args.clone();
+            page_args.push(request.cursor.clone().unwrap_or_default().into());
+            page_args.push(((remaining + 1) as i64).into());
+            let mut stmt = tx.prepare(&format!(
+                "SELECT e.id {filter} AND e.id > ? ORDER BY e.id LIMIT ?"
+            ))?;
+            stmt.query_map(rusqlite::params_from_iter(page_args.iter()), |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<Result<Vec<_>, _>>()?
         };
         let more = candidates.len() > remaining;
@@ -508,63 +565,6 @@ impl Workspace {
             None
         };
         ids.extend(candidates);
-        if let Some(search) = request.search.as_deref().filter(|s| !s.trim().is_empty()) {
-            let phrase = format!("\"{}\"", search.replace('"', "\"\""));
-            let mut matches = BTreeSet::new();
-            for (table, fts) in [
-                ("tickets", "ticket_graph_fts"),
-                ("documents", "document_fts"),
-                ("plans", "plan_graph_fts"),
-            ] {
-                if ids.is_empty() {
-                    break;
-                }
-                let placeholders = vec!["?"; ids.len()].join(",");
-                let sql = format!(
-                    "SELECT {table}.id FROM {table} CROSS JOIN {fts} ON {fts}.rowid = {table}.rowid WHERE {table}.id IN ({placeholders}) AND {fts} MATCH ?"
-                );
-                let mut stmt = tx.prepare(&sql)?;
-                let params = ids
-                    .iter()
-                    .map(String::as_str)
-                    .chain(std::iter::once(phrase.as_str()));
-                matches.extend(
-                    stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                        row.get::<_, String>(0)
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?,
-                );
-            }
-            ids.retain(|id| matches.contains(id));
-        }
-        if let Some(tag) = request.tag.as_deref().filter(|s| !s.is_empty()) {
-            let tag = tag.trim().to_lowercase();
-            let mut tagged = BTreeSet::new();
-            for (table, column) in [
-                ("ticket_tags", "ticket_id"),
-                ("document_tags", "document_id"),
-            ] {
-                if ids.is_empty() {
-                    break;
-                }
-                let placeholders = vec!["?"; ids.len()].join(",");
-                let sql = format!(
-                    "SELECT {column} FROM {table} WHERE {column} IN ({placeholders}) AND tag_name = ?"
-                );
-                let mut stmt = tx.prepare(&sql)?;
-                let params = ids
-                    .iter()
-                    .map(String::as_str)
-                    .chain(std::iter::once(tag.as_str()));
-                tagged.extend(
-                    stmt.query_map(rusqlite::params_from_iter(params), |row| {
-                        row.get::<_, String>(0)
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?,
-                );
-            }
-            ids.retain(|id| tagged.contains(id));
-        }
         let mut nodes = graph_nodes(&tx, &ids)?;
         nodes.retain(|node| {
             ids.contains(&node.id)
@@ -599,6 +599,7 @@ impl Workspace {
         let mut seen = BTreeSet::new();
         let mut omitted_groups = BTreeSet::new();
         let adjacency_limit = request.adjacency_limit.clamp(3, 12);
+        let mut over_limit = Vec::new();
         for (sql, kind) in GROUPS {
             if request
                 .relationship
@@ -630,25 +631,27 @@ impl Workspace {
             for (anchor, source, target, explanation) in rows {
                 let count = counts.entry(anchor).or_default();
                 *count += 1;
-                if *count > adjacency_limit {
-                    omitted_groups.insert(kind.to_owned());
-                    continue;
-                }
-                if !ids.contains(&source) || !ids.contains(&target) {
-                    omitted_groups.insert(kind.to_owned());
-                    continue;
-                }
                 let edge_kind = if kind == "document" && explanation.is_some() {
                     "spec"
                 } else {
                     kind
                 };
-                if !seen.insert((
+                let key = (
                     source.clone(),
                     target.clone(),
                     edge_kind.to_owned(),
                     explanation.clone(),
-                )) {
+                );
+                if *count > adjacency_limit {
+                    over_limit.push(key);
+                    continue;
+                }
+                // An edge to an item outside this page is not hidden by a limit;
+                // it appears once that item is loaded.
+                if !ids.contains(&source) || !ids.contains(&target) {
+                    continue;
+                }
+                if !seen.insert(key) {
                     continue;
                 }
                 if edges.len() == MAX_EDGES {
@@ -663,10 +666,24 @@ impl Workspace {
                 });
             }
         }
+        // Only a connection between two shown items that no other row drew is hidden.
+        for key in over_limit {
+            if ids.contains(&key.0) && ids.contains(&key.1) && !seen.contains(&key) {
+                omitted_groups.insert(key.2);
+            }
+        }
+        if request.relationship.is_some() {
+            let connected: BTreeSet<&String> = edges
+                .iter()
+                .flat_map(|edge| [&edge.source, &edge.target])
+                .collect();
+            nodes.retain(|node| connected.contains(&node.id));
+        }
         tx.commit()?;
         Ok(WorkspaceGraph {
             node_tags,
             nodes,
+            total,
             edges,
             next_cursor,
             omitted: more || visible_truncated || !omitted_groups.is_empty(),

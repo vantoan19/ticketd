@@ -25,12 +25,14 @@ vi.mock("@xyflow/react", () => ({
   ReactFlow: () => <div>Canvas</div>,
   Background: () => null,
   Controls: () => null,
+  MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 vi.mock("@/lib/api/client", () => ({ client: { workspaceGraph: vi.fn() } }));
 
 test("filters workspace results and focuses a selected item deliberately", async () => {
   vi.mocked(client.workspaceGraph).mockResolvedValue({
     node_tags: {},
+    total: 1,
     nodes: [
       {
         id: "doc",
@@ -57,7 +59,7 @@ test("filters workspace results and focuses a selected item deliberately", async
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
-  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
   expect(focus).toHaveBeenCalledWith("doc");
   fireEvent.change(screen.getByLabelText("Search"), {
     target: { value: "needle" },
@@ -72,6 +74,7 @@ test("filters workspace results and focuses a selected item deliberately", async
 test("expands omitted connections while retaining the selected item", async () => {
   vi.mocked(client.workspaceGraph).mockResolvedValue({
     node_tags: {},
+    total: 1,
     nodes: [
       {
         id: "one",
@@ -97,15 +100,15 @@ test("expands omitted connections while retaining the selected item", async () =
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "T-1 · First" }));
-  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show more connections" }),
+  );
   await waitFor(() =>
     expect(client.workspaceGraph).toHaveBeenCalledWith(
       expect.objectContaining({ adjacency_limit: 6 }),
     ),
   );
-  expect(
-    screen.getByRole("button", { name: "Center on this item" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Context graph" })).toBeTruthy();
 });
 
 test("connects visible items across candidate pages", async () => {
@@ -129,6 +132,7 @@ test("connects visible items across candidate pages", async () => {
     .mockReset()
     .mockResolvedValueOnce({
       node_tags: {},
+      total: 1,
       nodes: [first],
       edges: [],
       next_cursor: "cursor",
@@ -137,6 +141,7 @@ test("connects visible items across candidate pages", async () => {
     })
     .mockResolvedValueOnce({
       node_tags: {},
+      total: 1,
       nodes: [first, second],
       edges: [
         { source: "one", target: "two", kind: "blocks", explanation: null },
@@ -154,11 +159,38 @@ test("connects visible items across candidate pages", async () => {
       onOpen={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
   await waitFor(() =>
     expect(client.workspaceGraph).toHaveBeenCalledWith(
       expect.objectContaining({ cursor: "cursor", visible_ids: ["one"] }),
     ),
   );
-  expect((await screen.findAllByText("blocks")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("Blocks")).length).toBeGreaterThan(0);
+});
+
+test("a filter with no matches says so and can be cleared", async () => {
+  vi.mocked(client.workspaceGraph).mockReset().mockResolvedValue({
+    node_tags: {},
+    total: 0,
+    nodes: [],
+    edges: [],
+    next_cursor: null,
+    omitted: false,
+    omitted_groups: [],
+  });
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={vi.fn()}
+      onOpen={vi.fn()}
+    />,
+  );
+  fireEvent.change(await screen.findByLabelText("Search"), {
+    target: { value: "zzz" },
+  });
+  expect(await screen.findByText(/No items match these filters/)).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
+  expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("");
 });

@@ -399,3 +399,73 @@ fn workspace_search_index_tracks_ticket_and_plan_edits() {
     let graph = workspace.workspace_graph(&request).unwrap();
     assert!(!graph.nodes.iter().any(|node| node.id == ticket.id));
 }
+
+#[test]
+fn workspace_filters_apply_before_paging_and_relationship_prunes_unconnected() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for index in 0..70 {
+        workspace
+            .create_document(Some(&format!("Filler {index}")), "")
+            .unwrap();
+    }
+    let blocker = workspace.create_ticket("Rare blocker").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&blocker.reference, &dependent.reference, None)
+        .unwrap();
+    // The match may sort after the first 50 identities; filters must still find it.
+    let found = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            search: Some("Rare".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(found.nodes.len(), 1);
+    assert_eq!(found.total, 1);
+    let none = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            search: Some("absent".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!((none.nodes.len(), none.total), (0, 0));
+    let blocks = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            relationship: Some("blocks".into()),
+            kind: Some("ticket".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(blocks.nodes.len(), 2);
+    assert!(blocks.nodes.iter().all(|node| node.kind == "ticket"));
+}
+
+#[test]
+fn plan_membership_beyond_the_adjacency_limit_is_not_reported_omitted() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    for index in 0..5 {
+        let ticket = workspace.create_ticket(&format!("Member {index}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+    }
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            adjacency_limit: 3,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(graph.edges.len(), 5);
+    assert!(
+        graph.omitted_groups.is_empty(),
+        "{:?}",
+        graph.omitted_groups
+    );
+    let local = workspace.context_graph(&plan.id, false).unwrap();
+    assert!(!local.omitted_groups.iter().any(|kind| kind == "membership"));
+}

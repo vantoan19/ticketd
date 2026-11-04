@@ -209,7 +209,13 @@ export function App() {
                     setView={openView}
                     projects={projects}
                     plans={plans}
-                    scope={scope}
+                    scope={(...args) => {
+                      // A sidebar view always shows its list, not an open graph.
+                      setGraphOrigin(null);
+                      setLocalGraphOrigin(null);
+                      setWorkspaceGraphOpen(false);
+                      scope(...args);
+                    }}
                     navigation={navigation}
                     setCreating={(value) => {
                       if (value) setCreateStatus(undefined);
