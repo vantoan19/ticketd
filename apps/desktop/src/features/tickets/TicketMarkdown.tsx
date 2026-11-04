@@ -31,7 +31,7 @@ export function TicketReference({
   return target ? (
     <button
       type="button"
-      className="underline"
+      className="underline context-link"
       onClick={() => select(reference)}
     >
       {reference}

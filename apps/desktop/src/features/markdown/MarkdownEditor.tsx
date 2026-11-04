@@ -7,8 +7,9 @@ import {
   type MouseEvent,
 } from "react";
 import CodeMirror from "@uiw/react-codemirror";
+import { Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { TextApi, type Value } from "platejs";
 import {
   Plate,
@@ -52,7 +53,6 @@ import {
   unindentListItems,
   BulletedListRules,
   OrderedListRules,
-  TaskListRules,
 } from "@platejs/list-classic";
 import { TablePlugin } from "@platejs/table/react";
 import {
@@ -64,7 +64,7 @@ import {
 } from "@platejs/table";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
-import { toggleCodeBlock, CodeBlockRules } from "@platejs/code-block";
+import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,10 +93,30 @@ import {
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { checklistRule, closeCodeFence, openFenceRule } from "./input-rules";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
 
-const sourceExtensions = [markdown(), EditorView.lineWrapping];
+// Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
+// doubled and a closing fence never inherits indentation.
+const sourceExtensions = [
+  markdown({ addKeymap: false }),
+  EditorView.lineWrapping,
+  Prec.highest(
+    keymap.of([
+      {
+        key: "Enter",
+        run: (view) => {
+          view.dispatch(view.state.replaceSelection("\n"), {
+            scrollIntoView: true,
+            userEvent: "input",
+          });
+          return true;
+        },
+      },
+    ]),
+  ),
+];
 
 function Leaf(props: PlateLeafProps) {
   let children = props.children;
@@ -339,7 +359,13 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({ editorId }: { editorId: string }) {
+function Toolbar({
+  editorId,
+  visible,
+}: {
+  editorId: string;
+  visible: boolean;
+}) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -350,6 +376,7 @@ function Toolbar({ editorId }: { editorId: string }) {
   return (
     <div
       className="rich-toolbar"
+      hidden={!visible}
       role="toolbar"
       aria-label={selected ? "Selection formatting" : "Document formatting"}
     >
@@ -509,12 +536,56 @@ function Toolbar({ editorId }: { editorId: string }) {
   );
 }
 
+const richPlugins = [
+  ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
+    (plugin) => plugin.configure({ inputRules: [HeadingRules.markdown()] }),
+  ),
+  BlockquotePlugin.configure({ inputRules: [BlockquoteRules.markdown()] }),
+  HorizontalRulePlugin,
+  BoldPlugin.configure({
+    inputRules: [BoldRules.markdown(), BoldRules.markdown({ variant: "_" })],
+  }),
+  ItalicPlugin.configure({
+    inputRules: [
+      ItalicRules.markdown(),
+      ItalicRules.markdown({ variant: "_" }),
+    ],
+  }),
+  CodePlugin.configure({ inputRules: [CodeRules.markdown()] }),
+  StrikethroughPlugin.configure({
+    inputRules: [StrikethroughRules.markdown()],
+  }),
+  ListPlugin.configure({
+    inputRules: [
+      BulletedListRules.markdown(),
+      BulletedListRules.markdown({ variant: "*" }),
+      OrderedListRules.markdown(),
+      checklistRule,
+    ],
+  }),
+  TablePlugin.configure({ options: { disableMerge: true } }),
+  LinkPlugin,
+  CodeBlockPlugin.configure({
+    inputRules: [openFenceRule],
+  }),
+  createPlatePlugin({
+    key: "mermaid",
+    node: { isElement: true, isVoid: true, component: Diagram },
+  }),
+  createPlatePlugin({
+    key: "br",
+    node: { isElement: true, isInline: true, isVoid: true },
+  }),
+];
+
 export interface MarkdownEditorProps {
   value: string;
   onChange: (markdown: string) => void;
   readOnly?: boolean;
   label?: string;
   autoFocus?: boolean;
+  /** Shown while the rich editor is empty, e.g. "Write a thought…". */
+  placeholder?: string;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -524,7 +595,11 @@ export function MarkdownEditor({
   readOnly = false,
   label = "Markdown document",
   autoFocus = false,
+  placeholder,
 }: MarkdownEditorProps) {
+  // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
+  // so it stays keyboard reachable) and while one of its menus holds focus.
+  const [active, setActive] = useState(false);
   const [assessed, setAssessed] = useState<{
     source: string;
     document: Pick<ReturnType<typeof readMarkdown>, "value" | "reasons">;
@@ -547,51 +622,7 @@ export function MarkdownEditor({
   const [initialMarkdown] = useState(() => writeMarkdown(document.value));
   const previousMarkdown = useRef(initialMarkdown);
   const editor = usePlateEditor({
-    plugins: [
-      ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
-        (plugin) => plugin.configure({ inputRules: [HeadingRules.markdown()] }),
-      ),
-      BlockquotePlugin.configure({ inputRules: [BlockquoteRules.markdown()] }),
-      HorizontalRulePlugin,
-      BoldPlugin.configure({
-        inputRules: [
-          BoldRules.markdown(),
-          BoldRules.markdown({ variant: "_" }),
-        ],
-      }),
-      ItalicPlugin.configure({
-        inputRules: [
-          ItalicRules.markdown(),
-          ItalicRules.markdown({ variant: "_" }),
-        ],
-      }),
-      CodePlugin.configure({ inputRules: [CodeRules.markdown()] }),
-      StrikethroughPlugin.configure({
-        inputRules: [StrikethroughRules.markdown()],
-      }),
-      ListPlugin.configure({
-        inputRules: [
-          BulletedListRules.markdown(),
-          BulletedListRules.markdown({ variant: "*" }),
-          OrderedListRules.markdown(),
-          TaskListRules.markdown(),
-          TaskListRules.markdown({ checked: true }),
-        ],
-      }),
-      TablePlugin.configure({ options: { disableMerge: true } }),
-      LinkPlugin,
-      CodeBlockPlugin.configure({
-        inputRules: [CodeBlockRules.markdown({ on: "break" })],
-      }),
-      createPlatePlugin({
-        key: "mermaid",
-        node: { isElement: true, isVoid: true, component: Diagram },
-      }),
-      createPlatePlugin({
-        key: "br",
-        node: { isElement: true, isInline: true, isVoid: true },
-      }),
-    ],
+    plugins: richPlugins,
     components: {
       p: Element,
       h1: Element,
@@ -671,6 +702,11 @@ export function MarkdownEditor({
       moveBlock(editor, event.key === "ArrowUp" ? -1 : 1);
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey && closeCodeFence(editor)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (event.key === "Tab" && editor.api.some({ match: { type: "li" } })) {
       event.preventDefault();
       event.stopPropagation();
@@ -721,9 +757,30 @@ export function MarkdownEditor({
     }
   }
   return (
-    <section ref={container} className="markdown-editor" aria-label={label}>
+    <section
+      ref={container}
+      className="markdown-editor"
+      aria-label={label}
+      onFocus={() => setActive(true)}
+      onBlur={(event) => {
+        const next = event.relatedTarget;
+        if (
+          next instanceof Element &&
+          (event.currentTarget.contains(next) ||
+            next.closest(
+              "[data-slot=popover-content], [data-slot=dropdown-menu-content]",
+            ))
+        )
+          return;
+        setActive(false);
+      }}
+    >
       <div className="editor-mode">
-        <CopySourceButton source={value} label={`Copy ${label} Markdown`} />
+        <CopySourceButton
+          compact
+          source={value}
+          label={`Copy ${label} Markdown`}
+        />
         <Button
           disabled={document.reasons.length > 0}
           type="button"
@@ -796,9 +853,10 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar editorId={editorId} />}
+          {!readOnly && <Toolbar editorId={editorId} visible={active} />}
           <PlateContent
             readOnly={readOnly}
+            {...(placeholder ? { placeholder } : {})}
             aria-label={`${label} rich text`}
             role={slash ? "combobox" : "textbox"}
             aria-autocomplete={slash ? "list" : undefined}

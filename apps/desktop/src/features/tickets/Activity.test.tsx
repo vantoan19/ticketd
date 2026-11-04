@@ -431,6 +431,10 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   expect(
     screen.getByRole("textbox", { name: "New update rich text" }).textContent,
   ).toContain("Finding");
+  // The formatting toolbar appears while the editor has focus.
+  fireEvent.focus(
+    screen.getByRole("textbox", { name: "New update rich text" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Bold" }));
   expect(
     bridge.invoke.mock.calls.filter(

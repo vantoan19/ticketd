@@ -5,14 +5,62 @@ import remarkGfm from "remark-gfm";
 import { TextApi, type Descendant, type TElement, type Value } from "platejs";
 import type { Root, RootContent, PhrasingContent } from "mdast";
 
+const stringifyOptions = {
+  bullet: "-",
+  fences: true,
+  listItemIndent: "one",
+} as const;
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkStringify, stringifyOptions);
+
+/**
+ * remark escapes punctuation (`*`, `[`, `_`, `.`) that is only sometimes syntax. Each escape is
+ * dropped when the text still parses back as the same plain text, so stored text stays as typed.
+ * `relaxed` records that an escape was dropped.
+ */
+let relaxed = false;
+const lenient = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
   .use(remarkStringify, {
-    bullet: "-",
-    fences: true,
-    listItemIndent: "one",
+    ...stringifyOptions,
+    handlers: {
+      text(node, _parent, state, info) {
+        let text = state.safe(node.value, info);
+        // Table cells, HTML, entities and code need their escapes wherever they appear.
+        if (/[\n|<>&`]/.test(node.value) || node.value !== node.value.trim())
+          return text;
+        for (let index = 0; index < text.length - 1;) {
+          if (
+            text[index] === "\\" &&
+            /[!-/:-@[-`{-~]/.test(text[index + 1] ?? "")
+          ) {
+            const candidate = text.slice(0, index) + text.slice(index + 1);
+            if (isPlainText(candidate, node.value)) {
+              text = candidate;
+              relaxed = true;
+              continue;
+            }
+            index += 2;
+          } else index += 1;
+        }
+        return text;
+      },
+    },
   });
+
+function isPlainText(source: string, value: string): boolean {
+  const [paragraph, ...rest] = processor.parse(source).children;
+  const only = paragraph?.type === "paragraph" ? paragraph.children : [];
+  return (
+    rest.length === 0 &&
+    only.length === 1 &&
+    only[0]?.type === "text" &&
+    only[0].value === value
+  );
+}
 const supported = new Set([
   "root",
   "paragraph",
@@ -308,7 +356,18 @@ export function writeMarkdown(value: Value): string {
     type: "root",
     children: value.map((node) => block(node, diagrams)),
   };
-  let result = processor.stringify(tree);
+  relaxed = false;
+  let result = lenient.stringify(tree);
+  if (relaxed) {
+    // Unescaped neighbours can combine into syntax (`a*` before emphasis); keep the
+    // standard output unless both spellings mean the same thing.
+    const standard = processor.stringify(tree);
+    if (
+      JSON.stringify(meaning(processor.parse(result))) !==
+      JSON.stringify(meaning(processor.parse(standard)))
+    )
+      result = standard;
+  }
   diagrams.forEach((source, index) => {
     const longest = Math.max(
       2,
@@ -320,7 +379,8 @@ export function writeMarkdown(value: Value): string {
       () => `${fence}mermaid\n${source}\n${fence}`,
     );
   });
-  return result;
+  // Stringification ends every document with a newline; stored text does not.
+  return result.replace(/\n$/, "");
 }
 
 export function readMarkdown(source: string) {

@@ -281,7 +281,7 @@ fn link_insertion_validates_target_identity() {
     );
     assert_eq!(
         workspace.context_link_markdown(&document.id).unwrap(),
-        format!("[Document](ticketd://document/{})", document.id)
+        format!("[Context](ticketd://document/{})", document.id)
     );
     assert!(workspace.context_link_markdown("T-999999").is_err());
 }
@@ -741,5 +741,49 @@ fn opened_untitled_document_exposes_its_bounded_heading() {
     assert_eq!(
         workspace.open_document(&doc.id).unwrap().heading,
         "First line"
+    );
+}
+
+#[test]
+fn heading_is_first_plain_text_line_without_markdown_markers() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let cases = [
+        ("# Heading probe\n\nbody", "Heading probe"),
+        (
+            "\n\n- [ ] **Ship** the [report](https://x.test) now\n",
+            "Ship the report now",
+        ),
+        ("2\\*3\\*4 \\[brackets]", "2*3*4 [brackets]"),
+    ];
+    for (body, expected) in cases {
+        let document = workspace.create_document(None, body).unwrap();
+        assert_eq!(document.heading, expected);
+    }
+    let long = workspace
+        .create_document(None, &"word ".repeat(60))
+        .unwrap();
+    assert!(long.heading.chars().count() <= 120);
+    let titled = workspace
+        .create_document(Some("Explicit"), "# Other")
+        .unwrap();
+    assert_eq!(titled.heading, "Explicit");
+    let blank = workspace.create_document(None, " \n").unwrap();
+    assert_eq!(blank.heading, "Untitled");
+}
+
+#[test]
+fn source_document_link_uses_the_documents_heading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let document = workspace
+        .create_document(None, "# Launch notes\nmore")
+        .unwrap();
+    let ticket = workspace
+        .create_ticket_from_document(&document.id, "Follow up")
+        .unwrap();
+    assert_eq!(
+        ticket.body,
+        format!("[Launch notes](ticketd://document/{})", document.id)
     );
 }

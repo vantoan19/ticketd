@@ -66,3 +66,29 @@ describe("canonical Markdown rich-edit boundary", () => {
     }
   });
 });
+
+describe("Markdown writing keeps text as typed", () => {
+  const rich = (text: string) => [{ type: "p", children: [{ text }] }];
+  it("does not escape punctuation that is not syntax and adds no trailing newline", () => {
+    for (const text of [
+      "2*3 [brackets] and a_b",
+      "snake_case_name and v1.2",
+      "Done. See step 2.",
+    ])
+      expect(writeMarkdown(rich(text))).toBe(text);
+  });
+  it("keeps only the escape that prevents emphasis", () => {
+    expect(writeMarkdown(rich("2*3*4 [x]"))).toBe("2*3\\*4 [x]");
+  });
+  it("still escapes text that would otherwise change meaning", () => {
+    for (const text of ["*not emphasis*", "1. not a list", "# not a heading"]) {
+      const written = writeMarkdown(rich(text));
+      expect(written).not.toBe(text);
+      expect(readMarkdown(written).value).toEqual(rich(text));
+    }
+  });
+  it("round trips a brief without rewriting it", () => {
+    const brief = "Fixed 3. items and [x] later";
+    expect(writeMarkdown(readMarkdown(brief).value)).toBe(brief);
+  });
+});

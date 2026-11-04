@@ -88,13 +88,13 @@ describe("Markdown draft editor", () => {
     fireEvent.change(language, { target: { value: "typescript" } });
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
-        '```typescript\nconst message = "$& 日本語";\n```\n',
+        '```typescript\nconst message = "$& 日本語";\n```',
       ),
     );
     fireEvent.change(language, { target: { value: "my-dsl" } });
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith(
-        '```my-dsl\nconst message = "$& 日本語";\n```\n',
+        '```my-dsl\nconst message = "$& 日本語";\n```',
       ),
     );
     const calls = onChange.mock.calls.length;
@@ -210,5 +210,23 @@ describe("Markdown draft editor", () => {
     expect(
       screen.getByRole("link", { name: "Example" }).getAttribute("href"),
     ).toBe("https://example.com");
+  });
+});
+
+describe("Formatting toolbar", () => {
+  it("shows only while the editor has focus and offers an icon-only copy button", () => {
+    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
+    expect(screen.queryByText(/^Copy .* Markdown$/)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Copy Markdown document Markdown" }),
+    ).toBeTruthy();
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    fireEvent.focus(editable);
+    expect(screen.getByRole("button", { name: "Bold" })).toBeTruthy();
+    fireEvent.blur(editable);
+    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
   });
 });
