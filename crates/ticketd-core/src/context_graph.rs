@@ -126,7 +126,7 @@ impl Workspace {
                 "support",
             ),
         ];
-        let mut candidates = Vec::new();
+        let mut candidate_groups = Vec::new();
         let mut omitted = false;
         for (sql, kind) in groups {
             let mut statement = tx.prepare(sql)?;
@@ -142,6 +142,7 @@ impl Workspace {
             if rows.len() > GROUP_LIMIT {
                 omitted = true;
             }
+            let mut candidates = Vec::new();
             for (source, target, explanation) in rows.into_iter().take(GROUP_LIMIT) {
                 let kind = if kind == "document" && explanation.is_some() {
                     "spec"
@@ -149,6 +150,19 @@ impl Workspace {
                     kind
                 };
                 candidates.push((source, target, kind.to_owned(), explanation));
+            }
+            candidate_groups.push(candidates.into_iter());
+        }
+        let mut candidates = Vec::new();
+        loop {
+            let before = candidates.len();
+            for group in &mut candidate_groups {
+                if let Some(candidate) = group.next() {
+                    candidates.push(candidate);
+                }
+            }
+            if before == candidates.len() {
+                break;
             }
         }
         let mut ids = BTreeSet::from([center.clone()]);
@@ -261,7 +275,7 @@ impl Workspace {
             hidden_details,
             max_nodes: MAX_NODES,
             max_edges: MAX_EDGES,
-            max_work: groups.len() * (GROUP_LIMIT + (MAX_NODES - 1) * (INDUCED_QUOTA + 1)),
+            max_work: groups.len() * (GROUP_LIMIT + 1 + (MAX_NODES - 1) * (INDUCED_QUOTA + 1)),
         })
     }
 }

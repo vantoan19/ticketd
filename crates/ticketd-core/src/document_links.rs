@@ -121,6 +121,17 @@ fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Resul
             }
         }
     }
+    for (event, range) in Parser::new(body).into_offset_iter() {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event {
+            if let Some(number) = dest_url
+                .strip_prefix("ticketd://ticket/T-")
+                .and_then(|value| value.parse::<i64>().ok())
+                .filter(|number| *number > 0)
+            {
+                tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, range.start)])?;
+            }
+        }
+    }
     Ok(())
 }
 
