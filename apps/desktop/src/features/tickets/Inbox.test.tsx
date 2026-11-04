@@ -67,14 +67,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test("opens an entry without marking it read and explicitly marks shown entries", async () => {
+test("opening an entry marks it read and shown entries can be marked together", async () => {
   const select = vi.fn();
   render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-1.*First/ }));
   expect(select).toHaveBeenCalledWith("T-1");
-  expect(store.every((e) => !e.read)).toBe(true);
+  await waitFor(() => expect(store[0]?.read).toBe(true));
   const unreadState = { selector: ".sr-only" };
-  expect(screen.getAllByText("Unread", unreadState)).toHaveLength(2);
+  await waitFor(() =>
+    expect(screen.getAllByText("Unread", unreadState)).toHaveLength(1),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
   await waitFor(() =>
     expect(screen.queryByText("Unread", unreadState)).toBeNull(),
@@ -184,4 +186,22 @@ test("only reminders offer Snooze", async () => {
   render(<Inbox revision={0} select={vi.fn()} />);
   await screen.findByText("First");
   expect(screen.queryByRole("button", { name: /Snooze/ })).toBeNull();
+});
+
+test("a deleted update reads as deleted and opens the ticket only", async () => {
+  store = [
+    entry({
+      id: 9,
+      title: "Gone",
+      kind: "activity",
+      from_value: "note-id",
+      to_value: "Old",
+      deleted: true,
+    }),
+  ];
+  const select = vi.fn();
+  render(<Inbox revision={0} select={select} />);
+  expect(await screen.findByText("Update deleted")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Gone/ }));
+  expect(select).toHaveBeenCalledWith("T-9");
 });

@@ -1,7 +1,5 @@
-import { ContextGraphNavigation } from "@/features/documents/navigation";
-import { Button } from "@/components/ui/button";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
-import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
@@ -70,7 +68,6 @@ export function TicketDetails({
       document.getElementById("detail-heading")?.focus();
     }
   }, [selected]);
-  const openContextGraph = useContext(ContextGraphNavigation);
   const [graphReference, setGraphReference] = useState<string | null>(null);
   // The graph belongs to the ticket it opened from; selecting another closes it.
   const graphOpen = graphReference !== null && graphReference === selected;
@@ -133,11 +130,6 @@ export function TicketDetails({
         position={position}
         {...(onAdjacent && { onAdjacent })}
       />
-      {selected && openContextGraph && (
-        <Button variant="outline" onClick={() => openContextGraph(selected)}>
-          Context graph
-        </Button>
-      )}
       <div className="detail-scroll">
         {outsideResults && (
           <p className="selection-context" role="status">

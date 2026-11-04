@@ -47,6 +47,10 @@ export function useTicketWorkspace(
     plan: string;
   }>({ kind: "all", project: "all", plan: "" });
   const [queryError, setQueryError] = useState(false);
+  // A failed refresh after a list was shown keeps that list rather than blanking it.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const listLoaded = useRef(false);
+  const lastSnapshot = useRef("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [plan, setPlan] = useState("");
@@ -102,6 +106,8 @@ export function useTicketWorkspace(
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  // Advances on every successful poll, changed data or not, for views that poll their own sources.
+  const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
   const detailGeneration = useRef(0);
   const refresh = useCallback(async () => {
@@ -163,7 +169,15 @@ export function useTicketWorkspace(
         );
         return;
       }
+      listLoaded.current = true;
+      setPollTick((value) => value + 1);
       setQueryError(false);
+      setRefreshFailed(false);
+      setError("");
+      // The same data again changes nothing, so views are not told to reload.
+      const snapshot = JSON.stringify([trash, offset, result]);
+      if (snapshot === lastSnapshot.current) return;
+      lastSnapshot.current = snapshot;
       setTickets(result[0]);
       setLoadedOffset(offset);
       setCounts(result[3]);
@@ -171,13 +185,16 @@ export function useTicketWorkspace(
       setProjects(result[1]);
       setPlans(result[2]);
       setRevision((value) => value + 1);
-      setError("");
     } catch (reason) {
       if (request !== generation.current) return;
-      setQueryError(true);
-      setError(
-        `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
-      );
+      lastSnapshot.current = "";
+      if (listLoaded.current) setRefreshFailed(true);
+      else {
+        setQueryError(true);
+        setError(
+          `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
+        );
+      }
     } finally {
       window.clearTimeout(timeout);
       if (request === generation.current) setLoading(false);
@@ -205,7 +222,7 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [revision]);
+  }, [pollTick]);
   useEffect(() => {
     let active = true;
     void sourcesClient.health().then(
@@ -217,7 +234,7 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [revision]);
+  }, [pollTick]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => {
@@ -463,5 +480,6 @@ export function useTicketWorkspace(
     navigation,
     clearFilters,
     queryError,
+    refreshFailed,
   };
 }

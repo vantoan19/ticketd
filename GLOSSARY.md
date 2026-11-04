@@ -80,7 +80,7 @@ A ticket status indicating that its work is complete and no further review is re
 A ticket status indicating that its work will not continue. Cancellation does not satisfy its dependents' prerequisites.
 
 **Activity**:
-An automatic event or authored update attached to exactly one ticket. Authored activities have a required human-readable brief and optionally link to one supporting Document; they are editable and deletable. Automatic events record structured changes and cannot be edited or deleted individually. Attribution, when supplied, identifies the editing agent.
+An automatic event or authored update attached to exactly one ticket. Authored activities have a required human-readable brief and optionally link to one supporting Document; they are editable and deletable. Automatic events record structured changes and cannot be edited or deleted individually. Attribution, when supplied, identifies the editing agent. The interface calls an authored Activity an update and its Activity details its details; it never says note. The command line keeps `activity`, `--brief` and `--details-file`.
 
 **Document**:
 Reusable context: a thought, draft, spec, knowledge, or supporting detail. A Document has stable identity, an optional title, Markdown content, and recoverable trash state. It can be linked from multiple tickets, Plans, and Documents without duplication.
@@ -110,7 +110,7 @@ A ticket a person has explicitly selected to receive changes about in their atte
 The person's collection of changes on followed tickets, with read and unread state.
 
 **Ticket backlink**:
-An incoming reference from another ticket's description or authored activity, including the passage containing the reference.
+An incoming reference from another ticket's description or authored activity (or a Document), including the passage containing the reference. A ticket's own text is never a backlink to itself.
 
 **Related tickets**:
 Tickets connected by shared context without implying a blocking dependency or parent/subticket relationship.

@@ -679,7 +679,11 @@ fn get_activity(reference: String, id: String) -> Result<Option<Activity>, Strin
 #[tauri::command]
 fn add_activity(reference: String, brief: String) -> Result<Activity, String> {
     Workspace::open_default()
-        .and_then(|mut workspace| workspace.add_activity(&reference, &brief, None))
+        .and_then(|mut workspace| {
+            let activity = workspace.add_activity(&reference, &brief, None)?;
+            workspace.discard_inbox_for_own_update(&activity.id)?;
+            Ok(activity)
+        })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -697,11 +701,18 @@ fn add_activity_with_details(
         details,
         existing_document_id,
     };
-    match Workspace::open_default()
-        .and_then(|mut workspace| workspace.write(Some(&request_id), request))
+    let mut workspace = Workspace::open_default().map_err(|error| error.to_string())?;
+    match workspace
+        .write(Some(&request_id), request)
         .map_err(|error| error.to_string())?
     {
-        WriteResult::Activity(activity) => Ok(activity),
+        WriteResult::Activity(activity) => {
+            // The person who wrote it is not notified of their own update.
+            workspace
+                .discard_inbox_for_own_update(&activity.id)
+                .map_err(|error| error.to_string())?;
+            Ok(activity)
+        }
         _ => Err("Unexpected activity result".into()),
     }
 }

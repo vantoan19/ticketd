@@ -37,13 +37,56 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Activity> {
 pub(crate) fn get(conn: &Connection, ticket: &str, id: &str) -> Result<Activity, Error> {
     conn.query_row("SELECT id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id FROM activities WHERE ticket_id = ?1 AND id = ?2", params![ticket,id], row).optional()?.ok_or_else(|| Error::ActivityNotFound(id.to_owned()))
 }
+/// True when a brief has no visible text: only whitespace, zero-width characters,
+/// or Markdown whitespace entities such as `&#x20;` and `&nbsp;`.
+pub(crate) fn is_blank_brief(brief: &str) -> bool {
+    let mut rest = brief;
+    while !rest.is_empty() {
+        if let Some(tail) = rest.strip_prefix('&')
+            && let Some(end) = tail.find(';').filter(|end| *end <= 10)
+        {
+            let name = &tail[..end];
+            let decoded = match name {
+                "nbsp" | "ensp" | "emsp" | "thinsp" | "ZeroWidthSpace" | "NewLine" | "Tab" => {
+                    Some(' ')
+                }
+                _ => name
+                    .strip_prefix("#x")
+                    .or_else(|| name.strip_prefix("#X"))
+                    .map(|hex| u32::from_str_radix(hex, 16))
+                    .or_else(|| name.strip_prefix('#').map(|dec| dec.parse::<u32>()))
+                    .and_then(Result::ok)
+                    .and_then(char::from_u32),
+            };
+            if decoded.is_some_and(is_invisible) {
+                rest = &tail[end + 1..];
+                continue;
+            }
+            return false;
+        }
+        let mut chars = rest.chars();
+        let ch = chars.next().unwrap_or(' ');
+        if !is_invisible(ch) {
+            return false;
+        }
+        rest = chars.as_str();
+    }
+    true
+}
+fn is_invisible(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}'
+        )
+}
 pub(crate) fn add(
     conn: &Connection,
     ticket: &str,
     brief: &str,
     agent: Option<&str>,
 ) -> Result<Activity, Error> {
-    if brief.trim().is_empty() {
+    if is_blank_brief(brief) {
         return Err(Error::EmptyActivityBrief);
     }
     let id = Uuid::new_v4().to_string();
@@ -63,7 +106,7 @@ pub(crate) fn edit(
     if patch
         .brief
         .as_ref()
-        .is_some_and(|brief| brief.trim().is_empty())
+        .is_some_and(|brief| is_blank_brief(brief))
     {
         return Err(Error::EmptyActivityBrief);
     }

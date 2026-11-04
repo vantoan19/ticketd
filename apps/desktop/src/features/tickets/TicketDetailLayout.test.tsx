@@ -109,6 +109,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
     "Project",
     "Plan",
     "Tags",
+    "Documents",
     "Relationships",
     "Attention",
   ]);

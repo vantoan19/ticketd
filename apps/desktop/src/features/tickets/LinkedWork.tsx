@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SourceLink } from "@/features/tickets/SourceLink";
@@ -112,6 +113,7 @@ export function LinkedWork({
   onOpenGraph: () => void;
 }) {
   const { reference, current, pending, error } = work;
+  const openContextGraph = useContext(ContextGraphNavigation);
   const rows = work.rows.filter((row) => row.kind !== "subticket");
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
@@ -173,6 +175,7 @@ export function LinkedWork({
       <Button
         variant="link"
         className="linked-work-title"
+        title={row.title}
         onClick={() => select(row.reference)}
       >
         <span className="truncate">{row.title}</span>
@@ -249,7 +252,13 @@ export function LinkedWork({
           </Button>
         )}
         <div className="linked-work-actions">
-          <Button variant="ghost" size="sm" onClick={onOpenGraph}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              openContextGraph ? openContextGraph(reference) : onOpenGraph()
+            }
+          >
             <Network aria-hidden="true" />
             Dependencies
           </Button>

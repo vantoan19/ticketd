@@ -3,6 +3,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { client } from "@/lib/api/client";
+import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
 import "./backlinks.css";
@@ -111,7 +112,11 @@ export function Backlinks({
       <h3>
         Mentioned in{" "}
         <span className="text-muted-foreground">
-          {offset === 0 ? (links.length < 20 ? links.length : "20+") : ""}
+          {offset === 0
+            ? links.length < 20
+              ? links.length + documentLinks.length
+              : "20+"
+            : ""}
         </span>
       </h3>
       {error && <p role="alert">{error}</p>}
@@ -127,7 +132,7 @@ export function Backlinks({
                 {link.source_label}
                 {link.source_trashed ? " (Trash)" : ""}
               </strong>
-              <span>{link.passage}</span>
+              <span>{plainPassage(link.passage)}</span>
             </button>
           </li>
         ))}

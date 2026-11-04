@@ -124,6 +124,9 @@ pub(crate) fn query(
         let title: String = row.get(1)?;
         let activity_id: Option<String> = row.get(2)?;
         let content: String = row.get(3)?;
+        if reference == format!("T-{number}") {
+            continue;
+        }
         let mut last_line = None;
         for (text, range) in text_runs(&content) {
             if !contains_reference(&text, reference) {
