@@ -48,6 +48,7 @@ export function ContextGraph({
   >([]);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [error, setError] = useState("");
+  const [layoutError, setLayoutError] = useState("");
   useEffect(() => {
     let active = true;
     let latest = 0;
@@ -145,6 +146,7 @@ export function ContextGraph({
         </span>
       </div>
       {error && <p role="alert">{error}</p>}
+      {layoutError && <p role="alert">{layoutError}</p>}
       <div className="context-graph-main">
         <ContextGraphCanvas
           nodes={(graph?.nodes ?? []).map((node) => ({
@@ -154,11 +156,14 @@ export function ContextGraph({
           edges={edges}
           selected={selected}
           positions={positions}
-          onPositions={setPositions}
+          onPositions={(value) => {
+            setLayoutError("");
+            setPositions(value);
+          }}
           viewport={viewport}
           onViewport={setViewport}
           onSelect={setSelected}
-          onError={setError}
+          onError={setLayoutError}
         />
         <aside className="context-graph-preview">
           {preview ? (
