@@ -158,7 +158,7 @@ impl Workspace {
         include_support: bool,
     ) -> Result<Vec<DocumentSummary>, Error> {
         let sql = format!(
-            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
+            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR d.kept = 1 OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -262,7 +262,7 @@ impl Workspace {
         }
         self.connection
             .execute("UPDATE documents SET kept = 1 WHERE id = ?1", [id])?;
-        self.open_document(id)
+        self.show_document(id)
     }
 
     pub fn set_document_pin(&mut self, id: &str, pinned: bool) -> Result<(), Error> {
