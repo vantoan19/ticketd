@@ -271,11 +271,17 @@ export function DocumentEditor({
             if (titleDirty || bodyDirty) {
               if (!titleDirty) {
                 draft.current = { ...draft.current, title: next.title };
+                saved.current = { ...saved.current, title: next.title };
                 setTitle(next.title);
               }
               if (!bodyDirty) {
                 draft.current = {
                   ...draft.current,
+                  body: next.body,
+                  suggestion: next.suggestion,
+                };
+                saved.current = {
+                  ...saved.current,
                   body: next.body,
                   suggestion: next.suggestion,
                 };

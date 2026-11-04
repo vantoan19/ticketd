@@ -412,3 +412,46 @@ it("consumes graph navigation after saving so later edits stay on the Document",
   });
   expect(graph).toHaveBeenCalledTimes(1);
 });
+
+it("preserves successive unrelated saved title changes under a body conflict", async () => {
+  vi.useFakeTimers();
+  const doc = {
+    id: "d1",
+    title: "Original",
+    body: "Original body",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save)
+    .mockRejectedValueOnce("offline")
+    .mockResolvedValueOnce({
+      ...doc,
+      title: "External 2",
+      body: "Local draft",
+    });
+  vi.mocked(documents.show)
+    .mockResolvedValueOnce({
+      ...doc,
+      title: "External 1",
+      body: "External body",
+    })
+    .mockResolvedValue({ ...doc, title: "External 2", body: "External body" });
+  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Local draft" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save over saved content" }),
+  );
+  await act(async () => {});
+  expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
+    "External 2",
+    "Local draft",
+    false,
+  ]);
+});
