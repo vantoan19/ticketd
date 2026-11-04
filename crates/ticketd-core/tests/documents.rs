@@ -709,3 +709,22 @@ fn activity_references_include_visible_link_text_and_disappear_on_delete() {
             .is_empty()
     );
 }
+
+#[test]
+fn trash_pages_return_bounded_summaries_and_open_retains_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let body = "long body".repeat(10000);
+    let mut ids = Vec::new();
+    for n in 0..3 {
+        let doc = workspace.create_document(Some(&format!("Document {n}")), &body).unwrap();
+        workspace.set_document_trashed(&doc.id, true).unwrap();
+        ids.push(doc.id);
+    }
+    let first = workspace.trashed_documents_page(2, 0).unwrap();
+    let second = workspace.trashed_documents_page(2, 2).unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first[0].id, second[0].id);
+    assert_eq!(workspace.open_document(&ids[0]).unwrap().body, body);
+}

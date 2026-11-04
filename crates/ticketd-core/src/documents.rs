@@ -346,21 +346,16 @@ impl Workspace {
             }
         }
     }
-    pub fn trashed_documents(&self) -> Result<Vec<Document>, Error> {
-        let mut statement = self.connection.prepare("SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id) , kept FROM documents WHERE trashed = 1 ORDER BY updated_at DESC, id")?;
-        let rows = statement.query_map([], |row| {
-            Ok(Document {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                trashed: row.get(5)?,
-                origin_brief: row.get(6)?,
-                kept: row.get(7)?,
-            })
-        })?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    pub fn trashed_documents(&self) -> Result<Vec<DocumentSummary>, Error> {
+        self.trashed_documents_page(50, 0)
+    }
+
+    pub fn trashed_documents_page(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
+        let sql = format!("SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d WHERE d.trashed = 1 ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2");
+        let mut statement = self.connection.prepare(&sql)?;
+        Ok(statement.query_map(params![limit.min(100), offset], |row| Ok(DocumentSummary {
+            id: row.get(0)?, heading: row.get(1)?, origin_ticket: row.get(2)?,
+        }))?.collect::<Result<_, _>>()?)
     }
 
     pub fn set_document_trashed(&mut self, id: &str, trashed: bool) -> Result<Document, Error> {

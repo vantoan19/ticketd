@@ -12,17 +12,6 @@ import {
 import { DocumentEditor } from "./DocumentEditor";
 import "./documents.css";
 
-function heading(document: Document) {
-  return (
-    document.title?.trim() ||
-    document.origin_brief?.trim() ||
-    document.body
-      .split("\n")
-      .find((line) => line.trim())
-      ?.trim() ||
-    "Untitled"
-  );
-}
 export function Documents({
   capture,
   active,
@@ -43,7 +32,8 @@ export function Documents({
   const openGraph = useContext(ContextGraphNavigation);
   const [recent, setRecent] = useState<DocumentSummary[]>([]);
   const [pins, setPins] = useState<DocumentSummary[]>([]);
-  const [trash, setTrash] = useState<Document[]>([]);
+  const [trash, setTrash] = useState<DocumentSummary[]>([]);
+  const [trashOffset, setTrashOffset] = useState(0);
   const [showTrash, setShowTrash] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -60,15 +50,20 @@ export function Documents({
     void Promise.all([
       documents.recent(recentOffset, includeSupport),
       documents.pins(pinOffset),
-      documents.trash(),
     ])
-      .then(([r, p, t]) => {
+      .then(([r, p]) => {
         setRecent(r);
         setPins(p);
-        setTrash(t);
       })
       .catch((e: unknown) => setError(String(e)));
   }, [recentOffset, pinOffset, includeSupport]);
+  useEffect(() => {
+    if (!active || !showTrash) return;
+    const load = () => void documents.trash(trashOffset).then(setTrash).catch((e: unknown) => setError(String(e)));
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => window.clearInterval(timer);
+  }, [active, showTrash, trashOffset]);
   useEffect(() => {
     if (target)
       void Promise.all([documents.open(target.id), documents.tags(target.id)])
@@ -155,11 +150,13 @@ export function Documents({
             {trash.map((doc) => (
               <li key={doc.id}>
                 <Button variant="ghost" onClick={() => open(doc.id)}>
-                  {heading(doc)}
+                  {doc.heading}
                 </Button>
               </li>
             ))}
           </ul>
+          <Button disabled={trashOffset === 0} onClick={() => setTrashOffset(Math.max(0, trashOffset - 50))}>Previous trash</Button>
+          <Button disabled={trash.length < 50} onClick={() => setTrashOffset(trashOffset + 50)}>Next trash</Button>
         </section>
       ) : (
         <>

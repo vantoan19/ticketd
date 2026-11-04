@@ -73,7 +73,8 @@ export const documents = {
     z.array(z.string()).parse(await invoke("document_tags", { id })),
   tag: async (id: string, tag: string, present: boolean) =>
     invoke("set_document_tag", { id, tag, present }),
-  trash: async () => z.array(schema).parse(await invoke("trashed_documents")),
+  trash: async (offset: number) =>
+    z.array(summary).parse(await invoke("trashed_documents", { offset })),
   setTrashed: async (id: string, trashed: boolean, requestId: string) =>
     schema.parse(
       await invoke("set_document_trashed", { id, trashed, requestId }),

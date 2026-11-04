@@ -47,7 +47,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
     trashed ? [] : [{ id: doc.id, heading: "Context" }],
   );
   vi.mocked(documents.trash).mockImplementation(async () =>
-    trashed ? [{ ...doc, trashed }] : [],
+    trashed ? [{ id: doc.id, heading: doc.title }] : [],
   );
   vi.mocked(documents.open).mockImplementation(async () => ({
     ...doc,
@@ -68,6 +68,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
       target={null}
     />,
   );
+  expect(documents.trash).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
   await screen.findByText("This Document is in Trash.");
