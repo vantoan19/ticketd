@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { Activity } from "./Activity";
+import { DocumentNavigation } from "@/features/documents/navigation";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -733,21 +734,10 @@ test("opens the exact supporting Document from its update", async () => {
       });
     return Promise.resolve([]);
   });
-  render(
-    <Activity
-      reference="T-993"
-      status="Todo"
-      revision={0}
-      projects={[]}
-      active
-      trashed={false}
-    />,
-  );
+  const open = vi.fn();
+  render(<DocumentNavigation.Provider value={open}><Activity reference="T-993" status="Todo" revision={0} projects={[]} active trashed={false} /></DocumentNavigation.Provider>);
   fireEvent.click(await screen.findByRole("button", { name: "Open details" }));
-  expect(await screen.findByRole("button", { name: "Restore" })).toBeTruthy();
-  expect(bridge.invoke).toHaveBeenCalledWith("open_document", {
-    id: "doc-exact",
-  });
+  expect(open).toHaveBeenCalledWith("doc-exact");
 });
 
 test("offers refresh when the requested update was removed", async () => {

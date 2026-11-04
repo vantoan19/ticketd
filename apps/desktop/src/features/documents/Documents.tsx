@@ -20,6 +20,7 @@ export function Documents({
   onOpenTicket,
   onOpenPlan,
   target,
+  onDocumentClose,
 }: {
   capture: boolean;
   active: boolean;
@@ -28,6 +29,7 @@ export function Documents({
   onOpenTicket: (reference: string) => void;
   onOpenPlan: (id: string) => void;
   target: { id: string; key: number } | null;
+  onDocumentClose?: () => void;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
   const [recent, setRecent] = useState<DocumentSummary[]>([]);
@@ -137,6 +139,7 @@ export function Documents({
   );
   return (
     <div className="documents-page">
+      <div hidden={selected !== null}>
       <h1>Documents</h1>
       {error && <p role="alert">{error}</p>}
       <Button variant="outline" onClick={() => setShowTrash(!showTrash)}>
@@ -260,11 +263,13 @@ export function Documents({
           )}
         </>
       )}
+      </div>
       {selected && (
         <DocumentEditor
           key={selected.id}
           initial={selected}
           onOpenDocument={open}
+          {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
             setSelected(null);
             onOpenPlan(id);
@@ -276,13 +281,9 @@ export function Documents({
           onClose={() => {
             setSelected(null);
             refresh();
+            onDocumentClose?.();
           }}
         >
-          {openGraph && (
-            <Button variant="outline" onClick={() => openGraph(selected.id)}>
-              Context graph
-            </Button>
-          )}
           {selected.origin_brief && !selected.kept && (
             <Button
               onClick={() =>

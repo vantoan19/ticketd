@@ -7,6 +7,7 @@ import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
 import { Documents } from "@/features/documents/Documents";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
+import { type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
 import { Inbox } from "@/features/tickets/Inbox";
 import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
@@ -96,6 +97,7 @@ export function App() {
     id: string;
     key: number;
   } | null>(null);
+  const [documentReturn, setDocumentReturn] = useState<typeof view | null>(null);
   const [creating, setCreating] = useState(false);
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
@@ -118,6 +120,19 @@ export function App() {
     scope,
     navigation,
   } = workspace;
+  const openGraphItem = (node: GraphData["nodes"][number]) => {
+    setGraphOrigin(null);
+    if (node.kind === "document") {
+      setDocumentTarget({ id: node.id, key: Date.now() });
+      setView("documents");
+    } else if (node.kind === "plan") {
+      scope("all", "all", node.id);
+      setView("tickets");
+    } else if (node.ticket_reference) {
+      setSelected(node.ticket_reference);
+      setView("tickets");
+    }
+  };
   const bulk = useBulkEdit(refresh);
   useReminderNotifications((reference) => {
     setInboxTarget(null);
@@ -141,6 +156,7 @@ export function App() {
       >
         <DocumentNavigation.Provider
           value={(id) => {
+            if (view !== "documents") setDocumentReturn(view);
             setDocumentTarget({ id, key: Date.now() });
             setView("documents");
           }}
@@ -298,6 +314,9 @@ export function App() {
                         setSelected(reference);
                         setView("tickets");
                       }}
+                      onDocumentClose={() => {
+                        if (documentReturn) { setView(documentReturn); setDocumentReturn(null); }
+                      }}
                       onCaptureClose={() => setCapture(false)}
                     />
                   </div>
@@ -314,22 +333,7 @@ export function App() {
                           setLocalGraphOrigin(id);
                           setGraphOrigin(id);
                         }}
-                        onOpen={(node) => {
-                          setGraphOrigin(null);
-                          if (node.kind === "document") {
-                            setDocumentTarget({ id: node.id, key: Date.now() });
-                            setView("documents");
-                          } else if (node.kind === "plan") {
-                            scope("all", "all", node.id);
-                            setView("tickets");
-                          } else {
-                            const reference = node.label.match(/^T-\d+/)?.[0];
-                            if (reference) {
-                              setSelected(reference);
-                              setView("tickets");
-                            }
-                          }
-                        }}
+                        onOpen={openGraphItem}
                       />
                     </div>
                   )}
@@ -345,22 +349,7 @@ export function App() {
                             workspaceGraphOpen ? "__workspace__" : null,
                           );
                         }}
-                        onOpen={(node) => {
-                          setGraphOrigin(null);
-                          if (node.kind === "document") {
-                            setDocumentTarget({ id: node.id, key: Date.now() });
-                            setView("documents");
-                          } else if (node.kind === "plan") {
-                            scope("all", "all", node.id);
-                            setView("tickets");
-                          } else {
-                            const reference = node.label.match(/^T-\d+/)?.[0];
-                            if (reference) {
-                              setSelected(reference);
-                              setView("tickets");
-                            }
-                          }
-                        }}
+                        onOpen={openGraphItem}
                       />
                     </div>
                   )}

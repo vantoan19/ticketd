@@ -80,6 +80,7 @@ pub struct ContextGraphNode {
     pub id: String,
     pub kind: String,
     pub label: String,
+    pub ticket_reference: Option<String>,
     pub state: Option<String>,
     pub trashed: bool,
     pub activity_detail: bool,
@@ -423,7 +424,7 @@ fn graph_nodes(
     for chunk in ids.chunks(100) {
         let placeholders = vec!["?"; chunk.len()].join(",");
         let sql = format!(
-            "SELECT id, 'ticket', 'T-' || number || ' · ' || substr(title, 1, 200), status, trashed, 0 FROM tickets WHERE id IN ({placeholders}) UNION ALL SELECT d.id, 'document', {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept FROM documents d WHERE d.id IN ({placeholders}) UNION ALL SELECT id, 'plan', substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0 FROM plans WHERE id IN ({placeholders})",
+            "SELECT id, 'ticket', 'T-' || number || ' · ' || substr(title, 1, 200), status, trashed, 0, 'T-' || number FROM tickets WHERE id IN ({placeholders}) UNION ALL SELECT d.id, 'document', {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept, NULL FROM documents d WHERE d.id IN ({placeholders}) UNION ALL SELECT id, 'plan', substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0, NULL FROM plans WHERE id IN ({placeholders})",
             crate::documents::HEADING
         );
         let mut statement = tx.prepare(&sql)?;
@@ -438,6 +439,7 @@ fn graph_nodes(
                         state: r.get(3)?,
                         trashed: r.get(4)?,
                         activity_detail: r.get(5)?,
+                        ticket_reference: r.get(6)?,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?,

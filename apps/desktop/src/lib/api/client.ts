@@ -164,6 +164,7 @@ export const contextGraphSchema = z.object({
       state: z.string().nullable(),
       trashed: z.boolean(),
       activity_detail: z.boolean(),
+      ticket_reference: z.string().nullable().optional(),
     }),
   ),
   edges: z.array(

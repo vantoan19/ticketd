@@ -3,9 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { documents, type Document } from "./api";
 
+function DocumentSurface({ capture, onClose, children }: { capture: boolean; onClose: () => void; children: ReactNode }) {
+  if (!capture) return <article className="document-workspace">{children}</article>;
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}><DialogContent className="document-dialog" showCloseButton={false} onOpenAutoFocus={(event) => event.preventDefault()}>{children}</DialogContent></Dialog>;
+}
 type Snapshot = { title: string; body: string; suggestion: string | null };
 function documentHasEditorFocus() {
   return document.activeElement instanceof HTMLElement && Boolean(document.activeElement.closest("input, textarea, [contenteditable=true], .cm-content"));
@@ -25,6 +30,7 @@ export function DocumentEditor({
   onOpenDocument,
   onOpenTicket,
   onOpenPlan,
+  onOpenGraph,
   children,
 }: {
   initial: Document | null;
@@ -33,8 +39,10 @@ export function DocumentEditor({
   onOpenDocument?: (id: string) => void;
   onOpenTicket?: (reference: string) => void;
   onOpenPlan?: (id: string) => void;
+  onOpenGraph?: (id: string) => void;
   children?: ReactNode;
 }) {
+  const [writing, setWriting] = useState(initial === null);
   const [linkTarget, setLinkTarget] = useState("");
   const [ticketTitle, setTicketTitle] = useState("");
   const [links, setLinks] = useState<
@@ -213,25 +221,9 @@ export function DocumentEditor({
     void save();
   };
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) requestClose();
-      }}
-    >
-      <DialogContent
-        className="document-dialog"
-        showCloseButton={false}
-        onOpenAutoFocus={(event) => event.preventDefault()}
-      >
+    <DocumentSurface capture={!initial} onClose={requestClose}>
         <header>
-          <DialogTitle>
-            {initial
-              ? initial.title?.trim() ||
-                initial.origin_brief?.trim() ||
-                "Document"
-              : "Capture a thought"}
-          </DialogTitle>
+          {initial ? <h1>{title.trim() || initial.origin_brief?.trim() || "Document"}</h1> : <DialogTitle>Capture a thought</DialogTitle>}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -241,7 +233,12 @@ export function DocumentEditor({
             ×
           </Button>
         </header>
-        <FieldGroup>
+        {initial && <div className="document-mode" aria-label="Document mode">
+          <Button variant={writing ? "ghost" : "secondary"} onClick={() => setWriting(false)}>Read</Button>
+          <Button variant={writing ? "secondary" : "ghost"} onClick={() => setWriting(true)}>Write</Button>
+          <span role="status">{status}</span>
+        </div>}
+        {(!initial || writing) && <FieldGroup>
           <Field>
             <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
             <Input
@@ -255,7 +252,7 @@ export function DocumentEditor({
               }}
             />
           </Field>
-        </FieldGroup>
+        </FieldGroup>}
         {suggestion && (
           <p>
             Connected to {suggestion}{" "}
@@ -293,8 +290,8 @@ export function DocumentEditor({
             void save();
           }}>Save over saved content</Button>
         </div>}
-        {children}
-        <LazyMarkdownEditor
+        <div className="document-body">
+        {(!initial || writing) ? <LazyMarkdownEditor
           value={body}
           onChange={(value) => {
             draft.current = { ...draft.current, body: value };
@@ -302,9 +299,14 @@ export function DocumentEditor({
           }}
           label="Your thought"
           readOnly={trashed || transitioning}
-          autoFocus
-        />
-        <Field>
+          autoFocus={!initial}
+        /> : <MarkdownDocument source={body} />}
+        </div>
+        <aside className="document-rail">
+        {initial && <section aria-label="Document details"><h2>Document details</h2><dl><dt>Updated</dt><dd>{initial.updated_at}</dd><dt>Created</dt><dd>{initial.created_at}</dd><dt>Visibility</dt><dd>{initial.origin_brief && !initial.kept ? "Activity details" : "Documents"}</dd></dl></section>}
+        {children}
+        {initial && onOpenGraph && <Button variant="outline" onClick={() => navigate(() => onOpenGraph(initial.id))}>Context graph</Button>}
+        {(!initial || writing) && <><Field>
           <FieldLabel htmlFor="link-target">Link target</FieldLabel>
           <Input
             id="link-target"
@@ -334,7 +336,7 @@ export function DocumentEditor({
         >
           Insert link
         </Button>
-        {linkError && <p role="alert">{linkError}</p>}
+        {linkError && <p role="alert">{linkError}</p>}</>}
         {initial && (
           <section aria-label="Connected items">
             <h2>Connected items</h2>
@@ -416,6 +418,7 @@ export function DocumentEditor({
             </Button>
           </section>
         )}
+        </aside>
         <footer>
           <span role="status">{status}</span>
           {trashed && <span>This Document is in Trash.</span>}
@@ -443,7 +446,6 @@ export function DocumentEditor({
             Back to work
           </Button>
         </footer>
-      </DialogContent>
-    </Dialog>
+      </DocumentSurface>
   );
 }

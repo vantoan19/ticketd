@@ -84,6 +84,7 @@ it("notices saved changes beneath a focused draft and offers reload", async () =
   vi.mocked(documents.save).mockRejectedValue("offline");
   vi.mocked(documents.show).mockResolvedValue({ ...original, body: "Changed externally" });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
   fireEvent.change(editor, { target: { value: "Local draft" } });
@@ -163,6 +164,7 @@ it("opens a connected ticket after saving a document draft", async () => {
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
   await screen.findByText("Source");
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
   });
@@ -186,6 +188,8 @@ it("opens a trashed Document readably and restores it", async () => {
   });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
   expect(screen.getByText("This Document is in Trash.")).toBeTruthy();
+  expect(screen.getByText("Preserved")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   expect(screen.getByLabelText("Optional title")).toHaveProperty(
     "readOnly",
     true,
@@ -247,4 +251,18 @@ it("removes a suggested connection after the first save", async () => {
   );
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
   expect(vi.mocked(documents.save).mock.calls[1]?.[2]).toBe("Thought");
+});
+
+it("saves a draft before opening the context graph without a dialog", async () => {
+  const doc = { id: "d1", title: "Context", body: "Original", created_at: "now", updated_at: "now", trashed: false };
+  vi.mocked(documents.save).mockResolvedValue({ ...doc, body: "Draft" });
+  const graph = vi.fn();
+  render(<DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Original")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), { target: { value: "Draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
