@@ -19,6 +19,7 @@ import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
@@ -209,6 +210,14 @@ export function App() {
                       </SidebarTrigger>
                     </div>
                   )}
+                  {workspaceGraphOpen && graphOrigin === null && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => setGraphOrigin("__workspace__")}
+                    >
+                      Back to context graph
+                    </Button>
+                  )}
                   {error && (
                     <p role="alert" className="global-error">
                       {error}
@@ -298,7 +307,6 @@ export function App() {
                         onFocus={setGraphOrigin}
                         onOpen={(node) => {
                           setGraphOrigin(null);
-                          setWorkspaceGraphOpen(false);
                           if (node.kind === "document") {
                             setDocumentTarget({ id: node.id, key: Date.now() });
                             setView("documents");
@@ -326,7 +334,6 @@ export function App() {
                       }
                       onOpen={(node) => {
                         setGraphOrigin(null);
-                        setWorkspaceGraphOpen(false);
                         if (node.kind === "document") {
                           setDocumentTarget({ id: node.id, key: Date.now() });
                           setView("documents");
