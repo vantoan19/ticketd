@@ -165,8 +165,23 @@ impl Workspace {
                 break;
             }
         }
+        let mut candidate_ids = BTreeSet::from([center.clone()]);
+        for (source, target, _, _) in &candidates {
+            candidate_ids.insert(source.clone());
+            candidate_ids.insert(target.clone());
+        }
+        let mut hidden = BTreeSet::new();
+        let candidate_ids: Vec<_> = candidate_ids.into_iter().collect();
+        for chunk in candidate_ids.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut statement = tx.prepare(&format!("SELECT id FROM documents WHERE id IN ({placeholders}) AND originating_activity_id IS NOT NULL AND NOT kept"))?;
+            hidden.extend(
+                statement
+                    .query_map(rusqlite::params_from_iter(chunk), |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+        }
         let mut ids = BTreeSet::from([center.clone()]);
-        let mut nodes = BTreeMap::new();
         let mut edges = Vec::new();
         let mut hidden_details = false;
         let mut seen = BTreeSet::new();
@@ -180,9 +195,8 @@ impl Workspace {
                 continue;
             }
             let other = if source == center { &target } else { &source };
-            if !nodes.contains_key(other) {
-                let node = graph_node(&tx, other)?;
-                if node.activity_detail && !include_details && other != &center {
+            if !ids.contains(other) {
+                if hidden.contains(other) && !include_details && other != &center {
                     hidden_details = true;
                     continue;
                 }
@@ -191,7 +205,6 @@ impl Workspace {
                     continue;
                 }
                 ids.insert(other.clone());
-                nodes.insert(other.clone(), node);
             }
             if edges.len() == MAX_EDGES {
                 omitted = true;
@@ -265,11 +278,11 @@ impl Workspace {
                 });
             }
         }
-        nodes.insert(center.clone(), graph_node(&tx, &center)?);
+        let nodes = graph_nodes(&tx, &ids)?;
         tx.commit()?;
         Ok(ContextGraph {
             center,
-            nodes: nodes.into_values().collect(),
+            nodes,
             edges,
             omitted,
             hidden_details,
@@ -279,22 +292,35 @@ impl Workspace {
         })
     }
 }
-fn graph_node(tx: &rusqlite::Connection, id: &str) -> Result<ContextGraphNode, Error> {
-    let kind: String = tx.query_row("SELECT kind FROM entities WHERE id = ?1", [id], |r| {
-        r.get(0)
-    })?;
-    let (label, state, trashed, activity_detail) = match kind.as_str() {
-        "ticket" => tx.query_row("SELECT 'T-' || number || ' · ' || substr(title, 1, 200), status, trashed, 0 FROM tickets WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?,
-        "document" => tx.query_row(&format!("SELECT {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept FROM documents d WHERE d.id = ?1", crate::documents::HEADING), [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?,
-        "plan" => tx.query_row("SELECT substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0 FROM plans WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?,
-        _ => return Err(Error::NotFound(id.to_owned())),
-    };
-    Ok(ContextGraphNode {
-        id: id.to_owned(),
-        kind,
-        label,
-        state,
-        trashed,
-        activity_detail,
-    })
+fn graph_nodes(
+    tx: &rusqlite::Connection,
+    ids: &BTreeSet<String>,
+) -> Result<Vec<ContextGraphNode>, Error> {
+    let ids: Vec<_> = ids.iter().cloned().collect();
+    let mut nodes = Vec::new();
+    for chunk in ids.chunks(100) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT id, 'ticket', 'T-' || number || ' · ' || substr(title, 1, 200), status, trashed, 0 FROM tickets WHERE id IN ({placeholders}) UNION ALL SELECT d.id, 'document', {}, NULL, d.trashed, d.originating_activity_id IS NOT NULL AND NOT d.kept FROM documents d WHERE d.id IN ({placeholders}) UNION ALL SELECT id, 'plan', substr(name, 1, 200), CASE WHEN archived THEN 'Archived' ELSE 'Active' END, 0, 0 FROM plans WHERE id IN ({placeholders})",
+            crate::documents::HEADING
+        );
+        let mut statement = tx.prepare(&sql)?;
+        let parameters = (0..3).flat_map(|_| chunk.iter());
+        nodes.extend(
+            statement
+                .query_map(rusqlite::params_from_iter(parameters), |r| {
+                    Ok(ContextGraphNode {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        label: r.get(2)?,
+                        state: r.get(3)?,
+                        trashed: r.get(4)?,
+                        activity_detail: r.get(5)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(nodes)
 }
