@@ -119,9 +119,18 @@ pub(crate) fn missing_tables(
             missing.push(table);
         }
     }
-    // FTS tables also need their maintenance triggers; without them, later edits
-    // silently make search results stale even though the backup opens normally.
+    // Context identities and derived indexes need their maintenance triggers;
+    // missing triggers silently corrupt subsequent writes after a restore.
     for (trigger, introduced) in [
+        ("ticket_entity_insert", 35),
+        ("plan_entity_insert", 35),
+        ("numeric_mentions_activity_delete", 41),
+        ("activity_graph_numbers_insert", 42),
+        ("activity_graph_numbers_delete", 42),
+        ("activity_graph_targets_insert", 42),
+        ("activity_graph_targets_delete", 42),
+        ("document_heading_insert", 43),
+        ("document_heading_update", 43),
         ("document_fts_insert", 36),
         ("document_fts_delete", 36),
         ("document_fts_update", 36),

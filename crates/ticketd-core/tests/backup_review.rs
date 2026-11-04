@@ -327,3 +327,36 @@ fn backup_missing_search_maintenance_trigger_is_rejected() {
     };
     assert!(tables.contains(&"document_fts_update".to_owned()));
 }
+
+#[test]
+fn missing_context_maintenance_triggers_cannot_replace_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for trigger in [
+        "ticket_entity_insert",
+        "plan_entity_insert",
+        "numeric_mentions_activity_delete",
+        "activity_graph_numbers_insert",
+        "activity_graph_numbers_delete",
+        "activity_graph_targets_insert",
+        "activity_graph_targets_delete",
+        "document_heading_insert",
+        "document_heading_update",
+    ] {
+        let backup = dir.path().join(format!("{trigger}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {trigger}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("missing {trigger} accepted")
+        };
+        assert!(tables.contains(&trigger.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
