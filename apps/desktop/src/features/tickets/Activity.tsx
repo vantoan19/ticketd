@@ -1,12 +1,9 @@
-import {
-  documents,
-  type Document,
-  type DocumentSummary,
-} from "@/features/documents/api";
-import { DocumentEditor } from "@/features/documents/DocumentEditor";
+import { documents, type DocumentSummary } from "@/features/documents/api";
+import { DocumentNavigation } from "@/features/documents/navigation";
 import { useNow } from "@/lib/use-now";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -173,7 +170,7 @@ export function Activity({
   const [availableDocuments, setAvailableDocuments] = useState<
     DocumentSummary[]
   >([]);
-  const [openedDocument, setOpenedDocument] = useState<Document | null>(null);
+  const openDocument = useContext(DocumentNavigation);
   useEffect(() => {
     if (active && support)
       void documents
@@ -264,7 +261,7 @@ export function Activity({
         setTargetNote((previous) =>
           previous?.id === savedNote.id ? savedNote : previous,
         );
-      } else if (showDetails || support) {
+      } else {
         const payload = JSON.stringify([
           reference,
           draft,
@@ -300,7 +297,7 @@ export function Activity({
           support || null,
           requestId,
         );
-      } else await client.addActivity(reference, draft);
+      }
       if (edit) setEdit(null);
       else {
         setDraft("");
@@ -420,12 +417,6 @@ export function Activity({
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
-      {openedDocument && (
-        <DocumentEditor
-          initial={openedDocument}
-          onClose={() => setOpenedDocument(null)}
-        />
-      )}
       <div className="activity-heading">
         <h3>Activity</h3>
         <span>
@@ -720,10 +711,7 @@ export function Activity({
                     type="button"
                     variant="link"
                     onClick={() =>
-                      void documents
-                        .open(item.note.supporting_document_id!)
-                        .then(setOpenedDocument)
-                        .catch((reason: unknown) => setError(String(reason)))
+                      openDocument?.(item.note.supporting_document_id!)
                     }
                   >
                     Open details

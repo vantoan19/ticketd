@@ -47,7 +47,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
     trashed ? [] : [{ id: doc.id, heading: doc.title }],
   );
   vi.mocked(documents.trash).mockImplementation(async () =>
-    trashed ? [{ ...doc, trashed }] : [],
+    trashed ? [{ id: doc.id, heading: doc.title }] : [],
   );
   vi.mocked(documents.open).mockImplementation(async () => ({
     ...doc,

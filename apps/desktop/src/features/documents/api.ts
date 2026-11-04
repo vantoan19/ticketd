@@ -5,10 +5,12 @@ const schema = z.object({
   id: z.string(),
   title: z.string().nullable(),
   body: z.string(),
+  heading: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   trashed: z.boolean(),
   origin_brief: z.string().nullable().optional(),
+  origin_ticket: z.string().nullable().optional(),
   kept: z.boolean().optional(),
 });
 export type Document = z.infer<typeof schema>;
@@ -73,7 +75,8 @@ export const documents = {
     z.array(z.string()).parse(await invoke("document_tags", { id })),
   tag: async (id: string, tag: string, present: boolean) =>
     invoke("set_document_tag", { id, tag, present }),
-  trash: async () => z.array(schema).parse(await invoke("trashed_documents")),
+  trash: async (offset: number) =>
+    z.array(summary).parse(await invoke("trashed_documents", { offset })),
   setTrashed: async (id: string, trashed: boolean, requestId: string) =>
     schema.parse(
       await invoke("set_document_trashed", { id, trashed, requestId }),

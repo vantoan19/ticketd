@@ -108,7 +108,12 @@ enum DocumentCommand {
         #[arg(long, default_value_t = 4096)]
         limit: usize,
     },
-    TrashList,
+    TrashList {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     Trash {
         id: String,
     },
@@ -872,7 +877,9 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     &serde_json::json!({"id": document.id, "title": document.title, "created_at": document.created_at, "updated_at": document.updated_at, "trashed": document.trashed, "body": body, "offset": offset, "next_offset": next_offset, "truncated": next_offset.is_some(), "fetch": fetch}),
                 )?
             }
-            DocumentCommand::TrashList => serde_json::to_string(&workspace.trashed_documents()?)?,
+            DocumentCommand::TrashList { limit, offset } => {
+                serde_json::to_string(&workspace.trashed_documents_page(limit, offset)?)?
+            }
             DocumentCommand::Trash { id } => {
                 serde_json::to_string(&workspace.write(None, WriteRequest::TrashDocument { id })?)?
             }

@@ -118,9 +118,9 @@ fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn trashed_documents() -> Result<Vec<Document>, String> {
+fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
     Workspace::open_default()
-        .and_then(|w| w.trashed_documents())
+        .and_then(|w| w.trashed_documents_page(50, offset))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]

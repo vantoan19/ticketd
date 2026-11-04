@@ -78,7 +78,7 @@ it("keeps a failed capture open and retries the same request before returning", 
   fireEvent.click(screen.getByText("Back to work"));
   expect(close).toHaveBeenCalledOnce();
 });
-it("defers external refresh while the editor has focus", async () => {
+it("notices saved changes beneath a focused draft and offers reload", async () => {
   vi.useFakeTimers();
   const original = {
     id: "d1",
@@ -88,28 +88,65 @@ it("defers external refresh while the editor has focus", async () => {
     updated_at: "now",
     trashed: false,
   };
+  vi.mocked(documents.save).mockRejectedValue("offline");
   vi.mocked(documents.show).mockResolvedValue({
     ...original,
     body: "Changed externally",
   });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
+  fireEvent.change(editor, { target: { value: "Local draft" } });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(documents.show).not.toHaveBeenCalled();
+  expect(documents.show).toHaveBeenCalled();
+  expect(editor).toHaveProperty("value", "Local draft");
   expect(document.activeElement).toBe(editor);
-  screen.getByText("Back to work").focus();
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  expect(editor).toHaveProperty("value", "Changed externally");
+});
+it("preserves an unrelated saved title when saving over a conflicting body", async () => {
+  vi.useFakeTimers();
+  const original = {
+    id: "d1",
+    title: "Original title",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save)
+    .mockRejectedValueOnce("offline")
+    .mockResolvedValueOnce({
+      ...original,
+      title: "External title",
+      body: "Draft",
+    });
+  vi.mocked(documents.show).mockResolvedValue({
+    ...original,
+    title: "External title",
+    body: "External body",
+  });
+  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  expect(documents.show).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("Your thought")).toHaveProperty(
-    "value",
-    "Changed externally",
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save over saved content" }),
   );
-  vi.useRealTimers();
+  await act(async () => {});
+  expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
+    "External title",
+    "Draft",
+    false,
+  ]);
 });
 it("suggests only the current ticket and lets it be removed before capture", async () => {
   vi.mocked(documents.save).mockResolvedValue({
@@ -179,6 +216,7 @@ it("opens a connected ticket after saving a document draft", async () => {
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
   await screen.findByText("Source");
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
   });
@@ -202,6 +240,8 @@ it("opens a trashed Document readably and restores it", async () => {
   });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
   expect(screen.getByText("This Document is in Trash.")).toBeTruthy();
+  expect(screen.getByText("Preserved")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   expect(screen.getByLabelText("Optional title")).toHaveProperty(
     "readOnly",
     true,
@@ -263,4 +303,155 @@ it("removes a suggested connection after the first save", async () => {
   );
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
   expect(vi.mocked(documents.save).mock.calls[1]?.[2]).toBe("Thought");
+});
+
+it("saves a draft before opening the context graph without a dialog", async () => {
+  const doc = {
+    id: "d1",
+    title: "Context",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockResolvedValue({ ...doc, body: "Draft" });
+  const graph = vi.fn();
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Original")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
+  expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
+});
+
+it("opens the originating ticket from document details", () => {
+  const doc = {
+    id: "d1",
+    title: null,
+    body: "Evidence",
+    origin_brief: "Update",
+    origin_ticket: "T-3",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  const open = vi.fn();
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "T-3 · Activity details" }),
+  );
+  expect(open).toHaveBeenCalledWith("T-3");
+});
+
+it("reads an untitled Document with its core heading and current save details", async () => {
+  const doc = {
+    id: "d1",
+    title: null,
+    heading: "First line",
+    body: "First line\nMore",
+    created_at: "created",
+    updated_at: "before",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockResolvedValue({
+    ...doc,
+    body: "Changed",
+    heading: "Changed",
+    updated_at: "after",
+  });
+  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
+  expect(screen.getByText("before")).toBeTruthy();
+  expect(screen.getAllByText("Saved locally")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Changed" },
+  });
+  await waitFor(() => expect(screen.getByText("after")).toBeTruthy());
+  expect(screen.getByRole("heading", { name: "Changed" })).toBeTruthy();
+});
+
+it("consumes graph navigation after saving so later edits stay on the Document", async () => {
+  vi.useFakeTimers();
+  const doc = {
+    id: "d1",
+    title: "Context",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockImplementation(async (_id, _title, body) => ({
+    ...doc,
+    body: body ?? doc.body,
+  }));
+  const graph = vi.fn();
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "First" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await act(async () => {});
+  expect(graph).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Second" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(graph).toHaveBeenCalledTimes(1);
+});
+
+it("preserves successive unrelated saved title changes under a body conflict", async () => {
+  vi.useFakeTimers();
+  const doc = {
+    id: "d1",
+    title: "Original",
+    body: "Original body",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save)
+    .mockRejectedValueOnce("offline")
+    .mockResolvedValueOnce({
+      ...doc,
+      title: "External 2",
+      body: "Local draft",
+    });
+  vi.mocked(documents.show)
+    .mockResolvedValueOnce({
+      ...doc,
+      title: "External 1",
+      body: "External body",
+    })
+    .mockResolvedValue({ ...doc, title: "External 2", body: "External body" });
+  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Local draft" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save over saved content" }),
+  );
+  await act(async () => {});
+  expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
+    "External 2",
+    "Local draft",
+    false,
+  ]);
 });

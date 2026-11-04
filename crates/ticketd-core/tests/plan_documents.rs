@@ -85,6 +85,10 @@ fn designating_activity_details_promotes_and_preserves_support_and_replay() {
     );
     let document = workspace.show_document(&id).unwrap();
     assert_eq!(document.origin_brief.as_deref(), Some("Update"));
+    assert_eq!(
+        document.origin_ticket.as_deref(),
+        Some(ticket.reference.as_str())
+    );
     assert!(document.kept);
     assert_eq!(
         workspace.show_ticket(&ticket.reference).unwrap().plan_id,
@@ -118,5 +122,39 @@ fn plan_context_bounds_explicit_document_bodies() {
             .as_str()
             .unwrap()
             .contains(&doc.id)
+    );
+}
+
+#[test]
+fn plan_spec_and_keep_do_not_record_a_browsing_visit() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    let earlier = workspace.create_document(Some("Earlier"), "").unwrap();
+    let latest = workspace.create_document(Some("Latest"), "").unwrap();
+    workspace
+        .set_plan_spec(&plan.id, Some(&earlier.id))
+        .unwrap();
+    workspace.keep_document(&earlier.id).unwrap();
+    let ids: Vec<_> = workspace
+        .recent_documents()
+        .unwrap()
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+    assert_eq!(ids, vec![latest.id, earlier.id]);
+    let ticket = workspace.create_ticket("Ticket").unwrap();
+    let detail = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("Body"), None)
+        .unwrap()
+        .supporting_document_id
+        .unwrap();
+    workspace.keep_document(&detail).unwrap();
+    assert!(
+        workspace
+            .recent_documents()
+            .unwrap()
+            .iter()
+            .any(|d| d.id == detail)
     );
 }

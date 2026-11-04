@@ -14,6 +14,8 @@ fn graph_connects_plan_ticket_and_document_in_both_directions() {
         .unwrap();
     workspace.set_plan_spec(&plan.id, Some(&doc.id)).unwrap();
     let graph = workspace.context_graph(&ticket.reference, false).unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == ticket.id
+        && node.ticket_reference.as_deref() == Some(ticket.reference.as_str())));
     assert!(graph.nodes.iter().any(|node| node.id == plan.id));
     assert!(graph.nodes.iter().any(|node| node.id == doc.id));
     assert!(graph.edges.iter().any(|edge| edge.kind == "membership"));

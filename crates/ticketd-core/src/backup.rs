@@ -54,11 +54,17 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 34] = [
+const TABLES: [(&str, i64); 40] = [
     ("entities", 31),
     ("documents", 31),
     ("document_opens", 31),
     ("context_mentions", 35),
+    ("document_pins", 36),
+    ("document_tags", 36),
+    ("document_fts", 36),
+    ("activity_mentions", 40),
+    ("ticket_graph_fts", 43),
+    ("plan_graph_fts", 43),
     ("numeric_mentions", 41),
     ("activity_graph_numbers", 42),
     ("activity_graph_targets", 42),
@@ -113,6 +119,37 @@ pub(crate) fn missing_tables(
             missing.push(table);
         }
     }
+    // Context identities and derived indexes need their maintenance triggers;
+    // missing triggers silently corrupt subsequent writes after a restore.
+    for (trigger, introduced) in [
+        ("ticket_entity_insert", 35),
+        ("plan_entity_insert", 35),
+        ("numeric_mentions_activity_delete", 41),
+        ("activity_graph_numbers_insert", 42),
+        ("activity_graph_numbers_delete", 42),
+        ("activity_graph_targets_insert", 42),
+        ("activity_graph_targets_delete", 42),
+        ("document_heading_insert", 43),
+        ("document_heading_update", 43),
+        ("document_fts_insert", 36),
+        ("document_fts_delete", 36),
+        ("document_fts_update", 36),
+        ("ticket_graph_fts_insert", 43),
+        ("ticket_graph_fts_delete", 43),
+        ("ticket_graph_fts_update", 43),
+        ("plan_graph_fts_insert", 43),
+        ("plan_graph_fts_delete", 43),
+        ("plan_graph_fts_update", 43),
+    ] {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",
+            [trigger],
+            |row| row.get(0),
+        )?;
+        if version >= introduced && !exists {
+            missing.push(trigger);
+        }
+    }
     if version >= 32 && !table_exists(connection, "activities")? {
         missing.push("activities");
     }
@@ -133,7 +170,7 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
         }
         BackupCheck::NotTicketd => Err(Error::Backup("not a ticketd workspace backup".into())),
         BackupCheck::MissingTables { tables } => Err(Error::Backup(format!(
-            "missing table {}",
+            "missing schema object {}",
             tables.join(", ")
         ))),
         BackupCheck::Damaged { reason } => Err(Error::Backup(reason)),

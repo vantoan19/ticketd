@@ -280,3 +280,83 @@ fn backup_inspection_rejects_missing_context_index() {
     };
     assert!(tables.contains(&"context_mentions".to_owned()));
 }
+
+#[test]
+fn incomplete_context_schema_cannot_replace_healthy_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for table in [
+        "document_tags",
+        "document_pins",
+        "activity_mentions",
+        "document_fts",
+        "ticket_graph_fts",
+        "plan_graph_fts",
+    ] {
+        let backup = dir.path().join(format!("{table}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TABLE {table}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("missing {table} accepted")
+        };
+        assert!(tables.contains(&table.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
+
+#[test]
+fn backup_missing_search_maintenance_trigger_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    Connection::open(&backup)
+        .unwrap()
+        .execute_batch("DROP TRIGGER document_fts_update")
+        .unwrap();
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("missing trigger accepted")
+    };
+    assert!(tables.contains(&"document_fts_update".to_owned()));
+}
+
+#[test]
+fn missing_context_maintenance_triggers_cannot_replace_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for trigger in [
+        "ticket_entity_insert",
+        "plan_entity_insert",
+        "numeric_mentions_activity_delete",
+        "activity_graph_numbers_insert",
+        "activity_graph_numbers_delete",
+        "activity_graph_targets_insert",
+        "activity_graph_targets_delete",
+        "document_heading_insert",
+        "document_heading_update",
+    ] {
+        let backup = dir.path().join(format!("{trigger}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {trigger}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("missing {trigger} accepted")
+        };
+        assert!(tables.contains(&trigger.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}

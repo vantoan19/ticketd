@@ -74,7 +74,7 @@ impl Workspace {
             self.show_project(project)?;
         }
         if let Some(plan) = &filter.plan {
-            self.show_plan(plan)?;
+            crate::plans::get(&self.connection, plan)?;
         }
         let family = filter
             .family
