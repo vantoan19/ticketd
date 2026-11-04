@@ -112,7 +112,12 @@ export function DocumentEditor({
   const creatingTicket = useRef(false);
   const closeRequested = useRef(false);
   const afterSave = useRef<(() => void) | null>(null);
-  const finish = () => (afterSave.current ?? close.current)();
+  const finish = () => {
+    const action = afterSave.current ?? close.current;
+    afterSave.current = null;
+    closeRequested.current = false;
+    action();
+  };
   const close = useRef(onClose);
   useEffect(() => {
     close.current = onClose;

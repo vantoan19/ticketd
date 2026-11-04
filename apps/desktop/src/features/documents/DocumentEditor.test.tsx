@@ -378,3 +378,37 @@ it("reads an untitled Document with its core heading and current save details", 
   await waitFor(() => expect(screen.getByText("after")).toBeTruthy());
   expect(screen.getByRole("heading", { name: "Changed" })).toBeTruthy();
 });
+
+it("consumes graph navigation after saving so later edits stay on the Document", async () => {
+  vi.useFakeTimers();
+  const doc = {
+    id: "d1",
+    title: "Context",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockImplementation(async (_id, _title, body) => ({
+    ...doc,
+    body: body ?? doc.body,
+  }));
+  const graph = vi.fn();
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "First" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await act(async () => {});
+  expect(graph).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Second" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(graph).toHaveBeenCalledTimes(1);
+});
