@@ -138,3 +138,21 @@ fn plan_filter_with_latest_updates_uses_one_snapshot() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].latest_update.as_ref().unwrap().brief.text, "Progress");
 }
+
+#[test]
+fn ticket_context_pages_recent_reports_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Work").unwrap();
+    for n in 1..=22 { workspace.add_activity(&ticket.reference, &format!("Report {n}"), None).unwrap(); }
+    let options = |offset| ticketd_core::ContextOptions { activities: true, offset, ..Default::default() };
+    let first = workspace.ticket_context(&ticket.reference, options(0)).unwrap().activities.unwrap();
+    assert_eq!(first.items.len(), 20);
+    assert_eq!(first.items[0].brief.text, "Report 22");
+    assert_eq!(first.items[19].brief.text, "Report 3");
+    assert_eq!(first.next_offset, Some(20));
+    let next = workspace.ticket_context(&ticket.reference, options(20)).unwrap().activities.unwrap();
+    assert_eq!(next.items[0].brief.text, "Report 2");
+    assert_eq!(next.items[1].brief.text, "Report 1");
+    assert_eq!(next.next_offset, None);
+}

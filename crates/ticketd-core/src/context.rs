@@ -292,7 +292,7 @@ impl Workspace {
             None
         };
         let activities = if options.activities {
-            let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent,supporting_document_id FROM activities WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+            let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent,supporting_document_id FROM activities WHERE ticket_id=?1 ORDER BY number DESC LIMIT ?2 OFFSET ?3")?;
             let rows = stmt
                 .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
                     let supporting_document_id: Option<String> = r.get(5)?;
