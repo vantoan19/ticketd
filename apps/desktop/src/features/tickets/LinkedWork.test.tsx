@@ -360,12 +360,14 @@ test("subtickets read under the description with local progress, not in the rail
   );
 });
 
-test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
+test("Link subticket opens the link dialog already saying this ticket is the parent", async () => {
   bridge({
     children: [{ reference: "T-8", title: "Part", status: "Todo" }],
   });
   renderSection(base);
-  fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Link subticket" }),
+  );
   const dialog = await screen.findByRole("dialog");
   expect(
     (within(dialog).getByLabelText("Relationship") as HTMLSelectElement).value,

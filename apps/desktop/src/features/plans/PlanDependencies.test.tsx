@@ -8,7 +8,6 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { PlanDependencies } from "./PlanDependencies";
-import type { PlanViewState } from "./usePlanView";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -68,38 +67,97 @@ test("shows outside blockers and edits dependencies through the shared workflow"
         }
       : undefined,
   );
-  const run = async (change: () => Promise<unknown>) => {
-    await change();
-    return true;
-  };
-  const state: PlanViewState = {
-    view: null,
-    loadError: "",
-    pending: false,
-    actionError: "",
-    run,
-  };
+  const refresh = vi.fn(async () => {});
   render(
-    <PlanDependencies id="plan" revision={1} state={state} onOpen={vi.fn()} />,
+    <PlanDependencies
+      id="plan"
+      revision={1}
+      projects={[]}
+      refresh={refresh}
+      onOpen={vi.fn()}
+      onClose={vi.fn()}
+    />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Outside" }));
-  expect(screen.getByText("Todo · Ready · Outside Plan")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Member" }));
-  fireEvent.click(screen.getByRole("button", { name: "Remove blocker T-2" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^T-1: 1 blocker/ }),
+  );
+  expect(screen.getByText(/Todo, so it blocks until it is Done/)).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove blocker T-2 from T-1" }),
+  );
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith("remove_dependency", {
       blocker: "T-2",
       dependent: "T-1",
     }),
   );
-  fireEvent.change(screen.getByLabelText("Blocker ticket reference"), {
-    target: { value: "T-3" },
+});
+
+test("a rejected blocker is explained next to the form", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "plan_dependency_graph")
+      return {
+        nodes: [
+          {
+            id: "1",
+            reference: "T-1",
+            title: "Member",
+            status: "Todo",
+            availability: "Ready",
+            trashed: false,
+            boundary: false,
+          },
+        ],
+        edges: [],
+        max_nodes: 50,
+        max_depth: 1,
+        max_edges: 300,
+        max_work: 3000,
+        omitted_neighbors: false,
+        omitted_edges: false,
+        truncated: false,
+      };
+    if (command === "search_tickets")
+      return [
+        {
+          id: "3",
+          reference: "T-3",
+          title: "Other",
+          status: "Todo",
+          body: "",
+          trashed: false,
+          tags: [],
+          plan_id: null,
+          project_id: null,
+          availability: "Ready",
+          prerequisites: [],
+          parent: null,
+          children: [],
+        },
+      ];
+    if (command === "add_dependency")
+      throw "dependency would create a cycle or self-link";
+    return undefined;
   });
+  render(
+    <PlanDependencies
+      id="plan"
+      revision={1}
+      projects={[]}
+      refresh={vi.fn(async () => {})}
+      onOpen={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^T-1: 0 blockers/ }),
+  );
+  fireEvent.change(screen.getByLabelText("Add a blocker"), {
+    target: { value: "Other" },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /T-3/ }));
   fireEvent.click(screen.getByRole("button", { name: "Add blocker" }));
-  await waitFor(() =>
-    expect(bridge.invoke).toHaveBeenCalledWith("add_dependency", {
-      blocker: "T-3",
-      dependent: "T-1",
-    }),
+  expect((await screen.findByText(/already blocks T-3/)).textContent).toContain(
+    "T-1",
   );
 });

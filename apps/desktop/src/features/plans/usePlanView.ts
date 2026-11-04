@@ -17,10 +17,12 @@ export function usePlanView(
   } | null>(null);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [adding, setAdding] = useState(false);
   const [previousId, setPreviousId] = useState(planId);
   if (previousId !== planId) {
     setPreviousId(planId);
     setActionError("");
+    setAdding(false);
   }
   useEffect(() => {
     if (!planId) return;
@@ -62,6 +64,8 @@ export function usePlanView(
     loadError: current?.error ?? "",
     pending,
     actionError,
+    adding,
+    setAdding,
     run,
   };
 }

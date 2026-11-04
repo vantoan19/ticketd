@@ -203,3 +203,17 @@
 .graph-none {
   color: var(--muted-foreground);
 }
+.graph-node[data-boundary] {
+  box-shadow: none;
+  border: 1.5px dashed var(--muted-foreground);
+}
+.graph-node[data-boundary][data-selected] {
+  box-shadow: 0 0 0 2px var(--foreground);
+}
+.graph-node-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 16px;
+}

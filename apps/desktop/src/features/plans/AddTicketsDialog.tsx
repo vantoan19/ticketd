@@ -32,6 +32,7 @@ export function AddTicketsDialog({
   const [results, setResults] = useState<Ticket[] | null>(null);
   const [searchError, setSearchError] = useState("");
   const [searches, setSearches] = useState(0);
+  const [done, setDone] = useState("");
   const { pending, actionError, run } = state;
   useEffect(() => {
     if (!open) return;
@@ -85,7 +86,10 @@ export function AddTicketsDialog({
             placeholder="Search tickets to add"
             autoComplete="off"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setDone("");
+            }}
           />
         </label>
         {(searchError || actionError) && (
@@ -93,7 +97,12 @@ export function AddTicketsDialog({
             {searchError || actionError}
           </p>
         )}
-        {results && results.length === 0 && !searchError && (
+        {done && (
+          <p role="status" className="plan-add-done">
+            {done}
+          </p>
+        )}
+        {results && results.length === 0 && !searchError && !done && (
           <p className="plan-note">No tickets to add match this search.</p>
         )}
         <ul className="plan-add-results" aria-label="Tickets to add">
@@ -116,7 +125,13 @@ export function AddTicketsDialog({
                     void run(() =>
                       plansClient.setMember(ticket.reference, plan.id),
                     ).then((added) => {
-                      if (added) setSearches((value) => value + 1);
+                      if (!added) return;
+                      setDone(
+                        from
+                          ? `Moved ${ticket.reference} from ${from} to ${plan.name}.`
+                          : `Added ${ticket.reference} to ${plan.name}.`,
+                      );
+                      setSearches((value) => value + 1);
                     })
                   }
                 >

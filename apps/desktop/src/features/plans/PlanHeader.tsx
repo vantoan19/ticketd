@@ -1,9 +1,18 @@
 import { useContext } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Archive, ArchiveRestore, Pencil, Plus } from "lucide-react";
+import { Archive, ArchiveRestore, Network, Pencil, Plus } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -20,7 +29,7 @@ const list = (names: string[]) =>
     ? names.join(" and ")
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
-/** The context line: how many tickets, and which projects they span. */
+/** The summary line: scope, progress and what is held up. */
 function planContext(
   members: View["members"],
   projects: { id: string; name: string }[],
@@ -29,9 +38,15 @@ function planContext(
     .filter((project) => members.some((item) => item.project_id === project.id))
     .map((project) => project.name);
   const tickets = `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`;
-  return names.length
-    ? `Plan · ${tickets} across ${list(names)}`
-    : `Plan · ${tickets}`;
+  const done = members.filter((item) => item.status === "Done").length;
+  const blocked = members.filter(
+    (item) => item.availability === "Blocked",
+  ).length;
+  return [
+    names.length ? `${tickets} across ${list(names)}` : tickets,
+    ...(members.length ? [`${done} of ${members.length} done`] : []),
+    ...(blocked ? [`${blocked} blocked`] : []),
+  ].join(" · ");
 }
 
 /**
@@ -58,7 +73,8 @@ export function PlanHeader({
   const [nameError, setNameError] = useState("");
   const [editingPurpose, setEditingPurpose] = useState(false);
   const [purpose, setPurpose] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const { adding, setAdding } = state;
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
 
@@ -90,52 +106,48 @@ export function PlanHeader({
               {current.archived ? "Archived" : "Active"}
             </span>
           </div>
-          <p>{view ? planContext(view.members, projects) : "Plan"}</p>
+          <p>
+            {view ? `Plan · ${planContext(view.members, projects)}` : "Plan"}
+          </p>
         </div>
         <div className="plan-actions">
-          {openGraph && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openGraph(plan.id)}
-            >
-              Context graph
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={pending}
-            onClick={() => setAdding(true)}
-          >
+          <Button size="sm" disabled={pending} onClick={() => setAdding(true)}>
             <Plus data-icon="inline-start" /> Add tickets
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
+          <IconButton
+            label="Rename Plan"
             disabled={pending}
             onClick={startRename}
           >
-            <Pencil data-icon="inline-start" /> Rename
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            aria-describedby="plan-archive-note"
-            onClick={() =>
-              void run(() =>
-                plansClient.change(plan.id, null, !current.archived),
-              )
-            }
-          >
-            {current.archived ? (
-              <ArchiveRestore data-icon="inline-start" />
-            ) : (
-              <Archive data-icon="inline-start" />
-            )}
-            {current.archived ? "Reactivate" : "Archive"}
-          </Button>
+            <Pencil />
+          </IconButton>
+          {current.archived ? (
+            <IconButton
+              label="Reactivate Plan"
+              disabled={pending}
+              onClick={() =>
+                void run(() => plansClient.change(plan.id, null, false))
+              }
+            >
+              <ArchiveRestore />
+            </IconButton>
+          ) : (
+            <IconButton
+              label="Archive Plan"
+              disabled={pending}
+              onClick={() => setArchiving(true)}
+            >
+              <Archive />
+            </IconButton>
+          )}
+          {openGraph && (
+            <IconButton
+              label="Context graph"
+              onClick={() => openGraph(plan.id)}
+            >
+              <Network />
+            </IconButton>
+          )}
           {children}
         </div>
       </div>
@@ -200,7 +212,7 @@ export function PlanHeader({
         </form>
       ) : (
         <div>
-          {current.purpose && <p>{current.purpose}</p>}
+          {current.purpose && <p className="plan-purpose">{current.purpose}</p>}
           <Button
             variant="ghost"
             size="sm"
@@ -220,7 +232,11 @@ export function PlanHeader({
         </Alert>
       )}
       {view && (
-        <dl className="plan-counts" aria-label="Tickets by status">
+        <dl
+          className="plan-counts"
+          aria-label="Tickets by status"
+          title="Counts include parents and subtickets equally."
+        >
           {ticketStatuses.map((status) => (
             <div key={status}>
               <dt>
@@ -232,12 +248,32 @@ export function PlanHeader({
           ))}
         </dl>
       )}
-      <p id="plan-archive-note" className="plan-note">
-        {current.archived
-          ? "Reactivating returns this Plan to the sidebar. Its tickets keep their status."
-          : "Archiving hides this Plan from the sidebar. Its tickets stay searchable and unchanged."}{" "}
-        Counts include parents and subtickets equally.
-      </p>
+      <Dialog open={archiving} onOpenChange={setArchiving}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive {current.name}?</DialogTitle>
+            <DialogDescription>
+              Archiving hides this Plan from the sidebar. Its tickets stay
+              searchable and unchanged, and you can reactivate it later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setArchiving(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() =>
+                void run(() => plansClient.change(plan.id, null, true)).then(
+                  () => setArchiving(false),
+                )
+              }
+            >
+              Archive
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <AddTicketsDialog
         plan={current}
         plans={plans}

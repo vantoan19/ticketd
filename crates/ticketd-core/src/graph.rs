@@ -8,6 +8,8 @@ const MAX_NODES: usize = 50;
 const MAX_DEPTH: usize = 2;
 const MAX_EDGES: usize = 300;
 const MAX_WORK: usize = 3000;
+/// Outside tickets a Plan graph adds beyond its members, so a dense Plan still shows them.
+const MAX_OUTSIDE: usize = 20;
 
 #[derive(Debug, Serialize)]
 pub struct GraphNode {
@@ -18,6 +20,7 @@ pub struct GraphNode {
     pub status: Status,
     pub availability: Option<String>,
     pub boundary: bool,
+    pub project_id: Option<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct GraphEdge {
@@ -37,6 +40,8 @@ pub struct DependencyGraph {
     /// Some edges between displayed nodes were omitted or could not be checked.
     pub omitted_edges: bool,
     pub truncated: bool,
+    /// For a Plan graph, every non-trashed member, shown or not.
+    pub total_members: Option<usize>,
 }
 
 impl Workspace {
@@ -145,6 +150,7 @@ impl Workspace {
             omitted_neighbors,
             omitted_edges,
             truncated: omitted_neighbors || omitted_edges,
+            total_members: None,
         })
     }
     /// A bounded Plan scope, including prerequisites just outside that scope.
@@ -160,40 +166,74 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
+        let total_members: usize = tx.query_row(
+            "SELECT COUNT(*) FROM tickets WHERE plan_id = ?1 AND trashed = 0",
+            [plan],
+            |row| row.get(0),
+        )?;
         let mut omitted_neighbors = ids.len() > MAX_NODES;
         ids.truncate(MAX_NODES);
         let members = ids.clone();
         let mut boundaries = BTreeSet::new();
         let mut candidates = BTreeSet::new();
         let mut incomplete = false;
-        let quota = MAX_WORK / members.len().max(1);
+        let quota = MAX_WORK / (members.len().max(1) * 2);
         if !members.is_empty() {
-            let terms = members.iter().map(|_| format!("SELECT ? AS dependent, blocker_id FROM (SELECT blocker_id FROM dependencies WHERE dependent_id = ? ORDER BY blocker_id LIMIT {})", quota + 1)).collect::<Vec<_>>();
-            let parameters = members.iter().flat_map(|id| [id, id]).collect::<Vec<_>>();
+            // Prerequisites and tickets that wait on a member, both outside the Plan.
+            let mut terms = Vec::new();
+            let mut parameters = Vec::new();
+            for id in &members {
+                for (column, other, outgoing) in [
+                    ("dependent_id", "blocker_id", 0),
+                    ("blocker_id", "dependent_id", 1),
+                ] {
+                    terms.push(format!("SELECT ? AS member, {outgoing} AS outgoing, neighbor FROM (SELECT {other} AS neighbor FROM dependencies WHERE {column} = ? ORDER BY {other} LIMIT {})", quota + 1));
+                    parameters.push(id);
+                    parameters.push(id);
+                }
+            }
             let mut stmt = tx.prepare(&terms.join(" UNION ALL "))?;
             let rows = stmt
                 .query_map(rusqlite::params_from_iter(parameters), |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             drop(stmt);
-            let mut counts = HashMap::<String, usize>::new();
-            for (dependent, blocker) in rows {
-                let count = counts.entry(dependent.clone()).or_default();
+            let mut counts = HashMap::<(String, bool), usize>::new();
+            for (member, outgoing, neighbor) in rows {
+                let count = counts.entry((member.clone(), outgoing)).or_default();
                 *count += 1;
                 if *count > quota {
                     incomplete = true;
                     continue;
                 }
-                if !ids.contains(&blocker) {
-                    if ids.len() == MAX_NODES {
+                if !ids.contains(&neighbor) {
+                    // A member past the node limit is omitted, not an outside ticket.
+                    let in_plan = tx.query_row(
+                        "SELECT plan_id IS ?2 FROM tickets WHERE id = ?1",
+                        rusqlite::params![neighbor, plan],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    if in_plan {
                         omitted_neighbors = true;
                         continue;
                     }
-                    boundaries.insert(blocker.clone());
-                    ids.push(blocker.clone());
+                    if boundaries.len() == MAX_OUTSIDE {
+                        omitted_neighbors = true;
+                        continue;
+                    }
+                    boundaries.insert(neighbor.clone());
+                    ids.push(neighbor.clone());
                 }
-                candidates.insert((blocker, dependent));
+                candidates.insert(if outgoing {
+                    (member, neighbor)
+                } else {
+                    (neighbor, member)
+                });
             }
         }
         let (nodes, references) = graph_nodes(&tx, &ids, &boundaries)?;
@@ -225,6 +265,7 @@ impl Workspace {
             omitted_neighbors,
             omitted_edges,
             truncated: omitted_neighbors || omitted_edges,
+            total_members: Some(total_members),
         })
     }
 }
@@ -236,7 +277,7 @@ fn graph_nodes(
 ) -> Result<(Vec<GraphNode>, HashMap<String, String>), Error> {
     let ids_json = serde_json::to_string(&ids)?;
     let sql = format!(
-        "SELECT t.id, t.number, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}) FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
+        "SELECT t.id, t.number, t.title, t.status, t.trashed, {}, EXISTS(SELECT 1 FROM dependencies d JOIN tickets b ON b.id = d.blocker_id WHERE d.dependent_id = t.id AND {}), t.project_id FROM tickets t WHERE t.id IN (SELECT value FROM json_each(?1))",
         crate::source::held_sql("t.id"),
         crate::history::unresolved_blocker_sql("b")
     );
@@ -251,12 +292,13 @@ fn graph_nodes(
                 row.get::<_, bool>(4)?,
                 row.get::<_, bool>(5)?,
                 row.get::<_, bool>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     let mut metadata = HashMap::new();
-    for (id, number, title, status, trashed, held, blocked) in rows {
+    for (id, number, title, status, trashed, held, blocked, project_id) in rows {
         let status: Status = status.parse().map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(e))
         })?;
@@ -277,6 +319,7 @@ fn graph_nodes(
                 status,
                 availability,
                 boundary: false,
+                project_id,
             },
         );
     }

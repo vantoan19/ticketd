@@ -23,6 +23,8 @@ test("adds context, designates a spec, and opens its source", async () => {
     loadError: "",
     pending: false,
     actionError: "",
+    adding: false,
+    setAdding: vi.fn(),
     run,
   };
   const plan = {
