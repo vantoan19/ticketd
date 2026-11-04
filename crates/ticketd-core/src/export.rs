@@ -18,6 +18,8 @@ impl Workspace {
                 "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
             ),
             ("context_mentions", "source_id, target_id, passage"),
+            ("numeric_mentions", "source_id, activity, number, passage"),
+            ("activity_mentions", "activity_id, target_id, passage"),
             ("document_opens", "sequence, document_id"),
             ("document_pins", "document_id"),
             ("document_tags", "document_id, tag_name"),
