@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { ContextGraphNavigation } from "./navigation";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
@@ -39,6 +40,7 @@ export function Documents({
   onOpenPlan: (id: string) => void;
   target: { id: string; key: number } | null;
 }) {
+  const openGraph = useContext(ContextGraphNavigation);
   const [recent, setRecent] = useState<DocumentSummary[]>([]);
   const [pins, setPins] = useState<DocumentSummary[]>([]);
   const [trash, setTrash] = useState<Document[]>([]);
@@ -279,6 +281,11 @@ export function Documents({
             refresh();
           }}
         >
+          {openGraph && (
+            <Button variant="outline" onClick={() => openGraph(selected.id)}>
+              Context graph
+            </Button>
+          )}
           {selected.origin_brief && !selected.kept && (
             <Button
               onClick={() =>

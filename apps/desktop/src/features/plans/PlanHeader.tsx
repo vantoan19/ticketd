@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Archive, ArchiveRestore, Pencil, Plus } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -50,6 +52,7 @@ export function PlanHeader({
   state: PlanViewState;
 }) {
   const { view, loadError, pending, actionError, run } = state;
+  const openGraph = useContext(ContextGraphNavigation);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState("");
@@ -90,6 +93,15 @@ export function PlanHeader({
           <p>{view ? planContext(view.members, projects) : "Plan"}</p>
         </div>
         <div className="plan-actions">
+          {openGraph && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openGraph(plan.id)}
+            >
+              Context graph
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"

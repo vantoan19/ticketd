@@ -341,6 +341,12 @@ enum Command {
         reference: Option<String>,
         #[arg(long)]
         plan: Option<String>,
+        /// Show contextual connections rather than dependencies
+        #[arg(long, conflicts_with = "plan")]
+        context: bool,
+        /// Include generated Activity details
+        #[arg(long, requires = "context")]
+        include_details: bool,
     },
     /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
@@ -1256,8 +1262,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             },
         )?)?,
 
-        Command::Graph { reference, plan } => {
-            if let Some(plan) = plan {
+        Command::Graph {
+            reference,
+            plan,
+            context,
+            include_details,
+        } => {
+            if context {
+                serde_json::to_string(
+                    &workspace
+                        .context_graph(reference.as_deref().unwrap_or_default(), include_details)?,
+                )?
+            } else if let Some(plan) = plan {
                 serde_json::to_string(&workspace.plan_dependency_graph(&plan)?)?
             } else {
                 serde_json::to_string(

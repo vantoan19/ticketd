@@ -55,10 +55,12 @@ fn passage(body: &str, at: usize) -> String {
 }
 
 pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    index_numbers(tx, id, body, false)?;
     index_text(tx, id, body, false)
 }
 
 pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    index_numbers(tx, id, body, true)?;
     index_text(tx, id, body, true)?;
     // Backlinks recognize visible ticket references even in link text and
     // decoded Markdown runs; retain those established references here too.
@@ -89,6 +91,44 @@ pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<()
                     tx.execute("INSERT OR IGNORE INTO activity_mentions (activity_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, offset)])?;
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(), Error> {
+    tx.execute(
+        "DELETE FROM numeric_mentions WHERE source_id = ?1 AND activity = ?2",
+        params![id, activity],
+    )?;
+    for (text, range) in crate::backlinks::text_runs(body) {
+        for (at, _) in text.match_indices("T-") {
+            let rest = &text[at + 2..];
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
+            if digits == 0
+                || rest.starts_with('0')
+                || !text[..at].chars().next_back().is_none_or(boundary)
+                || !rest[digits..].chars().next().is_none_or(boundary)
+            {
+                continue;
+            }
+            if let Ok(number) = rest[..digits].parse::<i64>() {
+                let offset = body[range.clone()]
+                    .find(&text[at..at + 2 + digits])
+                    .map_or(range.start, |n| range.start + n);
+                tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, offset)])?;
+            }
+        }
+    }
+    for (event, range) in Parser::new(body).into_offset_iter() {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event
+            && let Some(number) = dest_url
+                .strip_prefix("ticketd://ticket/T-")
+                .and_then(|value| value.parse::<i64>().ok())
+                .filter(|number| *number > 0)
+        {
+            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, range.start)])?;
         }
     }
     Ok(())

@@ -9,6 +9,8 @@ pub use backup_review::{
     BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
 };
 mod context;
+mod context_graph;
+pub use context_graph::{ContextGraph, ContextGraphEdge, ContextGraphNode};
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink};
 mod documents;
@@ -64,7 +66,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 40;
+pub const FORMAT_VERSION: i64 = 41;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -510,6 +512,9 @@ impl Workspace {
             }
             transaction.execute_batch("PRAGMA user_version = 34;")?;
         }
+        if version < 41 {
+            transaction.execute_batch("CREATE TABLE IF NOT EXISTS numeric_mentions (source_id TEXT NOT NULL, activity INTEGER NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(source_id, activity, number, passage)); CREATE INDEX IF NOT EXISTS numeric_mentions_number ON numeric_mentions(number, activity, source_id, passage);")?;
+        }
         if version < 35 {
             document_links::migrate(&transaction)?;
         }
@@ -582,6 +587,28 @@ impl Workspace {
             for (id, brief) in activities {
                 document_links::index_activity(&transaction, &id, &brief)?;
             }
+        }
+        if version < 41 {
+            transaction.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_identity ON activities(ticket_id, id); CREATE TRIGGER IF NOT EXISTS numeric_mentions_activity_delete AFTER DELETE ON activities BEGIN DELETE FROM numeric_mentions WHERE source_id = OLD.id AND activity = 1; END;")?;
+            let mut statement = transaction.prepare("SELECT id, body, 0 FROM tickets UNION ALL SELECT id, body, 0 FROM documents UNION ALL SELECT id, brief, 1 FROM activities")?;
+            let records = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            for (id, body, activity) in records {
+                if activity {
+                    document_links::index_activity(&transaction, &id, &body)?;
+                } else {
+                    document_links::index_body(&transaction, &id, &body)?;
+                }
+            }
+            transaction.pragma_update(None, "user_version", 41)?;
         }
         transaction.commit()?;
         Ok(())
