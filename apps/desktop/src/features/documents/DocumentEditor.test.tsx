@@ -78,38 +78,22 @@ it("keeps a failed capture open and retries the same request before returning", 
   fireEvent.click(screen.getByText("Back to work"));
   expect(close).toHaveBeenCalledOnce();
 });
-it("defers external refresh while the editor has focus", async () => {
+it("notices saved changes beneath a focused draft and offers reload", async () => {
   vi.useFakeTimers();
-  const original = {
-    id: "d1",
-    title: null,
-    body: "Original",
-    created_at: "now",
-    updated_at: "now",
-    trashed: false,
-  };
-  vi.mocked(documents.show).mockResolvedValue({
-    ...original,
-    body: "Changed externally",
-  });
+  const original = { id: "d1", title: null, body: "Original", created_at: "now", updated_at: "now", trashed: false };
+  vi.mocked(documents.save).mockRejectedValue("offline");
+  vi.mocked(documents.show).mockResolvedValue({ ...original, body: "Changed externally" });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2000);
-  });
-  expect(documents.show).not.toHaveBeenCalled();
+  fireEvent.change(editor, { target: { value: "Local draft" } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(documents.show).toHaveBeenCalled();
+  expect(editor).toHaveProperty("value", "Local draft");
   expect(document.activeElement).toBe(editor);
-  screen.getByText("Back to work").focus();
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(2000);
-  });
-  expect(documents.show).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("Your thought")).toHaveProperty(
-    "value",
-    "Changed externally",
-  );
-  vi.useRealTimers();
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  expect(editor).toHaveProperty("value", "Changed externally");
 });
 it("suggests only the current ticket and lets it be removed before capture", async () => {
   vi.mocked(documents.save).mockResolvedValue({

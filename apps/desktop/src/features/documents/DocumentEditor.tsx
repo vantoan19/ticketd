@@ -7,6 +7,9 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { documents, type Document } from "./api";
 
 type Snapshot = { title: string; body: string; suggestion: string | null };
+function documentHasEditorFocus() {
+  return document.activeElement instanceof HTMLElement && Boolean(document.activeElement.closest("input, textarea, [contenteditable=true], .cm-content"));
+}
 type Pending = {
   id: string | null;
   title: string | null;
@@ -55,6 +58,8 @@ export function DocumentEditor({
     null,
   );
   const [failed, setFailed] = useState(false);
+  const [external, setExternal] = useState<Snapshot | null>(null);
+  const externalRef = useRef<Snapshot | null>(null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
   const saved = useRef<Snapshot>({ title, body, suggestion: null });
   const id = useRef(initial?.id ?? null);
@@ -90,7 +95,7 @@ export function DocumentEditor({
     }
   };
   const save = async () => {
-    if (saving.current) return;
+    if (saving.current || externalRef.current) return;
     const snapshot = draft.current;
     const titleChanged = snapshot.title !== saved.current.title;
     const bodyChanged =
@@ -169,61 +174,31 @@ export function DocumentEditor({
     return () => window.clearTimeout(timer);
   }, [title, body, suggestion]);
   useEffect(() => {
-    // Replacing rich editor content while typing can move its selection or focus.
-    const editing = () =>
-      document.activeElement instanceof HTMLElement &&
-      Boolean(
-        document.activeElement.closest(
-          "input, textarea, [contenteditable=true], .cm-content",
-        ),
-      );
     const timer = window.setInterval(() => {
-      if (
-        !id.current ||
-        editing() ||
-        saving.current ||
-        pending.current ||
-        draft.current.title !== saved.current.title ||
-        draft.current.body !== saved.current.body ||
-        draft.current.suggestion !== saved.current.suggestion
-      )
-        return;
-      void documents
-        .show(id.current)
-        .then((document) => {
-          if (
-            editing() ||
-            saving.current ||
-            pending.current ||
-            draft.current.title !== saved.current.title ||
-            draft.current.body !== saved.current.body ||
-            draft.current.suggestion !== saved.current.suggestion
-          )
-            return;
-          setTrashed(document.trashed);
-          const currentSuggestion = draft.current.suggestion;
-          const link = currentSuggestion
-            ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})`
-            : "";
-          const hasLink =
-            currentSuggestion &&
-            (document.body === link || document.body.endsWith(`\n\n${link}`));
-          const next = {
-            title: document.title ?? "",
-            body: hasLink
-              ? document.body
-                  .slice(0, document.body.length - link.length)
-                  .replace(/\n\n$/, "")
-              : document.body,
-            suggestion: hasLink ? currentSuggestion : null,
-          };
-          if (!hasLink && currentSuggestion) setSuggestion(null);
-          saved.current = next;
-          draft.current = next;
-          setTitle(next.title);
-          setBody(next.body);
-        })
-        .catch(() => {});
+      if (!id.current || saving.current) return;
+      void documents.show(id.current).then((document) => {
+        if (saving.current) return;
+        setTrashed(document.trashed);
+        const currentSuggestion = saved.current.suggestion;
+        const link = currentSuggestion ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})` : "";
+        const hasLink = Boolean(currentSuggestion && (document.body === link || document.body.endsWith(`\n\n${link}`)));
+        const next: Snapshot = { title: document.title ?? "", body: hasLink ? document.body.slice(0, -link.length).replace(/\n\n$/, "") : document.body, suggestion: hasLink ? currentSuggestion : null };
+        if (next.title === saved.current.title && next.body === saved.current.body) return;
+        const editing = documentHasEditorFocus();
+        const titleDirty = draft.current.title !== saved.current.title;
+        const bodyDirty = draft.current.body !== saved.current.body || draft.current.suggestion !== saved.current.suggestion;
+        const conflict = (titleDirty && next.title !== saved.current.title) || (bodyDirty && (next.body !== saved.current.body || next.suggestion !== saved.current.suggestion));
+        if (conflict || (editing && !titleDirty && !bodyDirty) || pending.current) {
+          externalRef.current = next;
+          setExternal(next);
+          return;
+        }
+        const merged = { title: titleDirty ? draft.current.title : next.title, body: bodyDirty ? draft.current.body : next.body, suggestion: bodyDirty ? draft.current.suggestion : next.suggestion };
+        saved.current = next;
+        draft.current = merged;
+        if (!titleDirty) setTitle(merged.title);
+        if (!bodyDirty) { setBody(merged.body); setSuggestion(merged.suggestion); }
+      }).catch(() => {});
     }, 2000);
     return () => window.clearInterval(timer);
   }, []);
@@ -296,6 +271,28 @@ export function DocumentEditor({
             </Button>
           </p>
         )}
+        {external && <div role="alert">
+          <p>Saved content changed while you were editing.</p>
+          <Button variant="outline" onClick={() => {
+            saved.current = external;
+            draft.current = external;
+            pending.current = null;
+            externalRef.current = null;
+            setExternal(null);
+            setTitle(external.title);
+            setBody(external.body);
+            setSuggestion(null);
+            setFailed(false);
+            setStatus("Loaded saved content");
+          }}>Reload saved content</Button>
+          <Button variant="outline" onClick={() => {
+            saved.current = external;
+            pending.current = null;
+            externalRef.current = null;
+            setExternal(null);
+            void save();
+          }}>Save over saved content</Button>
+        </div>}
         {children}
         <LazyMarkdownEditor
           value={body}
