@@ -730,3 +730,16 @@ fn trash_pages_return_bounded_summaries_and_open_retains_body() {
     assert_ne!(first[0].id, second[0].id);
     assert_eq!(workspace.open_document(&ids[0]).unwrap().body, body);
 }
+
+#[test]
+fn opened_untitled_document_exposes_its_bounded_heading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let doc = workspace
+        .create_document(None, "\nFirst line\nMore text")
+        .unwrap();
+    assert_eq!(
+        workspace.open_document(&doc.id).unwrap().heading,
+        "First line"
+    );
+}

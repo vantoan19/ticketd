@@ -329,3 +329,52 @@ it("saves a draft before opening the context graph without a dialog", async () =
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
+
+it("opens the originating ticket from document details", () => {
+  const doc = {
+    id: "d1",
+    title: null,
+    body: "Evidence",
+    origin_brief: "Update",
+    origin_ticket: "T-3",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  const open = vi.fn();
+  render(
+    <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "T-3 · Activity details" }),
+  );
+  expect(open).toHaveBeenCalledWith("T-3");
+});
+
+it("reads an untitled Document with its core heading and current save details", async () => {
+  const doc = {
+    id: "d1",
+    title: null,
+    heading: "First line",
+    body: "First line\nMore",
+    created_at: "created",
+    updated_at: "before",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockResolvedValue({
+    ...doc,
+    body: "Changed",
+    heading: "Changed",
+    updated_at: "after",
+  });
+  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
+  expect(screen.getByText("before")).toBeTruthy();
+  expect(screen.getAllByText("Saved locally")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Changed" },
+  });
+  await waitFor(() => expect(screen.getByText("after")).toBeTruthy());
+  expect(screen.getByRole("heading", { name: "Changed" })).toBeTruthy();
+});

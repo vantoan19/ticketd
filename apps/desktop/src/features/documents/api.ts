@@ -5,10 +5,12 @@ const schema = z.object({
   id: z.string(),
   title: z.string().nullable(),
   body: z.string(),
+  heading: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   trashed: z.boolean(),
   origin_brief: z.string().nullable().optional(),
+  origin_ticket: z.string().nullable().optional(),
   kept: z.boolean().optional(),
 });
 export type Document = z.infer<typeof schema>;

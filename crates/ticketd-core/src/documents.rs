@@ -8,12 +8,16 @@ pub struct Document {
     pub id: String,
     pub title: Option<String>,
     pub body: String,
+    #[serde(default)]
+    pub heading: String,
     pub created_at: String,
     pub updated_at: String,
     #[serde(default)]
     pub trashed: bool,
     #[serde(default)]
     pub origin_brief: Option<String>,
+    #[serde(default)]
+    pub origin_ticket: Option<String>,
     #[serde(default)]
     pub kept: bool,
 }
@@ -114,7 +118,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                "SELECT id, title, body, created_at, updated_at, trashed, (SELECT brief FROM activities WHERE id = documents.originating_activity_id)  , kept FROM documents WHERE id = ?1",
+                &format!("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed, (SELECT brief FROM activities WHERE id = d.originating_activity_id), d.kept, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = d.originating_activity_id), {HEADING} FROM documents d WHERE d.id = ?1"),
                 [id],
                 |row| {
                     Ok(Document {
@@ -126,6 +130,8 @@ impl Workspace {
                         trashed: row.get(5)?,
                         origin_brief: row.get(6)?,
                         kept: row.get(7)?,
+                        origin_ticket: row.get(8)?,
+                        heading: row.get(9)?,
                     })
                 },
             )

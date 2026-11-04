@@ -85,6 +85,10 @@ fn designating_activity_details_promotes_and_preserves_support_and_replay() {
     );
     let document = workspace.show_document(&id).unwrap();
     assert_eq!(document.origin_brief.as_deref(), Some("Update"));
+    assert_eq!(
+        document.origin_ticket.as_deref(),
+        Some(ticket.reference.as_str())
+    );
     assert!(document.kept);
     assert_eq!(
         workspace.show_ticket(&ticket.reference).unwrap().plan_id,

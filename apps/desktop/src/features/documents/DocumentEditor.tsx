@@ -91,7 +91,10 @@ export function DocumentEditor({
   }, [initial]);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
-  const [status, setStatus] = useState("Start writing. We’ll save as you go.");
+  const [status, setStatus] = useState(
+    initial ? "Saved locally" : "Start writing. We’ll save as you go.",
+  );
+  const [savedDocument, setSavedDocument] = useState(initial);
   const [trashed, setTrashed] = useState(initial?.trashed ?? false);
   const [transitioning, setTransitioning] = useState(false);
   const transition = useRef<{ trashed: boolean; requestId: string } | null>(
@@ -181,6 +184,7 @@ export function DocumentEditor({
         request.requestId,
       );
       id.current = result.id;
+      setSavedDocument(result);
       saved.current = request.snapshot;
       pending.current = null;
       saving.current = false;
@@ -221,6 +225,7 @@ export function DocumentEditor({
         .then((document) => {
           if (saving.current) return;
           setTrashed(document.trashed);
+          setSavedDocument(document);
           const currentSuggestion = saved.current.suggestion;
           const link = currentSuggestion
             ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})`
@@ -308,7 +313,12 @@ export function DocumentEditor({
     <DocumentSurface capture={!initial} onClose={requestClose}>
       <header>
         {initial ? (
-          <h1>{title.trim() || initial.origin_brief?.trim() || "Document"}</h1>
+          <h1>
+            {title.trim() ||
+              savedDocument?.heading ||
+              initial.origin_brief?.trim() ||
+              "Document"}
+          </h1>
         ) : (
           <DialogTitle>Capture a thought</DialogTitle>
         )}
@@ -443,9 +453,24 @@ export function DocumentEditor({
             <h2>Document details</h2>
             <dl>
               <dt>Updated</dt>
-              <dd>{initial.updated_at}</dd>
+              <dd>{savedDocument?.updated_at ?? initial.updated_at}</dd>
               <dt>Created</dt>
-              <dd>{initial.created_at}</dd>
+              <dd>{savedDocument?.created_at ?? initial.created_at}</dd>
+              {initial.origin_ticket && (
+                <>
+                  <dt>Origin</dt>
+                  <dd>
+                    <Button
+                      variant="link"
+                      onClick={() =>
+                        navigate(() => onOpenTicket?.(initial.origin_ticket!))
+                      }
+                    >
+                      {initial.origin_ticket} · Activity details
+                    </Button>
+                  </dd>
+                </>
+              )}
               <dt>Visibility</dt>
               <dd>
                 {initial.origin_brief && !initial.kept
@@ -582,7 +607,7 @@ export function DocumentEditor({
         )}
       </aside>
       <footer>
-        <span role="status">{status}</span>
+        {!initial && <span role="status">{status}</span>}
         {trashed && <span>This Document is in Trash.</span>}
         {initial && (
           <Button
