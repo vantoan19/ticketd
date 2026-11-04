@@ -24,11 +24,8 @@
   background: var(--accent);
 }
 .document-dialog {
-  position: fixed;
-  transform: none;
-  translate: none;
-  inset: 8px 8px 8px auto;
-  width: min(560px, calc(100vw - 16px));
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   max-height: calc(100dvh - 16px);
   overflow: auto;
   background: var(--background);
@@ -44,6 +41,10 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+.document-dialog .editor-mode {
+  flex-wrap: wrap;
 }
 .document-dialog header {
   margin-bottom: 24px;
@@ -58,8 +59,6 @@
 }
 @media (max-width: 767px) {
   .document-dialog {
-    inset: 0;
-    width: 100%;
     max-height: 100dvh;
     border-radius: 0;
   }

@@ -27,7 +27,7 @@ function DocumentSurface({
       }}
     >
       <DialogContent
-        className="document-dialog"
+        className="document-dialog inset-0 max-w-none translate-x-0 translate-y-0 sm:max-w-none md:inset-y-2 md:right-2 md:left-auto md:w-[min(560px,calc(100vw-16px))]"
         showCloseButton={false}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
