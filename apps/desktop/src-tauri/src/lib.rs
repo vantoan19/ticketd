@@ -6,7 +6,8 @@ use ticketd_core::{
     ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan,
     PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange,
-    TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    TicketFilter, TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo,
+    WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -326,6 +327,12 @@ fn context_graph(reference: String, include_details: bool) -> Result<ContextGrap
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn workspace_graph(request: WorkspaceGraphRequest) -> Result<WorkspaceGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| w.workspace_graph(&request))
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 fn context_graph_expanded(
     reference: String,
@@ -1366,6 +1373,7 @@ pub fn run() -> Result<(), tauri::Error> {
             find_tickets_with_updates,
             count_tickets,
             context_graph,
+            workspace_graph,
             context_graph_expanded,
             dependency_graph,
             plan_dependency_graph,

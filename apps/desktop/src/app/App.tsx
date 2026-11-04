@@ -4,6 +4,7 @@ import {
   PlanNavigation,
 } from "@/features/documents/navigation";
 import { ContextGraph } from "@/features/documents/ContextGraph";
+import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
 import { Documents } from "@/features/documents/Documents";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -18,6 +19,7 @@ import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
 import { useThemeSync } from "@/lib/preferences";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
@@ -55,6 +57,9 @@ export function App() {
       setViewBeforeSettings(view);
       setSettingsSection("appearance");
     }
+    setGraphOrigin(null);
+    setLocalGraphOrigin(null);
+    setWorkspaceGraphOpen(false);
     setView(next);
   };
   const [inboxTarget, setInboxTarget] = useState<{
@@ -84,6 +89,8 @@ export function App() {
     };
   }, []);
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
+  const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
+  const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   const [capture, setCapture] = useState(false);
   const [documentTarget, setDocumentTarget] = useState<{
     id: string;
@@ -119,7 +126,13 @@ export function App() {
   });
   const isMobile = useIsMobile();
   return (
-    <ContextGraphNavigation.Provider value={setGraphOrigin}>
+    <ContextGraphNavigation.Provider
+      value={(id) => {
+        setWorkspaceGraphOpen(id === "__workspace__");
+        setLocalGraphOrigin(id === "__workspace__" ? null : id);
+        setGraphOrigin(id);
+      }}
+    >
       <PlanNavigation.Provider
         value={(id) => {
           scope("all", "all", id);
@@ -200,6 +213,17 @@ export function App() {
                       </SidebarTrigger>
                     </div>
                   )}
+                  {(workspaceGraphOpen || localGraphOrigin) &&
+                    graphOrigin === null && (
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          setGraphOrigin(localGraphOrigin ?? "__workspace__")
+                        }
+                      >
+                        Back to context graph
+                      </Button>
+                    )}
                   {error && (
                     <p role="alert" className="global-error">
                       {error}
@@ -277,27 +301,68 @@ export function App() {
                       onCaptureClose={() => setCapture(false)}
                     />
                   </div>
-                  {graphOrigin && (
-                    <ContextGraph
-                      origin={graphOrigin}
-                      onBack={() => setGraphOrigin(null)}
-                      onOpen={(node) => {
-                        setGraphOrigin(null);
-                        if (node.kind === "document") {
-                          setDocumentTarget({ id: node.id, key: Date.now() });
-                          setView("documents");
-                        } else if (node.kind === "plan") {
-                          scope("all", "all", node.id);
-                          setView("tickets");
-                        } else {
-                          const reference = node.label.match(/^T-\d+/)?.[0];
-                          if (reference) {
-                            setSelected(reference);
+                  {workspaceGraphOpen && (
+                    <div hidden={graphOrigin !== "__workspace__"}>
+                      <WorkspaceGraph
+                        active={graphOrigin === "__workspace__"}
+                        revision={revision}
+                        onBack={() => {
+                          setGraphOrigin(null);
+                          setWorkspaceGraphOpen(false);
+                        }}
+                        onFocus={(id) => {
+                          setLocalGraphOrigin(id);
+                          setGraphOrigin(id);
+                        }}
+                        onOpen={(node) => {
+                          setGraphOrigin(null);
+                          if (node.kind === "document") {
+                            setDocumentTarget({ id: node.id, key: Date.now() });
+                            setView("documents");
+                          } else if (node.kind === "plan") {
+                            scope("all", "all", node.id);
                             setView("tickets");
+                          } else {
+                            const reference = node.label.match(/^T-\d+/)?.[0];
+                            if (reference) {
+                              setSelected(reference);
+                              setView("tickets");
+                            }
                           }
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                    </div>
+                  )}
+                  {localGraphOrigin && (
+                    <div hidden={graphOrigin !== localGraphOrigin}>
+                      <ContextGraph
+                        key={localGraphOrigin}
+                        active={graphOrigin === localGraphOrigin}
+                        origin={localGraphOrigin}
+                        onBack={() => {
+                          setLocalGraphOrigin(null);
+                          setGraphOrigin(
+                            workspaceGraphOpen ? "__workspace__" : null,
+                          );
+                        }}
+                        onOpen={(node) => {
+                          setGraphOrigin(null);
+                          if (node.kind === "document") {
+                            setDocumentTarget({ id: node.id, key: Date.now() });
+                            setView("documents");
+                          } else if (node.kind === "plan") {
+                            scope("all", "all", node.id);
+                            setView("tickets");
+                          } else {
+                            const reference = node.label.match(/^T-\d+/)?.[0];
+                            if (reference) {
+                              setSelected(reference);
+                              setView("tickets");
+                            }
+                          }
+                        }}
+                      />
+                    </div>
                   )}
                   <TicketWorkspaceView
                     workspace={workspace}

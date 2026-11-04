@@ -21,7 +21,7 @@ export function ContextGraphCanvas({
   onSelect,
   onError,
 }: {
-  nodes: { id: string; label: string }[];
+  nodes: { id: string; label: string; color?: string }[];
   edges: Edge[];
   selected: string | null;
   positions: Record<string, Point>;
@@ -101,6 +101,9 @@ export function ContextGraphCanvas({
           position: positions[node.id]!,
           data: { label: node.label },
           selected: node.id === selected,
+          ...(node.color
+            ? { style: { borderColor: node.color, borderWidth: 3 } }
+            : {}),
         })),
     [nodes, positions, selected],
   );

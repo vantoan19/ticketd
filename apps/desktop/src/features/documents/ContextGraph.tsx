@@ -18,10 +18,12 @@ const edgeLabels: Record<string, string> = {
 };
 
 export function ContextGraph({
+  active = true,
   origin,
   onBack,
   onOpen,
 }: {
+  active?: boolean;
   origin: string;
   onBack: () => void;
   onOpen: (node: Graph["nodes"][number]) => void;
@@ -50,14 +52,15 @@ export function ContextGraph({
   const [error, setError] = useState("");
   const [layoutError, setLayoutError] = useState("");
   useEffect(() => {
-    let active = true;
+    if (!active) return;
+    let live = true;
     let latest = 0;
     function refresh() {
       const request = ++latest;
       void client
         .contextGraphExpanded(center, includeDetails, expandedIds, pages)
         .then((value) => {
-          if (!active || request !== latest) return;
+          if (!live || request !== latest) return;
           setGraph(value);
           setSelected((previous) =>
             previous && value.nodes.some((node) => node.id === previous)
@@ -67,16 +70,16 @@ export function ContextGraph({
           setError("");
         })
         .catch((reason: unknown) => {
-          if (active && request === latest) setError(String(reason));
+          if (live && request === latest) setError(String(reason));
         });
     }
     refresh();
     const timer = window.setInterval(refresh, 5000);
     return () => {
-      active = false;
+      live = false;
       window.clearInterval(timer);
     };
-  }, [center, includeDetails, expandedIds, pages]);
+  }, [active, center, includeDetails, expandedIds, pages]);
   function focus(id: string) {
     setHistory((entries) => [
       ...entries,
@@ -148,23 +151,25 @@ export function ContextGraph({
       {error && <p role="alert">{error}</p>}
       {layoutError && <p role="alert">{layoutError}</p>}
       <div className="context-graph-main">
-        <ContextGraphCanvas
-          nodes={(graph?.nodes ?? []).map((node) => ({
-            id: node.id,
-            label: `${node.kind.toUpperCase()} · ${node.label}`,
-          }))}
-          edges={edges}
-          selected={selected}
-          positions={positions}
-          onPositions={(value) => {
-            setLayoutError("");
-            setPositions(value);
-          }}
-          viewport={viewport}
-          onViewport={setViewport}
-          onSelect={setSelected}
-          onError={setLayoutError}
-        />
+        {active && (
+          <ContextGraphCanvas
+            nodes={(graph?.nodes ?? []).map((node) => ({
+              id: node.id,
+              label: `${node.kind.toUpperCase()} · ${node.label}`,
+            }))}
+            edges={edges}
+            selected={selected}
+            positions={positions}
+            onPositions={(value) => {
+              setLayoutError("");
+              setPositions(value);
+            }}
+            viewport={viewport}
+            onViewport={setViewport}
+            onSelect={setSelected}
+            onError={setLayoutError}
+          />
+        )}
         <aside className="context-graph-preview">
           {preview ? (
             <>

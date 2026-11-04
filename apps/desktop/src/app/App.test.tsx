@@ -1529,3 +1529,111 @@ test("a later page that empties moves back to the last page that exists", async 
   expect(screen.getByText("50 tickets")).toBeTruthy();
   expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });
+
+test.each(["ticket", "document", "plan"] as const)(
+  "returns to workspace graph filters after opening a %s",
+  async (kind) => {
+    const ticket = bulkTicket(1);
+    await renderBulk({
+      find_tickets: () => [ticket],
+      show_ticket: () => ticket,
+      workspace_graph: () => ({
+        node_tags: {},
+        nodes: [
+          {
+            id: "1",
+            kind,
+            label: "T-1 · First",
+            state: "Todo",
+            trashed: false,
+            activity_detail: false,
+          },
+        ],
+        edges: [],
+        next_cursor: null,
+        omitted: false,
+        omitted_groups: [],
+      }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "First" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to context graph" }),
+    );
+    expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
+      "First",
+    );
+  },
+);
+
+test("returns to local graph state after opening an item", async () => {
+  const ticket = bulkTicket(1);
+  const node = {
+    id: "1",
+    kind: "ticket",
+    label: "T-1 · First",
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  };
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      nodes: [node],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+    context_graph_expanded: () => ({
+      center: "1",
+      nodes: [node],
+      edges: [],
+      omitted: false,
+      omitted_groups: [],
+      continuations: [],
+      hidden_details: false,
+      max_nodes: 100,
+      max_edges: 300,
+      max_work: 1000,
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Include Activity details" }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Back to context graph" }),
+  );
+  expect(
+    (
+      screen.getByRole("checkbox", {
+        name: "Include Activity details",
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+});

@@ -762,3 +762,29 @@ fn context_graph_cli_reads_new_connections() {
             .any(|n| n["label"].as_str().unwrap().contains("Third"))
     );
 }
+
+#[test]
+fn workspace_context_graph_cli_filters_indexed_search() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "Unique search word"]);
+    run(&["create", "Another ticket"]);
+    let graph = run(&["graph", "--context", "--workspace", "--search", "Unique"]);
+    assert_eq!(graph["nodes"].as_array().unwrap().len(), 1);
+}
