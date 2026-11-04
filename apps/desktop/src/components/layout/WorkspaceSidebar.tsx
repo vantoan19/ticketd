@@ -11,6 +11,7 @@ import {
   Layers,
   Archive,
   FileText,
+  Network,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,7 +33,8 @@ import {
 } from "@/components/ui/tooltip";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import type { RefObject } from "react";
+import { useContext, type RefObject } from "react";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
@@ -86,6 +88,7 @@ export function WorkspaceSidebar({
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const isMobile = useIsMobile();
+  const openGraph = useContext(ContextGraphNavigation);
   const unread = counts.unread_inbox > 0;
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
@@ -131,6 +134,11 @@ export function WorkspaceSidebar({
                 onClick={() => setView("documents")}
               >
                 <FileText size={16} /> Documents
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => openGraph?.("__workspace__")}>
+                <Network size={16} /> Context graph
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

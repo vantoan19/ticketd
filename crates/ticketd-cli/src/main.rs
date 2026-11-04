@@ -337,10 +337,25 @@ enum Command {
     },
     /// View a bounded dependency graph around a ticket
     Graph {
-        #[arg(required_unless_present = "plan", conflicts_with = "plan")]
+        #[arg(required_unless_present_any = ["plan", "workspace"], conflicts_with_all = ["plan", "workspace"])]
         reference: Option<String>,
         #[arg(long)]
         plan: Option<String>,
+        /// Browse a bounded page of workspace context
+        #[arg(long, requires = "context", conflicts_with = "plan")]
+        workspace: bool,
+        #[arg(long, requires = "workspace")]
+        search: Option<String>,
+        #[arg(long, requires = "workspace")]
+        kind: Option<String>,
+        #[arg(long, requires = "workspace")]
+        tag: Option<String>,
+        #[arg(long, requires = "workspace")]
+        relationship: Option<String>,
+        #[arg(long, requires = "workspace")]
+        cursor: Option<String>,
+        #[arg(long, requires = "workspace", default_value_t = 3)]
+        adjacency_limit: usize,
         /// Show contextual connections rather than dependencies
         #[arg(long, conflicts_with = "plan")]
         context: bool,
@@ -1267,8 +1282,28 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             context,
             include_details,
+            workspace: workspace_scope,
+            search,
+            kind,
+            tag,
+            relationship,
+            cursor,
+            adjacency_limit,
         } => {
-            if context {
+            if workspace_scope {
+                serde_json::to_string(&workspace.workspace_graph(
+                    &ticketd_core::WorkspaceGraphRequest {
+                        cursor,
+                        search,
+                        kind,
+                        tag,
+                        relationship,
+                        include_details,
+                        adjacency_limit,
+                        ..Default::default()
+                    },
+                )?)?
+            } else if context {
                 serde_json::to_string(
                     &workspace
                         .context_graph(reference.as_deref().unwrap_or_default(), include_details)?,

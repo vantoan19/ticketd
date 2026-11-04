@@ -10,7 +10,9 @@ pub use backup_review::{
 };
 mod context;
 mod context_graph;
-pub use context_graph::{ContextGraph, ContextGraphEdge, ContextGraphNode};
+pub use context_graph::{
+    ContextGraph, ContextGraphEdge, ContextGraphNode, WorkspaceGraph, WorkspaceGraphRequest,
+};
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink};
 mod documents;
@@ -66,7 +68,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 41;
+pub const FORMAT_VERSION: i64 = 43;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -609,6 +611,26 @@ impl Workspace {
                 }
             }
             transaction.pragma_update(None, "user_version", 41)?;
+        }
+        if version < 43 {
+            let has_body_heading: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('documents') WHERE name = 'body_heading')", [], |row| row.get(0))?;
+            if !has_body_heading {
+                transaction.execute_batch("ALTER TABLE documents ADD COLUMN body_heading TEXT;")?;
+            }
+            transaction.execute_batch("UPDATE documents SET body_heading = nullif(trim(substr(ltrim(body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '');
+                CREATE TRIGGER IF NOT EXISTS document_heading_insert AFTER INSERT ON documents BEGIN UPDATE documents SET body_heading = nullif(trim(substr(ltrim(new.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(new.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '') WHERE id = new.id; END;
+                CREATE TRIGGER IF NOT EXISTS document_heading_update AFTER UPDATE OF body ON documents BEGIN UPDATE documents SET body_heading = nullif(trim(substr(ltrim(new.body, char(10)||char(13)||' '), 1, min(200, instr(ltrim(new.body, char(10)||char(13)||' ') || char(10), char(10)) - 1))), '') WHERE id = new.id; END;")?;
+            transaction.execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS ticket_graph_fts USING fts5(title, body, content='tickets', content_rowid='rowid');
+                INSERT INTO ticket_graph_fts(ticket_graph_fts) VALUES ('rebuild');
+                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_insert AFTER INSERT ON tickets BEGIN INSERT INTO ticket_graph_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body); END;
+                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_delete AFTER DELETE ON tickets BEGIN INSERT INTO ticket_graph_fts(ticket_graph_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body); END;
+                CREATE TRIGGER IF NOT EXISTS ticket_graph_fts_update AFTER UPDATE OF title, body ON tickets BEGIN INSERT INTO ticket_graph_fts(ticket_graph_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body); INSERT INTO ticket_graph_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body); END;
+                CREATE VIRTUAL TABLE IF NOT EXISTS plan_graph_fts USING fts5(name, purpose, content='plans', content_rowid='rowid');
+                INSERT INTO plan_graph_fts(plan_graph_fts) VALUES ('rebuild');
+                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_insert AFTER INSERT ON plans BEGIN INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;
+                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_delete AFTER DELETE ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); END;
+                CREATE TRIGGER IF NOT EXISTS plan_graph_fts_update AFTER UPDATE OF name, purpose ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;
+                PRAGMA user_version = 43;")?;
         }
         transaction.commit()?;
         Ok(())

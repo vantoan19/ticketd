@@ -4,6 +4,7 @@ import {
   PlanNavigation,
 } from "@/features/documents/navigation";
 import { ContextGraph } from "@/features/documents/ContextGraph";
+import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
 import { Documents } from "@/features/documents/Documents";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -55,6 +56,8 @@ export function App() {
       setViewBeforeSettings(view);
       setSettingsSection("appearance");
     }
+    setGraphOrigin(null);
+    setWorkspaceGraphOpen(false);
     setView(next);
   };
   const [inboxTarget, setInboxTarget] = useState<{
@@ -84,6 +87,7 @@ export function App() {
     };
   }, []);
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
+  const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   const [capture, setCapture] = useState(false);
   const [documentTarget, setDocumentTarget] = useState<{
     id: string;
@@ -119,7 +123,12 @@ export function App() {
   });
   const isMobile = useIsMobile();
   return (
-    <ContextGraphNavigation.Provider value={setGraphOrigin}>
+    <ContextGraphNavigation.Provider
+      value={(id) => {
+        setWorkspaceGraphOpen(id === "__workspace__");
+        setGraphOrigin(id);
+      }}
+    >
       <PlanNavigation.Provider
         value={(id) => {
           scope("all", "all", id);
@@ -277,12 +286,47 @@ export function App() {
                       onCaptureClose={() => setCapture(false)}
                     />
                   </div>
-                  {graphOrigin && (
+                  {workspaceGraphOpen && (
+                    <div hidden={graphOrigin !== "__workspace__"}>
+                      <WorkspaceGraph
+                        active={graphOrigin === "__workspace__"}
+                        revision={revision}
+                        onBack={() => {
+                          setGraphOrigin(null);
+                          setWorkspaceGraphOpen(false);
+                        }}
+                        onFocus={setGraphOrigin}
+                        onOpen={(node) => {
+                          setGraphOrigin(null);
+                          setWorkspaceGraphOpen(false);
+                          if (node.kind === "document") {
+                            setDocumentTarget({ id: node.id, key: Date.now() });
+                            setView("documents");
+                          } else if (node.kind === "plan") {
+                            scope("all", "all", node.id);
+                            setView("tickets");
+                          } else {
+                            const reference = node.label.match(/^T-\d+/)?.[0];
+                            if (reference) {
+                              setSelected(reference);
+                              setView("tickets");
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  )}
+                  {graphOrigin && graphOrigin !== "__workspace__" && (
                     <ContextGraph
                       origin={graphOrigin}
-                      onBack={() => setGraphOrigin(null)}
+                      onBack={() =>
+                        setGraphOrigin(
+                          workspaceGraphOpen ? "__workspace__" : null,
+                        )
+                      }
                       onOpen={(node) => {
                         setGraphOrigin(null);
+                        setWorkspaceGraphOpen(false);
                         if (node.kind === "document") {
                           setDocumentTarget({ id: node.id, key: Date.now() });
                           setView("documents");

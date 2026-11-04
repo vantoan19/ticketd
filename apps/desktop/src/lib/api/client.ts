@@ -189,6 +189,25 @@ export const contextGraphSchema = z.object({
   max_work: z.number(),
 });
 export type ContextGraph = z.infer<typeof contextGraphSchema>;
+export const workspaceGraphSchema = contextGraphSchema
+  .pick({ nodes: true, edges: true, omitted: true })
+  .extend({
+    next_cursor: z.string().nullable(),
+    omitted_groups: z.array(z.string()),
+    node_tags: z.record(z.string(), z.string()),
+  });
+export type WorkspaceGraph = z.infer<typeof workspaceGraphSchema>;
+export type WorkspaceGraphRequest = {
+  cursor: string | null;
+  search: string | null;
+  kind: string | null;
+  tag: string | null;
+  relationship: string | null;
+  include_details: boolean;
+  adjacency_limit: number;
+  visible_ids: string[];
+  hydrate_only: boolean;
+};
 
 export const graphSchema = z.object({
   nodes: z.array(
@@ -378,6 +397,11 @@ export type BulkChange = {
   remove_tags?: string[];
 };
 export const client = {
+  async workspaceGraph(request: WorkspaceGraphRequest) {
+    return workspaceGraphSchema.parse(
+      await invoke("workspace_graph", { request }),
+    );
+  },
   async contextGraph(reference: string, includeDetails: boolean) {
     return contextGraphSchema.parse(
       await invoke("context_graph", { reference, includeDetails }),

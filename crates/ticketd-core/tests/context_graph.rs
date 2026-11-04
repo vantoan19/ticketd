@@ -97,3 +97,210 @@ fn graph_identifies_limited_relationship_groups() {
             .any(|group| group == "membership")
     );
 }
+
+#[test]
+fn workspace_graph_search_filters_and_continues() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Searchable needle").unwrap();
+    workspace
+        .create_document(Some("Other"), "needle in body")
+        .unwrap();
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            search: Some("needle".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == ticket.id));
+    assert_eq!(graph.nodes.len(), 2);
+}
+
+#[test]
+fn workspace_pages_filter_tags_and_keep_details_hidden_until_requested() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Owner").unwrap();
+    let detail = workspace
+        .add_activity_with_details(&ticket.reference, "Update", None, Some("Details"), None)
+        .unwrap()
+        .supporting_document_id
+        .unwrap();
+    let doc = workspace.create_document(Some("Tagged"), "").unwrap();
+    workspace.set_document_tag(&doc.id, "theme", true).unwrap();
+    let tagged = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            tag: Some("theme".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(tagged.nodes.len(), 1);
+    assert_eq!(tagged.nodes[0].id, doc.id);
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert!(!graph.nodes.iter().any(|node| node.id == detail));
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            include_details: true,
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == detail));
+    for index in 0..55 {
+        workspace
+            .create_document(Some(&format!("Page {index}")), "")
+            .unwrap();
+    }
+    let first = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert!(first.omitted);
+    let second = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            cursor: first.next_cursor.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(
+        first
+            .nodes
+            .iter()
+            .all(|node| second.nodes.iter().all(|other| other.id != node.id))
+    );
+}
+
+#[test]
+fn graph_uses_updated_untitled_document_heading() {
+    use ticketd_core::{DocumentPatch, WorkspaceGraphRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let doc = workspace
+        .create_document(None, "\n  First heading\nBody")
+        .unwrap();
+    workspace
+        .change_document(
+            &doc.id,
+            DocumentPatch {
+                body: Some("\n Second heading\nMore".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == doc.id)
+            .unwrap()
+            .label,
+        "Second heading"
+    );
+}
+
+#[test]
+fn workspace_expands_omitted_relationships_under_a_fixed_budget() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let mut tickets = Vec::new();
+    for i in 0..20 {
+        tickets.push(workspace.create_ticket(&format!("Ticket {i}")).unwrap());
+    }
+    for i in 0..tickets.len() {
+        for j in i + 1..tickets.len() {
+            workspace
+                .add_dependency(&tickets[i].reference, &tickets[j].reference, None)
+                .unwrap();
+        }
+    }
+    let initial = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert!(initial.omitted_groups.iter().any(|kind| kind == "blocks"));
+    let expanded = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            adjacency_limit: 12,
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(expanded.edges.len() > initial.edges.len());
+    assert!(expanded.omitted);
+}
+
+#[test]
+fn workspace_includes_connections_between_loaded_candidate_pages() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for index in 0..60 {
+        workspace.create_ticket(&format!("Ticket {index}")).unwrap();
+    }
+    let first = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    let second = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            cursor: first.next_cursor.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+    let reference = |label: &str| label.split(' ').next().unwrap().to_owned();
+    let a = reference(&first.nodes[0].label);
+    let b = reference(&second.nodes[0].label);
+    workspace.add_dependency(&a, &b, None).unwrap();
+    let combined = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            cursor: first.next_cursor,
+            visible_ids: first.nodes.iter().map(|node| node.id.clone()).collect(),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(combined.edges.iter().any(|edge| edge.kind == "blocks"
+        && edge.source == first.nodes[0].id
+        && edge.target == second.nodes[0].id));
+}
+
+#[test]
+fn workspace_search_index_tracks_ticket_and_plan_edits() {
+    use ticketd_core::{TicketPatch, WorkspaceGraphRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Before").unwrap();
+    let plan = workspace.create_plan("Plan").unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("newly indexed phrase".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .set_plan_purpose(&plan.id, "newly indexed phrase")
+        .unwrap();
+    let request = WorkspaceGraphRequest {
+        search: Some("newly indexed phrase".into()),
+        ..Default::default()
+    };
+    let graph = workspace.workspace_graph(&request).unwrap();
+    assert!(graph.nodes.iter().any(|node| node.id == ticket.id));
+    assert!(graph.nodes.iter().any(|node| node.id == plan.id));
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("replaced".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let graph = workspace.workspace_graph(&request).unwrap();
+    assert!(!graph.nodes.iter().any(|node| node.id == ticket.id));
+}
