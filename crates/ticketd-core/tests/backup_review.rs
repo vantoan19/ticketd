@@ -280,3 +280,19 @@ fn backup_inspection_rejects_missing_context_index() {
     };
     assert!(tables.contains(&"context_mentions".to_owned()));
 }
+
+#[test]
+fn incomplete_context_schema_cannot_replace_healthy_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for table in ["document_tags", "document_pins", "activity_mentions", "document_fts", "ticket_graph_fts", "plan_graph_fts"] {
+        let backup = dir.path().join(format!("{table}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup).unwrap().execute_batch(&format!("DROP TABLE {table}")).unwrap();
+        let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check else { panic!("missing {table} accepted") };
+        assert!(tables.contains(&table.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
