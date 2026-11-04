@@ -27,13 +27,26 @@ function DocumentSurface({
       }}
     >
       <DialogContent
-        className="document-dialog"
+        className="document-dialog inset-0 max-w-none translate-x-0 translate-y-0 sm:max-w-none md:inset-y-2 md:right-2 md:left-auto md:w-[min(560px,calc(100vw-16px))]"
         showCloseButton={false}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         {children}
       </DialogContent>
     </Dialog>
+  );
+}
+function DocumentDate({ value }: { value: string }) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? (
+    value
+  ) : (
+    <time dateTime={value} title={value}>
+      {date.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })}
+    </time>
   );
 }
 type Snapshot = { title: string; body: string; suggestion: string | null };
@@ -77,6 +90,7 @@ export function DocumentEditor({
   const [writing, setWriting] = useState(initial === null);
   const [linkTarget, setLinkTarget] = useState("");
   const [ticketTitle, setTicketTitle] = useState("");
+  const [creatingFromDocument, setCreatingFromDocument] = useState(false);
   const [links, setLinks] = useState<
     Awaited<ReturnType<typeof documents.links>>
   >([[], []]);
@@ -464,9 +478,17 @@ export function DocumentEditor({
             <h2>Document details</h2>
             <dl>
               <dt>Updated</dt>
-              <dd>{savedDocument?.updated_at ?? initial.updated_at}</dd>
+              <dd>
+                <DocumentDate
+                  value={savedDocument?.updated_at ?? initial.updated_at}
+                />
+              </dd>
               <dt>Created</dt>
-              <dd>{savedDocument?.created_at ?? initial.created_at}</dd>
+              <dd>
+                <DocumentDate
+                  value={savedDocument?.created_at ?? initial.created_at}
+                />
+              </dd>
               {initial.origin_ticket && (
                 <>
                   <dt>Origin</dt>
@@ -568,52 +590,91 @@ export function DocumentEditor({
                         {label}
                         {isTrashed ? " (Trash)" : ""}
                       </Button>
-                      <p>{link.passage}</p>
+                      <DocumentNavigation.Provider
+                        value={
+                          onOpenDocument
+                            ? (id) => navigate(() => onOpenDocument(id))
+                            : null
+                        }
+                      >
+                        <PlanNavigation.Provider
+                          value={
+                            onOpenPlan
+                              ? (id) => navigate(() => onOpenPlan(id))
+                              : null
+                          }
+                        >
+                          <div className="document-passage">
+                            <MarkdownDocument
+                              source={link.passage}
+                              select={
+                                onOpenTicket
+                                  ? (reference) =>
+                                      navigate(() => onOpenTicket(reference))
+                                  : undefined
+                              }
+                            />
+                          </div>
+                        </PlanNavigation.Provider>
+                      </DocumentNavigation.Provider>
                     </li>
                   );
                 }),
               )}
             </ul>
-            <Field>
-              <FieldLabel htmlFor="ticket-from-document">
-                New ticket title
-              </FieldLabel>
-              <Input
-                id="ticket-from-document"
-                value={ticketTitle}
-                onChange={(event) => setTicketTitle(event.target.value)}
-              />
-            </Field>
-            <Button
-              disabled={trashed || transitioning || !ticketTitle.trim()}
-              onClick={() => {
-                if (creatingTicket.current) return;
-                if (
-                  !ticketRequest.current ||
-                  ticketRequest.current.title !== ticketTitle
-                )
-                  ticketRequest.current = {
-                    title: ticketTitle,
-                    id: crypto.randomUUID(),
-                  };
-                creatingTicket.current = true;
-                void documents
-                  .createTicket(
-                    initial.id,
-                    ticketTitle,
-                    ticketRequest.current.id,
-                  )
-                  .then((ticket) =>
-                    navigate(() => onOpenTicket?.(ticket.reference)),
-                  )
-                  .catch((error: unknown) => setLinkError(String(error)))
-                  .finally(() => {
-                    creatingTicket.current = false;
-                  });
-              }}
+            {!creatingFromDocument && (
+              <Button
+                variant="outline"
+                onClick={() => setCreatingFromDocument(true)}
+              >
+                Create ticket
+              </Button>
+            )}
+            <div
+              hidden={!creatingFromDocument}
+              className="document-create-ticket"
             >
-              Create ticket
-            </Button>
+              <Field>
+                <FieldLabel htmlFor="ticket-from-document">
+                  New ticket title
+                </FieldLabel>
+                <Input
+                  id="ticket-from-document"
+                  value={ticketTitle}
+                  onChange={(event) => setTicketTitle(event.target.value)}
+                />
+              </Field>
+              <Button
+                disabled={trashed || transitioning || !ticketTitle.trim()}
+                onClick={() => {
+                  if (creatingTicket.current) return;
+                  if (
+                    !ticketRequest.current ||
+                    ticketRequest.current.title !== ticketTitle
+                  )
+                    ticketRequest.current = {
+                      title: ticketTitle,
+                      id: crypto.randomUUID(),
+                    };
+                  creatingTicket.current = true;
+                  void documents
+                    .createTicket(
+                      initial.id,
+                      ticketTitle,
+                      ticketRequest.current.id,
+                    )
+                    .then((ticket) =>
+                      navigate(() => onOpenTicket?.(ticket.reference)),
+                    )
+                    .catch((error: unknown) => setLinkError(String(error)))
+                    .finally(() => {
+                      creatingTicket.current = false;
+                    });
+                }}
+              >
+                Create ticket
+              </Button>
+            </div>
           </section>
         )}
       </aside>

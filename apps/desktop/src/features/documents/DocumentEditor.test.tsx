@@ -455,3 +455,46 @@ it("preserves successive unrelated saved title changes under a body conflict", a
     false,
   ]);
 });
+
+it("shows readable linked context and opens a Document referenced in its passage", async () => {
+  vi.mocked(documents.links).mockResolvedValue([
+    [],
+    [
+      {
+        source_id: "source",
+        target_id: "d1",
+        source_kind: "document",
+        target_kind: "document",
+        source_label: "Source",
+        target_label: "Current",
+        source_trashed: false,
+        target_trashed: false,
+        passage: "See [related context](ticketd://document/related-id).",
+      },
+    ],
+  ]);
+  const open = vi.fn();
+  render(
+    <DocumentEditor
+      initial={{
+        id: "d1",
+        title: "Current",
+        body: "Body",
+        created_at: "2026-11-04T00:00:00Z",
+        updated_at: "2026-11-04T00:00:00Z",
+        trashed: false,
+      }}
+      onClose={vi.fn()}
+      onOpenDocument={open}
+    />,
+  );
+  const link = await screen.findByRole("button", { name: "related context" });
+  expect(screen.queryByText(/ticketd:\/\/document/)).toBeNull();
+  fireEvent.click(link);
+  expect(open).toHaveBeenCalledWith("related-id");
+  expect(
+    screen.queryByRole("textbox", { name: "New ticket title" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  expect(screen.getByLabelText("New ticket title")).toBeTruthy();
+});
