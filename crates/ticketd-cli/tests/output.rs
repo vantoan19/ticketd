@@ -726,6 +726,8 @@ fn context_graph_cli_reads_new_connections() {
     };
     run(&["create", "First"]);
     run(&["create", "Second"]);
+    run(&["create", "Third"]);
+    run(&["change", "T-2", "--body", "See T-3"]);
     run(&["change", "T-1", "--body", "See T-2"]);
     let graph = run(&["graph", "T-2", "--context"]);
     assert!(
@@ -741,6 +743,23 @@ fn context_graph_cli_reads_new_connections() {
             .unwrap()
             .iter()
             .any(|e| e["kind"] == "mention")
+    );
+    let center = run(&["graph", "T-1", "--context"]);
+    let second = center["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["label"].as_str().unwrap().contains("Second"))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let expanded = run(&["graph", "T-1", "--context", "--expand", second]);
+    assert!(
+        expanded["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["label"].as_str().unwrap().contains("Third"))
     );
 }
 

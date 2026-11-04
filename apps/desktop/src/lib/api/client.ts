@@ -183,6 +183,15 @@ export const contextGraphSchema = z.object({
     }),
   ),
   omitted: z.boolean(),
+  omitted_groups: z.array(z.string()),
+  continuations: z.array(
+    z.object({
+      anchor: z.string(),
+      group: z.number(),
+      kind: z.string(),
+      next_offset: z.number().nullable(),
+    }),
+  ),
   hidden_details: z.boolean(),
   max_nodes: z.number(),
   max_edges: z.number(),
@@ -400,6 +409,21 @@ export const client = {
   async workspaceGraph(request: WorkspaceGraphRequest) {
     return workspaceGraphSchema.parse(
       await invoke("workspace_graph", { request }),
+    );
+  },
+  async contextGraphExpanded(
+    reference: string,
+    includeDetails: boolean,
+    expandedIds: string[],
+    pages: { anchor: string; group: number; offset: number }[],
+  ) {
+    return contextGraphSchema.parse(
+      await invoke("context_graph_expanded", {
+        reference,
+        includeDetails,
+        expandedIds,
+        pages,
+      }),
     );
   },
   async contextGraph(reference: string, includeDetails: boolean) {

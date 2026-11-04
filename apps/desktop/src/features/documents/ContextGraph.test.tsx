@@ -10,10 +10,12 @@ vi.mock("@xyflow/react", () => ({
   Background: () => null,
   Controls: () => null,
 }));
-vi.mock("@/lib/api/client", () => ({ client: { contextGraph: vi.fn() } }));
+vi.mock("@/lib/api/client", () => ({
+  client: { contextGraphExpanded: vi.fn() },
+}));
 
 test("previews a connection and focuses it only on request", async () => {
-  vi.mocked(client.contextGraph).mockResolvedValue({
+  vi.mocked(client.contextGraphExpanded).mockResolvedValue({
     center: "one",
     nodes: [
       {
@@ -42,6 +44,8 @@ test("previews a connection and focuses it only on request", async () => {
       },
     ],
     omitted: false,
+    omitted_groups: [],
+    continuations: [],
     hidden_details: false,
     max_nodes: 50,
     max_edges: 300,
@@ -51,9 +55,24 @@ test("previews a connection and focuses it only on request", async () => {
   render(<ContextGraph origin="T-1" onBack={vi.fn()} onOpen={open} />);
   fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
   expect(screen.getByText("Read this", { exact: false })).toBeTruthy();
-  expect(client.contextGraph).toHaveBeenCalledTimes(1);
+  expect(client.contextGraphExpanded).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
   await waitFor(() =>
-    expect(client.contextGraph).toHaveBeenCalledWith("two", false),
+    expect(client.contextGraphExpanded).toHaveBeenCalledWith(
+      "two",
+      false,
+      [],
+      [],
+    ),
   );
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await waitFor(() =>
+    expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
+      "T-1",
+      false,
+      [],
+      [],
+    ),
+  );
+  expect(screen.getByRole("heading", { name: "Discovery" })).toBeTruthy();
 });
