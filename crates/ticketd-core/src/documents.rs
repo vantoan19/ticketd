@@ -27,6 +27,13 @@ pub struct DocumentSummary {
     pub id: String,
     pub heading: String,
     pub origin_ticket: Option<String>,
+    /// Short plain-text excerpt of the body, without Markdown markers.
+    #[serde(default)]
+    pub snippet: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +42,10 @@ pub struct DocumentSearchResult {
     pub heading: String,
     pub snippet: String,
     pub origin_ticket: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -85,6 +96,97 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
 
 // Limit headings in list results even when a document has a very long first line.
 pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), nullif(substr(trim((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 1, 200), ''), d.body_heading, 'Untitled')";
+/// Columns read by every Document list query; see `summary_from_row`.
+fn summary_columns() -> String {
+    format!(
+        "d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name))"
+    )
+}
+
+fn summary_from_row(
+    row: &rusqlite::Row<'_>,
+    query: Option<&str>,
+) -> rusqlite::Result<DocumentSummary> {
+    let body: String = row.get(3)?;
+    let tags: Option<String> = row.get(5)?;
+    Ok(DocumentSummary {
+        id: row.get(0)?,
+        heading: row.get(1)?,
+        origin_ticket: row.get(2)?,
+        snippet: plain_snippet(&body, query),
+        tags: tags
+            .map(|value| value.split('\u{1f}').map(str::to_owned).collect())
+            .unwrap_or_default(),
+        updated_at: row.get(4)?,
+    })
+}
+
+/// Plain text of the Markdown `body`, collapsed to one line. With a `query`, the excerpt
+/// is centred on its first match so a result shows why it matched.
+fn plain_snippet(body: &str, query: Option<&str>) -> String {
+    const LIMIT: usize = 160;
+    let mut text = String::new();
+    let mut fenced = false;
+    for line in body.lines() {
+        let line = line.trim();
+        if line.starts_with("```") || line.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced || line.is_empty() {
+            continue;
+        }
+        let line = line.trim_start_matches(['#', '>', ' ']);
+        let line = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .unwrap_or(line);
+        let line = line
+            .strip_prefix("[ ] ")
+            .or_else(|| line.strip_prefix("[x] "))
+            .unwrap_or(line);
+        let mut chars = line.chars().peekable();
+        let mut plain = String::new();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '*' | '_' | '`' | '\\' => {}
+                '!' if chars.peek() == Some(&'[') => {}
+                '[' => {}
+                ']' if chars.peek() == Some(&'(') => {
+                    for next in chars.by_ref() {
+                        if next == ')' {
+                            break;
+                        }
+                    }
+                }
+                ']' => {}
+                other => plain.push(other),
+            }
+        }
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(plain.trim());
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let start = query
+        .and_then(|needle| {
+            let lower: String = text.to_lowercase();
+            let byte = lower.find(&needle.to_lowercase())?;
+            // Lowercasing can change byte offsets; fall back to the start when it does.
+            (lower.len() == text.len()).then(|| text[..byte].chars().count())
+        })
+        .map_or(0, |at| at.saturating_sub(40));
+    let end = (start + LIMIT).min(chars.len());
+    let mut snippet: String = chars[start..end].iter().collect();
+    if start > 0 {
+        snippet.insert(0, '…');
+    }
+    if end < chars.len() {
+        snippet.push('…');
+    }
+    snippet
+}
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {
@@ -163,33 +265,27 @@ impl Workspace {
         offset: u32,
         include_support: bool,
     ) -> Result<Vec<DocumentSummary>, Error> {
+        let columns = summary_columns();
         let sql = format!(
-            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR d.kept = 1 OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
+            "SELECT {columns} FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR d.kept = 1 OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset, include_support], |row| {
-                Ok(DocumentSummary {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    origin_ticket: row.get(2)?,
-                })
+                Ok(summary_from_row(row, None)?)
             })?
             .collect::<Result<_, _>>()?)
     }
 
     pub fn pinned_documents(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
+        let columns = summary_columns();
         let sql = format!(
-            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 AND (d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?1 OFFSET ?2"
+            "SELECT {columns} FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 AND (d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset], |row| {
-                Ok(DocumentSummary {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    origin_ticket: row.get(2)?,
-                })
+                Ok(summary_from_row(row, None)?)
             })?
             .collect::<Result<_, _>>()?)
     }
@@ -217,8 +313,9 @@ impl Workspace {
             let Some(tag) = tag else {
                 return Ok(Vec::new());
             };
+            let columns = summary_columns();
             let sql = format!(
-                "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 AND (?4 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?2 OFFSET ?3"
+                "SELECT {columns} FROM document_tags t JOIN documents d ON d.id = t.document_id WHERE t.tag_name = ?1 AND d.trashed = 0 AND (?4 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?2 OFFSET ?3"
             );
             let mut statement = self.connection.prepare(&sql)?;
             return Ok(statement
@@ -230,11 +327,14 @@ impl Workspace {
                         include_support
                     ],
                     |row| {
+                        let summary = summary_from_row(row, None)?;
                         Ok(DocumentSearchResult {
-                            id: row.get(0)?,
-                            heading: row.get(1)?,
-                            snippet: String::new(),
-                            origin_ticket: row.get(2)?,
+                            id: summary.id,
+                            heading: summary.heading,
+                            snippet: summary.snippet,
+                            origin_ticket: summary.origin_ticket,
+                            tags: summary.tags,
+                            updated_at: summary.updated_at,
                         })
                     },
                 )?
@@ -242,19 +342,23 @@ impl Workspace {
         }
         let expression = format!("\"{}\"", query.replace('"', "\"\""));
         let tag = tag.map(|value| value.trim().to_lowercase());
+        let columns = summary_columns();
         let sql = format!(
-            "SELECT d.id, {HEADING}, substr(snippet(document_fts, -1, '', '', '…', 24), 1, 300), (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL OR d.kept = 1) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+            "SELECT {columns} FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL OR d.kept = 1) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(
                 params![expression, tag, limit.min(100), offset, include_support],
                 |row| {
+                    let summary = summary_from_row(row, Some(query))?;
                     Ok(DocumentSearchResult {
-                        id: row.get(0)?,
-                        heading: row.get(1)?,
-                        snippet: row.get(2)?,
-                        origin_ticket: row.get(3)?,
+                        id: summary.id,
+                        heading: summary.heading,
+                        snippet: summary.snippet,
+                        origin_ticket: summary.origin_ticket,
+                        tags: summary.tags,
+                        updated_at: summary.updated_at,
                     })
                 },
             )?
@@ -361,17 +465,14 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<DocumentSummary>, Error> {
+        let columns = summary_columns();
         let sql = format!(
-            "SELECT d.id, {HEADING}, (SELECT 'T-' || t.number FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id) FROM documents d WHERE d.trashed = 1 ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2"
+            "SELECT {columns} FROM documents d WHERE d.trashed = 1 ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset], |row| {
-                Ok(DocumentSummary {
-                    id: row.get(0)?,
-                    heading: row.get(1)?,
-                    origin_ticket: row.get(2)?,
-                })
+                Ok(summary_from_row(row, None)?)
             })?
             .collect::<Result<_, _>>()?)
     }

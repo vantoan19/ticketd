@@ -41,8 +41,11 @@ const summary = z.object({
   id: z.string(),
   heading: z.string(),
   origin_ticket: z.string().nullable().optional(),
+  snippet: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  updated_at: z.string().optional(),
 });
-const searchResult = summary.extend({ snippet: z.string() });
+const searchResult = summary;
 export type DocumentSummary = z.infer<typeof summary>;
 export type DocumentSearchResult = z.infer<typeof searchResult>;
 export const documents = {

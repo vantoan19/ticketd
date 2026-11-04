@@ -71,7 +71,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   expect(documents.trash).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
-  await screen.findByText("This Document is in Trash.");
+  await screen.findByText("In Trash");
   fireEvent.click(screen.getByRole("button", { name: "Back to work" }));
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),

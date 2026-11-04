@@ -70,7 +70,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   );
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   fireEvent.click(await screen.findByRole("button", { name: "Move to Trash" }));
-  await screen.findByText("This Document is in Trash.");
+  await screen.findByText("In Trash");
   fireEvent.click(screen.getByRole("button", { name: "Back to work" }));
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
@@ -134,7 +134,7 @@ it("offers a clear way back from an empty Document search", async () => {
   fireEvent.change(screen.getByLabelText("Search Documents"), {
     target: { value: "missing" },
   });
-  await screen.findByText("No Documents match your search or filters.");
+  await screen.findByText(/No Documents match .missing./);
   fireEvent.click(
     screen.getByRole("button", { name: "Clear search and filters" }),
   );
@@ -142,4 +142,75 @@ it("offers a clear way back from an empty Document search", async () => {
     (screen.getByLabelText("Search Documents") as HTMLInputElement).value,
   ).toBe("");
   expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+});
+
+it("shows snippet, tags and date per row, highlights matches and refocuses search on Clear", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([
+    {
+      id: "1",
+      heading: "Plan",
+      snippet: "First plan text",
+      tags: ["spec"],
+      updated_at: new Date().toISOString(),
+    },
+  ]);
+  vi.mocked(documents.search).mockResolvedValue([
+    { id: "1", heading: "Plan", snippet: "First plan text", tags: ["spec"] },
+  ]);
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  expect(await screen.findByText("First plan text")).toBeTruthy();
+  expect(screen.getByText("Today")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Search Documents"), {
+    target: { value: "plan" },
+  });
+  await screen.findByText("1 result");
+  expect(document.querySelector("mark")?.textContent).toBe("plan");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Clear search and filters" }),
+  );
+  expect(document.activeElement).toBe(
+    screen.getByLabelText("Search Documents"),
+  );
+});
+
+it("disables tagging and ticket creation for a trashed Document", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.open).mockResolvedValue({
+    id: "1",
+    title: "Old",
+    body: "x",
+    created_at: "now",
+    updated_at: "now",
+    trashed: true,
+  });
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={{ id: "1", key: 1 }}
+    />,
+  );
+  await screen.findByText("In Trash");
+  expect(
+    (screen.getByRole("button", { name: "Add tag" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (screen.getByRole("button", { name: "Create ticket" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
 });

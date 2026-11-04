@@ -46,7 +46,7 @@ afterEach(() => {
 it("returns without creating an untouched capture", async () => {
   const close = vi.fn();
   render(<DocumentEditor initial={null} onClose={close} />);
-  fireEvent.click(screen.getByText("Back to work"));
+  fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
   expect(documents.save).not.toHaveBeenCalled();
 });
@@ -66,8 +66,8 @@ it("keeps a failed capture open and retries the same request before returning", 
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
-  fireEvent.click(screen.getByText("Back to work"));
-  await screen.findByText(/Could not save/);
+  fireEvent.click(screen.getByText("Done"));
+  await screen.findByText(/couldn’t save your changes/);
   expect(close).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Retry"));
   await waitFor(() => expect(documents.save).toHaveBeenCalledTimes(2));
@@ -75,7 +75,7 @@ it("keeps a failed capture open and retries the same request before returning", 
     vi.mocked(documents.save).mock.calls[1],
   );
   await screen.findByText("Saved locally");
-  fireEvent.click(screen.getByText("Back to work"));
+  fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
 });
 it("notices saved changes beneath a focused draft and offers reload", async () => {
@@ -138,9 +138,7 @@ it("preserves an unrelated saved title when saving over a conflicting body", asy
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Save over saved content" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
   await act(async () => {});
   expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
     "External title",
@@ -166,7 +164,7 @@ it("suggests only the current ticket and lets it be removed before capture", asy
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
   });
-  fireEvent.click(screen.getByText("Back to work"));
+  fireEvent.click(screen.getByText("Done"));
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Thought");
 });
@@ -174,7 +172,20 @@ it("inserts a validated link into the draft", async () => {
   vi.mocked(documents.linkMarkdown).mockResolvedValue(
     "[T-4](ticketd://ticket/T-4)",
   );
-  render(<DocumentEditor initial={null} onClose={vi.fn()} />);
+  render(
+    <DocumentEditor
+      initial={{
+        id: "d1",
+        title: "Doc",
+        body: "",
+        created_at: "now",
+        updated_at: "now",
+        trashed: false,
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Link target"), {
     target: { value: "T-4" },
   });
@@ -239,7 +250,7 @@ it("opens a trashed Document readably and restores it", async () => {
     trashed: false,
   });
   render(<DocumentEditor initial={original} onClose={vi.fn()} />);
-  expect(screen.getByText("This Document is in Trash.")).toBeTruthy();
+  expect(screen.getByText("In Trash")).toBeTruthy();
   expect(screen.getByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   expect(screen.getByLabelText("Optional title")).toHaveProperty(
@@ -273,7 +284,7 @@ it("keeps capture typing unchanged while saving the suggested connection", async
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Thought" },
   });
-  fireEvent.click(screen.getByText("Back to work"));
+  fireEvent.click(screen.getByText("Done"));
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(
     "Thought\n\n[T-12](ticketd://ticket/T-12)",
@@ -445,9 +456,7 @@ it("preserves successive unrelated saved title changes under a body conflict", a
   await act(async () => {
     await vi.advanceTimersByTimeAsync(4000);
   });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Save over saved content" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
   await act(async () => {});
   expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
     "External 2",
@@ -497,4 +506,44 @@ it("shows readable linked context and opens a Document referenced in its passage
   ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   expect(screen.getByLabelText("New ticket title")).toBeTruthy();
+});
+
+it("lists each connected item once and names Plans that use the Document as spec", async () => {
+  const document = {
+    id: "d1",
+    title: "Spec",
+    body: "x",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  const link = (source: string, target: string) => ({
+    source_id: source,
+    target_id: target,
+    source_kind: source === "d1" ? "document" : "ticket",
+    target_kind: target === "d1" ? "document" : "ticket",
+    source_label: source === "d1" ? "Spec" : "T-4",
+    target_label: target === "d1" ? "Spec" : "T-4",
+    source_trashed: false,
+    target_trashed: false,
+    passage: "mention",
+  });
+  vi.mocked(documents.links).mockResolvedValue([
+    [link("d1", "t4")],
+    [
+      link("t4", "d1"),
+      {
+        ...link("p1", "d1"),
+        source_kind: "plan",
+        source_label: "Roadmap",
+        passage: "",
+      },
+    ],
+  ]);
+  render(<DocumentEditor initial={document} onClose={vi.fn()} />);
+  expect(await screen.findAllByText("Links to and linked from")).toHaveLength(
+    1,
+  );
+  expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Spec of Roadmap" })).toBeTruthy();
 });

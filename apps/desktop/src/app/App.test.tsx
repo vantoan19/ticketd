@@ -1640,3 +1640,12 @@ test("returns to local graph state after opening an item", async () => {
     ).checked,
   ).toBe(true);
 });
+
+test("opens Capture from anywhere with the global shortcut", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    bridgeDefault(command),
+  );
+  render(<App />);
+  fireEvent.keyDown(window, { key: "N", shiftKey: true, ctrlKey: true });
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+});
