@@ -204,7 +204,15 @@ export function ContextGraph({
           <input
             type="checkbox"
             checked={includeDetails}
-            onChange={(event) => setIncludeDetails(event.target.checked)}
+            onChange={(event) => {
+              const include = event.target.checked;
+              if (!include) {
+                setExpandedIds([]);
+                setPages([]);
+                setGraph(null);
+              }
+              setIncludeDetails(include);
+            }}
           />{" "}
           Include Activity details
         </label>
