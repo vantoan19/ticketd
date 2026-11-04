@@ -747,7 +747,7 @@ fn opened_untitled_document_exposes_its_bounded_heading() {
 #[test]
 fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ() {
     let dir = tempfile::tempdir().unwrap();
-    let mut workspace = Workspace::open(&dir.path().join("workspace.sqlite3")).unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let first = workspace
         .create_document(
             Some("Plan"),

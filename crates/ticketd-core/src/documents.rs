@@ -273,7 +273,7 @@ impl Workspace {
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset, include_support], |row| {
-                Ok(summary_from_row(row, None)?)
+                summary_from_row(row, None)
             })?
             .collect::<Result<_, _>>()?)
     }
@@ -286,7 +286,7 @@ impl Workspace {
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset], |row| {
-                Ok(summary_from_row(row, None)?)
+                summary_from_row(row, None)
             })?
             .collect::<Result<_, _>>()?)
     }
@@ -473,7 +473,7 @@ impl Workspace {
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
             .query_map(params![limit.min(100), offset], |row| {
-                Ok(summary_from_row(row, None)?)
+                summary_from_row(row, None)
             })?
             .collect::<Result<_, _>>()?)
     }
