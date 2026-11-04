@@ -788,3 +788,69 @@ fn workspace_context_graph_cli_filters_indexed_search() {
     let graph = run(&["graph", "--context", "--workspace", "--search", "Unique"]);
     assert_eq!(graph["nodes"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn activity_and_document_commands_replay_by_request_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| -> serde_json::Value {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    run(&["create", "Outcome"]);
+    let add = [
+        "activity",
+        "add",
+        "T-1",
+        "--brief",
+        "Once",
+        "--request-id",
+        "a-1",
+    ];
+    let first = run(&add);
+    assert_eq!(run(&add), first);
+    assert_eq!(first["brief"], "Once");
+    let feed = run(&["activity", "list", "T-1"]);
+    assert_eq!(
+        feed.as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["type"] == "authored")
+            .count(),
+        1
+    );
+    let id = first["id"].as_str().unwrap();
+    let edit = [
+        "activity",
+        "edit",
+        "T-1",
+        id,
+        "--brief",
+        "Twice",
+        "--request-id",
+        "e-1",
+    ];
+    assert_eq!(run(&edit), run(&edit));
+    let create = [
+        "document",
+        "create",
+        "--body",
+        "Body",
+        "--request-id",
+        "d-1",
+    ];
+    let document = run(&create);
+    assert_eq!(run(&create), document);
+    assert_eq!(document["body"], "Body");
+}

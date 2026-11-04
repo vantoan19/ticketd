@@ -20,7 +20,7 @@ The interface should feel composed, legible, and predictable. A person should id
 
 Use three levels of emphasis:
 
-1. **Work content:** ticket titles, descriptions, notes, and meaningful results. These have the strongest text contrast and the largest share of the screen.
+1. **Work content:** ticket titles, descriptions, updates, and meaningful results. These have the strongest text contrast and the largest share of the screen.
 2. **Context:** status, project, Plan, relationships, and evidence. These stay readable and close to the content they describe.
 3. **Operations:** follow, reminder configuration, filters, editing controls, and administrative actions. These have compact triggers and reveal their forms when requested.
 
@@ -29,7 +29,7 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 ### Composition rules
 
 - Establish grouping with alignment and spacing first. Use a shadow boundary where navigation or independently scrolling planes meet. Separate document sections with spacing.
-- Use flat document sections. Do not wrap each property, note, empty state, or relationship type in its own card. The one exception is content owned by an external source, which sits in read-only source cards (see Documents and activity).
+- Use flat document sections. Do not wrap each property, update, empty state, or relationship type in its own card. The one exception is content owned by an external source, which sits in read-only source cards (see Documents and activity).
 - Give each action surface one primary action. The workspace's New ticket action and a focused dialog's submit action may coexist.
 - Keep headings, body text, inputs, and section actions on consistent left and right edges.
 - Keep small supporting text readable. Do not use low contrast, tiny text, or excessive truncation to make a screen seem cleaner.
@@ -133,7 +133,7 @@ Bundle Geist Sans and Geist Mono locally. Use the reference’s actual 400, 500,
 
 Use the source’s form tokens for shared inputs: 14px/20px default and 16px/24px large. Its observed native input size is 13.3px; ticketd’s themed form controls use the explicit 14px form token rather than relying on browser-native metrics. Root text size is 16px, so the reference’s `.875rem` form size resolves to 14px.
 
-Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation, ticket rows, descriptions, and notes are 14px/20px in the working panes. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
+Do not shrink the entire workspace to a 13px root or scale down type to fit an extra pane. Choose the appropriate existing role instead: captions are 12px, navigation, ticket rows, descriptions, and updates are 14px/20px in the working panes. Semibold is reserved for display/section-title emphasis; small section headings use the real medium weight.
 
 Authored headings use these same roles: first-level headings may use the 32px section-title role, with lower levels using the 14px heading roles and spacing to express hierarchy. The ticket title remains the strongest application heading through placement. Preserve authored strong emphasis using the available semibold face without changing all surrounding interface labels to semibold.
 
@@ -225,7 +225,7 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 │ Projects  ⚙  │ │ ◌ In review    1     +  │ └──────────────────────┘  │ Tags        │ │
 │ Plans     ⚙  │ │ ◌ T-44 Ticket title  #91│ Subtickets   ▬▬ 1 of 2    │ Relations   │ │
 │ Archived …   │ │ ○ Todo         3     +  │ GitHub conversation       │ Attention   │ │
-│              │ │ ○ T-45 Ticket title     │ Notes and history         │             │ │
+│              │ │ ○ T-45 Ticket title     │ Activity                  │             │ │
 │ ● GitHub     │ └─────────────────────────┴───────────────────────────┴─────────────┘ │
 │ Trash        │                                                                       │
 │ Settings     │                                                                       │
@@ -248,7 +248,7 @@ The drawing describes hierarchy, not additional duplicate search fields. Search 
 | Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                          |
 | Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context         |
 
-List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty note editor must not push the title down.
+List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
 
 ### Responsive rules
 
@@ -307,39 +307,39 @@ Search retains its query while opening details. Filter controls show active cons
 5. **Subtickets:** directly under the description, a heading with a compact neutral progress bar and “1 of 2 done”, rows with status icon, reference, title, and status word, and Add subticket. On an externally owned ticket, a caption states that subtickets stay local.
 6. **Evidence and backlinks:** flat sections with concise existing information and contextual add/edit actions.
 7. **Source conversation:** tickets that have an external source. The source’s comments and events, read-only, with a link to comment at the source. After ownership is taken the retrieved conversation stays, as the history of the source; it is no longer refreshed.
-8. **Notes and history:** authored notes, distinguishable recorded changes, and explicit note submission. On an externally owned ticket, a caption states that notes stay in ticketd and are never sent to the source.
+8. **Activity:** authored updates, distinguishable recorded changes, and explicit update submission, with an All | Updates toggle. Activity follows the description; empty relationship sections are folded away. On an externally owned ticket, a caption states that updates stay in ticketd and are never sent to the source.
 
-For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored note, with its relative reporting time and supplied editing agent, and opens that note; with none it says “No update reported”. Editing an older note does not make it the latest report.
+For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored update, with its relative reporting time and supplied editing agent, and opens that update; with none it says “No update reported”. Editing an older update does not make it the latest report.
 
 The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
 
 In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
 
-Use 8px from title to state line and 24px from state line to the description. Use 24px between major reading sections and 32px before the source conversation and the notes. Use section spacing instead of divider lines; shadow boundaries belong to pane edges, floating surfaces, and source cards.
+Use 8px from title to state line and 24px from state line to the description. Use 24px between major reading sections and 32px before the source conversation and Activity. Use section spacing instead of divider lines; shadow boundaries belong to pane edges, floating surfaces, and source cards.
 
 A save state belongs next to the edited content, in 12px supporting text. Stable Saved feedback must not take an entire standalone section. Pending save, Saving, and failures remain visible and accessible. Never hide a failure to achieve a cleaner screenshot.
 
 ### Visibility and action placement
 
-| Information/action       | Default presentation                                               | Editing surface                                      |
-| ------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------- |
-| Follow                   | Labeled toggle in the rail’s Attention section                     | Immediate action with pending/error feedback         |
-| Reminder                 | Remind me trigger, or a short scheduled-time summary, in Attention | Focused popover; expand to sheet when space requires |
-| Status/project/Plan/tags | Labeled values in the property rail                                | Anchored picker; explicit clear/add/remove choices   |
-| Source                   | Rail Source section: identity link, freshness, ownership, actions  | Explicit Refresh, Publish, Retry, or Take ownership  |
-| Description              | Rendered document, or an unobtrusive Add description action        | In-place rich editor for local tickets only          |
-| Parent/subtickets        | Subtickets with progress under the description; parent in the rail | Search/select action near the group heading          |
-| Blocking dependencies    | Rail Relationships with each blocker’s status; reason in the row   | Focused add/remove workflow and graph access         |
-| Related/discovered work  | Rail Relationships grouped by relationship meaning                 | Add relationship action with explicit direction      |
-| Duplicate                | Duplicate status, with the canonical ticket in Relationships       | Mark as duplicate workflow in the actions menu       |
-| Evidence                 | Named records with type, value/link, and date                      | Add evidence or Edit opens a focused form            |
-| Backlinks                | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                       |
-| Source conversation      | External comments and events in source order, read-only            | Comment at the source                                |
-| Activity                 | Notes and history readable in one chronological area               | Add note; edit/delete beside the relevant note       |
+| Information/action       | Default presentation                                               | Editing surface                                         |
+| ------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| Follow                   | Labeled toggle in the rail’s Attention section                     | Immediate action with pending/error feedback            |
+| Reminder                 | Remind me trigger, or a short scheduled-time summary, in Attention | Focused popover; expand to sheet when space requires    |
+| Status/project/Plan/tags | Labeled values in the property rail                                | Anchored picker; explicit clear/add/remove choices      |
+| Source                   | Rail Source section: identity link, freshness, ownership, actions  | Explicit Refresh, Publish, Retry, or Take ownership     |
+| Description              | Rendered document, or an unobtrusive Add description action        | In-place rich editor for local tickets only             |
+| Parent/subtickets        | Subtickets with progress under the description; parent in the rail | Search/select action near the group heading             |
+| Blocking dependencies    | Rail Relationships with each blocker’s status; reason in the row   | Focused add/remove workflow and graph access            |
+| Related/discovered work  | Rail Relationships grouped by relationship meaning                 | Add relationship action with explicit direction         |
+| Duplicate                | Duplicate status, with the canonical ticket in Relationships       | Mark as duplicate workflow in the actions menu          |
+| Evidence                 | Named records with type, value/link, and date                      | Add evidence or Edit opens a focused form               |
+| Backlinks                | Count and source excerpts; expandable when lengthy                 | Navigate to the source passage                          |
+| Source conversation      | External comments and events in source order, read-only            | Comment at the source                                   |
+| Activity                 | Updates and history readable in one chronological area             | Write an update; edit/delete beside the relevant update |
 
 Relationships are one flat rail section, grouped by meaning: parent, blocked by, blocks, related, discovered while, and duplicate of. Use at most one disclosure level for supporting content. Do not nest Relationships → category → form disclosures. Existing blockers and duplicate identity must not be buried behind a collapsed group. Empty optional groups collapse into a single Add relationship action; do not stack “No parent,” “No subtickets,” “No prerequisites,” and “No related tickets.”
 
-Destructive actions belong in a labeled menu or focused review surface. Describe the result precisely: Trash ticket, Remove relationship, or Delete note. Duplicate handling is not a generic delete operation.
+Destructive actions belong in a labeled menu or focused review surface. Describe the result precisely: Trash ticket, Remove relationship, or Delete update. Duplicate handling is not a generic delete operation.
 
 ### Externally owned tickets
 
@@ -347,7 +347,7 @@ A ticket is either Local or owned by an external source. Retained provenance is 
 
 - **Ownership cues:** show the owner in three places: the list row’s source pill, the detail header’s source link, and the rail’s Source section. A local ticket has no source pill.
 - **Read-only content:** the title, description, and source comments of an externally owned ticket are read-only. Do not show editing affordances on them. The description card’s header says Read-only and links to edit at the source.
-- **Local progress:** while the issue is open, the Status picker offers Todo, In progress, and In review, with a caption that closing states follow the source. Once it is closed, the picker’s choices are disabled and its caption explains that reopening at the source returns the ticket to Todo. The rail’s Status note says that progress is kept in ticketd.
+- **Local progress:** while the issue is open, the Status picker offers Todo, In progress, and In review, with a caption that closing states follow the source. Once it is closed, the picker’s choices are disabled and its caption explains that reopening at the source returns the ticket to Todo. The rail’s Status caption says that progress is kept in ticketd.
 - **Freshness:** the rail shows “Synced 4 min ago” beside a green dot and says which fields the source owns. While refreshing, the list header and the rail read “Refreshing GitHub…” without a dot.
 - **Unavailable source:** a recessed notice at the top of the document column states what failed and since when, says that nothing was deleted or completed, and offers Retry and Take ownership…. The list row and the rail carry the orange Source unavailable dot.
 - **Publishing:** an eligible local ticket (Todo, In progress, or In review) offers Publish to GitHub… in the rail’s Source section; an ineligible one states why. Publication goes through a dialog that previews the issue exactly as it will be sent.
@@ -362,13 +362,13 @@ Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with
 - Code uses a recessed surface, 12px padding, language label, and Copy action. Scroll code horizontally inside its boundary. Long prose and URLs wrap.
 - Tables stay within a labeled horizontal scroll region. Preserve cell readability instead of shrinking the whole table.
 - Mermaid diagrams fit the reading column and provide source and expand actions. Rendering errors stay beside the diagram; source remains editable and savable.
-- A note is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
-- Content owned by an external source is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The card is the provenance signal; locally authored notes stay unboxed.
+- An update is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
+- Content owned by an external source is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The card is the provenance signal; locally authored updates stay unboxed.
 - The source conversation shows the source’s comments as source cards and its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, as compact rows: a 28px circular icon, the actor, the event, and the time.
-- Automatic history is visually quieter than authored notes. Group its label, changed values, and time into a compact row.
-- The empty note composer begins as a compact Add a note affordance. Once opened, keep the draft and tools available until submission or explicit discard; blur is not submission.
+- Automatic history is visually quieter than authored updates. Group its label, changed values, and time into a compact row.
+- The empty update composer begins as a one-line “Write an update…” affordance. Once opened, keep the draft available until submission or explicit discard, with “Add details” and “Attach Document” in one row and “Draft kept on this device” beside Post; blur is not submission. Whitespace-only text cannot be posted. Details are the Document that explains an update; attaching a Document uses a title-search picker, never a raw ID.
 
-Description autosave and explicit Add note submission remain different interactions. External CLI updates refresh saved values while preserving drafts. A conflict notice offers Reload saved content and Save my draft, with enough text to explain the overwrite. Do not move the notice out of view when a refresh occurs.
+Description autosave and explicit Post update submission remain different interactions. External CLI updates refresh saved values while preserving drafts. A conflict notice offers Reload saved content and Save my draft, with enough text to explain the overwrite. Do not move the notice out of view when a refresh occurs.
 
 ## 9. Attention, reminders, evidence, and duplicate review
 
@@ -376,7 +376,7 @@ Description autosave and explicit Add note submission remain different interacti
 
 Use rows with a consistent grid: unread indicator, ticket reference/title, event summary, then time and read-state action. Title and summary are separate lines. Show human language such as “Status changed to In review”; never expose event keys such as `relationship:discovered-while`.
 
-Unread rows have stronger title emphasis and an explicit state. Read rows remain legible. Keep Mark shown as read near the view heading; per-row controls appear on focus as well as hover. Navigation to a note reveals and focuses the relevant content without silently changing ticket status. Follow and reminder settings remain personal to the local person.
+Your own updates never notify you. Opening an entry marks it read; an entry for a deleted update says “Update deleted”. Unread rows have stronger title emphasis and an explicit state. Read rows remain legible. Keep Mark shown as read near the view heading; per-row controls appear on focus as well as hover. Navigation to an update reveals and focuses the relevant content without silently changing ticket status. Follow and reminder settings remain personal to the local person.
 
 ### Reminders
 
@@ -486,7 +486,7 @@ Review a complete workflow with realistic content, not only an empty screenshot.
 
 - Light and dark views at 1440 × 900, 1280 × 800, 1024 × 768, and a 390 × 844 narrow-window stress case.
 - Split, expanded, and single-pane detail modes, including navigation back to the same list position.
-- Short and multiline titles, a long description, code, a table, a Mermaid diagram, notes, blockers, evidence, and empty optional content.
+- Short and multiline titles, a long description, code, a table, a Mermaid diagram, updates, blockers, evidence, and empty optional content.
 - Bulk selection, open pickers, reminder editing, duplicate dependency review, save errors, and external-change notices.
 - Keyboard focus, selected and hovered rows, disabled/pending controls, and 200% zoom.
 - Externally owned tickets that are open, closed, and unavailable; a local ticket ready to publish; the source filter; and a status change that moves a row between groups.

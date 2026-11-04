@@ -268,7 +268,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   await act(async () => {
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(0);

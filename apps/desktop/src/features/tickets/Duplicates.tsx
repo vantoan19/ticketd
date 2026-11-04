@@ -151,6 +151,43 @@ export function Duplicates({
     };
   }, [preview, choices, canonicalArg, separate, answerKey]);
 
+  // Dependencies can change under an open review (from the CLI, another
+  // window). Compare the shown preview with a fresh one and ask for a refresh
+  // rather than leaving rows that no longer match.
+  useEffect(() => {
+    if (!preview || stale || pending) return;
+    let current = true;
+    const shown = JSON.stringify([preview.canonical, preview.edges]);
+    const timer = window.setInterval(() => {
+      void client
+        .previewDuplicate(
+          separate ? target : ticket.reference,
+          canonicalArg,
+          separate,
+        )
+        .then((latest) => {
+          if (
+            current &&
+            JSON.stringify([latest.canonical, latest.edges]) !== shown
+          )
+            setStale("changed");
+        })
+        .catch(() => {});
+    }, 2000);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [
+    preview,
+    stale,
+    pending,
+    separate,
+    target,
+    canonicalArg,
+    ticket.reference,
+  ]);
+
   async function loadPreview() {
     setPending(true);
     setError("");

@@ -1,4 +1,7 @@
-import { documents, type DocumentSummary } from "@/features/documents/api";
+import { documents } from "@/features/documents/api";
+import { DocumentPicker } from "./DocumentPicker";
+import { hasVisibleText } from "./brief-text";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { useNow } from "@/lib/use-now";
 import {
@@ -15,19 +18,14 @@ import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
+import { FileText, MoreHorizontal, Plus, History } from "lucide-react";
 import {
   client,
   type AuthoredActivity,
@@ -127,6 +125,12 @@ export function Activity({
       current = false;
     };
   }, [active, reference, revision, targetId, targetKey]);
+  // Leaving the ticket ends the "no longer available" notice for good.
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    if (!active) setTargetMissing(null);
+  }
   const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
@@ -167,16 +171,26 @@ export function Activity({
   const [support, setSupportValue] = useState(
     () => localValue(selectionKey) ?? "",
   );
-  const [availableDocuments, setAvailableDocuments] = useState<
-    DocumentSummary[]
-  >([]);
+  const [supportTitle, setSupportTitle] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [view, setView] = useState<"all" | "updates">("all");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const openDocument = useContext(DocumentNavigation);
   useEffect(() => {
-    if (active && support)
-      void documents
-        .recent(0)
-        .then(setAvailableDocuments)
-        .catch((reason: unknown) => setError(String(reason)));
+    if (!active || !support) return;
+    let current = true;
+    void documents
+      .show(support)
+      .then((document) => {
+        if (current)
+          setSupportTitle(document.title || document.heading || "Document");
+      })
+      .catch((reason: unknown) => {
+        if (current) setError(String(reason));
+      });
+    return () => {
+      current = false;
+    };
   }, [active, support]);
   function setDetails(value: string) {
     setDetailsValue(value);
@@ -243,7 +257,7 @@ export function Activity({
       event.target !== event.currentTarget ||
       busy.current ||
       trashed ||
-      !(edit ? edit.content : draft).trim()
+      !hasVisibleText(edit ? edit.content : draft)
     )
       return;
     busy.current = true;
@@ -332,9 +346,10 @@ export function Activity({
         (note) => note.id === id && note.supporting_document_id,
       );
       await client.deleteActivity(reference, id);
+      setConfirmDelete(null);
       setFeedback(
         hadSupport
-          ? "Update deleted. Its supporting Document was preserved."
+          ? "Update deleted. Its details stay in Documents."
           : "Update deleted.",
       );
       if (targetRequest.current?.id === id) targetRequest.current = null;
@@ -408,7 +423,15 @@ export function Activity({
       entry,
       index,
     })),
-  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  ]
+    .filter((item) => view === "all" || item.type === "note")
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  // The newest update still in the list, so deleting the latest one moves the label.
+  const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
+    (best, note) =>
+      best === null || note.reported_at > best.reported_at ? note : best,
+    null,
+  )?.id;
   const lookups = {
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
@@ -419,11 +442,24 @@ export function Activity({
     <section className="activity" aria-label="Activity">
       <div className="activity-heading">
         <h3>Activity</h3>
+        <SegmentedControl
+          aria-label="Show activity"
+          value={view}
+          onValueChange={setView}
+          options={[
+            { value: "all", label: "All" },
+            { value: "updates", label: "Updates" },
+          ]}
+        />
         <span>
           Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
         </span>
       </div>
-      {feedback && <p role="status">{feedback}</p>}
+      {feedback && (
+        <p role="status" className="activity-muted">
+          {feedback}
+        </p>
+      )}
       {targetMissing === targetId && targetId !== undefined && (
         <Alert>
           <AlertDescription>
@@ -453,7 +489,7 @@ export function Activity({
           className="activity-compact-composer"
           onClick={() => setComposing(true)}
         >
-          Add update
+          Write an update…
         </button>
       )}
       {!trashed && (composing || edit) && (
@@ -463,7 +499,7 @@ export function Activity({
         >
           <FieldGroup>
             <Field data-disabled={pending}>
-              <FieldLabel asChild>
+              <FieldLabel className="sr-only" asChild>
                 <span>{edit ? "Edit update" : "New update"}</span>
               </FieldLabel>
               <LazyMarkdownEditor
@@ -475,83 +511,63 @@ export function Activity({
                 }
                 readOnly={pending}
               />
-              <FieldDescription>Markdown is supported.</FieldDescription>
             </Field>
           </FieldGroup>
-          {!edit && (
-            <>
-              {!showDetails && !support && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowDetails(true);
-                    setDetails("");
-                  }}
-                >
-                  Add details
-                </Button>
-              )}
-              {showDetails && (
-                <Field>
-                  <FieldLabel asChild>
-                    <span>Details</span>
-                  </FieldLabel>
-                  <LazyMarkdownEditor
-                    label="Details"
-                    value={details}
-                    onChange={setDetails}
-                    readOnly={pending}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={pending}
-                    onClick={() => {
-                      try {
-                        localStorage.removeItem(detailKey);
-                        localStorage.removeItem(requestKey);
-                      } catch {
-                        setError(
-                          "Could not clear the unpublished details on this device.",
-                        );
-                      }
-                      setDetailsValue("");
-                      setShowDetails(false);
-                    }}
-                  >
-                    Remove details
-                  </Button>
-                </Field>
-              )}
-              {!showDetails && (
-                <Field>
-                  <FieldLabel htmlFor="activity-support">
-                    Link existing Document
-                  </FieldLabel>
-                  <select
-                    id="activity-support"
-                    value={support}
-                    onFocus={() =>
-                      void documents
-                        .recent(0)
-                        .then(setAvailableDocuments)
-                        .catch((reason: unknown) => setError(String(reason)))
-                    }
-                    onChange={(event) => setSupport(event.target.value)}
-                  >
-                    <option value="">None</option>
-                    {availableDocuments.map((document) => (
-                      <option key={document.id} value={document.id}>
-                        {document.heading}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
-            </>
+          {!edit && showDetails && (
+            <Field>
+              <FieldLabel asChild>
+                <span>Details</span>
+              </FieldLabel>
+              <LazyMarkdownEditor
+                label="Details"
+                value={details}
+                onChange={setDetails}
+                readOnly={pending}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  try {
+                    localStorage.removeItem(detailKey);
+                    localStorage.removeItem(requestKey);
+                  } catch {
+                    setError(
+                      "Could not clear the unpublished details on this device.",
+                    );
+                  }
+                  setDetailsValue("");
+                  setShowDetails(false);
+                }}
+              >
+                Remove details
+              </Button>
+            </Field>
+          )}
+          {!edit && support && (
+            <p className="activity-attached">
+              <FileText aria-hidden="true" />
+              <span className="truncate">{supportTitle || "Document"}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSupport("")}
+              >
+                Remove Document
+              </Button>
+            </p>
+          )}
+          {!edit && picking && (
+            <DocumentPicker
+              onPick={(picked) => {
+                setSupport(picked.id);
+                setSupportTitle(picked.heading);
+                setPicking(false);
+              }}
+            />
           )}
           {changed && (
             <p role="status" className="activity-muted">
@@ -560,49 +576,84 @@ export function Activity({
             </p>
           )}
           <div className="activity-actions">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={pending || !draftText.trim()}
-            >
-              {pending ? "Saving…" : edit ? "Save update" : "Post update"}
-            </Button>
-            {edit ? (
+            {!edit && !showDetails && !support && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={pending}
-                onClick={() => setEdit(null)}
-              >
-                Cancel edit
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={pending}
                 onClick={() => {
-                  setDraft("");
-                  try {
-                    localStorage.removeItem(detailKey);
-                    localStorage.removeItem(selectionKey);
-                    localStorage.removeItem(requestKey);
-                  } catch {
-                    setError(
-                      "Could not clear the unpublished update on this device.",
-                    );
-                  }
-                  setDetailsValue("");
-                  setSupportValue("");
-                  setShowDetails(false);
-                  setComposing(false);
+                  setShowDetails(true);
+                  setDetails("");
+                  setPicking(false);
                 }}
               >
-                Discard draft
+                <Plus aria-hidden="true" />
+                Add details
               </Button>
             )}
+            {!edit && !showDetails && !support && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-expanded={picking}
+                onClick={() => setPicking(!picking)}
+              >
+                <FileText aria-hidden="true" />
+                Attach Document
+              </Button>
+            )}
+            <span className="activity-actions-end">
+              {!edit && (
+                <span className="activity-muted">
+                  Draft kept on this device
+                </span>
+              )}
+              {edit ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => setEdit(null)}
+                >
+                  Cancel edit
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => {
+                    setDraft("");
+                    try {
+                      localStorage.removeItem(detailKey);
+                      localStorage.removeItem(selectionKey);
+                      localStorage.removeItem(requestKey);
+                    } catch {
+                      setError(
+                        "Could not clear the unpublished update on this device.",
+                      );
+                    }
+                    setDetailsValue("");
+                    setSupportValue("");
+                    setShowDetails(false);
+                    setPicking(false);
+                    setComposing(false);
+                  }}
+                >
+                  Discard draft
+                </Button>
+              )}
+              <Button
+                type="submit"
+                size="sm"
+                disabled={pending || !hasVisibleText(draftText)}
+              >
+                {pending ? "Saving…" : edit ? "Save update" : "Post update"}
+              </Button>
+            </span>
           </div>
         </form>
       )}
@@ -649,7 +700,9 @@ export function Activity({
               >
                 <div className="activity-meta">
                   <strong>
-                    {item.note.id === latestNoteId ? "Latest update" : "Update"}
+                    {item.note.id === (newestNoteId ?? latestNoteId)
+                      ? "Latest update"
+                      : "Update"}
                   </strong>
                   <time
                     dateTime={item.note.reported_at}
@@ -691,7 +744,11 @@ export function Activity({
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
-                          onSelect={() => void remove(item.note.id)}
+                          onSelect={() =>
+                            item.note.supporting_document_id
+                              ? setConfirmDelete(item.note.id)
+                              : void remove(item.note.id)
+                          }
                         >
                           Delete update
                         </DropdownMenuItem>
@@ -699,6 +756,28 @@ export function Activity({
                     </DropdownMenu>
                   )}
                 </div>
+                {confirmDelete === item.note.id && (
+                  <p role="alertdialog" className="activity-confirm">
+                    Delete update? Its details stay in Documents.
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => void remove(item.note.id)}
+                    >
+                      Delete update
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(null)}
+                    >
+                      Keep update
+                    </Button>
+                  </p>
+                )}
                 <div className="markdown-preview activity-note">
                   <MarkdownDocument
                     source={item.note.brief}
@@ -720,6 +799,7 @@ export function Activity({
               </li>
             ) : (
               <li key={`history-${item.index}`} className="activity-history">
+                <History aria-hidden="true" className="activity-history-icon" />
                 <span>{historySentence(item.entry, lookups)}</span>
                 <time
                   dateTime={item.entry.timestamp}

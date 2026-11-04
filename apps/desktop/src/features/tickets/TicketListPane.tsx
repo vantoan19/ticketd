@@ -70,6 +70,7 @@ export function TicketListPane({
     navigation,
     clearFilters,
     queryError,
+    refreshFailed,
     revision,
   } = workspace;
   // An Plan scope shows the Plan's own header instead of a plain title.
@@ -231,6 +232,14 @@ export function TicketListPane({
           )}
           {!trash && <TicketFilters part="chips" {...filterProps} />}
 
+          {refreshFailed && !queryError && (
+            <p role="status" className="refresh-failed">
+              Can’t refresh. Showing the last list.{" "}
+              <Button variant="link" size="sm" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </p>
+          )}
           {queryError ? (
             <div className="empty-state" role="alert">
               <strong>Could not load tickets</strong>

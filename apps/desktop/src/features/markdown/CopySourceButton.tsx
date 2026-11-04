@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { Copy } from "lucide-react";
+import { IconButton } from "@/components/ui/icon-button";
 
 export function CopySourceButton({
   source,
@@ -19,14 +20,9 @@ export function CopySourceButton({
   }
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => void copy()}
-      >
-        {label}
-      </Button>
+      <IconButton type="button" label={label} onClick={() => void copy()}>
+        <Copy aria-hidden="true" />
+      </IconButton>
       <span role="status" className="text-muted-foreground text-xs">
         {message}
       </span>

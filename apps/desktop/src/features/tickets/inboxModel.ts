@@ -19,7 +19,9 @@ export function summarize(entry: Entry): string {
     entry.kind === "reminder"
       ? "Your reminder is due"
       : entry.kind === "activity"
-        ? `New update: ${entry.to_value}`
+        ? entry.deleted
+          ? "Update deleted"
+          : `New update: ${entry.to_value}`
         : describeChange(entry.kind, entry.from_value, entry.to_value);
   return entry.editing_agent
     ? `${base} · ${providerName(entry.editing_agent)}`

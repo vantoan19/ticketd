@@ -45,6 +45,7 @@ afterEach(() => {
   Element.prototype.scrollIntoView = scrollIntoView;
   vi.unstubAllGlobals();
   bridge.invoke.mockReset();
+  listStamp = 0;
 });
 
 const ticket = (reference: string, body: string, trashed = false): Ticket => ({
@@ -75,6 +76,7 @@ const span = {
 type Api = { select: (reference: string) => void };
 const api: Api = { select: () => {} };
 let show: (reference: string) => Promise<Ticket>;
+let listStamp = 0;
 function Harness() {
   const workspace = useTicketWorkspace(vi.fn(), vi.fn());
   const bulk = useBulkEdit(workspace.refresh);
@@ -116,6 +118,16 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                   activity_id: null,
                   passage: "Blocked on T-1 today.",
                   ...span,
+                },
+              ]
+            : [];
+        case "find_tickets_with_updates":
+          // Something else changed in the workspace, as a real edit would show.
+          return listStamp > 0
+            ? [
+                {
+                  ticket: ticket("T-9", String(listStamp)),
+                  latest_update: null,
                 },
               ]
             : [];
@@ -184,8 +196,10 @@ test("trashing and restoring the revealed ticket does not reveal it again", asyn
   const scroller = document.querySelector<HTMLElement>(".detail-scroll")!;
   scroller.scrollTop = 33;
   current = ticket("T-2", STORED, true);
+  listStamp = 1;
   await waitFor(() => expect(marked()).toBeNull(), { timeout: 4000 });
   current = ticket("T-2", STORED, false);
+  listStamp = 2;
   await waitFor(
     () =>
       expect(

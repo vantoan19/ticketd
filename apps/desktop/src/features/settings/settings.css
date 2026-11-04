@@ -17,6 +17,8 @@
   gap: 8px;
   width: 100%;
   height: 32px;
+  min-height: 32px;
+  flex: none;
   padding: 0 12px;
   border-radius: 6px;
   text-align: left;
@@ -423,4 +425,8 @@
 }
 .source-preview-heading > .settings-hint {
   margin-left: auto;
+}
+
+.settings-page [data-slot="segmented-control"] [role="radio"] {
+  min-height: 32px;
 }

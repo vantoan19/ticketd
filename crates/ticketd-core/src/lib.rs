@@ -924,6 +924,10 @@ impl Workspace {
         ensure_editable(&tx, &id_ticket)?;
         tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 ON CONFLICT(document_id) DO NOTHING", [id])?;
         activities::delete(&tx, &id_ticket, id)?;
+        tx.execute(
+            "UPDATE inbox_entries SET read = 1 WHERE kind = 'activity' AND from_value = ?1",
+            [id],
+        )?;
         tx.commit()?;
         Ok(())
     }

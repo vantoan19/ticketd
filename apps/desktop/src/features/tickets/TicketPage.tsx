@@ -6,6 +6,7 @@ import { Reminder } from "@/features/tickets/Reminder";
 import { RailSection } from "@/features/tickets/RailSection";
 import { TicketProperties } from "@/features/tickets/TicketProperties";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
+import { TicketDocuments } from "@/features/tickets/TicketDocuments";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
 import { Activity } from "@/features/tickets/Activity";
@@ -177,6 +178,25 @@ export function TicketPage({
             {stateLine}
           </TicketEditor>
         )}
+        <Activity
+          reference={ticket.reference}
+          ticketId={ticket.id}
+          target={
+            updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
+              ? updateTarget
+              : noteTarget
+          }
+          projects={projects}
+          plans={plans}
+          status={ticket.status}
+          revision={revision}
+          active={active}
+          trashed={ticket.trashed}
+          select={select}
+          latestNoteId={ticket.latest_update?.activity_id}
+          sourceName={source?.provider_name}
+          onChanged={refresh}
+        />
         {active && !ticket.trashed && (
           <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
@@ -204,25 +224,6 @@ export function TicketPage({
             select={select}
           />
         )}
-        <Activity
-          reference={ticket.reference}
-          ticketId={ticket.id}
-          target={
-            updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
-              ? updateTarget
-              : noteTarget
-          }
-          projects={projects}
-          plans={plans}
-          status={ticket.status}
-          revision={revision}
-          active={active}
-          trashed={ticket.trashed}
-          select={select}
-          latestNoteId={ticket.latest_update?.activity_id}
-          sourceName={source?.provider_name}
-          onChanged={refresh}
-        />
       </div>
       <TicketProperties
         ticket={ticket}
@@ -237,6 +238,12 @@ export function TicketPage({
       >
         {active && !ticket.trashed && (
           <>
+            <TicketDocuments
+              ticket={ticket}
+              revision={revision}
+              updateTicket={updateTicket}
+              refresh={refresh}
+            />
             <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
             <LinkedWorkDialogs work={work} />
           </>

@@ -111,7 +111,7 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
     throw new Error(`Unexpected ${command}`);
   });
   const first = render(<Activity {...props} reference="T-21" />);
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -120,7 +120,7 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
   });
   first.unmount();
   render(<Activity {...props} reference="T-22" />);
-  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-21" />);
   fireEvent.click(
@@ -130,10 +130,10 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Half-written finding");
   fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
-  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-21" />);
-  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
 });
 
 test("Activity puts the composer before labelled notes and quiet relative history", async () => {
@@ -160,7 +160,7 @@ test("Activity puts the composer before labelled notes and quiet relative histor
   expect(screen.getByText("2 h ago")).toBeTruthy();
   expect(
     screen
-      .getByRole("button", { name: "Add update" })
+      .getByRole("button", { name: "Write an update…" })
       .compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 });

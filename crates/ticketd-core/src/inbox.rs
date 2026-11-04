@@ -16,6 +16,9 @@ pub struct InboxEntry {
     pub timestamp: String,
     pub read: bool,
     pub editing_agent: Option<String>,
+    /// True when the update this entry announces has since been deleted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
@@ -157,7 +160,7 @@ impl Workspace {
         unread_only: bool,
     ) -> Result<Vec<InboxEntry>, Error> {
         self.deliver_due_reminders()?;
-        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
+        let mut stmt = self.connection.prepare("SELECT i.id, t.number, t.title, i.kind, i.from_value, i.to_value, i.timestamp, i.read, i.editing_agent, (i.kind = 'activity' AND NOT EXISTS (SELECT 1 FROM activities a WHERE a.id = i.from_value)) FROM inbox_entries i JOIN tickets t ON t.id = i.ticket_id WHERE i.person = ?1 AND (?4 = 0 OR i.read = 0) ORDER BY i.id DESC LIMIT ?2 OFFSET ?3")?;
         let entries = stmt
             .query_map(
                 params![LOCAL_PERSON, limit.min(100), offset, unread_only],
@@ -172,11 +175,21 @@ impl Workspace {
                         timestamp: row.get(6)?,
                         read: row.get(7)?,
                         editing_agent: row.get(8)?,
+                        deleted: row.get(9)?,
                     })
                 },
             )?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
+    }
+    /// The person who wrote an update is not told about it: drop the inbox
+    /// entries that update produced for them.
+    pub fn discard_inbox_for_own_update(&mut self, activity_id: &str) -> Result<(), Error> {
+        self.connection.execute(
+            "DELETE FROM inbox_entries WHERE person = ?1 AND kind = 'activity' AND from_value = ?2",
+            params![LOCAL_PERSON, activity_id],
+        )?;
+        Ok(())
     }
     pub fn set_inbox_read(&mut self, ids: &[i64], read: bool) -> Result<(), Error> {
         if ids.len() > 100 {

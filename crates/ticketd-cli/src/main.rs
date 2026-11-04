@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
     ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
-    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
 #[derive(Parser)]
@@ -14,53 +14,62 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum ReminderCommand {
+    /// Show when a ticket's reminder is due
     Show { reference: String },
+    /// Set a reminder (due time must be RFC 3339 with an offset)
     Set { reference: String, due_at: String },
+    /// Move a reminder to a later time
     Snooze { reference: String, due_at: String },
+    /// Remove a ticket's reminder
     Dismiss { reference: String },
 }
 
 #[derive(Subcommand)]
 enum DocumentCommand {
+    /// List what an item (Document, ticket or Plan ID) links to: its outgoing references
     References {
         id: String,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+    /// List everything that links to an item, of any kind (ticket, Plan or Document)
     Incoming {
         id: String,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
-    Link {
-        target: String,
-    },
-    CreateTicket {
-        id: String,
-        title: String,
-    },
+    /// Print the Markdown link text for a ticket, Plan or Document, to paste into a body
+    Link { target: String },
+    /// Create a ticket from a Document and link them
+    CreateTicket { id: String, title: String },
+    /// List only tickets that mention a Document, with passages
     Backlinks {
         id: String,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+    /// Create a Document (JSON result includes its id)
     Create {
+        /// Optional title; without one the first line of the body is its heading
         #[arg(long)]
         title: Option<String>,
+        /// The Markdown body
         #[arg(long, conflicts_with = "body_file")]
         body: Option<String>,
+        /// Read the Markdown body from a file (- reads stdin)
         #[arg(long)]
         body_file: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
-    Show {
-        id: String,
-    },
-    Open {
-        id: String,
-    },
-    Keep {
-        id: String,
-    },
+    /// Show a Document with its full body
+    Show { id: String },
+    /// Show a Document and record that it was opened
+    Open { id: String },
+    /// Keep an activity-details Document so it appears in the default Documents list
+    Keep { id: String },
+    /// List recently opened or changed Documents
     Recent {
         #[arg(long)]
         include_support: bool,
@@ -69,6 +78,7 @@ enum DocumentCommand {
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+    /// Search Document titles and bodies
     Search {
         query: String,
         #[arg(long)]
@@ -80,20 +90,22 @@ enum DocumentCommand {
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+    /// List pinned Documents
     Pins {
         #[arg(long, default_value_t = 50)]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+    /// Pin a Document (or unpin with --remove)
     Pin {
         id: String,
         #[arg(long)]
         remove: bool,
     },
-    Tags {
-        id: String,
-    },
+    /// List a Document's tags
+    Tags { id: String },
+    /// Add a tag to a Document (or remove with --remove)
     Tag {
         id: String,
         tag: String,
@@ -108,28 +120,35 @@ enum DocumentCommand {
         #[arg(long, default_value_t = 4096)]
         limit: usize,
     },
+    /// List trashed Documents
     TrashList {
         #[arg(long, default_value_t = 50)]
         limit: u32,
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
-    Trash {
-        id: String,
-    },
-    Restore {
-        id: String,
-    },
+    /// Move a Document to trash
+    Trash { id: String },
+    /// Restore a Document from trash
+    Restore { id: String },
+    /// Change a Document's title or body (supply only what changes)
     Change {
         id: String,
+        /// Set the title
         #[arg(long, conflicts_with = "clear_title")]
         title: Option<String>,
+        /// Remove the title so the heading comes from the body
         #[arg(long)]
         clear_title: bool,
+        /// Replace the Markdown body
         #[arg(long, conflicts_with = "body_file")]
         body: Option<String>,
+        /// Replace the body with a file's contents (- reads stdin)
         #[arg(long)]
         body_file: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
 }
 
@@ -161,7 +180,7 @@ enum Command {
         #[arg(long)]
         file: Option<String>,
     },
-    /// Execute a JSON write request from a file or stdin; retain its result for safe retries
+    /// Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior
     Write {
         file: String,
         #[arg(long)]
@@ -568,51 +587,49 @@ impl FindArgs {
 
 #[derive(Subcommand)]
 enum PlanCommand {
+    /// Show a Plan's spec and supporting Documents (add --bodies for their text)
     Context {
         id: String,
         #[arg(long)]
         bodies: bool,
     },
+    /// Add a supporting Document to a Plan (or remove with --remove)
     Document {
         id: String,
         document_id: String,
         #[arg(long)]
         remove: bool,
     },
+    /// Designate a Plan's primary spec Document, or clear it by omitting the ID
     Spec {
         id: String,
         document_id: Option<String>,
     },
-    Create {
-        name: String,
-    },
+    /// Create a Plan
+    Create { name: String },
+    /// List Plans (--all includes archived ones)
     List {
         #[arg(long)]
         all: bool,
     },
-    Show {
-        id: String,
-    },
-    Rename {
-        id: String,
-        name: String,
-    },
-    Purpose {
-        id: String,
-        purpose: String,
-    },
-    Archive {
-        id: String,
-    },
-    Reactivate {
-        id: String,
-    },
+    /// Show a Plan with its tickets
+    Show { id: String },
+    /// Rename a Plan
+    Rename { id: String, name: String },
+    /// Set a Plan's purpose text
+    Purpose { id: String, purpose: String },
+    /// Archive a Plan
+    Archive { id: String },
+    /// Make an archived Plan active again
+    Reactivate { id: String },
+    /// Add a ticket to a Plan
     Add {
         id: String,
         reference: String,
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Remove a ticket from its Plan
     Remove {
         reference: String,
         #[arg(long)]
@@ -621,27 +638,22 @@ enum PlanCommand {
 }
 #[derive(Subcommand)]
 enum ProjectCommand {
-    Create {
-        name: String,
-        path: String,
-    },
+    /// Create a project for a repository path
+    Create { name: String, path: String },
+    /// Change a project's name and path
     Edit {
         id: String,
         name: String,
         path: String,
     },
-    Show {
-        id: String,
-    },
+    /// Show a project
+    Show { id: String },
+    /// List projects
     List,
-    Register {
-        id: String,
-        path: String,
-    },
-    Unregister {
-        id: String,
-        path: String,
-    },
+    /// Register another checkout path for a project
+    Register { id: String, path: String },
+    /// Remove a registered checkout path from a project
+    Unregister { id: String, path: String },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -686,21 +698,22 @@ impl From<EvidenceFields> for EvidenceInput {
 }
 #[derive(Subcommand)]
 enum EvidenceCommand {
+    /// Record evidence (PR, commit, branch, worktree or verification) on a ticket
     Add {
         reference: String,
         #[command(flatten)]
         fields: EvidenceFields,
     },
+    /// Replace an evidence item's fields
     Edit {
         reference: String,
         id: String,
         #[command(flatten)]
         fields: EvidenceFields,
     },
-    Delete {
-        reference: String,
-        id: String,
-    },
+    /// Delete an evidence item
+    Delete { reference: String, id: String },
+    /// List a ticket's evidence
     List {
         reference: String,
         #[arg(long, default_value_t = 50)]
@@ -714,27 +727,41 @@ enum ActivityCommand {
     /// Append an activity, reading --file - from stdin
     Add {
         reference: String,
+        /// The brief: a short update that reads on its own (plain text or Markdown)
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
+        /// Read the brief from a file (- reads stdin)
         #[arg(long)]
         file: Option<String>,
+        /// Name of the agent posting this activity, shown beside it
         #[arg(long)]
         agent: Option<String>,
+        /// A file holding the activity details; they are saved as a new Document linked to the activity (- reads stdin)
         #[arg(long, conflicts_with = "document")]
         details_file: Option<String>,
+        /// The ID of an existing Document to attach as the activity's details
         #[arg(long)]
         document: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Edit supplied fields of an activity
     Edit {
         reference: String,
         id: String,
+        /// The new brief text; it replaces the stored brief
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
+        /// Read the new brief from a file (- reads stdin)
         #[arg(long)]
         file: Option<String>,
+        /// Name of the agent making this edit, shown beside the activity
         #[arg(long)]
         agent: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Delete an activity
     Delete { reference: String, id: String },
@@ -748,6 +775,14 @@ enum ActivityCommand {
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+}
+/// The value of a write result without its `{"kind","value"}` wrapper, so a
+/// retried command prints the same object as the first run.
+fn bare(result: WriteResult) -> Result<String, Box<dyn std::error::Error>> {
+    let wrapped = serde_json::to_value(&result)?;
+    Ok(wrapped
+        .get("value")
+        .map_or_else(|| wrapped.to_string(), ToString::to_string))
 }
 fn read_content(
     content: Option<String>,
@@ -764,8 +799,96 @@ fn read_content(
     })
 }
 
+/// Help for arguments that share a meaning everywhere; `parents` is the command
+/// path so an `id` reads as a Document, Plan, project or activity ID.
+fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
+    let group = parents.get(1).map(String::as_str).unwrap_or("");
+    Some(match id {
+        "id" => match group {
+            "document" => "The Document ID (see `document recent` or `document search`)",
+            "plan" => "The Plan ID (see `plan list`)",
+            "project" => "The project ID (see `project list`)",
+            "activity" => "The activity ID (see `activity list`)",
+            "evidence" => "The evidence ID (see `evidence list`)",
+            _ => "The ID",
+        },
+        "reference" => "The ticket reference, for example T-12",
+        "ticket" => "The ticket reference, for example T-12",
+        "agent" => "Name of the agent making this change, recorded in history and the feed",
+        "offset" => "Skip this many results (for paging)",
+        "limit" => "Return at most this many results",
+        "title" => "The title",
+        "name" => "The name",
+        "path" => "A path",
+        "target" => "The ticket, Plan or Document to link to",
+        "query" => "Text to search for",
+        "tag" => "A tag name",
+        "remove" => "Remove instead of add",
+        "project" => "Restrict to a project ID",
+        "plan" => "Restrict to a Plan ID",
+        "kind" => "The kind",
+        "document_id" => "The Document ID",
+        "include_support" => "Include activity-details Documents that were not kept",
+        "canonical" => "The canonical (original) ticket reference",
+        "blocker" => "The ticket that blocks",
+        "dependent" => "The ticket that waits",
+        "status" => "A ticket status",
+        "parent" => "The parent ticket reference",
+        "purpose" => "The Plan's purpose text",
+        "due_at" => "RFC 3339 time with an offset, for example 2026-01-31T09:00:00-05:00",
+        "file" => "A JSON file (- reads stdin)",
+        "request_id" => {
+            "Makes retries safe: repeating this ID with the same input returns the first result instead of writing again"
+        }
+        "body" => "The Markdown description",
+        "body_file" => "Read the description from a file (- reads stdin)",
+        "clear_project" => "Unlink the ticket from its project",
+        "value" => "The URL, reference, path or verification result",
+        "source" => "The ticket that is the source of the change, for example T-12",
+        "bodies" => "Include the Documents' text, not only their titles",
+        "all" => "Include archived Plans",
+        "unlinked" => "Only tickets without a project",
+        "availability" => "Only ready or blocked tickets",
+        "latest_update" => "Include each ticket's latest update (bounded)",
+        "relationships" => "Include relationships",
+        "activities" => "Include activities",
+        "evidence" => "Include evidence",
+        "backlinks" => "Include incoming references",
+        "provider" => "The source provider, for example github",
+        "field" => "The setting to suggest values for",
+        "search" => "Only items whose title or text contains this",
+        "relationship" => "Only this kind of relationship",
+        "cursor" => "Continue a previous page using its cursor",
+        "adjacency_limit" => "Most neighbors to show around each item",
+        "context" => "Show contextual connections rather than dependencies",
+        "include_details" => "Include generated Activity details",
+        "expand" => "Expand connections around a previously visible item (repeatable)",
+        "page" => "Continue a group using its JSON page request (repeatable)",
+        "workspace" => "Browse the whole workspace rather than one ticket or Plan",
+        _ => return None,
+    })
+}
+fn describe(command: clap::Command, parents: &[String]) -> clap::Command {
+    let mut path = parents.to_vec();
+    path.push(command.get_name().to_owned());
+    let named = path.clone();
+    command
+        .mut_args(move |arg| {
+            if arg.get_help().is_none()
+                && !matches!(arg.get_id().as_str(), "help" | "version")
+                && let Some(text) = argument_help(&named, arg.get_id().as_str())
+            {
+                return arg.help(text);
+            }
+            arg
+        })
+        .mut_subcommands(move |child| describe(child, &path))
+}
+
 fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
-    let args = Arguments::parse();
+    use clap::{CommandFactory, FromArgMatches};
+    let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
+        .unwrap_or_else(|error| error.exit());
     if let Command::RestoreWorkspace { path } = &args.command {
         let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
             Some(workspace) => Workspace::restore(workspace, path)?,
@@ -821,10 +944,18 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 title,
                 body,
                 body_file,
-            } => serde_json::to_string(&workspace.create_document(
-                title.as_deref(),
-                &read_content(body, body_file)?.unwrap_or_default(),
-            )?)?,
+                request_id,
+            } => {
+                let body = read_content(body, body_file)?.unwrap_or_default();
+                match request_id {
+                    None => {
+                        serde_json::to_string(&workspace.create_document(title.as_deref(), &body)?)?
+                    }
+                    Some(id) => bare(
+                        workspace.write(Some(&id), WriteRequest::CreateDocument { title, body })?,
+                    )?,
+                }
+            }
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
             DocumentCommand::Keep { id } => {
@@ -892,17 +1023,24 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 clear_title,
                 body,
                 body_file,
-            } => serde_json::to_string(&workspace.change_document(
-                &id,
-                DocumentPatch {
+                request_id,
+            } => {
+                let patch = DocumentPatch {
                     title: if clear_title {
                         Some(None)
                     } else {
                         title.map(Some)
                     },
                     body: read_content(body, body_file)?,
-                },
-            )?)?,
+                };
+                match request_id {
+                    None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,
+                    Some(request) => bare(
+                        workspace
+                            .write(Some(&request), WriteRequest::ChangeDocument { id, patch })?,
+                    )?,
+                }
+            }
         },
         Command::Reminder { command } => match command {
             ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
@@ -1061,19 +1199,33 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 agent,
                 details_file,
                 document,
+                request_id,
             } => {
                 if file.as_deref() == Some("-") && details_file.as_deref() == Some("-") {
                     return Err("brief and details cannot both read from stdin".into());
                 }
                 let brief = read_content(brief, file)?.ok_or("provide --brief or --file")?;
                 let details = read_content(None, details_file)?;
-                serde_json::to_string(&workspace.add_activity_with_details(
-                    &reference,
-                    &brief,
-                    agent.as_deref(),
-                    details.as_deref(),
-                    document.as_deref(),
-                )?)?
+                if request_id.is_some() {
+                    bare(workspace.write(
+                        request_id.as_deref(),
+                        WriteRequest::AddActivityWithDetails {
+                            reference,
+                            brief,
+                            agent,
+                            details,
+                            existing_document_id: document,
+                        },
+                    )?)?
+                } else {
+                    serde_json::to_string(&workspace.add_activity_with_details(
+                        &reference,
+                        &brief,
+                        agent.as_deref(),
+                        details.as_deref(),
+                        document.as_deref(),
+                    )?)?
+                }
             }
             ActivityCommand::Edit {
                 reference,
@@ -1081,14 +1233,25 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 brief,
                 file,
                 agent,
-            } => serde_json::to_string(&workspace.edit_activity(
-                &reference,
-                &id,
-                ActivityPatch {
+                request_id,
+            } => {
+                let patch = ActivityPatch {
                     brief: read_content(brief, file)?,
                     editing_agent: agent,
-                },
-            )?)?,
+                };
+                if request_id.is_some() {
+                    bare(workspace.write(
+                        request_id.as_deref(),
+                        WriteRequest::EditActivity {
+                            reference,
+                            id,
+                            patch,
+                        },
+                    )?)?
+                } else {
+                    serde_json::to_string(&workspace.edit_activity(&reference, &id, patch)?)?
+                }
+            }
             ActivityCommand::Delete { reference, id } => {
                 workspace.delete_activity(&reference, &id)?;
                 "null".into()

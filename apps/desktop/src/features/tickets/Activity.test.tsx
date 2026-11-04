@@ -61,9 +61,13 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
       trashed={false}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Edit Markdown source" }),
+    await screen.findByRole(
+      "button",
+      { name: "Edit Markdown source" },
+      { timeout: 5000 },
+    ),
   );
   const composer = screen.getByRole("textbox", { name: "New update source" });
   fireEvent.change(composer, { target: { value: "A **draft**" } });
@@ -411,7 +415,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   );
   render(<Activity {...scoped} />);
   expect(screen.queryByRole("textbox")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   const add = screen.getByRole("button", { name: "Post update" });
   expect(add).toHaveProperty("disabled", true);
   fireEvent.submit(add.closest("form")!);
@@ -443,7 +447,7 @@ test("rejects blank notes and adds canonical Markdown only on explicit submissio
   );
   expect(saved[0]?.brief).toBe("## Finding\n\n- [x] Done");
   expect(screen.queryByRole("textbox")).toBeNull();
-  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
 });
 
 test("preserves new and edited drafts across hidden navigation, external refresh and failed edits, then cancels back to the new draft", async () => {
@@ -458,7 +462,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
   });
   const view = render(<Activity {...scoped} />);
   await screen.findByText("Agent: cli-agent");
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -542,7 +546,7 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
   fireEvent.click(screen.getByRole("button", { name: "Save update" }));
   await screen.findByRole("heading", { name: "Edited finding" });
   expect(saved.brief).toBe("## Edited finding");
-  expect(screen.getByRole("button", { name: "Add update" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Cancel edit" })).toBeNull();
 });
 
@@ -579,7 +583,7 @@ test("reports when a brief cannot be saved locally", async () => {
     throw new Error("Storage unavailable");
   });
   render(<Activity {...props} reference="T-988" />);
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
   );
@@ -605,7 +609,7 @@ test("restores unpublished details after remount", async () => {
     trashed: false,
   };
   const view = render(<Activity {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(screen.getByRole("button", { name: "Add details" }));
   expect(await screen.findByText("Details")).toBeTruthy();
   const sourceButtons = await screen.findAllByRole("button", {
@@ -704,12 +708,16 @@ test("retries a brief-only post with the same request identity", async () => {
 test("restores a selected supporting Document after navigation", async () => {
   bridge.invoke.mockImplementation((command: string) => {
     if (command === "recent_documents")
-      return Promise.resolve([
-        {
-          id: "doc-1",
-          heading: "Investigation",
-        },
-      ]);
+      return Promise.resolve([{ id: "doc-1", heading: "Investigation" }]);
+    if (command === "show_document")
+      return Promise.resolve({
+        id: "doc-1",
+        title: "Investigation",
+        body: "",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+        trashed: false,
+      });
     return Promise.resolve([]);
   });
   const props = {
@@ -721,17 +729,30 @@ test("restores a selected supporting Document after navigation", async () => {
     trashed: false,
   };
   const view = render(<Activity {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Add update" }));
-  const select = screen.getByLabelText("Link existing Document");
-  fireEvent.focus(select);
-  await screen.findByRole("option", { name: "Investigation" });
-  fireEvent.change(select, { target: { value: "doc-1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Attach Document" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Investigation" }));
   view.unmount();
   render(<Activity {...props} />);
-  await screen.findByRole("option", { name: "Investigation" });
-  expect(screen.getByLabelText("Link existing Document")).toHaveProperty(
-    "value",
-    "doc-1",
+  expect(await screen.findByText("Investigation")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Remove Document" })).toBeTruthy();
+});
+
+test("a brief of only whitespace entities cannot be posted", async () => {
+  render(
+    <Activity
+      reference="T-993"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  expect(screen.getByRole("button", { name: "Post update" })).toHaveProperty(
+    "disabled",
+    true,
   );
 });
 

@@ -222,11 +222,12 @@ export function Inbox({
                   </span>
                   <button
                     className="inbox-ticket"
-                    onClick={() =>
-                      e.kind === "activity"
-                        ? select(e.reference, e.from_value)
-                        : select(e.reference)
-                    }
+                    onClick={() => {
+                      if (!e.read) void mark([e.id], true);
+                      if (e.kind === "activity" && !e.deleted)
+                        select(e.reference, e.from_value);
+                      else select(e.reference);
+                    }}
                   >
                     <span className="inbox-title-line">
                       <span className="inbox-reference">{e.reference}</span>

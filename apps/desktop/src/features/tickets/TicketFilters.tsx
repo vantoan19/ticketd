@@ -55,6 +55,10 @@ export function TicketFilters(p: Props) {
     p.setOffset(0);
   };
   const chips = [
+    p.query.trim() && {
+      label: `Search: ${p.query.trim()}`,
+      clear: () => update(p.setQuery, ""),
+    },
     !p.navigation.plan &&
       p.plan && {
         label: `Plan: ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
@@ -89,6 +93,7 @@ export function TicketFilters(p: Props) {
   ].filter((chip): chip is { label: string; clear: () => void } =>
     Boolean(chip),
   );
+  const filterCount = chips.length - (p.query.trim() ? 1 : 0);
   return (
     <>
       {p.part !== "chips" && (
@@ -120,15 +125,15 @@ export function TicketFilters(p: Props) {
             <PopoverTrigger asChild>
               <IconButton
                 label={
-                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                  filterCount ? `Filters, ${filterCount} active` : "Filters"
                 }
                 aria-label={
-                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                  filterCount ? `Filters, ${filterCount} active` : "Filters"
                 }
               >
                 <SlidersHorizontal />
-                {chips.length > 0 && (
-                  <span className="filter-count">{chips.length}</span>
+                {filterCount > 0 && (
+                  <span className="filter-count">{filterCount}</span>
                 )}
               </IconButton>
             </PopoverTrigger>

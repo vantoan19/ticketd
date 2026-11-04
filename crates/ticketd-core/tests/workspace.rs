@@ -4358,3 +4358,58 @@ fn plan_graph_discloses_omissions_and_cycle_validation_uses_full_graph() {
             .is_err()
     );
 }
+
+#[test]
+fn blank_briefs_made_of_whitespace_entities_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Updates").unwrap();
+    for brief in ["", "  \n", "&#x20;\n&#x20;", "&nbsp; \u{200b}"] {
+        assert!(
+            workspace
+                .add_activity(&ticket.reference, brief, None)
+                .is_err(),
+            "{brief:?} should be blank"
+        );
+    }
+    assert!(
+        workspace
+            .add_activity(&ticket.reference, "&amp; done", None)
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_ticket_is_not_mentioned_in_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Self").unwrap();
+    workspace
+        .add_activity(&ticket.reference, "Relates to T-1 itself", None)
+        .unwrap();
+    assert!(workspace.backlinks("T-1", 20, 0).unwrap().is_empty());
+}
+
+#[test]
+fn the_author_is_not_notified_and_deleted_updates_read_as_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Follow").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let own = workspace
+        .add_activity(&ticket.reference, "My own update", None)
+        .unwrap();
+    workspace.discard_inbox_for_own_update(&own.id).unwrap();
+    assert!(workspace.inbox(100, 0).unwrap().is_empty());
+    let agent = workspace
+        .add_activity(&ticket.reference, "Agent update", Some("claude"))
+        .unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(!entries[0].read && !entries[0].deleted);
+    workspace
+        .delete_activity(&ticket.reference, &agent.id)
+        .unwrap();
+    let entries = workspace.inbox(100, 0).unwrap();
+    assert!(entries[0].read && entries[0].deleted);
+}
