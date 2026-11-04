@@ -347,6 +347,12 @@ enum Command {
         /// Include generated Activity details
         #[arg(long, requires = "context")]
         include_details: bool,
+        /// Expand connections around a previously visible item (repeatable)
+        #[arg(long, requires = "context")]
+        expand: Vec<String>,
+        /// Continue a group using its JSON page request (repeatable)
+        #[arg(long, requires = "context")]
+        page: Vec<String>,
     },
     /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
@@ -1267,12 +1273,20 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             plan,
             context,
             include_details,
+            expand,
+            page,
         } => {
             if context {
-                serde_json::to_string(
-                    &workspace
-                        .context_graph(reference.as_deref().unwrap_or_default(), include_details)?,
-                )?
+                let pages = page
+                    .iter()
+                    .map(|value| serde_json::from_str(value))
+                    .collect::<Result<Vec<ticketd_core::ContextGraphPage>, _>>()?;
+                serde_json::to_string(&workspace.context_graph_with_pages(
+                    reference.as_deref().unwrap_or_default(),
+                    include_details,
+                    &expand,
+                    &pages,
+                )?)?
             } else if let Some(plan) = plan {
                 serde_json::to_string(&workspace.plan_dependency_graph(&plan)?)?
             } else {

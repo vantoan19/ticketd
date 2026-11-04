@@ -3,10 +3,10 @@ mod cli_status;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary, Evidence,
-    EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan, PlanView, Project, SafetyBackup,
-    SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch,
-    Workspace, WorkspaceInfo, WriteRequest, WriteResult,
+    ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
+    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan,
+    PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange,
+    TicketFilter, TicketPatch, Workspace, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -323,6 +323,20 @@ fn edit_project(id: String, name: String, path: String) -> Result<Project, Strin
 fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, String> {
     Workspace::open_default()
         .and_then(|w| w.context_graph(&reference, include_details))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn context_graph_expanded(
+    reference: String,
+    include_details: bool,
+    expanded_ids: Vec<String>,
+    pages: Vec<ContextGraphPage>,
+) -> Result<ContextGraph, String> {
+    Workspace::open_default()
+        .and_then(|w| {
+            w.context_graph_with_pages(&reference, include_details, &expanded_ids, &pages)
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -1352,6 +1366,7 @@ pub fn run() -> Result<(), tauri::Error> {
             find_tickets_with_updates,
             count_tickets,
             context_graph,
+            context_graph_expanded,
             dependency_graph,
             plan_dependency_graph,
             list_trash,

@@ -1,9 +1,10 @@
 use crate::{Error, Workspace};
 use rusqlite::{OptionalExtension, params};
-use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-const MAX_NODES: usize = 50;
+const MAX_NODES: usize = 100;
+const MAX_EXPANSIONS: usize = 8;
 const GROUP_LIMIT: usize = 50;
 const MAX_EDGES: usize = 300;
 
@@ -23,12 +24,27 @@ pub struct ContextGraphEdge {
     pub kind: String,
     pub explanation: Option<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextGraphPage {
+    pub anchor: String,
+    pub group: usize,
+    pub offset: usize,
+}
+#[derive(Debug, Serialize)]
+pub struct ContextGraphContinuation {
+    pub anchor: String,
+    pub group: usize,
+    pub kind: String,
+    pub next_offset: Option<usize>,
+}
 #[derive(Debug, Serialize)]
 pub struct ContextGraph {
     pub center: String,
     pub nodes: Vec<ContextGraphNode>,
     pub edges: Vec<ContextGraphEdge>,
     pub omitted: bool,
+    pub omitted_groups: Vec<String>,
+    pub continuations: Vec<ContextGraphContinuation>,
     pub hidden_details: bool,
     pub max_nodes: usize,
     pub max_edges: usize,
@@ -41,6 +57,30 @@ impl Workspace {
         reference: &str,
         include_details: bool,
     ) -> Result<ContextGraph, Error> {
+        self.context_graph_expanded(reference, include_details, &[])
+    }
+
+    pub fn context_graph_expanded(
+        &self,
+        reference: &str,
+        include_details: bool,
+        expanded_ids: &[String],
+    ) -> Result<ContextGraph, Error> {
+        self.context_graph_with_pages(reference, include_details, expanded_ids, &[])
+    }
+
+    pub fn context_graph_with_pages(
+        &self,
+        reference: &str,
+        include_details: bool,
+        expanded_ids: &[String],
+        pages: &[ContextGraphPage],
+    ) -> Result<ContextGraph, Error> {
+        if expanded_ids.len() + pages.len() > MAX_EXPANSIONS {
+            return Err(Error::InvalidBatch(format!(
+                "at most {MAX_EXPANSIONS} graph expansions are allowed"
+            )));
+        }
         let tx = self.connection.unchecked_transaction()?;
         let center: String = if let Some(number) = reference
             .strip_prefix("T-")
@@ -86,7 +126,7 @@ impl Workspace {
                 "document",
             ),
             (
-                "SELECT m.source_id, t.id, m.passage FROM numeric_mentions m JOIN tickets t ON t.number = m.number WHERE m.source_id = ?1 AND m.activity = 0 ORDER BY m.number, m.passage LIMIT ?2",
+                "SELECT m.source_id, COALESCE(t.id, ''), m.passage FROM numeric_mentions m LEFT JOIN tickets t ON t.number = m.number WHERE m.source_id = ?1 AND m.activity = 0 ORDER BY m.number, m.passage LIMIT ?2",
                 "mention",
             ),
             (
@@ -94,7 +134,7 @@ impl Workspace {
                 "mention",
             ),
             (
-                "SELECT a.ticket_id, t.id, m.passage FROM activities a JOIN numeric_mentions m ON m.source_id = a.id AND m.activity = 1 JOIN tickets t ON t.number = m.number WHERE a.ticket_id = ?1 ORDER BY a.id, m.number, m.passage LIMIT ?2",
+                "SELECT m.ticket_id, COALESCE(t.id, ''), m.passage FROM activity_graph_numbers m LEFT JOIN tickets t ON t.number = m.number WHERE m.ticket_id = ?1 ORDER BY m.activity_id, m.number, m.passage LIMIT ?2",
                 "activity",
             ),
             (
@@ -110,7 +150,7 @@ impl Workspace {
                 "mention",
             ),
             (
-                "SELECT a.ticket_id, m.target_id, m.passage FROM activities a JOIN activity_mentions m ON m.activity_id = a.id WHERE a.ticket_id = ?1 ORDER BY a.id, m.target_id, m.passage LIMIT ?2",
+                "SELECT ticket_id, target_id, passage FROM activity_graph_targets WHERE ticket_id = ?1 ORDER BY activity_id, target_id, passage LIMIT ?2",
                 "activity",
             ),
             (
@@ -126,96 +166,162 @@ impl Workspace {
                 "support",
             ),
         ];
-        let mut candidate_groups = Vec::new();
-        let mut omitted = false;
-        for (sql, kind) in groups {
-            let mut statement = tx.prepare(sql)?;
-            let rows = statement
-                .query_map(params![center, (GROUP_LIMIT + 1) as i64], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, Option<String>>(2)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            if rows.len() > GROUP_LIMIT {
-                omitted = true;
-            }
-            let mut candidates = Vec::new();
-            for (source, target, explanation) in rows.into_iter().take(GROUP_LIMIT) {
-                let kind = if kind == "document" && explanation.is_some() {
-                    "spec"
-                } else {
-                    kind
-                };
-                candidates.push((source, target, kind.to_owned(), explanation));
-            }
-            candidate_groups.push(candidates.into_iter());
-        }
-        let mut candidates = Vec::new();
-        loop {
-            let before = candidates.len();
-            for group in &mut candidate_groups {
-                if let Some(candidate) = group.next() {
-                    candidates.push(candidate);
-                }
-            }
-            if before == candidates.len() {
-                break;
-            }
-        }
-        let mut candidate_ids = BTreeSet::from([center.clone()]);
-        for (source, target, _, _) in &candidates {
-            candidate_ids.insert(source.clone());
-            candidate_ids.insert(target.clone());
-        }
-        let mut hidden = BTreeSet::new();
-        let candidate_ids: Vec<_> = candidate_ids.into_iter().collect();
-        for chunk in candidate_ids.chunks(100) {
-            let placeholders = vec!["?"; chunk.len()].join(",");
-            let mut statement = tx.prepare(&format!("SELECT id FROM documents WHERE id IN ({placeholders}) AND originating_activity_id IS NOT NULL AND NOT kept"))?;
-            hidden.extend(
-                statement
-                    .query_map(rusqlite::params_from_iter(chunk), |r| r.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-        }
         let mut ids = BTreeSet::from([center.clone()]);
         let mut edges = Vec::new();
         let mut hidden_details = false;
         let mut seen = BTreeSet::new();
-        for (source, target, kind, explanation) in candidates {
-            if !seen.insert((
-                source.clone(),
-                target.clone(),
-                kind.clone(),
-                explanation.clone(),
-            )) {
+        let mut omitted = false;
+        let mut omitted_groups = BTreeSet::new();
+        let mut continuations = BTreeMap::<(String, usize), ContextGraphContinuation>::new();
+        let mut anchors = vec![(center.clone(), None)];
+        anchors.extend(expanded_ids.iter().cloned().map(|id| (id, None)));
+        for page in pages {
+            if page.group >= groups.len()
+                || page.offset == 0
+                || page.offset > 200
+                || page.offset % GROUP_LIMIT != 0
+            {
+                return Err(Error::InvalidBatch("invalid graph continuation".into()));
+            }
+            anchors.push((page.anchor.clone(), Some((page.group, page.offset))));
+        }
+        let mut queue = VecDeque::from(anchors);
+        let mut queried = BTreeSet::new();
+        let mut stalled = 0;
+        while let Some((anchor, page)) = queue.pop_front() {
+            if !ids.contains(&anchor)
+                || page.is_some_and(|(group, _)| !queried.contains(&(anchor.clone(), group)))
+            {
+                queue.push_back((anchor, page));
+                stalled += 1;
+                if stalled >= queue.len() {
+                    return Err(Error::InvalidBatch(
+                        "graph expansion must target a visible item".into(),
+                    ));
+                }
                 continue;
             }
-            let other = if source == center { &target } else { &source };
-            if !ids.contains(other) {
-                if hidden.contains(other) && !include_details && other != &center {
-                    hidden_details = true;
+            stalled = 0;
+            if let Some((group, offset)) = page
+                && continuations
+                    .get(&(anchor.clone(), group))
+                    .and_then(|item| item.next_offset)
+                    != Some(offset)
+            {
+                // A fresh snapshot can have fewer rows; do not skip ahead.
+                continue;
+            }
+            let mut candidate_groups = Vec::new();
+            for (group, (sql, kind)) in groups.iter().copied().enumerate() {
+                if page.is_some_and(|(selected, _)| selected != group) {
                     continue;
                 }
-                if !ids.contains(other) && ids.len() == MAX_NODES {
+                let offset = page.map_or(0, |(_, offset)| offset);
+                let sql = format!("{sql} OFFSET ?3");
+                let mut statement = tx.prepare(&sql)?;
+                let rows = statement
+                    .query_map(
+                        params![anchor, (GROUP_LIMIT + 1) as i64, offset as i64],
+                        |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                            ))
+                        },
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let key = (anchor.clone(), group);
+                queried.insert(key.clone());
+                if rows.len() > GROUP_LIMIT {
+                    continuations.insert(
+                        key,
+                        ContextGraphContinuation {
+                            anchor: anchor.clone(),
+                            group,
+                            kind: kind.to_owned(),
+                            next_offset: (offset < 200).then_some(offset + GROUP_LIMIT),
+                        },
+                    );
+                } else {
+                    continuations.remove(&key);
+                }
+                let mut candidates = Vec::new();
+                for (source, target, explanation) in rows.into_iter().take(GROUP_LIMIT) {
+                    if target.is_empty() {
+                        continue;
+                    }
+                    let kind = if kind == "document" && explanation.is_some() {
+                        "spec"
+                    } else {
+                        kind
+                    };
+                    candidates.push((source, target, kind.to_owned(), explanation));
+                }
+                candidate_groups.push(candidates.into_iter());
+            }
+            let mut candidates = Vec::new();
+            loop {
+                let before = candidates.len();
+                for group in &mut candidate_groups {
+                    if let Some(candidate) = group.next() {
+                        candidates.push(candidate);
+                    }
+                }
+                if before == candidates.len() {
+                    break;
+                }
+            }
+            let mut candidate_ids = BTreeSet::from([anchor.clone()]);
+            for (source, target, _, _) in &candidates {
+                candidate_ids.insert(source.clone());
+                candidate_ids.insert(target.clone());
+            }
+            let mut hidden = BTreeSet::new();
+            let candidate_ids: Vec<_> = candidate_ids.into_iter().collect();
+            for chunk in candidate_ids.chunks(100) {
+                let placeholders = vec!["?"; chunk.len()].join(",");
+                let mut statement = tx.prepare(&format!("SELECT id FROM documents WHERE id IN ({placeholders}) AND originating_activity_id IS NOT NULL AND NOT kept"))?;
+                hidden.extend(
+                    statement
+                        .query_map(rusqlite::params_from_iter(chunk), |r| r.get::<_, String>(0))?
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+            }
+            for (source, target, kind, explanation) in candidates {
+                if !seen.insert((
+                    source.clone(),
+                    target.clone(),
+                    kind.clone(),
+                    explanation.clone(),
+                )) {
+                    continue;
+                }
+                let other = if source == anchor { &target } else { &source };
+                if !ids.contains(other) {
+                    if hidden.contains(other) && !include_details && other != &center {
+                        hidden_details = true;
+                        continue;
+                    }
+                    if !ids.contains(other) && ids.len() == MAX_NODES {
+                        omitted = true;
+                        omitted_groups.insert(kind.clone());
+                        continue;
+                    }
+                    ids.insert(other.clone());
+                }
+                if edges.len() == MAX_EDGES {
                     omitted = true;
-                    continue;
+                    omitted_groups.insert(kind.clone());
+                    break;
                 }
-                ids.insert(other.clone());
+                edges.push(ContextGraphEdge {
+                    source,
+                    target,
+                    kind,
+                    explanation,
+                });
             }
-            if edges.len() == MAX_EDGES {
-                omitted = true;
-                break;
-            }
-            edges.push(ContextGraphEdge {
-                source,
-                target,
-                kind,
-                explanation,
-            });
         }
         // Check edges between selected neighbors under an independent, bounded
         // per-anchor quota. Each subquery can stop on its adjacency index.
@@ -248,6 +354,7 @@ impl Workspace {
                 *count += 1;
                 if *count > INDUCED_QUOTA {
                     omitted = true;
+                    omitted_groups.insert(kind.to_owned());
                     continue;
                 }
                 if !ids.contains(&source) || !ids.contains(&target) {
@@ -268,6 +375,7 @@ impl Workspace {
                 }
                 if edges.len() == MAX_EDGES {
                     omitted = true;
+                    omitted_groups.insert(kind.to_owned());
                     break;
                 }
                 edges.push(ContextGraphEdge {
@@ -278,6 +386,13 @@ impl Workspace {
                 });
             }
         }
+        for continuation in continuations.values_mut() {
+            omitted = true;
+            omitted_groups.insert(continuation.kind.clone());
+            if ids.len() >= MAX_NODES || edges.len() >= MAX_EDGES {
+                continuation.next_offset = None;
+            }
+        }
         let nodes = graph_nodes(&tx, &ids)?;
         tx.commit()?;
         Ok(ContextGraph {
@@ -285,10 +400,15 @@ impl Workspace {
             nodes,
             edges,
             omitted,
+            omitted_groups: omitted_groups.into_iter().collect(),
+            continuations: continuations.into_values().collect(),
             hidden_details,
             max_nodes: MAX_NODES,
             max_edges: MAX_EDGES,
-            max_work: groups.len() * (GROUP_LIMIT + 1 + (MAX_NODES - 1) * (INDUCED_QUOTA + 1)),
+            max_work: groups.len()
+                * ((MAX_EXPANSIONS + 1) * (GROUP_LIMIT + 1)
+                    + (MAX_NODES - 1) * (INDUCED_QUOTA + 1))
+                + MAX_EXPANSIONS * (200 + GROUP_LIMIT + 1),
         })
     }
 }

@@ -10,7 +10,9 @@ pub use backup_review::{
 };
 mod context;
 mod context_graph;
-pub use context_graph::{ContextGraph, ContextGraphEdge, ContextGraphNode};
+pub use context_graph::{
+    ContextGraph, ContextGraphContinuation, ContextGraphEdge, ContextGraphNode, ContextGraphPage,
+};
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink};
 mod documents;
@@ -66,7 +68,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 41;
+pub const FORMAT_VERSION: i64 = 42;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -609,6 +611,23 @@ impl Workspace {
                 }
             }
             transaction.pragma_update(None, "user_version", 41)?;
+        }
+        if version < 42 {
+            // Rebuildable, ordered projections let graph reads stop after a bounded
+            // number of Activity mentions without walking unrelated Activities.
+            transaction.execute_batch("                CREATE TABLE IF NOT EXISTS activity_graph_numbers (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, number INTEGER NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, number, passage));
+                CREATE TABLE IF NOT EXISTS activity_graph_targets (ticket_id TEXT NOT NULL, activity_id TEXT NOT NULL, target_id TEXT NOT NULL, passage TEXT NOT NULL, PRIMARY KEY(ticket_id, activity_id, target_id, passage));
+                INSERT OR IGNORE INTO activity_graph_numbers SELECT a.ticket_id, m.source_id, m.number, m.passage FROM numeric_mentions m JOIN activities a ON a.id=m.source_id WHERE m.activity=1;
+                INSERT OR IGNORE INTO activity_graph_targets SELECT a.ticket_id, m.activity_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id=m.activity_id;
+                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_insert AFTER INSERT ON numeric_mentions WHEN NEW.activity=1 BEGIN INSERT OR IGNORE INTO activity_graph_numbers SELECT ticket_id, NEW.source_id, NEW.number, NEW.passage FROM activities WHERE id=NEW.source_id; END;
+                CREATE TRIGGER IF NOT EXISTS activity_graph_numbers_delete AFTER DELETE ON numeric_mentions WHEN OLD.activity=1 BEGIN DELETE FROM activity_graph_numbers WHERE activity_id=OLD.source_id AND number=OLD.number AND passage=OLD.passage; END;
+                CREATE TRIGGER IF NOT EXISTS activity_graph_targets_insert AFTER INSERT ON activity_mentions BEGIN INSERT OR IGNORE INTO activity_graph_targets SELECT ticket_id, NEW.activity_id, NEW.target_id, NEW.passage FROM activities WHERE id=NEW.activity_id; END;
+                CREATE TRIGGER IF NOT EXISTS activity_graph_targets_delete AFTER DELETE ON activity_mentions BEGIN DELETE FROM activity_graph_targets WHERE activity_id=OLD.activity_id AND target_id=OLD.target_id AND passage=OLD.passage; END;
+                CREATE INDEX IF NOT EXISTS activity_graph_numbers_source ON activity_graph_numbers(activity_id, number, passage);
+                CREATE INDEX IF NOT EXISTS activity_graph_targets_source ON activity_graph_targets(activity_id, target_id, passage);
+                CREATE INDEX IF NOT EXISTS context_mentions_reverse_full ON context_mentions(target_id, source_id, passage);
+                CREATE INDEX IF NOT EXISTS activity_mentions_reverse_full ON activity_mentions(target_id, activity_id, passage);
+                PRAGMA user_version=42;")?;
         }
         transaction.commit()?;
         Ok(())
