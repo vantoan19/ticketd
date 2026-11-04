@@ -11,12 +11,17 @@ export function layoutContextGraph(
 ): Record<string, Point> {
   const ids = [...request.nodes].sort();
   const points: Record<string, Point> = {};
+  // Enough circumference that a dense neighborhood does not start overlapped.
+  const radius = Math.max(220, ids.length * 24);
   ids.forEach((id, index) => {
     const existing = request.positions[id];
     const angle = (2 * Math.PI * index) / Math.max(ids.length, 1);
     points[id] = existing
       ? { ...existing }
-      : { x: 400 + 220 * Math.cos(angle), y: 240 + 220 * Math.sin(angle) };
+      : {
+          x: 400 + radius * Math.cos(angle),
+          y: 240 + radius * Math.sin(angle),
+        };
   });
   for (let iteration = 0; iteration < 100; iteration++) {
     const forces: Record<string, Point> = Object.fromEntries(

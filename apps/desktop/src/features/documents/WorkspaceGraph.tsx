@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Edge, Viewport } from "@xyflow/react";
+import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
+import { GraphLegend } from "./GraphLegend";
+import { connectionRows, edgeLabels, flowEdges, kindNames } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +38,7 @@ export function WorkspaceGraph({
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loadingPage, setLoadingPage] = useState(false);
+  const [fit, setFit] = useState(true);
   const [positions, setPositions] = useState<Record<string, Point>>({});
   const [viewport, setViewport] = useState<Viewport>({
     x: 100,
@@ -66,6 +69,7 @@ export function WorkspaceGraph({
       .then((value) => {
         if (active) {
           setGraph(value);
+          setFit(true);
           setError("");
         }
       })
@@ -111,33 +115,23 @@ export function WorkspaceGraph({
   }, [active, revision, request, adjacencyLimit]);
   const nodes = useMemo(
     () =>
-      (graph?.nodes ?? []).map((node) => {
-        const tagName = graph?.node_tags[node.id];
-        const hue = tagName
-          ? Array.from(tagName).reduce(
-              (hash, char) => (hash * 31 + char.charCodeAt(0)) % 360,
-              0,
-            )
-          : null;
-        return {
-          id: node.id,
-          label: `${node.kind.toUpperCase()} · ${node.label}`,
-          ...(hue === null ? {} : { color: `hsl(${hue} 65% 50%)` }),
-        };
-      }),
-    [graph],
-  );
-  const edges = useMemo<Edge[]>(
-    () =>
-      (graph?.edges ?? []).map((edge, index) => ({
-        id: String(index),
-        source: edge.source,
-        target: edge.target,
-        label: edge.kind,
+      (graph?.nodes ?? []).map((node) => ({
+        id: node.id,
+        label: `${kindNames[node.kind].toUpperCase()} · ${node.label}`,
       })),
     [graph],
   );
+  const edges = useMemo(() => flowEdges(graph?.edges ?? []), [graph]);
   const preview = graph?.nodes.find((node) => node.id === selected);
+  const filtered = !!(search || kind || tag || relationship);
+  function clearFilters() {
+    setSearch("");
+    setKind("");
+    setTag("");
+    setRelationship("");
+    setAdjacencyLimit(3);
+    setPagesLoaded(1);
+  }
   const more = async () => {
     if (!graph?.next_cursor || loadingPage) return;
     setLoadingPage(true);
@@ -189,13 +183,12 @@ export function WorkspaceGraph({
     }
   };
   return (
-    <section
-      className="context-graph-page"
-      aria-label="Workspace context graph"
-    >
+    <section className="context-graph-page" aria-label="Workspace graph">
       <div className="context-graph-heading">
-        <h1>Workspace context graph</h1>
-        <Button onClick={onBack}>Back</Button>
+        <h1>Workspace graph</h1>
+        <Button variant="ghost" onClick={onBack}>
+          Back
+        </Button>
       </div>
       <div className="context-graph-toolbar">
         <label>
@@ -255,7 +248,9 @@ export function WorkspaceGraph({
               "activity",
               "support",
             ].map((value) => (
-              <option key={value}>{value}</option>
+              <option key={value} value={value}>
+                {edgeLabels[value]}
+              </option>
             ))}
           </select>
         </label>
@@ -269,8 +264,13 @@ export function WorkspaceGraph({
               setPagesLoaded(1);
             }}
           />{" "}
-          Include Activity details
+          Include update details
         </label>
+        {filtered && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        )}
       </div>
       {error && <p role="alert">{error}</p>}
       <div className="context-graph-main">
@@ -285,21 +285,24 @@ export function WorkspaceGraph({
             onViewport={setViewport}
             onSelect={setSelected}
             onError={setError}
+            fit={fit}
+            onFitted={() => setFit(false)}
           />
         )}
         <aside className="context-graph-preview">
           {preview ? (
             <>
+              <p>{kindNames[preview.kind]}</p>
               <h2>{preview.label}</h2>
               <p>
-                {preview.kind} {preview.state}{" "}
+                {preview.state}
                 {graph?.node_tags[preview.id]
-                  ? ` · ${graph.node_tags[preview.id]}`
+                  ? ` · Tag: ${graph.node_tags[preview.id]}`
                   : ""}
               </p>
               <Button onClick={() => onOpen(preview)}>Open item</Button>
-              <Button variant="ghost" onClick={() => onFocus(preview.id)}>
-                Center on this item
+              <Button variant="outline" onClick={() => onFocus(preview.id)}>
+                Context graph
               </Button>
             </>
           ) : (
@@ -307,23 +310,59 @@ export function WorkspaceGraph({
           )}
         </aside>
       </div>
-      {graph?.omitted && (
-        <p role="status">
-          Some items or connections are omitted by bounded checks.{" "}
-          {graph.omitted_groups.join(", ")}
+      <div className="context-graph-toolbar">
+        <GraphLegend />
+      </div>
+      {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
+        <p role="status" className="context-graph-status">
+          {filtered ? "No items match these filters." : "Nothing to show yet."}{" "}
+          {filtered && (
+            <Button variant="outline" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
         </p>
-      )}
-      {graph?.omitted_groups.length && adjacencyLimit < 12 ? (
-        <Button disabled={loadingPage} onClick={() => void expandConnections()}>
-          Expand connections
-        </Button>
-      ) : null}
-      {graph?.next_cursor && (
-        <Button disabled={loadingPage} onClick={() => void more()}>
-          {graph.nodes.length >= 100 || pagesLoaded >= 4
-            ? "Next page"
-            : "Show more"}
-        </Button>
+      ) : (
+        graph && (
+          <p role="status" className="context-graph-status">
+            {relationship
+              ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
+              : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+            · {graph.edges.length}{" "}
+            {graph.edges.length === 1 ? "connection" : "connections"}
+            {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
+              <>
+                {" · "}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingPage}
+                  onClick={() => void expandConnections()}
+                >
+                  Show more connections
+                </Button>
+              </>
+            )}
+            {graph.omitted_groups.length > 0 && adjacencyLimit >= 12 && (
+              <> · Some connections are hidden; open an item to see all</>
+            )}
+            {graph.next_cursor && (
+              <>
+                {" · "}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingPage}
+                  onClick={() => void more()}
+                >
+                  {graph.nodes.length >= 100 || pagesLoaded >= 4
+                    ? "Next page"
+                    : "Load more"}
+                </Button>
+              </>
+            )}
+          </p>
+        )
       )}
       <h2>Items</h2>
       <ul className="context-graph-list">
@@ -332,16 +371,11 @@ export function WorkspaceGraph({
             <button type="button" onClick={() => setSelected(node.id)}>
               {node.label}
             </button>
-            {graph.edges
-              .filter(
-                (edge) => edge.source === node.id || edge.target === node.id,
-              )
-              .map((edge, index) => (
-                <p key={index}>
-                  {edge.kind}
-                  {edge.explanation ? ` · ${edge.explanation}` : ""}
-                </p>
-              ))}
+            {connectionRows(node.id, graph).map((row) => (
+              <p key={row.key}>
+                <strong>{edgeLabels[row.kind] ?? row.kind}</strong> · {row.text}
+              </p>
+            ))}
           </li>
         ))}
       </ul>

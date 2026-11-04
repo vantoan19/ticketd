@@ -7,6 +7,7 @@ vi.mock("@xyflow/react", () => ({
   ReactFlow: () => <div>Canvas</div>,
   Background: () => null,
   Controls: () => null,
+  MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 
 test("metadata refresh keeps layout and stale worker results are ignored", () => {

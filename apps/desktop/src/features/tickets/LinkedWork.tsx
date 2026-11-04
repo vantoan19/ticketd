@@ -251,7 +251,7 @@ export function LinkedWork({
         <div className="linked-work-actions">
           <Button variant="ghost" size="sm" onClick={onOpenGraph}>
             <Network aria-hidden="true" />
-            Graph
+            Dependencies
           </Button>
           {linkAction}
         </div>

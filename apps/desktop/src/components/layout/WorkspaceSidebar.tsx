@@ -138,7 +138,7 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton onClick={() => openGraph?.("__workspace__")}>
-                <Network size={16} /> Context graph
+                <Network size={16} /> Workspace graph
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

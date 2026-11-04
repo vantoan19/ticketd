@@ -41,10 +41,17 @@
 @media (max-width: 700px) {
   .context-graph-main {
     grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
   }
+  .context-graph-canvas {
+    min-height: 320px;
+    height: 320px;
+  }
+  /* The selected item's details come before the map on narrow screens. */
   .context-graph-preview {
+    order: -1;
     border-left: 0;
-    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
   }
 }
 
@@ -60,4 +67,78 @@
 .context-graph-preview {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.context-graph-status {
+  margin: 0 0 16px;
+}
+.context-graph-scope {
+  color: var(--muted-foreground);
+}
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.graph-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Selection and keyboard focus read in both themes. */
+.context-graph-page .react-flow__node-default {
+  border-radius: var(--radius);
+}
+.context-graph-page .react-flow__node-default.selected,
+.context-graph-page .react-flow__node-default.selectable:focus,
+.context-graph-page .react-flow__node-default.selectable.selected:hover {
+  border: 2px solid var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
+  background: var(--surface);
+}
+.context-graph-page .react-flow__node-default:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.context-graph-page .react-flow__edges {
+  color: var(--muted-foreground);
+}
+.context-graph-page .react-flow__edge-path {
+  stroke: currentColor;
+}
+.context-graph-page .react-flow__edge-text {
+  fill: var(--foreground);
+}
+.context-graph-page .react-flow__edge-textbg {
+  fill: var(--surface);
+}
+.context-graph-page .react-flow__controls {
+  box-shadow: var(--shadow-border);
+}
+.context-graph-page .react-flow__controls-button {
+  background: var(--surface);
+  color: var(--foreground);
+  border-bottom: 1px solid var(--border);
+}
+.context-graph-page .react-flow__controls-button:hover {
+  background: var(--accent);
+}
+.context-graph-page .react-flow__controls-button svg {
+  fill: currentColor;
+}
+.context-graph-page .react-flow__attribution {
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.context-graph-page .react-flow__attribution a {
+  color: inherit;
+}
+.context-graph-page .react-flow__background {
+  background: var(--background);
 }
