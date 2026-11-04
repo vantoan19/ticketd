@@ -14,15 +14,25 @@
   padding: 24px 32px;
   overflow: auto;
 }
-.documents-page h1 {
+.documents-page {
+  display: flex;
+  flex-direction: column;
+}
+/* List-page typography stays here so rendered Markdown keeps its own list and heading styles. */
+.documents-list-view {
+  width: 100%;
+  max-width: 936px;
+  margin: 0 auto;
+}
+.documents-list-view h1 {
   font-size: 24px;
   margin-bottom: 24px;
 }
-.documents-page h2 {
+.documents-list-view h2 {
   font-size: 14px;
   margin-bottom: 8px;
 }
-.documents-page ul {
+.documents-list-view ul {
   list-style: none;
   padding: 0;
 }
@@ -38,7 +48,6 @@
   box-shadow: 0 8px 32px #0003;
   padding: 24px;
 }
-.document-dialog header,
 .document-dialog footer {
   display: flex;
   justify-content: space-between;
@@ -48,17 +57,6 @@
 }
 .document-dialog .editor-mode {
   flex-wrap: wrap;
-}
-.document-dialog header {
-  margin-bottom: 24px;
-}
-.document-dialog #document-title {
-  width: 100%;
-  margin-bottom: 16px;
-  font-size: 24px;
-}
-.document-dialog footer {
-  margin-top: 20px;
 }
 @media (max-width: 767px) {
   .document-dialog {
@@ -70,48 +68,127 @@
 .document-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 220px;
-  grid-template-areas: "header rail" "mode rail" "title rail" "conflict rail" "body rail" "footer rail";
-  gap: 20px 48px;
+  gap: 48px;
   padding: 12px 0 32px;
   align-items: start;
 }
-.document-workspace > header {
-  grid-area: header;
+.document-main {
   display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.document-main > header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.document-dialog .document-main > header {
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
 }
-.document-workspace > header h1 {
+.document-main > header h1 {
   margin: 0;
+  font-size: 24px;
+  overflow-wrap: anywhere;
 }
-.document-workspace > .document-mode {
-  grid-area: mode;
+.document-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.document-close {
+  min-width: 32px;
+  min-height: 32px;
+  width: 32px;
+  height: 32px;
+  flex: none;
+}
+.document-main > .document-mode {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-.document-workspace > .document-mode [role="status"] {
+.document-status {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 13px;
 }
-.document-workspace > [data-slot="field-group"] {
-  grid-area: title;
+.document-status svg {
+  width: 14px;
+  height: 14px;
 }
-.document-workspace > .document-body {
-  grid-area: body;
+.document-main > .document-body {
   min-width: 0;
+  font-size: 16px;
+  line-height: 1.6;
 }
-.document-workspace > .document-rail {
-  grid-area: rail;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.document-workspace > footer {
-  grid-area: footer;
+.document-main > footer {
   display: flex;
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
+}
+.document-dialog .document-main > footer {
+  justify-content: flex-end;
+}
+.document-dialog .document-main > footer .document-status {
+  margin-right: auto;
+  margin-left: 0;
+}
+.document-trash-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted);
+}
+.document-trash-banner span::after {
+  content: " ·";
+}
+.document-save-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.document-save-error p {
+  margin: 0;
+}
+.document-save-error details {
+  flex-basis: 100%;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.document-save-error pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.document-conflict p {
+  margin: 0 0 12px;
+}
+.document-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.document-dialog #document-title {
+  font-size: 14px;
+}
+.document-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 .document-rail dt {
   color: var(--muted-foreground);
@@ -138,10 +215,12 @@
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.document-rail .document-direction {
+  margin: 0 0 4px 12px;
+}
 @media (max-width: 767px) {
   .document-workspace {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "header" "mode" "title" "conflict" "body" "rail" "footer";
   }
 }
 
@@ -160,29 +239,42 @@
   gap: 16px;
   margin: 24px 0 32px;
 }
+.documents-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
 .documents-include {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
-.documents-filters {
+.documents-search {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  align-items: end;
-  gap: 12px;
+  gap: 8px;
+  max-width: 420px;
 }
-.documents-filters label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.documents-search input {
   flex: 1 1 200px;
-  max-width: 320px;
 }
-.documents-page section {
+.documents-tag-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.documents-count {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.documents-list-view section {
   margin-bottom: 24px;
 }
-.documents-page .document-list {
-  max-width: 760px;
+.documents-list-view .document-list {
   margin: 0;
 }
 .document-list li {
@@ -190,6 +282,7 @@
   align-items: start;
   gap: 12px;
   border-bottom: 1px solid var(--border);
+  padding: 8px 0;
 }
 .document-list-content {
   flex: 1;
@@ -199,19 +292,55 @@
   display: block;
   width: 100%;
   height: auto;
-  min-height: 44px;
+  min-height: 32px;
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
+  font-weight: 600;
 }
 .document-list-content p {
-  margin: 0 12px 12px;
+  margin: 0 12px 4px;
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
+.document-list-content .document-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.document-list-content .document-origin,
+.document-list-content .document-list-tags {
+  font-size: 12px;
+}
+.document-list-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.document-list-tags button {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.document-list mark {
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.document-list-date {
+  flex: none;
+  margin-top: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
 .document-list > li > button {
   flex: none;
-  margin: 6px;
+  margin: 2px;
 }
 .document-pagination {
   display: flex;
@@ -257,11 +386,4 @@
   .documents-page {
     padding: 20px 16px;
   }
-  .documents-filters label {
-    max-width: none;
-  }
-}
-
-.document-workspace > .document-conflict {
-  grid-area: conflict;
 }

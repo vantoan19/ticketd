@@ -198,10 +198,26 @@ fn document_context_links(
 > {
     Workspace::open_default()
         .and_then(|w| {
-            Ok((
-                w.context_links(&id, 100, 0)?,
-                w.context_backlinks(&id, 100, 0)?,
-            ))
+            let mut backlinks = w.context_backlinks(&id, 100, 0)?;
+            // A Plan that uses this Document as its spec is a connection even though
+            // no Markdown link states it.
+            for plan in w.list_plans(false)? {
+                if plan.spec_document_id.as_deref() == Some(id.as_str()) {
+                    backlinks.push(ticketd_core::ContextLink {
+                        activity_id: None,
+                        source_id: plan.id,
+                        target_id: id.clone(),
+                        source_kind: "plan".into(),
+                        target_kind: "document".into(),
+                        passage: String::new(),
+                        source_label: plan.name,
+                        target_label: String::new(),
+                        source_trashed: false,
+                        target_trashed: false,
+                    });
+                }
+            }
+            Ok((w.context_links(&id, 100, 0)?, backlinks))
         })
         .map_err(|e| e.to_string())
 }

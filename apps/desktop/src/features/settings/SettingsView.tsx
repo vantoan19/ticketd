@@ -536,6 +536,10 @@ function KeyboardShortcutsCard() {
       action: "Create from the New ticket dialog",
       keys: [[modifier, "Enter"]],
     },
+    {
+      action: "Capture a thought from anywhere",
+      keys: [[modifier, "Shift", "N"]],
+    },
     { action: "Close the top surface", keys: [["Esc"]] },
     {
       action: "Resize the list and detail from the divider",

@@ -93,6 +93,22 @@ export function App() {
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   const [capture, setCapture] = useState(false);
+  // Capture is reachable from anywhere: Mod+Shift+N opens it without leaving the current view.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "n"
+      ) {
+        event.preventDefault();
+        setCapture(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const [documentTarget, setDocumentTarget] = useState<{
     id: string;
     key: number;
@@ -314,6 +330,7 @@ export function App() {
                       active={view === "documents"}
                       target={documentTarget}
                       capture={capture}
+                      onCapture={() => setCapture(true)}
                       currentTicket={
                         view === "tickets" ? workspace.selected : null
                       }

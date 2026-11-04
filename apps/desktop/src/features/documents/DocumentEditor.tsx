@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, Check, X } from "lucide-react";
+import { client } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -76,6 +78,7 @@ export function DocumentEditor({
   onOpenTicket,
   onOpenPlan,
   onOpenGraph,
+  active = true,
   children,
 }: {
   initial: Document | null;
@@ -85,7 +88,9 @@ export function DocumentEditor({
   onOpenTicket?: (reference: string) => void;
   onOpenPlan?: (id: string) => void;
   onOpenGraph?: (id: string) => void;
-  children?: ReactNode;
+  /** False while the Documents view is hidden: stop polling for outside changes. */
+  active?: boolean;
+  children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
   const [writing, setWriting] = useState(initial === null);
   const [linkTarget, setLinkTarget] = useState("");
@@ -96,12 +101,25 @@ export function DocumentEditor({
   >([[], []]);
   const [linkError, setLinkError] = useState("");
   const [suggestion, setSuggestion] = useState(currentTicket ?? null);
-  useEffect(() => {
+  const linksKey = useRef("");
+  const refreshLinks = () => {
     if (initial)
       void documents
         .links(initial.id)
-        .then(setLinks)
+        .then((next) => {
+          const key = JSON.stringify(next);
+          if (key === linksKey.current) return;
+          linksKey.current = key;
+          setLinks(next);
+        })
         .catch((error: unknown) => setLinkError(String(error)));
+  };
+  const refreshLinksRef = useRef(refreshLinks);
+  useEffect(() => {
+    refreshLinksRef.current = refreshLinks;
+  });
+  useEffect(() => {
+    refreshLinksRef.current();
   }, [initial]);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
@@ -115,6 +133,8 @@ export function DocumentEditor({
     null,
   );
   const [failed, setFailed] = useState(false);
+  const [failureDetail, setFailureDetail] = useState("");
+  const [failedTrash, setFailedTrash] = useState(false);
   const [external, setExternal] = useState<Snapshot | null>(null);
   const externalRef = useRef<Snapshot | null>(null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
@@ -151,7 +171,9 @@ export function DocumentEditor({
       setStatus(result.trashed ? "Moved to Trash" : "Restored");
     } catch (error) {
       setFailed(true);
-      setStatus(`Could not update Trash: ${String(error)}`);
+      setFailedTrash(true);
+      setFailureDetail(String(error));
+      setStatus("Not saved");
     } finally {
       setTransitioning(false);
     }
@@ -208,11 +230,7 @@ export function DocumentEditor({
       pending.current = null;
       saving.current = false;
       setStatus("Saved locally");
-      if (initial)
-        void documents
-          .links(initial.id)
-          .then(setLinks)
-          .catch((error: unknown) => setLinkError(String(error)));
+      refreshLinks();
       if (
         draft.current.title !== saved.current.title ||
         draft.current.body !== saved.current.body ||
@@ -225,7 +243,9 @@ export function DocumentEditor({
       saving.current = false;
       closeRequested.current = false;
       setFailed(true);
-      setStatus(`Could not save: ${String(error)}`);
+      setFailedTrash(false);
+      setFailureDetail(String(error));
+      setStatus("Not saved");
     }
   };
   const saveRef = useRef(save);
@@ -237,8 +257,11 @@ export function DocumentEditor({
     return () => window.clearTimeout(timer);
   }, [title, body, suggestion]);
   useEffect(() => {
+    if (!active) return;
     const timer = window.setInterval(() => {
       if (!id.current || saving.current) return;
+      // Links change when other Documents or tickets are edited, not only this one.
+      refreshLinksRef.current();
       void documents
         .show(id.current)
         .then((document) => {
@@ -323,7 +346,7 @@ export function DocumentEditor({
         .catch(() => {});
     }, 2000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [active]);
   const navigate = (action: () => void) => {
     afterSave.current = action;
     closeRequested.current = true;
@@ -334,146 +357,242 @@ export function DocumentEditor({
     closeRequested.current = true;
     void save();
   };
+  const toggleTrash = () => {
+    transition.current = { trashed: !trashed, requestId: crypto.randomUUID() };
+    void save();
+  };
+  const locked = trashed || transitioning;
+  const capture = !initial;
+  const heading =
+    title.trim() ||
+    savedDocument?.heading ||
+    initial?.origin_brief?.trim() ||
+    "Document";
+  const titleField = (
+    <FieldGroup>
+      <Field>
+        <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
+        <Input
+          id="document-title"
+          placeholder={
+            capture
+              ? "Add a title (optional)"
+              : initial.origin_brief?.trim() || "Untitled"
+          }
+          readOnly={locked}
+          value={title}
+          onChange={(event) => {
+            draft.current = { ...draft.current, title: event.target.value };
+            setTitle(event.target.value);
+          }}
+        />
+      </Field>
+    </FieldGroup>
+  );
+  const statusLine = (
+    <span role="status" className="document-status">
+      {status === "Saved locally" && <Check aria-hidden="true" />}
+      {status}
+    </span>
+  );
+  const saveError = failed && (
+    <div role="alert" className="document-save-error">
+      <p>
+        {failedTrash
+          ? "We couldn’t update Trash. Nothing was lost."
+          : "We couldn’t save your changes. Your draft is still here."}
+      </p>
+      <Button onClick={() => void save()}>Retry</Button>
+      {failureDetail && (
+        <details>
+          <summary>Details</summary>
+          <pre>{failureDetail}</pre>
+        </details>
+      )}
+    </div>
+  );
+  const connected = groupConnections(links);
   return (
-    <DocumentSurface capture={!initial} onClose={requestClose}>
-      <header>
-        {initial ? (
-          <h1>
-            {title.trim() ||
-              savedDocument?.heading ||
-              initial.origin_brief?.trim() ||
-              "Document"}
-          </h1>
-        ) : (
-          <DialogTitle>Capture a thought</DialogTitle>
-        )}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Close and return"
-          onClick={requestClose}
-        >
-          ×
-        </Button>
-      </header>
-      {initial && (
-        <div className="document-mode" aria-label="Document mode">
-          <Button
-            variant={writing ? "ghost" : "secondary"}
-            onClick={() => setWriting(false)}
-          >
-            Read
-          </Button>
-          <Button
-            variant={writing ? "secondary" : "ghost"}
-            onClick={() => setWriting(true)}
-          >
-            Write
-          </Button>
-          <span role="status">{status}</span>
-        </div>
-      )}
-      {(!initial || writing) && (
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
-            <Input
-              id="document-title"
-              placeholder={initial?.origin_brief?.trim() || "Untitled"}
-              readOnly={trashed || transitioning}
-              value={title}
-              onChange={(event) => {
-                draft.current = { ...draft.current, title: event.target.value };
-                setTitle(event.target.value);
-              }}
-            />
-          </Field>
-        </FieldGroup>
-      )}
-      {suggestion && (
-        <p>
-          Connected to {suggestion}{" "}
-          <Button
-            variant="ghost"
-            aria-label={`Remove connection to ${suggestion}`}
-            onClick={() => {
-              draft.current = { ...draft.current, suggestion: null };
-              setSuggestion(null);
-            }}
-          >
-            Remove
-          </Button>
-        </p>
-      )}
-      {external && (
-        <div role="alert" className="document-conflict">
-          <p>Saved content changed while you were editing.</p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              saved.current = external;
-              draft.current = external;
-              pending.current = null;
-              externalRef.current = null;
-              setExternal(null);
-              setTitle(external.title);
-              setBody(external.body);
-              setSuggestion(null);
-              setFailed(false);
-              setStatus("Loaded saved content");
-            }}
-          >
-            Reload saved content
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              saved.current = external;
-              pending.current = null;
-              externalRef.current = null;
-              setExternal(null);
-              void save();
-            }}
-          >
-            Save over saved content
-          </Button>
-        </div>
-      )}
-      <div className="document-body">
-        {!initial || writing ? (
-          <LazyMarkdownEditor
-            value={body}
-            onChange={(value) => {
-              draft.current = { ...draft.current, body: value };
-              setBody(value);
-            }}
-            label="Your thought"
-            readOnly={trashed || transitioning}
-            autoFocus={!initial}
-          />
-        ) : (
-          <DocumentNavigation.Provider
-            value={
-              onOpenDocument ? (id) => navigate(() => onOpenDocument(id)) : null
-            }
-          >
-            <PlanNavigation.Provider
-              value={onOpenPlan ? (id) => navigate(() => onOpenPlan(id)) : null}
+    <DocumentSurface capture={capture} onClose={requestClose}>
+      <div className="document-main">
+        {trashed && (
+          <div role="status" className="document-trash-banner">
+            <span>In Trash</span>
+            <Button
+              variant="outline"
+              disabled={transitioning}
+              onClick={toggleTrash}
             >
-              <MarkdownDocument
-                source={body}
-                select={
-                  onOpenTicket
-                    ? (reference) => navigate(() => onOpenTicket(reference))
-                    : undefined
-                }
-              />
-            </PlanNavigation.Provider>
-          </DocumentNavigation.Provider>
+              Restore
+            </Button>
+          </div>
         )}
-      </div>
-      <aside className="document-rail">
+        <header>
+          {initial ? (
+            <>
+              <div className="document-eyebrow">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="document-close"
+                  aria-label="Close and return"
+                  onClick={requestClose}
+                >
+                  <ArrowLeft aria-hidden="true" />
+                </Button>
+                <span>Document</span>
+              </div>
+              <h1>{heading}</h1>
+            </>
+          ) : (
+            <>
+              <DialogTitle>Capture a thought</DialogTitle>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="document-close"
+                aria-label="Close and return"
+                onClick={requestClose}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </>
+          )}
+        </header>
         {initial && (
+          <div className="document-mode" aria-label="Document mode">
+            <Button
+              variant={writing ? "ghost" : "secondary"}
+              onClick={() => setWriting(false)}
+            >
+              Read
+            </Button>
+            <Button
+              variant={writing ? "secondary" : "ghost"}
+              onClick={() => setWriting(true)}
+            >
+              Write
+            </Button>
+            {statusLine}
+          </div>
+        )}
+        {initial && writing && titleField}
+        {suggestion && (
+          <p>
+            Connected to {suggestion}{" "}
+            <Button
+              variant="ghost"
+              aria-label={`Remove connection to ${suggestion}`}
+              onClick={() => {
+                draft.current = { ...draft.current, suggestion: null };
+                setSuggestion(null);
+              }}
+            >
+              Remove
+            </Button>
+          </p>
+        )}
+        {external && (
+          <div role="alert" className="document-conflict">
+            <p>
+              Saved content changed while you were editing. Reload saved content
+              to discard your draft, or save my draft to replace the saved
+              content with it.
+            </p>
+            <div className="document-conflict-actions">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  saved.current = external;
+                  draft.current = external;
+                  pending.current = null;
+                  externalRef.current = null;
+                  setExternal(null);
+                  setTitle(external.title);
+                  setBody(external.body);
+                  setSuggestion(null);
+                  setFailed(false);
+                  setStatus("Loaded saved content");
+                }}
+              >
+                Reload saved content
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  saved.current = external;
+                  pending.current = null;
+                  externalRef.current = null;
+                  setExternal(null);
+                  void save();
+                }}
+              >
+                Save my draft
+              </Button>
+            </div>
+          </div>
+        )}
+        {initial && saveError}
+        <div className="document-body">
+          {!initial || writing ? (
+            <LazyMarkdownEditor
+              value={body}
+              onChange={(value) => {
+                draft.current = { ...draft.current, body: value };
+                setBody(value);
+              }}
+              label="Your thought"
+              readOnly={locked}
+              autoFocus={capture}
+            />
+          ) : (
+            <DocumentNavigation.Provider
+              value={
+                onOpenDocument
+                  ? (id) => navigate(() => onOpenDocument(id))
+                  : null
+              }
+            >
+              <PlanNavigation.Provider
+                value={
+                  onOpenPlan ? (id) => navigate(() => onOpenPlan(id)) : null
+                }
+              >
+                <MarkdownDocument
+                  source={body}
+                  select={
+                    onOpenTicket
+                      ? (reference) => navigate(() => onOpenTicket(reference))
+                      : undefined
+                  }
+                />
+              </PlanNavigation.Provider>
+            </DocumentNavigation.Provider>
+          )}
+        </div>
+        {capture && titleField}
+        {!initial && saveError}
+        <footer>
+          {capture && statusLine}
+          {initial && !trashed && (
+            <Button
+              variant="outline"
+              disabled={transitioning}
+              onClick={toggleTrash}
+            >
+              Move to Trash
+            </Button>
+          )}
+          <Button
+            variant={capture ? "default" : "outline"}
+            onClick={requestClose}
+          >
+            {capture ? "Done" : "Back to work"}
+          </Button>
+        </footer>
+      </div>
+      {initial && (
+        <aside className="document-rail">
           <section aria-label="Document details">
             <h2>Document details</h2>
             <dl>
@@ -512,119 +631,118 @@ export function DocumentEditor({
               </dd>
             </dl>
           </section>
-        )}
-        {children}
-        {initial && onOpenGraph && (
-          <Button
-            variant="outline"
-            onClick={() => navigate(() => onOpenGraph(initial.id))}
-          >
-            Context graph
-          </Button>
-        )}
-        {(!initial || writing) && (
-          <>
-            <Field>
-              <FieldLabel htmlFor="link-target">Link target</FieldLabel>
-              <Input
-                id="link-target"
-                placeholder="Ticket reference or Document ID"
-                disabled={trashed || transitioning}
-                value={linkTarget}
-                onChange={(event) => setLinkTarget(event.target.value)}
-              />
-            </Field>
+          {typeof children === "function" ? children({ trashed }) : children}
+          {onOpenGraph && (
             <Button
-              disabled={trashed || transitioning || !linkTarget.trim()}
               variant="outline"
-              onClick={() =>
-                void documents
-                  .linkMarkdown(linkTarget.trim())
-                  .then((link) => {
-                    const next = draft.current.body
-                      ? `${draft.current.body}\n\n${link}`
-                      : link;
-                    draft.current = { ...draft.current, body: next };
-                    setBody(next);
-                    setLinkTarget("");
-                    setLinkError("");
-                  })
-                  .catch((error: unknown) => setLinkError(String(error)))
-              }
+              onClick={() => navigate(() => onOpenGraph(initial.id))}
             >
-              Insert link
+              Context graph
             </Button>
-            {linkError && <p role="alert">{linkError}</p>}
-          </>
-        )}
-        {initial && (
+          )}
+          {writing && (
+            <>
+              <Field>
+                <FieldLabel htmlFor="link-target">Link target</FieldLabel>
+                <Input
+                  id="link-target"
+                  placeholder="Ticket reference or Document ID"
+                  disabled={locked}
+                  value={linkTarget}
+                  onChange={(event) => setLinkTarget(event.target.value)}
+                />
+              </Field>
+              <Button
+                disabled={locked || !linkTarget.trim()}
+                variant="outline"
+                onClick={() =>
+                  void documents
+                    .linkMarkdown(linkTarget.trim())
+                    .then((link) => {
+                      const next = draft.current.body
+                        ? `${draft.current.body}\n\n${link}`
+                        : link;
+                      draft.current = { ...draft.current, body: next };
+                      setBody(next);
+                      setLinkTarget("");
+                      setLinkError("");
+                    })
+                    .catch((error: unknown) => setLinkError(String(error)))
+                }
+              >
+                Insert link
+              </Button>
+              {linkError && <p role="alert">{linkError}</p>}
+            </>
+          )}
           <section aria-label="Connected items">
             <h2>Connected items</h2>
             {links.some((group) => group.length === 100) && (
               <p>Showing the first 100 items in each direction.</p>
             )}
             <ul>
-              {links.flatMap((group, direction) =>
-                group.map((link) => {
-                  const kind =
-                    direction === 0 ? link.target_kind : link.source_kind;
-                  const target =
-                    direction === 0 ? link.target_id : link.source_id;
-                  const isTrashed =
-                    direction === 0 ? link.target_trashed : link.source_trashed;
-                  const label =
-                    direction === 0 ? link.target_label : link.source_label;
-                  return (
-                    <li key={`${direction}-${target}-${link.passage}`}>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          if (kind === "document")
-                            navigate(() => onOpenDocument?.(target));
-                          else if (kind === "ticket")
-                            navigate(() => onOpenTicket?.(label));
-                          else if (kind === "plan")
-                            navigate(() => onOpenPlan?.(target));
-                        }}
-                      >
-                        {label}
-                        {isTrashed ? " (Trash)" : ""}
-                      </Button>
-                      <DocumentNavigation.Provider
+              {connected.map((item) => (
+                <li key={`${item.kind}-${item.id}`}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      if (item.kind === "document")
+                        navigate(() => onOpenDocument?.(item.id));
+                      else if (item.kind === "ticket")
+                        navigate(() => onOpenTicket?.(item.label));
+                      else if (item.kind === "plan")
+                        navigate(() => onOpenPlan?.(item.id));
+                    }}
+                  >
+                    <ConnectedLabel item={item} />
+                    {item.trashed ? " (Trash)" : ""}
+                  </Button>
+                  <p className="document-direction">
+                    {item.to && item.from
+                      ? "Links to and linked from"
+                      : item.to
+                        ? "Links to"
+                        : item.kind === "plan" && item.passages.length === 0
+                          ? "Uses this Document as its spec"
+                          : "Linked from"}
+                  </p>
+                  {item.passages.map((passage) => (
+                    <DocumentNavigation.Provider
+                      key={passage}
+                      value={
+                        onOpenDocument
+                          ? (id) => navigate(() => onOpenDocument(id))
+                          : null
+                      }
+                    >
+                      <PlanNavigation.Provider
                         value={
-                          onOpenDocument
-                            ? (id) => navigate(() => onOpenDocument(id))
+                          onOpenPlan
+                            ? (id) => navigate(() => onOpenPlan(id))
                             : null
                         }
                       >
-                        <PlanNavigation.Provider
-                          value={
-                            onOpenPlan
-                              ? (id) => navigate(() => onOpenPlan(id))
-                              : null
-                          }
-                        >
-                          <div className="document-passage">
-                            <MarkdownDocument
-                              source={link.passage}
-                              select={
-                                onOpenTicket
-                                  ? (reference) =>
-                                      navigate(() => onOpenTicket(reference))
-                                  : undefined
-                              }
-                            />
-                          </div>
-                        </PlanNavigation.Provider>
-                      </DocumentNavigation.Provider>
-                    </li>
-                  );
-                }),
-              )}
+                        <div className="document-passage">
+                          <MarkdownDocument
+                            source={passage}
+                            select={
+                              onOpenTicket
+                                ? (reference) =>
+                                    navigate(() => onOpenTicket(reference))
+                                : undefined
+                            }
+                          />
+                        </div>
+                      </PlanNavigation.Provider>
+                    </DocumentNavigation.Provider>
+                  ))}
+                </li>
+              ))}
             </ul>
             {!creatingFromDocument && (
               <Button
                 variant="outline"
+                disabled={locked}
                 onClick={() => setCreatingFromDocument(true)}
               >
                 Create ticket
@@ -645,7 +763,7 @@ export function DocumentEditor({
                 />
               </Field>
               <Button
-                disabled={trashed || transitioning || !ticketTitle.trim()}
+                disabled={locked || !ticketTitle.trim()}
                 onClick={() => {
                   if (creatingTicket.current) return;
                   if (
@@ -676,35 +794,65 @@ export function DocumentEditor({
               </Button>
             </div>
           </section>
-        )}
-      </aside>
-      <footer>
-        {!initial && <span role="status">{status}</span>}
-        {trashed && <span>This Document is in Trash.</span>}
-        {initial && (
-          <Button
-            variant="outline"
-            disabled={transitioning}
-            onClick={() => {
-              transition.current = {
-                trashed: !trashed,
-                requestId: crypto.randomUUID(),
-              };
-              void save();
-            }}
-          >
-            {trashed ? "Restore" : "Move to Trash"}
-          </Button>
-        )}
-        {failed && (
-          <Button variant="outline" onClick={() => void save()}>
-            Retry
-          </Button>
-        )}
-        <Button variant="outline" onClick={requestClose}>
-          Back to work
-        </Button>
-      </footer>
+        </aside>
+      )}
     </DocumentSurface>
   );
+}
+
+type Connection = {
+  kind: string;
+  id: string;
+  label: string;
+  trashed: boolean;
+  to: boolean;
+  from: boolean;
+  passages: string[];
+};
+/** One row per connected item, however many links or directions join it to this Document. */
+function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
+  const rows = new Map<string, Connection>();
+  links.forEach((group, direction) => {
+    for (const link of group) {
+      const out = direction === 0;
+      const kind = out ? link.target_kind : link.source_kind;
+      const id = out ? link.target_id : link.source_id;
+      const key = `${kind}-${id}`;
+      const row = rows.get(key) ?? {
+        kind,
+        id,
+        label: out ? link.target_label : link.source_label,
+        trashed: out ? link.target_trashed : link.source_trashed,
+        to: false,
+        from: false,
+        passages: [],
+      };
+      if (out) row.to = true;
+      else row.from = true;
+      if (link.passage && !row.passages.includes(link.passage))
+        row.passages.push(link.passage);
+      rows.set(key, row);
+    }
+  });
+  return [...rows.values()];
+}
+/** Tickets show their title beside the reference; Plans using this Document read "Spec of …". */
+function ConnectedLabel({ item }: { item: Connection }) {
+  const [title, setTitle] = useState("");
+  useEffect(() => {
+    if (item.kind !== "ticket") return;
+    let current = true;
+    void client.showTicket(item.label).then(
+      (ticket) => {
+        if (current) setTitle(ticket.title);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [item.kind, item.label]);
+  if (item.kind === "plan" && item.passages.length === 0)
+    return <>Spec of {item.label}</>;
+  return <>{title ? `${item.label} · ${title}` : item.label}</>;
 }

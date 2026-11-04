@@ -743,3 +743,27 @@ fn opened_untitled_document_exposes_its_bounded_heading() {
         "First line"
     );
 }
+
+#[test]
+fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(&dir.path().join("workspace.sqlite3")).unwrap();
+    let first = workspace
+        .create_document(
+            Some("Plan"),
+            "# Heading\n\n- **Bold** [link](ticketd://document/x) item\n\n```\ncode\n```",
+        )
+        .unwrap();
+    let second = workspace.create_document(Some("Plan"), "Other").unwrap();
+    workspace.set_document_tag(&first.id, "b", true).unwrap();
+    workspace.set_document_tag(&first.id, "a", true).unwrap();
+    workspace.open_document(&first.id).unwrap();
+    workspace.open_document(&second.id).unwrap();
+    let rows = workspace.recent_documents().unwrap();
+    let row = rows.iter().find(|row| row.id == first.id).unwrap();
+    assert_eq!(row.snippet, "Heading Bold link item");
+    assert_eq!(row.tags, ["a", "b"]);
+    assert!(!row.updated_at.is_empty());
+    let found = workspace.search_documents("link", None, 10, 0).unwrap();
+    assert!(found[0].snippet.contains("link item"));
+}
