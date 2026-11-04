@@ -58,6 +58,7 @@ export function App() {
       setSettingsSection("appearance");
     }
     setGraphOrigin(null);
+    setLocalGraphOrigin(null);
     setWorkspaceGraphOpen(false);
     setView(next);
   };
@@ -88,6 +89,7 @@ export function App() {
     };
   }, []);
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
+  const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
   const [capture, setCapture] = useState(false);
   const [documentTarget, setDocumentTarget] = useState<{
@@ -127,6 +129,7 @@ export function App() {
     <ContextGraphNavigation.Provider
       value={(id) => {
         setWorkspaceGraphOpen(id === "__workspace__");
+        setLocalGraphOrigin(id === "__workspace__" ? null : id);
         setGraphOrigin(id);
       }}
     >
@@ -210,14 +213,17 @@ export function App() {
                       </SidebarTrigger>
                     </div>
                   )}
-                  {workspaceGraphOpen && graphOrigin === null && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => setGraphOrigin("__workspace__")}
-                    >
-                      Back to context graph
-                    </Button>
-                  )}
+                  {(workspaceGraphOpen || localGraphOrigin) &&
+                    graphOrigin === null && (
+                      <Button
+                        variant="ghost"
+                        onClick={() =>
+                          setGraphOrigin(localGraphOrigin ?? "__workspace__")
+                        }
+                      >
+                        Back to context graph
+                      </Button>
+                    )}
                   {error && (
                     <p role="alert" className="global-error">
                       {error}
@@ -304,7 +310,10 @@ export function App() {
                           setGraphOrigin(null);
                           setWorkspaceGraphOpen(false);
                         }}
-                        onFocus={setGraphOrigin}
+                        onFocus={(id) => {
+                          setLocalGraphOrigin(id);
+                          setGraphOrigin(id);
+                        }}
                         onOpen={(node) => {
                           setGraphOrigin(null);
                           if (node.kind === "document") {
@@ -324,31 +333,36 @@ export function App() {
                       />
                     </div>
                   )}
-                  {graphOrigin && graphOrigin !== "__workspace__" && (
-                    <ContextGraph
-                      origin={graphOrigin}
-                      onBack={() =>
-                        setGraphOrigin(
-                          workspaceGraphOpen ? "__workspace__" : null,
-                        )
-                      }
-                      onOpen={(node) => {
-                        setGraphOrigin(null);
-                        if (node.kind === "document") {
-                          setDocumentTarget({ id: node.id, key: Date.now() });
-                          setView("documents");
-                        } else if (node.kind === "plan") {
-                          scope("all", "all", node.id);
-                          setView("tickets");
-                        } else {
-                          const reference = node.label.match(/^T-\d+/)?.[0];
-                          if (reference) {
-                            setSelected(reference);
+                  {localGraphOrigin && (
+                    <div hidden={graphOrigin !== localGraphOrigin}>
+                      <ContextGraph
+                        key={localGraphOrigin}
+                        active={graphOrigin === localGraphOrigin}
+                        origin={localGraphOrigin}
+                        onBack={() => {
+                          setLocalGraphOrigin(null);
+                          setGraphOrigin(
+                            workspaceGraphOpen ? "__workspace__" : null,
+                          );
+                        }}
+                        onOpen={(node) => {
+                          setGraphOrigin(null);
+                          if (node.kind === "document") {
+                            setDocumentTarget({ id: node.id, key: Date.now() });
+                            setView("documents");
+                          } else if (node.kind === "plan") {
+                            scope("all", "all", node.id);
                             setView("tickets");
+                          } else {
+                            const reference = node.label.match(/^T-\d+/)?.[0];
+                            if (reference) {
+                              setSelected(reference);
+                              setView("tickets");
+                            }
                           }
-                        }
-                      }}
-                    />
+                        }}
+                      />
+                    </div>
                   )}
                   <TicketWorkspaceView
                     workspace={workspace}
