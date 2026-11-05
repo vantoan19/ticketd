@@ -1,3 +1,4 @@
+import { planSummary as summarizePlan } from "@/features/plans/plan-summary";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   AlertCircle,
@@ -185,25 +186,7 @@ export function TicketListPane({
     scopeTotal,
   };
   const members = planState.view?.members ?? [];
-  const memberProjects = [
-    ...new Set(
-      members.map(
-        (member) =>
-          projects.find((item) => item.id === member.project_id)?.name ??
-          "no project",
-      ),
-    ),
-  ];
-  const blocked = members.filter(
-    (member) => member.availability === "Blocked",
-  ).length;
-  const planSummary = [
-    `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`,
-    memberProjects.length > 0 ? memberProjects.join(", ") : null,
-    blocked > 0 ? `${blocked} blocked` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const planSummary = summarizePlan(members, projects);
   return (
     <section
       className="ticket-list"

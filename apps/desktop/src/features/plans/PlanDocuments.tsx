@@ -6,6 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
@@ -31,15 +32,23 @@ export function PlanDocuments({
     const isSpec = doc.id === spec?.id;
     return (
       <li key={doc.id} className="plan-document-row">
-        <FileText aria-hidden="true" size={14} />
+        {!isSpec && <FileText aria-hidden="true" size={14} />}
         <button
           type="button"
           className={isSpec ? "plan-spec-chip" : undefined}
           title={doc.heading}
           onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
         >
-          {isSpec ? `Spec: ${doc.heading}` : doc.heading}
-          {doc.trashed && " (Trashed)"}
+          {isSpec && (
+            <>
+              <FileText aria-hidden="true" size={14} />
+              <span className="plan-spec-label">Spec:</span>{" "}
+            </>
+          )}
+          <span className={isSpec ? "plan-spec-title" : undefined}>
+            {doc.heading}
+            {doc.trashed && " (Trashed)"}
+          </span>
         </button>
         {!readOnly && (
           <DropdownMenu>
@@ -91,7 +100,6 @@ export function PlanDocuments({
   }
   return (
     <section className="plan-documents" aria-label="Plan context">
-      {spec && <ul>{documentRow(spec)}</ul>}
       {supporting.length > 0 && (
         <details>
           <summary>
@@ -101,14 +109,16 @@ export function PlanDocuments({
           <ul>{supporting.map(documentRow)}</ul>
         </details>
       )}
+      {spec && <ul>{documentRow(spec)}</ul>}
       {!readOnly && (
-        <IconButton
-          label="Add context"
+        <Button
+          variant="ghost"
+          size="sm"
           aria-expanded={adding}
           onClick={() => setAdding(!adding)}
         >
-          <Plus />
-        </IconButton>
+          <Plus data-icon="inline-start" /> Add context
+        </Button>
       )}
       {adding && !readOnly && (
         <div className="plan-document-picker">

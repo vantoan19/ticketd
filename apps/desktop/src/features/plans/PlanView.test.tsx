@@ -317,7 +317,11 @@ test("the title row carries the labeled view toggle, and a summary line sits abo
   // The header spans both panes: the toggle is not inside the list section.
   const list = screen.getByRole("region", { name: "Launch" });
   expect(list.contains(toggle)).toBe(false);
-  expect(await screen.findByText("2 tickets · no project")).toBeTruthy();
+  // The header and the list toolbar both carry the summary.
+  await waitFor(() =>
+    expect(screen.getAllByText("2 tickets · no project")).toHaveLength(2),
+  );
+
   expect(screen.getByRole("button", { name: "Filters" }).textContent).toContain(
     "Filter",
   );
@@ -329,10 +333,22 @@ test("renaming focuses the title, shows its hint, and F2 starts it", async () =>
   const field = screen.getByRole("textbox", { name: "Plan name" });
   await waitFor(() => expect(document.activeElement).toBe(field));
   expect(screen.getByText("saves", { exact: false })).toBeTruthy();
+  // The hint sits in the title row and the state stays visible.
+  const row = field.parentElement!;
+  expect(row.contains(screen.getByText("saves", { exact: false }))).toBe(true);
+  expect(within(row).getByText("Active")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "F2" });
   expect(
     await screen.findByRole("textbox", { name: "Plan name" }),
   ).toBeTruthy();
+});
+
+test("an empty Plan detail teaches the keys and hides its toolbar band", async () => {
+  await openLaunch();
+  const hint = screen.getByText("Enter").closest("p")!;
+  expect(hint.textContent).toBe("↑↓ move Enter open");
+  const detail = screen.getByRole("region", { name: "Ticket details" });
+  expect(detail.hasAttribute("data-empty")).toBe(true);
 });
