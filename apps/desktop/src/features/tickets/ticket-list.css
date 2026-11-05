@@ -410,21 +410,27 @@
   flex: none;
   max-width: 100%;
 }
+/* The context item carries its type icon: layers for a Plan, a folder for a
+   project, so the two names are never mistaken for each other. */
+.ticket-row-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ticket-row-context svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.ticket-row-context-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ticket-row-meta:has(.ticket-row-time) {
   flex-wrap: nowrap;
 }
 
-.ticket-row-brief {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Active rows use the full second line for the source warning and report. */
-.ticket-row-meta-active {
-  grid-column: 1 / -1;
-}
 .refresh-failed {
   margin: 0;
   padding: 4px 12px;

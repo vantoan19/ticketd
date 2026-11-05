@@ -132,7 +132,7 @@ export function TicketHeader({
         <h2
           id="detail-heading"
           tabIndex={-1}
-          className={selected ? "detail-reference" : undefined}
+          className={selected ? "detail-reference" : "sr-only"}
         >
           {selected ?? "Ticket details"}
         </h2>

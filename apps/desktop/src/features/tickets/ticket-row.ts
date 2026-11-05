@@ -44,25 +44,42 @@ export function readinessShortLabel(value: Readiness) {
   return `Blocked by ${value.by}${value.trashed ? " (in Trash)" : ""} +${value.more}`;
 }
 
+export type RowContextKind = "duplicate" | "subticket" | "plan" | "project";
+
 /** At most one context item: duplicate, parent, Plan, then project. */
-export function rowContext(ticket: Ticket, scope: RowScope): string | null {
-  if (ticket.duplicate_of) return `Duplicate of ${ticket.duplicate_of}`;
+export function rowContextItem(
+  ticket: Ticket,
+  scope: RowScope,
+): { kind: RowContextKind; label: string } | null {
+  if (ticket.duplicate_of)
+    return { kind: "duplicate", label: `Duplicate of ${ticket.duplicate_of}` };
   // An externally closed duplicate names the source's canonical issue, or says it is unknown.
   const target = externalDuplicateTarget(ticket);
   if (target)
-    return target.kind === "external"
-      ? `Duplicate of ${target.ticket ?? target.display}`
-      : "Duplicate · target unknown";
+    return {
+      kind: "duplicate",
+      label:
+        target.kind === "external"
+          ? `Duplicate of ${target.ticket ?? target.display}`
+          : "Duplicate · target unknown",
+    };
   if (ticket.parent)
-    return `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
+    return {
+      kind: "subticket",
+      label: `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`,
+    };
   const plan =
     scope.showPlan && ticket.plan_id
       ? scope.plans.find((item) => item.id === ticket.plan_id)
       : undefined;
-  if (plan) return plan.name;
+  if (plan) return { kind: "plan", label: plan.name };
   const project =
     scope.showProject && ticket.project_id
       ? scope.projects.find((item) => item.id === ticket.project_id)
       : undefined;
-  return project?.name ?? null;
+  return project ? { kind: "project", label: project.name } : null;
+}
+
+export function rowContext(ticket: Ticket, scope: RowScope): string | null {
+  return rowContextItem(ticket, scope)?.label ?? null;
 }

@@ -864,20 +864,14 @@
   }
 }
 .detail-empty {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
+  display: grid;
+  place-items: center;
   min-height: 320px;
+  margin: 0;
   padding: 48px 24px;
-  text-align: center;
   color: var(--muted-foreground);
-}
-.detail-empty strong {
-  color: var(--foreground);
-}
-.detail-empty p {
   font-size: 14px;
+  line-height: 20px;
 }
 .ticket-personal-actions {
   display: flex;

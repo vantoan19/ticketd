@@ -5,8 +5,8 @@ import {
   ListTodo,
   Trash2,
   Settings,
-  Settings2,
-  Plus,
+  Ellipsis,
+  SquarePen,
   Folder,
   Layers,
   Archive,
@@ -23,7 +23,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +45,30 @@ function SidebarCount({ value }: { value: number }) {
       {" "}
       <span className="sidebar-count">{value}</span>
     </>
+  );
+}
+
+/** The heading's "..." menu: a place to manage the list below it. */
+function ManageMenu({
+  label,
+  item,
+  onSelect,
+}: {
+  label: string;
+  item: string;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton label={label}>
+          <Ellipsis aria-hidden="true" size={16} />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onSelect}>{item}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -111,16 +134,13 @@ export function WorkspaceSidebar({
           <strong>ticketd</strong>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
+              <IconButton
                 ref={newTrigger}
                 className="new-ticket"
-                variant="ghost"
-                size="sm"
-                aria-label="New"
+                label="New ticket"
               >
-                <Plus aria-hidden="true" />
-                New
-              </Button>
+                <SquarePen aria-hidden="true" />
+              </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -215,25 +235,14 @@ export function WorkspaceSidebar({
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
               Projects{" "}
-              <IconButton
+              <ManageMenu
                 label="Manage projects"
-                onClick={() => setView("projects")}
-              >
-                <Settings2 size={16} />
-              </IconButton>
+                item="All projects"
+                onSelect={() => setView("projects")}
+              />
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={
-                      navigation.project === "unlinked" && view === "tickets"
-                    }
-                    onClick={() => scope("all", "unlinked")}
-                  >
-                    <Folder size={16} /> Unlinked
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
                 {projects.map((p) => (
                   <SidebarMenuItem key={p.id}>
                     <SidebarMenuButton
@@ -246,6 +255,21 @@ export function WorkspaceSidebar({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={
+                      navigation.project === "unlinked" && view === "tickets"
+                    }
+                    onClick={() => scope("all", "unlinked")}
+                  >
+                    {/* Dashed: not a project, the tickets that have none. */}
+                    <Folder
+                      size={16}
+                      style={{ strokeDasharray: "2.5 2.5" }}
+                    />{" "}
+                    No project
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </nav>
           </SidebarGroup>
@@ -275,9 +299,11 @@ export function WorkspaceSidebar({
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
               Plans{" "}
-              <IconButton label="Manage Plans" onClick={() => setView("plans")}>
-                <Settings2 size={16} />
-              </IconButton>
+              <ManageMenu
+                label="Manage Plans"
+                item="All Plans"
+                onSelect={() => setView("plans")}
+              />
             </div>
             <nav aria-label="Plan scopes" className="sidebar-nav">
               <SidebarMenu>
