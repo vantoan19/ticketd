@@ -48,8 +48,8 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 /// Explicit-link mentions plus numeric `T-n` mentions resolved when read, so a reference to a
 /// ticket created later appears, and the context graph and link lists always agree.
 /// Explicit ticket-to-Document references (the `ticket_documents` table) join them with the
-/// fixed passage `Linked Document` and `explicit` set.
-const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0 UNION SELECT ticket_id, document_id, 'Linked Document', 1 FROM ticket_documents)";
+/// an empty passage (there is no text to quote) and `explicit` set.
+const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
 
 /// Every standalone `T-n` ticket reference in plain text, as the byte offset and length of the
 /// token and its number. This is the one rule for what counts as a numeric mention.

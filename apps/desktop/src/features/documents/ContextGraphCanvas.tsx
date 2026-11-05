@@ -14,13 +14,14 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
+import { centerZoom, panToInclude, READABLE_ZOOM } from "./graph-text";
 import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
 /** Low enough that a dense neighbourhood fits whole instead of being clipped. */
 const MIN_ZOOM = 0.05;
-/** A small neighbourhood opens at a zoom where card text can be read. */
-const READABLE_ZOOM = 0.6;
+/** A lone card must not be blown up to fill the view. */
+const MAX_FIT_ZOOM = 1;
 
 export function ContextGraphCanvas({
   nodes,
@@ -126,11 +127,6 @@ export function ContextGraphCanvas({
   useEffect(() => {
     onFittedRef.current = onFitted;
   }, [onFitted]);
-  const nodeCount = nodes.length;
-  const nodeCountRef = useRef(nodeCount);
-  useEffect(() => {
-    nodeCountRef.current = nodeCount;
-  }, [nodeCount]);
   const placed = nodes.some((node) => positions[node.id]);
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -153,23 +149,53 @@ export function ContextGraphCanvas({
         void instance.current.setCenter(
           target.x + CARD_WIDTH / 2,
           target.y + CARD_HEIGHT / 2,
-          { zoom: instance.current.getZoom(), duration: 200 },
+          { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
       } else {
         void instance.current?.fitView({
           padding: 0.2,
           duration: 200,
-          // A small map opens readable and may overflow; a dense one fits whole.
-          minZoom: nodeCount <= 14 ? READABLE_ZOOM : MIN_ZOOM,
+          // A map is only shown on request or when small, so it always opens at a
+          // readable zoom and the person pans; a lone card is not enlarged.
+          minZoom: READABLE_ZOOM,
+          maxZoom: MAX_FIT_ZOOM,
         });
       }
       onFittedRef.current?.();
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, centerOn, placed, ready, positions, nodeCount]);
-  // Fit again when the panel is resized, so the map never stays clipped.
+  }, [fit, centerOn, placed, ready, positions]);
   const container = useRef<HTMLDivElement | null>(null);
+  // Cards that appear later (Expand, Load more) are panned into view; cards already
+  // placed stay where they are.
+  const placedIds = useRef<Set<string> | null>(null);
+  const viewportRef = useRef(viewport);
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+  useEffect(() => {
+    const now = new Set(nodes.filter((n) => positions[n.id]).map((n) => n.id));
+    const before = placedIds.current;
+    placedIds.current = now;
+    if (!before || before.size === 0 || fit || centerOn || !ready) return;
+    const added = [...now].filter((id) => !before.has(id));
+    const element = container.current;
+    if (!added.length || !element || !instance.current) return;
+    const points = added.map((id) => positions[id]!);
+    const x = Math.min(...points.map((p) => p.x));
+    const y = Math.min(...points.map((p) => p.y));
+    const right = Math.max(...points.map((p) => p.x)) + CARD_WIDTH;
+    const bottom = Math.max(...points.map((p) => p.y)) + CARD_HEIGHT;
+    const next = panToInclude(
+      viewportRef.current,
+      { width: element.clientWidth, height: element.clientHeight },
+      { x, y, width: right - x, height: bottom - y },
+    );
+    if (next.x !== viewportRef.current.x || next.y !== viewportRef.current.y)
+      void instance.current.setViewport(next, { duration: 200 });
+  }, [positions, nodes, fit, centerOn, ready]);
+  // Fit again when the panel is resized, so the map never stays clipped.
   useEffect(() => {
     const element = container.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -186,7 +212,8 @@ export function ContextGraphCanvas({
           void instance.current?.fitView({
             padding: 0.2,
             duration: 200,
-            minZoom: nodeCountRef.current <= 14 ? READABLE_ZOOM : MIN_ZOOM,
+            minZoom: READABLE_ZOOM,
+            maxZoom: MAX_FIT_ZOOM,
           }),
         150,
       );

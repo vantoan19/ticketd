@@ -330,25 +330,37 @@ fn workspace_expands_omitted_relationships_under_a_fixed_budget() {
 
 #[test]
 fn workspace_includes_connections_between_loaded_candidate_pages() {
-    use ticketd_core::WorkspaceGraphRequest;
+    use ticketd_core::{TicketPatch, WorkspaceGraphRequest};
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
-    for index in 0..60 {
-        workspace.create_ticket(&format!("Ticket {index}")).unwrap();
+    let tickets: Vec<_> = (0..60)
+        .map(|index| workspace.create_ticket(&format!("Ticket {index}")).unwrap())
+        .collect();
+    workspace
+        .add_dependency(&tickets[0].reference, &tickets[1].reference, None)
+        .unwrap();
+    // Newest first: touching every other ticket pushes the two linked ones to the last page,
+    // then touching the first again brings only it back to the first page.
+    let touch = |workspace: &mut Workspace, index: usize| {
+        workspace
+            .change_ticket(
+                &tickets[index].reference,
+                TicketPatch {
+                    title: Some(format!("Touched {index}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    };
+    for index in 2..60 {
+        touch(&mut workspace, index);
     }
+    touch(&mut workspace, 0);
     let first = workspace
         .workspace_graph(&WorkspaceGraphRequest::default())
         .unwrap();
-    let second = workspace
-        .workspace_graph(&WorkspaceGraphRequest {
-            cursor: first.next_cursor.clone(),
-            ..Default::default()
-        })
-        .unwrap();
-    let reference = |label: &str| label.split(' ').next().unwrap().to_owned();
-    let a = reference(&first.nodes[0].label);
-    let b = reference(&second.nodes[0].label);
-    workspace.add_dependency(&a, &b, None).unwrap();
+    assert!(first.nodes.iter().any(|node| node.id == tickets[0].id));
+    assert!(!first.nodes.iter().any(|node| node.id == tickets[1].id));
     let combined = workspace
         .workspace_graph(&WorkspaceGraphRequest {
             cursor: first.next_cursor,
@@ -357,8 +369,8 @@ fn workspace_includes_connections_between_loaded_candidate_pages() {
         })
         .unwrap();
     assert!(combined.edges.iter().any(|edge| edge.kind == "blocks"
-        && edge.source == first.nodes[0].id
-        && edge.target == second.nodes[0].id));
+        && edge.source == tickets[0].id
+        && edge.target == tickets[1].id));
 }
 
 #[test]
@@ -625,4 +637,103 @@ fn workspace_graph_leaves_out_trashed_items() {
     assert!(graph.nodes.iter().any(|n| n.id == kept.id));
     assert!(graph.nodes.iter().all(|n| n.id != gone.id));
     assert_eq!(graph.total, 1);
+}
+
+#[test]
+fn workspace_search_matches_prefixes_headings_and_counts_hidden_connections() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let hub = workspace.create_ticket("Hub").unwrap();
+    for i in 0..5 {
+        let other = workspace.create_ticket(&format!("Spoke {i}")).unwrap();
+        workspace
+            .add_dependency(&hub.reference, &other.reference, None)
+            .unwrap();
+    }
+    // A Document whose visible heading is the originating update's brief.
+    let detail = workspace
+        .add_activity_with_details(
+            &hub.reference,
+            "Promoted details fixture update.",
+            None,
+            Some("Unrelated body"),
+            None,
+        )
+        .unwrap()
+        .supporting_document_id
+        .unwrap();
+    let search = |text: &str, details: bool| WorkspaceGraphRequest {
+        search: Some(text.into()),
+        include_details: details,
+        ..Default::default()
+    };
+    let by_heading = workspace
+        .workspace_graph(&search("promoted details", true))
+        .unwrap();
+    assert!(by_heading.nodes.iter().any(|node| node.id == detail));
+    let by_prefix = workspace.workspace_graph(&search("hu", false)).unwrap();
+    assert_eq!(by_prefix.nodes.len(), 1);
+    assert_eq!(by_prefix.nodes[0].id, hub.id);
+    // The hub's spokes are not shown, but their number is.
+    assert!(by_prefix.edges.is_empty());
+    assert_eq!(by_prefix.connection_counts[&hub.id], 5 + 1);
+}
+
+#[test]
+fn workspace_pages_list_most_recently_changed_first() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let mut ids = Vec::new();
+    for i in 0..60 {
+        ids.push(
+            workspace
+                .create_document(Some(&format!("Doc {i:02}")), "")
+                .unwrap()
+                .id,
+        );
+    }
+    // Make the oldest Document the newest change.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    workspace
+        .change_document(
+            &ids[0],
+            ticketd_core::DocumentPatch {
+                body: Some("changed".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let first = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert_eq!(first.nodes[0].id, ids[0]);
+    let second = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            cursor: first.next_cursor.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(first.nodes.len() + second.nodes.len(), 60);
+    assert!(second.next_cursor.is_none());
+}
+
+#[test]
+fn attached_document_is_its_own_connection_kind_without_a_passage() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Ticket").unwrap();
+    let doc = workspace.create_document(Some("Brief"), "").unwrap();
+    workspace
+        .set_ticket_document(&ticket.reference, &doc.id, true)
+        .unwrap();
+    let graph = workspace.context_graph(&ticket.reference, false).unwrap();
+    let edge = graph
+        .edges
+        .iter()
+        .find(|edge| edge.target == doc.id)
+        .unwrap();
+    assert_eq!(edge.kind, "attached");
+    assert!(edge.explanation.is_none());
 }

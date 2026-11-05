@@ -274,3 +274,36 @@ test("marks items in the Trash", async () => {
     await screen.findByRole("button", { name: "T-1 · Old (Trash)" }),
   ).toBeTruthy();
 });
+
+test("a crowded workspace opens as a list and the map is one click away", async () => {
+  vi.mocked(client.workspaceGraph).mockResolvedValue({
+    node_tags: {},
+    connection_counts: { n0: 49 },
+    total: 13,
+    nodes: Array.from({ length: 13 }, (_, i) => ({
+      id: `n${i}`,
+      kind: "document" as const,
+      label: `Doc ${i}`,
+      state: null,
+      trashed: false,
+      activity_detail: false,
+    })),
+    edges: [],
+    next_cursor: null,
+    omitted: false,
+    omitted_groups: [],
+  });
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={vi.fn()}
+      onOpen={vi.fn()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Show map" }));
+  expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show list" }));
+  expect(screen.getByText(/49 connections/)).toBeTruthy();
+});

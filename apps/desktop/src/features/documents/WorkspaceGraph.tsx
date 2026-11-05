@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { GraphLegend } from "./GraphLegend";
-import { connectionRows, edgeLabels, flowEdges, kindNames } from "./graph-text";
+import {
+  connectionRows,
+  edgeLabels,
+  flowEdges,
+  kindNames,
+  opensAsMap,
+  stateLine,
+} from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +53,8 @@ export function WorkspaceGraph({
   const [pagesLoaded, setPagesLoaded] = useState(1);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // A crowded workspace opens as a list; the map is one click away.
+  const [mapChoice, setMapChoice] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
@@ -145,6 +154,7 @@ export function WorkspaceGraph({
   );
   const edges = useMemo(() => flowEdges(graph?.edges ?? []), [graph]);
   const preview = graph?.nodes.find((node) => node.id === selected);
+  const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, 100);
   const filtered = !!(search || kind || tag || relationship);
   function clearFilters() {
     setSearch("");
@@ -204,6 +214,32 @@ export function WorkspaceGraph({
       setLoadingPage(false);
     }
   };
+  const previewPanel = preview ? (
+    <>
+      <p>{kindNames[preview.kind]}</p>
+      <h2>{preview.label}</h2>
+      <p>
+        {stateLine(preview)}
+        {graph?.node_tags[preview.id]
+          ? ` · Tag: ${graph.node_tags[preview.id]}`
+          : ""}
+      </p>
+      {(graph?.connection_counts?.[preview.id] ?? 0) > 0 && (
+        <p>
+          {graph?.connection_counts?.[preview.id]}{" "}
+          {graph?.connection_counts?.[preview.id] === 1
+            ? "connection"
+            : "connections"}
+        </p>
+      )}
+      <Button onClick={() => onOpen(preview)}>Open item</Button>
+      <Button variant="outline" onClick={() => onFocus(preview.id)}>
+        Context graph
+      </Button>
+    </>
+  ) : (
+    <p>Select an item to preview it.</p>
+  );
   return (
     <section className="context-graph-page" aria-label="Workspace graph">
       <div className="context-graph-heading">
@@ -276,6 +312,7 @@ export function WorkspaceGraph({
                 "membership",
                 "document",
                 "mention",
+                "attached",
                 "activity",
                 "support",
                 "subticket",
@@ -306,46 +343,39 @@ export function WorkspaceGraph({
             Clear filters
           </Button>
         )}
+        {!!graph?.nodes.length && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMapChoice(!showMap)}
+          >
+            {showMap ? "Show list" : "Show map"}
+          </Button>
+        )}
       </div>
       {error && <p role="alert">{error}</p>}
-      <div className="context-graph-main">
-        {active && (
-          <ContextGraphCanvas
-            nodes={nodes}
-            edges={edges}
-            selected={selected}
-            positions={positions}
-            onPositions={setPositions}
-            viewport={viewport}
-            onViewport={setViewport}
-            onSelect={setSelected}
-            onError={setError}
-            fit={fit}
-            onFitted={() => setFit(false)}
-          />
-        )}
-        <aside className="context-graph-preview">
-          {preview ? (
-            <>
-              <p>{kindNames[preview.kind]}</p>
-              <h2>{preview.label}</h2>
-              <p>
-                {preview.state}
-                {preview.trashed ? " · Trashed" : ""}
-                {graph?.node_tags[preview.id]
-                  ? ` · Tag: ${graph.node_tags[preview.id]}`
-                  : ""}
-              </p>
-              <Button onClick={() => onOpen(preview)}>Open item</Button>
-              <Button variant="outline" onClick={() => onFocus(preview.id)}>
-                Context graph
-              </Button>
-            </>
-          ) : (
-            <p>Select an item to preview it.</p>
+      {showMap ? (
+        <div className="context-graph-main">
+          {active && (
+            <ContextGraphCanvas
+              nodes={nodes}
+              edges={edges}
+              selected={selected}
+              positions={positions}
+              onPositions={setPositions}
+              viewport={viewport}
+              onViewport={setViewport}
+              onSelect={setSelected}
+              onError={setError}
+              fit={fit}
+              onFitted={() => setFit(false)}
+            />
           )}
-        </aside>
-      </div>
+          <aside className="context-graph-preview">{previewPanel}</aside>
+        </div>
+      ) : (
+        <aside className="context-graph-strip">{previewPanel}</aside>
+      )}
       <div className="context-graph-toolbar">
         <GraphLegend />
       </div>
@@ -371,6 +401,9 @@ export function WorkspaceGraph({
                 : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
             · {graph.edges.length}{" "}
             {graph.edges.length === 1 ? "connection" : "connections"}
+            {graph.edges.length === 0 &&
+              Object.values(graph.connection_counts ?? {}).some((n) => n > 0) &&
+              " among these items"}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
               <>
                 {" · "}
@@ -418,6 +451,16 @@ export function WorkspaceGraph({
                 <strong>{edgeLabels[row.kind] ?? row.kind}</strong> · {row.text}
               </p>
             ))}
+            {connectionRows(node.id, graph).length === 0 &&
+              (graph.connection_counts?.[node.id] ?? 0) > 0 && (
+                <p>
+                  {graph.connection_counts?.[node.id]}{" "}
+                  {graph.connection_counts?.[node.id] === 1
+                    ? "connection"
+                    : "connections"}{" "}
+                  · open its Context graph to see them
+                </p>
+              )}
           </li>
         ))}
       </ul>
