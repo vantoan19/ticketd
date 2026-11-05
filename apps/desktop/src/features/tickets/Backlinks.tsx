@@ -136,7 +136,12 @@ export function Backlinks({
                 {link.source_label}
                 {link.source_trashed ? " (Trash)" : ""}
               </strong>
-              <span>{plainPassage(link.passage)}</span>
+              <span className="mention-passage">
+                <EmphasizedPassage
+                  text={plainPassage(link.passage)}
+                  reference={reference}
+                />
+              </span>
             </button>
           </li>
         ))}

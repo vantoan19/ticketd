@@ -149,9 +149,6 @@ export function SourceRail({
             <LaptopMinimal aria-hidden="true" />
             Local
           </span>
-          <small className="rail-note">
-            Created in ticketd. Everything here is editable.
-          </small>
           <LocalParentNote ticket={ticket} />
           <LocalPublication ticket={ticket} refresh={refresh} />
         </div>

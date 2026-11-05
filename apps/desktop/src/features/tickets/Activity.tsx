@@ -589,9 +589,10 @@ export function Activity({
             { value: "updates", label: "Updates" },
           ]}
         />
-        <span>
-          Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
-        </span>
+        {/* Only worth saying where a source owns the ticket and could be confused for the destination. */}
+        {sourceName && (
+          <span>Only in ticketd · never sent to {sourceName}</span>
+        )}
       </div>
       {feedback && (
         <p role="status" className="activity-muted">
@@ -917,11 +918,10 @@ export function Activity({
                 }
               >
                 <div className="activity-meta">
-                  <strong>
-                    {item.note.id === (newestNoteId ?? latestNoteId)
-                      ? "Latest update"
-                      : "Update"}
-                  </strong>
+                  <strong>Update</strong>
+                  {item.note.id === (newestNoteId ?? latestNoteId) && (
+                    <span className="activity-latest">Latest</span>
+                  )}
                   <time
                     dateTime={item.note.reported_at}
                     title={formatDateTime(item.note.reported_at)}
