@@ -25,6 +25,7 @@ const linkSchema = z.object({
   target_label: z.string(),
   source_trashed: z.boolean(),
   target_trashed: z.boolean(),
+  explicit: z.boolean().optional(),
 });
 const linkDocuments = {
   linkMarkdown: async (reference: string) =>
@@ -33,6 +34,19 @@ const linkDocuments = {
     z
       .tuple([z.array(linkSchema), z.array(linkSchema)])
       .parse(await invoke("document_context_links", { id, offset })),
+  /** Attach or detach a Document to a ticket's context without touching its description. */
+  setTicketDocument: async (
+    reference: string,
+    documentId: string,
+    present: boolean,
+  ) => {
+    await invoke("set_ticket_document", {
+      reference,
+      documentId,
+      present,
+      requestId: crypto.randomUUID(),
+    });
+  },
   createTicket: async (id: string, title: string, requestId: string) =>
     z.object({ reference: z.string() }).parse(
       await invoke("ticket_from_document", {

@@ -278,7 +278,6 @@ export function TicketPage({
             <TicketDocuments
               ticket={ticket}
               revision={revision}
-              updateTicket={updateTicket}
               refresh={refresh}
             />
             <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />

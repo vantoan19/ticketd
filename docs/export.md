@@ -8,13 +8,13 @@ in the desktop. When redirecting stdout yourself, a failed command may leave a
 partial file; use `--file` for safe publication.
 
 The root object has integer `format_version` 2 and arrays named `projects`,
-`project_checkouts`, `plans`, `plan_documents`, `tickets`, `documents`, `document_opens`, `document_pins`, `document_tags`, `entities`, `context_mentions`, `numeric_mentions`, `activity_mentions`, `activities`, `evidence`, `ticket_history`,
+`project_checkouts`, `plans`, `plan_documents`, `ticket_documents`, `tickets`, `documents`, `document_opens`, `document_pins`, `document_tags`, `entities`, `context_mentions`, `numeric_mentions`, `activity_mentions`, `activities`, `evidence`, `ticket_history`,
 `ticket_follows`, `inbox_entries`, `tags`, `ticket_tags`, `dependencies`,
 `duplicate_tickets`, `ticket_parents`, `source_configurations`, `external_identities`, `external_ownership`, `source_sync`, `external_duplicate_targets`, `source_conversation`, `source_status`, and `publication_attempts`. Version 2 renamed notes to `activities` and efforts to `plans`, and added Documents and their related arrays; version 1 exports are not compatible. Each array contains objects
 with the corresponding record fields. IDs are strings; `ticket_id`, `project_id`,
 `plan_id`, `child_id`, `parent_id`, `blocker_id`, and `dependent_id` refer to
 IDs in the relevant array. `ticket_tags.tag_name` refers to `tags.name`.
-`plan_documents` associates Plan IDs with Document IDs; `plans.spec_document_id` selects an associated primary spec.
+`plan_documents` associates Plan IDs with Document IDs; `ticket_documents` associates ticket IDs with the Document IDs a person attached to the ticket's context (as opposed to Documents its description mentions); `plans.spec_document_id` selects an associated primary spec.
 `document_tags.tag_name` also refers to `tags.name`; `document_pins` and
 `document_opens` refer to Document IDs. The full-text index is derived from
 Document titles and Markdown bodies and is not exported. Ticket `number` forms its stable reference as `T-` followed by the decimal number.

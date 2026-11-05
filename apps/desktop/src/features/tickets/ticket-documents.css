@@ -5,6 +5,13 @@
   gap: 2px;
 }
 .ticket-documents {
+  /* .rail-section aligns its children to the start, which stops them stretching. */
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.ticket-documents ul {
   min-width: 0;
 }
 .ticket-documents ul,
@@ -68,6 +75,11 @@
   text-align: left;
   font-size: 14px;
 }
+.ticket-documents-item {
+  flex: 1 1 0;
+  width: auto;
+  overflow: hidden;
+}
 .ticket-documents-item:hover,
 .document-picker-item:hover {
   background: var(--accent);
@@ -102,4 +114,22 @@
   margin: 0;
   color: var(--muted-foreground);
   font-size: 12px;
+}
+
+.ticket-documents-edit {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ticket-documents-edit:hover,
+.ticket-documents-edit:focus-visible {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ticket-documents-edit:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }

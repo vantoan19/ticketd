@@ -88,6 +88,10 @@
 .activity-note {
   margin: 0;
 }
+.activity-note:not([data-expanded]) {
+  max-height: 20rem;
+  overflow: hidden;
+}
 .activity-actions {
   display: flex;
   flex-wrap: wrap;

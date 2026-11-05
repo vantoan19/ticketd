@@ -18,6 +18,9 @@ pub struct ContextOptions {
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
+    /// The Documents explicitly attached to the ticket.
+    #[serde(default)]
+    pub documents: bool,
     /// The source's comments and events for an externally sourced ticket.
     #[serde(default)]
     pub conversation: bool,
@@ -93,6 +96,14 @@ pub struct ContextActivity {
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
 }
+/// A Document a person explicitly attached to the ticket.
+#[derive(Debug, Serialize)]
+pub struct ContextDocument {
+    pub id: String,
+    pub heading: BoundedText,
+    pub trashed: bool,
+    pub fetch: String,
+}
 #[derive(Debug, Serialize)]
 pub struct ContextEvidence {
     pub id: String,
@@ -141,6 +152,8 @@ pub struct TicketContext {
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backlinks: Option<ContextPage<crate::Backlink>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documents: Option<ContextPage<ContextDocument>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_conversation: Option<ContextPage<ContextSourceEntry>>,
 }
@@ -348,6 +361,23 @@ impl Workspace {
         } else {
             None
         };
+        let documents = if options.documents {
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM ticket_documents td JOIN documents d ON d.id = td.document_id WHERE td.ticket_id = ?1 ORDER BY td.rowid LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
+            let rows = stmt
+                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
+                    let document_id: String = r.get(0)?;
+                    Ok(ContextDocument {
+                        fetch: format!("ticketd document read {document_id}"),
+                        id: document_id,
+                        heading: text(r.get(1)?, LABEL),
+                        trashed: r.get(2)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Some(page(rows, options.offset))
+        } else {
+            None
+        };
         let source_conversation = if options.conversation {
             let entries = crate::source::conversation_entries(&tx, &id)?
                 .into_iter()
@@ -412,6 +442,7 @@ impl Workspace {
             latest_update,
             evidence,
             backlinks,
+            documents,
             source_conversation,
         })
     }

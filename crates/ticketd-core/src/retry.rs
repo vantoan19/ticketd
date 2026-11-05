@@ -39,6 +39,11 @@ pub enum WriteRequest {
     KeepDocument {
         id: String,
     },
+    SetTicketDocument {
+        reference: String,
+        document_id: String,
+        present: bool,
+    },
     TrashDocument {
         id: String,
     },
@@ -305,6 +310,13 @@ impl Workspace {
             WriteRequest::SetDocumentTag { id, tag, present } => {
                 self.set_document_tag(&id, &tag, present)?;
                 WriteResult::Deleted
+            }
+            WriteRequest::SetTicketDocument {
+                reference,
+                document_id,
+                present,
+            } => {
+                WriteResult::Ticket(self.set_ticket_document(&reference, &document_id, present)?)
             }
             WriteRequest::KeepDocument { id } => WriteResult::Document(self.keep_document(&id)?),
             WriteRequest::TrashDocument { id } => {

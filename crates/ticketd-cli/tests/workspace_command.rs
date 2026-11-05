@@ -176,6 +176,43 @@ fn document_ticket_and_backlinks_are_available_to_agents() {
 }
 
 #[test]
+fn a_document_can_be_attached_to_a_ticket_and_detached_without_editing_its_description() {
+    let dir = tempfile::tempdir().unwrap();
+    let ticket: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["create", "Task"])).unwrap();
+    let reference = ticket["reference"].as_str().unwrap();
+    let document: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "Investigation"],
+    ))
+    .unwrap();
+    let id = document["id"].as_str().unwrap();
+    let attached: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "document",
+            "link-ticket",
+            id,
+            reference,
+            "--request-id",
+            "r-1",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(attached["body"], ticket["body"]);
+    let context: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["context", reference, "--documents"])).unwrap();
+    assert_eq!(context["documents"]["items"][0]["id"], id);
+    let incoming: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "incoming", id])).unwrap();
+    assert_eq!(incoming[0]["explicit"], true);
+    run(dir.path(), &["document", "unlink-ticket", id, reference]);
+    let context: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["context", reference, "--documents"])).unwrap();
+    assert!(context["documents"]["items"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn documents_can_be_searched_pinned_and_tagged_via_cli() {
     let dir = tempfile::tempdir().unwrap();
     let created: serde_json::Value = serde_json::from_str(&run(

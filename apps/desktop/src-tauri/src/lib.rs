@@ -240,6 +240,7 @@ fn document_context_links(
                         target_label: String::new(),
                         source_trashed: false,
                         target_trashed: false,
+                        explicit: false,
                     });
                 }
             }
@@ -1017,6 +1018,31 @@ fn set_plan_document(
 }
 
 #[tauri::command]
+fn set_ticket_document(
+    reference: String,
+    document_id: String,
+    present: bool,
+    request_id: String,
+) -> Result<Ticket, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetTicketDocument {
+                    reference,
+                    document_id,
+                    present,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket result".into()),
+    }
+}
+
+#[tauri::command]
 fn set_plan_spec(
     plan_id: String,
     document_id: Option<String>,
@@ -1406,6 +1432,7 @@ pub fn run() -> Result<(), tauri::Error> {
             list_plans,
             show_plan,
             set_plan_document,
+            set_ticket_document,
             set_plan_spec,
             create_plan,
             change_plan,
