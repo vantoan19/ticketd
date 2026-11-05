@@ -88,6 +88,9 @@ test("adds context, designates a spec, and opens its source", async () => {
     </DocumentNavigation.Provider>,
   );
   fireEvent.click(screen.getByText("1 linked Document"));
+  expect(
+    screen.getByRole("button", { name: "Add context" }).textContent,
+  ).toContain("Add context");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Actions for Proposal" }),
     { button: 0, ctrlKey: false },
@@ -99,6 +102,20 @@ test("adds context, designates a spec, and opens its source", async () => {
       expect.objectContaining({ planId: "plan", documentId: "doc" }),
     ),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Proposal" }));
+  rendered.rerender(
+    <DocumentNavigation.Provider value={open}>
+      <PlanDocuments
+        view={{
+          ...base,
+          plan: { ...plan, spec_document_id: "doc" },
+          documents: [{ id: "doc", heading: "Proposal", trashed: false }],
+        }}
+        state={state}
+      />
+    </DocumentNavigation.Provider>,
+  );
+  const chip = screen.getByRole("button", { name: "Spec: Proposal" });
+  expect(chip.className).toContain("plan-spec-chip");
+  fireEvent.click(chip);
   expect(open).toHaveBeenCalledWith("doc", "Back to Plan");
 });

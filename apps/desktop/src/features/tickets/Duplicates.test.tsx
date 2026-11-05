@@ -625,12 +625,14 @@ test("one flow in the dialog shell: Cancel, and a primary that waits for a canon
 test("the primary names what it applies and waits for every dependency choice", async () => {
   await openReview();
   expect(
-    screen.getByText("Choose Replace, Keep or Remove for each dependency"),
+    await screen.findByText(
+      "Choose Replace, Keep or Remove for each dependency",
+    ),
   ).toBeTruthy();
   choose("T-1 blocks T-3", "remove");
   expect(
-    screen.getByRole("button", {
+    await screen.findByRole("button", {
       name: "Mark duplicate and apply 1 change",
-    }) as HTMLButtonElement,
+    }),
   ).toBeTruthy();
 });

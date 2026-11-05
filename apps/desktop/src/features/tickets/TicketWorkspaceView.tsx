@@ -140,12 +140,17 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <div className="plan-workspace" hidden={hidden}>
+    <div
+      className="plan-workspace"
+      hidden={hidden}
+      data-plan={scopedPlan ? "" : undefined}
+    >
       {scopedPlan && (
         <PlanHeader
           key={scopedPlan.id}
           plan={scopedPlan}
           plans={workspace.plans}
+          projects={workspace.projects}
           state={planState}
           mode={planMode}
           onModeChange={setPlanMode}

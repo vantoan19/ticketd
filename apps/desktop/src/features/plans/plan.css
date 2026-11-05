@@ -17,6 +17,7 @@
 }
 .plan-rename-hint {
   margin: 0;
+  white-space: nowrap;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
@@ -48,6 +49,14 @@
   align-items: center;
   gap: 4px 12px;
   min-height: 32px;
+}
+.plan-title-row[data-renaming="true"] {
+  flex-wrap: nowrap;
+}
+.plan-header-summary {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
 }
 .plan-title-spacer {
   flex: 1;
@@ -299,12 +308,24 @@
   font-size: 12px;
 }
 .plan-spec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 28px;
   padding: 0 8px;
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--border);
   color: var(--foreground);
   font-size: 13px;
+}
+.plan-spec-label {
+  color: var(--muted-foreground);
+}
+.plan-spec-title {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .plan-documents ul {
   list-style: none;
@@ -472,4 +493,8 @@
   border-radius: 4px;
   outline: 1px dashed var(--muted-foreground);
   outline-offset: -1px;
+}
+
+.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-header {
+  display: none;
 }
