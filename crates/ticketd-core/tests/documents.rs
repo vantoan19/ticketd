@@ -145,6 +145,7 @@ fn retrying_create_ticket_from_document_does_not_duplicate_ticket() {
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let source = workspace.create_document(None, "Source").unwrap();
     let request = || WriteRequest::CreateTicketFromDocument {
+        follow: false,
         id: source.id.clone(),
         title: "Task".into(),
     };
@@ -810,4 +811,210 @@ fn source_document_link_uses_the_documents_heading() {
         ticket.body,
         format!("[Launch notes](ticketd://document/{})", document.id)
     );
+}
+
+#[allow(clippy::unwrap_used)] // test setup
+fn temp_workspace() -> (tempfile::TempDir, Workspace) {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    (dir, workspace)
+}
+
+#[test]
+fn concurrent_document_changes_wait_instead_of_failing_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let document = workspace.create_document(None, "Start").unwrap();
+    drop(workspace);
+    let failures: Vec<String> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|worker| {
+                let (path, id) = (path.clone(), document.id.clone());
+                scope.spawn(move || {
+                    let mut workspace = Workspace::open(&path).unwrap();
+                    (0..10)
+                        .filter_map(|n| {
+                            workspace
+                                .change_document(
+                                    &id,
+                                    DocumentPatch {
+                                        title: None,
+                                        body: Some(format!("{worker}-{n}")),
+                                    },
+                                )
+                                .err()
+                                .map(|error| error.to_string())
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect()
+    });
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn search_matches_partial_words_and_stays_safe_with_quotes() {
+    let (_dir, mut workspace) = temp_workspace();
+    workspace
+        .create_document(Some("Meeting notes"), "Weekly sync log")
+        .unwrap();
+    for query in ["Meet", "meeting no", "lo", "\"Meet"] {
+        assert_eq!(
+            workspace
+                .search_documents(query, None, 10, 0)
+                .unwrap()
+                .len(),
+            1,
+            "{query}"
+        );
+    }
+    assert!(
+        workspace
+            .search_documents("zzz", None, 10, 0)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn context_links_use_document_headings_and_accept_ticket_references() {
+    let (_dir, mut workspace) = temp_workspace();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let untitled = workspace
+        .create_document(None, "# Plain heading\nBody")
+        .unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            ticketd_core::TicketPatch {
+                body: Some(format!("[x](ticketd://document/{})", untitled.id)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let outgoing = workspace.context_links(&ticket.reference, 10, 0).unwrap();
+    assert_eq!(outgoing.len(), 1);
+    assert_eq!(outgoing[0].target_label, "Plain heading");
+    let incoming = workspace.context_backlinks(&untitled.id, 10, 0).unwrap();
+    assert_eq!(incoming[0].source_label, "T-1");
+    assert_eq!(incoming[0].target_label, "Plain heading");
+}
+
+#[test]
+fn document_mentions_cover_link_text_and_tickets_created_later() {
+    let (_dir, mut workspace) = temp_workspace();
+    workspace.create_ticket("First").unwrap();
+    let document = workspace
+        .create_document(
+            Some("Notes"),
+            "See [T-1](https://example.com) and T-2 which does not exist yet",
+        )
+        .unwrap();
+    let before: Vec<_> = workspace
+        .context_links(&document.id, 10, 0)
+        .unwrap()
+        .into_iter()
+        .map(|link| link.target_label)
+        .collect();
+    assert_eq!(before, ["T-1"]);
+    let second = workspace.create_ticket("Second").unwrap();
+    let mut after: Vec<_> = workspace
+        .context_links(&document.id, 10, 0)
+        .unwrap()
+        .into_iter()
+        .map(|link| link.target_label)
+        .collect();
+    after.sort();
+    assert_eq!(after, ["T-1", "T-2"]);
+    let back = workspace.document_backlinks(&document.id, 10, 0).unwrap();
+    assert!(back.is_empty(), "documents are not ticket sources");
+    let incoming = workspace.context_backlinks(&second.id, 10, 0).unwrap();
+    assert_eq!(incoming.len(), 1);
+}
+
+#[test]
+fn blank_activity_details_create_no_document_and_trashed_support_is_explained() {
+    let (_dir, mut workspace) = temp_workspace();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let activity = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("  \n"), None)
+        .unwrap();
+    assert_eq!(activity.supporting_document_id, None);
+    let document = workspace.create_document(None, "Support").unwrap();
+    workspace.set_document_trashed(&document.id, true).unwrap();
+    let error = workspace
+        .add_activity_with_details(&ticket.reference, "Again", None, None, Some(&document.id))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("in trash") && error.contains("document restore"),
+        "{error}"
+    );
+}
+
+#[test]
+fn pinned_activity_details_are_listed_and_trashed_documents_cannot_join_plans() {
+    let (_dir, mut workspace) = temp_workspace();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let activity = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("Details"), None)
+        .unwrap();
+    let id = activity.supporting_document_id.unwrap();
+    workspace.set_document_pin(&id, true).unwrap();
+    assert_eq!(workspace.pinned_documents(10, 0).unwrap().len(), 1);
+    let plan = workspace.create_plan("Plan").unwrap();
+    workspace.set_document_trashed(&id, true).unwrap();
+    let error = workspace
+        .set_plan_document(&plan.id, &id, true)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("in trash"), "{error}");
+}
+
+#[test]
+fn deleting_an_activity_keeps_a_kept_details_document_out_of_recents() {
+    let (_dir, mut workspace) = temp_workspace();
+    let ticket = workspace.create_ticket("Task").unwrap();
+    let opened = workspace.create_document(None, "Opened").unwrap();
+    let activity = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("Kept details"), None)
+        .unwrap();
+    let id = activity.supporting_document_id.clone().unwrap();
+    workspace.keep_document(&id).unwrap();
+    workspace
+        .delete_activity(&ticket.reference, &activity.id)
+        .unwrap();
+    assert_eq!(workspace.recent_documents().unwrap()[0].id, opened.id);
+}
+
+#[test]
+fn ticket_created_from_a_document_can_be_followed() {
+    let (_dir, mut workspace) = temp_workspace();
+    let source = workspace.create_document(None, "Source").unwrap();
+    let followed = workspace
+        .create_ticket_from_document_following(&source.id, "Followed", true)
+        .unwrap();
+    let plain = workspace
+        .create_ticket_from_document(&source.id, "Plain")
+        .unwrap();
+    assert!(workspace.is_following(&followed.reference).unwrap());
+    assert!(!workspace.is_following(&plain.reference).unwrap());
+}
+
+#[test]
+fn plan_context_flags_truncated_ticket_titles() {
+    let (_dir, mut workspace) = temp_workspace();
+    let plan = workspace.create_plan("Plan").unwrap();
+    let ticket = workspace.create_ticket(&"t".repeat(300)).unwrap();
+    workspace
+        .set_plan(&ticket.reference, Some(&plan.id), None)
+        .unwrap();
+    let context = workspace.plan_context(&plan.id, false).unwrap();
+    assert_eq!(context["tickets"][0]["title_truncated"], true);
 }

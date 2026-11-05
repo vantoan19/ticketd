@@ -168,8 +168,8 @@ impl Workspace {
             }
         }
         let tickets = {
-            let mut stmt = tx.prepare("SELECT number, substr(title, 1, 256), status FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
-            stmt.query_map([id], |r| Ok(serde_json::json!({"reference": format!("T-{}", r.get::<_, i64>(0)?), "title": r.get::<_, String>(1)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
+            let mut stmt = tx.prepare("SELECT number, substr(title, 1, 256), status, length(title) > 256 FROM tickets WHERE plan_id = ?1 AND trashed = 0 ORDER BY number LIMIT 21")?;
+            stmt.query_map([id], |r| Ok(serde_json::json!({"reference": format!("T-{}", r.get::<_, i64>(0)?), "title": r.get::<_, String>(1)?, "title_truncated": r.get::<_, bool>(3)?, "status": r.get::<_, String>(2)?})))?.collect::<Result<Vec<_>, _>>()?
         };
         let dependencies = {
             let mut stmt = tx.prepare("SELECT b.number, d.number FROM dependencies x JOIN tickets b ON b.id = x.blocker_id JOIN tickets d ON d.id = x.dependent_id WHERE (b.plan_id = ?1 OR d.plan_id = ?1) AND (b.trashed = 0 OR d.trashed = 0) ORDER BY b.number, d.number LIMIT 21")?;
@@ -177,7 +177,7 @@ impl Workspace {
         };
         let documents = {
             let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, CASE WHEN ?2 THEN substr(d.body, 1, 4096) ELSE NULL END, length(d.body) > 4096 FROM plan_documents pd JOIN documents d ON d.id = pd.document_id WHERE pd.plan_id = ?1 ORDER BY d.id LIMIT 21", crate::documents::HEADING))?;
-            stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document show {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
+            stmt.query_map(params![id, bodies], |r| { let doc_id: String = r.get(0)?; Ok(serde_json::json!({"id": doc_id, "heading": r.get::<_, String>(1)?, "trashed": r.get::<_, bool>(2)?, "body": r.get::<_, Option<String>>(3)?, "body_truncated": bodies && r.get::<_, bool>(4)?, "fetch": format!("ticketd document read {}", doc_id)})) })?.collect::<Result<Vec<_>, _>>()?
         };
         tx.commit()?;
         Ok(serde_json::json!({
@@ -197,8 +197,12 @@ impl Workspace {
     ) -> Result<Plan, Error> {
         self.connection.execute_batch("SAVEPOINT plan_document")?;
         let result = (|| {
+            crate::transaction_write_lock(&self.connection)?;
             get(&self.connection, plan_id)?;
-            self.show_document(document_id)?;
+            let document = self.show_document(document_id)?;
+            if present && document.trashed {
+                return Err(Error::DocumentTrashed(document_id.to_owned()));
+            }
             if present {
                 self.connection.execute(
                     "INSERT OR IGNORE INTO plan_documents(plan_id, document_id) VALUES (?1, ?2)",
@@ -232,6 +236,7 @@ impl Workspace {
     ) -> Result<Plan, Error> {
         self.connection.execute_batch("SAVEPOINT plan_spec")?;
         let result = (|| {
+            crate::transaction_write_lock(&self.connection)?;
             get(&self.connection, plan_id)?;
             if let Some(id) = document_id {
                 self.keep_document(id)?;

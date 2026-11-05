@@ -15,6 +15,9 @@ pub enum WriteRequest {
     CreateTicketFromDocument {
         id: String,
         title: String,
+        /// Make the local person follow the new ticket, as the desktop preference asks.
+        #[serde(default)]
+        follow: bool,
     },
     CreateDocument {
         title: Option<String>,
@@ -286,9 +289,9 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
-            WriteRequest::CreateTicketFromDocument { id, title } => {
-                WriteResult::Ticket(self.create_ticket_from_document(&id, &title)?)
-            }
+            WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
+                self.create_ticket_from_document_following(&id, &title, follow)?,
+            ),
             WriteRequest::CreateDocument { title, body } => {
                 WriteResult::Document(self.create_document(title.as_deref(), &body)?)
             }

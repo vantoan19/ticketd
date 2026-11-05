@@ -854,3 +854,35 @@ fn activity_and_document_commands_replay_by_request_id() {
     assert_eq!(run(&create), document);
     assert_eq!(document["body"], "Body");
 }
+
+#[test]
+fn cli_document_keep_trash_restore_print_the_bare_document() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let document = run(&["document", "create", "--body", "Hello"]);
+    let id = document["id"].as_str().unwrap();
+    for command in ["keep", "trash", "restore"] {
+        let printed = run(&["document", command, id]);
+        assert_eq!(printed["id"], id, "{command}");
+        assert!(printed.get("value").is_none(), "{command}");
+    }
+    run(&["create", "Task"]);
+    let references = run(&["document", "references", "T-1"]);
+    assert!(references.as_array().unwrap().is_empty());
+}

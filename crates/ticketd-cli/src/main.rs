@@ -959,7 +959,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
             DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
             DocumentCommand::Keep { id } => {
-                serde_json::to_string(&workspace.write(None, WriteRequest::KeepDocument { id })?)?
+                bare(workspace.write(None, WriteRequest::KeepDocument { id })?)?
             }
             DocumentCommand::Recent {
                 limit,
@@ -1012,11 +1012,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.trashed_documents_page(limit, offset)?)?
             }
             DocumentCommand::Trash { id } => {
-                serde_json::to_string(&workspace.write(None, WriteRequest::TrashDocument { id })?)?
+                bare(workspace.write(None, WriteRequest::TrashDocument { id })?)?
             }
-            DocumentCommand::Restore { id } => serde_json::to_string(
-                &workspace.write(None, WriteRequest::RestoreDocument { id })?,
-            )?,
+            DocumentCommand::Restore { id } => {
+                bare(workspace.write(None, WriteRequest::RestoreDocument { id })?)?
+            }
             DocumentCommand::Change {
                 id,
                 title,

@@ -69,7 +69,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 43;
+pub const FORMAT_VERSION: i64 = 44;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -156,6 +156,8 @@ pub enum Error {
     EmptyTag,
     #[error("ticket '{0}' is in trash; restore it before editing")]
     Trashed(String),
+    #[error("document '{0}' is in trash; restore it with `ticketd document restore {0}` first")]
+    DocumentTrashed(String),
     #[error("a related ticket is missing from the workspace")]
     MissingRelatedTicket,
     #[error("ticket title must not be empty")]
@@ -652,6 +654,10 @@ impl Workspace {
                 CREATE TRIGGER IF NOT EXISTS plan_graph_fts_update AFTER UPDATE OF name, purpose ON plans BEGIN INSERT INTO plan_graph_fts(plan_graph_fts, rowid, name, purpose) VALUES ('delete', old.rowid, old.name, old.purpose); INSERT INTO plan_graph_fts(rowid, name, purpose) VALUES (new.rowid, new.name, new.purpose); END;
                 PRAGMA user_version = 43;")?;
         }
+        if version < 44 {
+            // The latest Activity of a ticket is read on every refresh.
+            transaction.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_number ON activities(ticket_id, number DESC); PRAGMA user_version = 44;")?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -863,6 +869,8 @@ impl Workspace {
         details: Option<&str>,
         existing_document_id: Option<&str>,
     ) -> Result<Activity, Error> {
+        // Blank details are no details: an untouched empty capture creates nothing.
+        let details = details.filter(|text| !text.trim().is_empty());
         if details.is_some() && existing_document_id.is_some() {
             return Err(Error::ConflictingActivitySupport);
         }
@@ -884,13 +892,15 @@ impl Workspace {
             document_links::index_body(&tx, &id, body)?;
             Some(id)
         } else if let Some(id) = existing_document_id {
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM documents WHERE id = ?1 AND trashed = 0)",
-                [id],
-                |r| r.get(0),
-            )?;
-            if !exists {
-                return Err(Error::DocumentNotFound(id.to_owned()));
+            let trashed: Option<bool> = tx
+                .query_row("SELECT trashed FROM documents WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            match trashed {
+                None => return Err(Error::DocumentNotFound(id.to_owned())),
+                Some(true) => return Err(Error::DocumentTrashed(id.to_owned())),
+                Some(false) => {}
             }
             Some(id.to_owned())
         } else {
@@ -924,7 +934,7 @@ impl Workspace {
         transaction_write_lock(&tx)?;
         let id_ticket = relationships::id(&tx, reference)?;
         ensure_editable(&tx, &id_ticket)?;
-        tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 ON CONFLICT(document_id) DO NOTHING", [id])?;
+        tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
         activities::delete(&tx, &id_ticket, id)?;
         tx.execute(
             "UPDATE inbox_entries SET read = 1 WHERE kind = 'activity' AND from_value = ?1",

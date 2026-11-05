@@ -33,15 +33,15 @@ with tempfile.TemporaryDirectory() as home:
         duration, tickets = run('batch', '-', data=operations)
         batches.append(duration)
     report('100-ticket batch', batches)
-    # Populate 100 tickets with Markdown, notes and tags, in one bounded batch.
+    # Populate 100 tickets with Markdown, activities and tags, in one bounded batch.
     body = ('## Context\nA concrete implementation outcome with acceptance criteria.\n' * 40)
-    changes = [dict(operation='change', ticket=t['reference'], change=dict(body=body, notes=['Investigation finding', 'Verification result'], add_tags=['feature', 'review'])) for t in tickets]
+    changes = [dict(operation='change', ticket=t['reference'], change=dict(body=body, activities=['Investigation finding', 'Verification result'], add_tags=['feature', 'review'])) for t in tickets]
     run('batch', '-', data=changes)
     ref = tickets[-1]['reference']
     run('batch', '-', data=[dict(operation='change', ticket=ref, change=dict(add_blockers=[t['reference'] for t in tickets[:49]]))])
     for label, args in [('warm list', ('list',)), ('project list', ('list', '--project', project['id'])),
                         ('search', ('search', 'Benchmark')), ('editor read', ('show', ref)),
-                        ('context', ('context', ref, '--project', '--relationships', '--notes')),
+                        ('context', ('context', ref, '--project', '--relationships', '--activities')),
                         ('graph', ('graph', ref))]:
         report(label, [run(*args)[0] for _ in range(20)])
     def worker(i):

@@ -10,7 +10,7 @@ impl Workspace {
     pub fn export(&self) -> Result<Value, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let mut result = Map::new();
-        result.insert("format_version".into(), Value::from(1));
+        result.insert("format_version".into(), Value::from(2));
         for (table, columns) in [
             ("entities", "id, kind"),
             (

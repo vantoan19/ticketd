@@ -158,26 +158,29 @@ fn save_document(
     title_changed: bool,
     request_id: String,
 ) -> Result<Document, String> {
-    let request = match id {
-        Some(id) => WriteRequest::ChangeDocument {
-            id,
-            patch: DocumentPatch {
-                title: title_changed.then_some(title),
-                body,
-            },
-        },
-        None => WriteRequest::CreateDocument {
+    // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
+    // replay record that would otherwise keep a full copy of every autosaved body forever.
+    // Creating still uses the request ID, because a repeated create would duplicate.
+    let Some(id) = id else {
+        let request = WriteRequest::CreateDocument {
             title,
             body: body.unwrap_or_default(),
-        },
+        };
+        return match Workspace::open_default()
+            .and_then(|mut w| w.write(Some(&request_id), request))
+            .map_err(|e| e.to_string())?
+        {
+            WriteResult::Document(document) => Ok(document),
+            _ => Err("Unexpected save result".into()),
+        };
     };
-    match Workspace::open_default()
-        .and_then(|mut w| w.write(Some(&request_id), request))
-        .map_err(|e| e.to_string())?
-    {
-        WriteResult::Document(document) => Ok(document),
-        _ => Err("Unexpected save result".into()),
-    }
+    let patch = DocumentPatch {
+        title: title_changed.then_some(title),
+        body,
+    };
+    Workspace::open_default()
+        .and_then(|mut w| w.change_document(&id, patch))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -226,12 +229,17 @@ fn ticket_from_document(
     id: String,
     title: String,
     request_id: String,
+    follow: Option<bool>,
 ) -> Result<ticketd_core::Ticket, String> {
     match Workspace::open_default()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
-                WriteRequest::CreateTicketFromDocument { id, title },
+                WriteRequest::CreateTicketFromDocument {
+                    id,
+                    title,
+                    follow: follow.unwrap_or(false),
+                },
             )
         })
         .map_err(|e| e.to_string())?
@@ -405,12 +413,6 @@ fn show_ticket(reference: String) -> Result<Ticket, String> {
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
-    Workspace::open_default()
-        .and_then(|w| w.find_tickets(&filter))
-        .map_err(|e| e.to_string())
-}
 #[tauri::command]
 fn find_tickets_with_updates(
     filter: TicketFilter,
@@ -658,12 +660,6 @@ fn activity_feed(
 ) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
     Workspace::open_default()
         .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
-        .map_err(|e| e.to_string())
-}
-#[tauri::command]
-fn list_activities(reference: String, limit: u32, offset: u32) -> Result<Vec<Activity>, String> {
-    Workspace::open_default()
-        .and_then(|workspace| workspace.activities(&reference, limit, offset))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
@@ -1396,7 +1392,6 @@ pub fn run() -> Result<(), tauri::Error> {
             edit_project,
             show_ticket,
             search_tickets,
-            find_tickets,
             find_tickets_with_updates,
             count_tickets,
             context_graph,
@@ -1426,7 +1421,6 @@ pub fn run() -> Result<(), tauri::Error> {
             source_conversation,
             latest_update,
             activity_feed,
-            list_activities,
             get_activity,
             add_activity,
             add_activity_with_details,

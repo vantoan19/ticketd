@@ -1066,7 +1066,7 @@ fn export_preserves_workspace_relationships_and_trash() {
         .set_trashed(&parent.reference, true, None)
         .unwrap();
     let export = workspace.export().unwrap();
-    assert_eq!(export["format_version"], 1);
+    assert_eq!(export["format_version"], 2);
     assert_eq!(export["projects"][0]["id"], project.id);
     assert_eq!(export["project_checkouts"][0]["project_id"], project.id);
     assert_eq!(export["plans"][0]["id"], plan.id);
