@@ -23,8 +23,8 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Preferences",
-  "Sources",
   "Workspace",
+  "Sources",
   "Help",
 ];
 
