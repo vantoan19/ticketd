@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
+import { useKeepPaneScroll } from "./keep-scroll";
 import { KindIcon } from "./GraphLegend";
 import {
   connectionRows,
@@ -65,6 +66,7 @@ export function WorkspaceGraph({
   onFocus: (id: string) => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
+  const keepScroll = useKeepPaneScroll();
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
   const [tag, setTag] = useState("");
@@ -439,26 +441,6 @@ export function WorkspaceGraph({
                 onError={setError}
                 fit={fit}
                 onFitted={() => setFit(false)}
-                overlay={
-                  unconnected.length > 0 && (
-                    <div
-                      className="context-graph-unconnected"
-                      role="group"
-                      aria-label="Not connected"
-                    >
-                      <strong>Not connected · {unconnected.length}</strong>
-                      {unconnected.map((node) => (
-                        <button
-                          key={node.id}
-                          type="button"
-                          onClick={() => setSelected(node.id)}
-                        >
-                          {node.label}
-                        </button>
-                      ))}
-                    </div>
-                  )
-                }
               />
             )}
             <aside className="context-graph-preview">
@@ -473,6 +455,30 @@ export function WorkspaceGraph({
                 </p>
               )}
               {previewPanel}
+              {unconnected.length > 0 && (
+                <div
+                  className="context-graph-unconnected"
+                  role="group"
+                  aria-label="Not connected"
+                >
+                  <strong>Not connected · {unconnected.length}</strong>
+                  <div
+                    className="context-graph-unconnected-list"
+                    tabIndex={0}
+                    aria-label="Not connected items"
+                  >
+                    {unconnected.map((node) => (
+                      <button
+                        key={node.id}
+                        type="button"
+                        onClick={() => setSelected(node.id)}
+                      >
+                        {node.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </aside>
           </div>
         ) : (
@@ -538,7 +544,7 @@ export function WorkspaceGraph({
           {graph?.nodes.map((node) => (
             <li key={node.id}>
               <KindIcon kind={node.kind} />
-              <button type="button" onClick={() => setSelected(node.id)}>
+              <button type="button" {...keepScroll(() => setSelected(node.id))}>
                 {node.label}
                 {node.trashed ? " (Trash)" : ""}
               </button>

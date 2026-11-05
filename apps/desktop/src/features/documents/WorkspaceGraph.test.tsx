@@ -8,7 +8,6 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type React from "react";
 import { client } from "@/lib/api/client";
 import { WorkspaceGraph } from "./WorkspaceGraph";
 
@@ -18,11 +17,9 @@ vi.mock("./ContextGraphCanvas", () => ({
   ContextGraphCanvas: ({
     edges,
     nodes,
-    overlay,
   }: {
     edges: { label?: string }[];
     nodes: { id: string }[];
-    overlay?: React.ReactNode;
   }) => (
     <div data-testid="canvas">
       {nodes.map((node) => (
@@ -31,7 +28,6 @@ vi.mock("./ContextGraphCanvas", () => ({
       {edges.map((edge, index) => (
         <span key={index}>{edge.label}</span>
       ))}
-      {overlay}
     </div>
   ),
 }));
@@ -357,7 +353,7 @@ test("items with no relationship leave the canvas for a Not connected list", asy
   const canvas = screen.getByTestId("canvas");
   expect(canvas.querySelectorAll("[data-card]")).toHaveLength(2);
   expect(canvas.querySelector('[data-card="lone"]')).toBeNull();
-  const group = within(canvas).getByRole("group", { name: "Not connected" });
+  const group = screen.getByRole("group", { name: "Not connected" });
   expect(group.textContent).toContain("Not connected · 1");
   fireEvent.click(
     within(group).getByRole("button", { name: "T-4 · Dark mode" }),

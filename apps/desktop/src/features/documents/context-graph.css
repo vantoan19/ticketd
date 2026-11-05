@@ -44,6 +44,8 @@
 }
 .context-graph-edge-label {
   position: absolute;
+  /* Opaque and above the cards: a label that must cross a card stays readable. */
+  z-index: 2000;
   pointer-events: none;
   display: flex;
   align-items: center;
@@ -254,8 +256,6 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px 16px;
-  max-height: 168px;
-  overflow: auto;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   background: var(--surface);
@@ -274,17 +274,12 @@
   flex-wrap: wrap;
   gap: 4px 16px;
 }
+/* Items with no relationship: a heading and a list that scrolls inside the side panel. */
 .context-graph-unconnected {
-  max-height: 120px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: none;
-  padding: 0;
+  gap: 4px;
+  margin-top: 12px;
   font-size: 12px;
   line-height: 16px;
   color: var(--muted-foreground);
@@ -293,13 +288,51 @@
   color: var(--foreground);
   font-weight: 500;
 }
+/* Five whole rows (24px each); a shadow at the cut edge shows there is more. */
+.context-graph-unconnected-list {
+  --rows: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--rows) * 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+  background:
+    linear-gradient(var(--background) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--background) 70%) bottom / 100% 24px local,
+    radial-gradient(
+        farthest-side at 50% 0,
+        color-mix(in srgb, var(--foreground) 22%, transparent),
+        transparent
+      )
+      top / 100% 8px scroll,
+    radial-gradient(
+        farthest-side at 50% 100%,
+        color-mix(in srgb, var(--foreground) 22%, transparent),
+        transparent
+      )
+      bottom / 100% 8px scroll;
+  background-repeat: no-repeat;
+  border-radius: 6px;
+}
+.context-graph-unconnected-list:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
 .context-graph-unconnected button {
+  flex: none;
+  height: 24px;
   padding: 0;
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
+  line-height: 24px;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  scroll-snap-align: start;
   cursor: pointer;
 }
 .context-graph-unconnected button:hover {

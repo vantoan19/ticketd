@@ -122,3 +122,30 @@ test("the legend has its own row beside the canvas, one zoom and Fit control sta
   );
   expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
 });
+
+test("the canvas stays hidden until the first fit, so the map is never seen at the starting zoom", () => {
+  vi.stubGlobal(
+    "Worker",
+    class {
+      postMessage = vi.fn();
+      terminate = vi.fn();
+    },
+  );
+  const view = render(
+    <ContextGraphCanvas
+      edges={[]}
+      selected={null}
+      positions={{}}
+      onPositions={vi.fn()}
+      viewport={{ x: 0, y: 0, zoom: 1 }}
+      onViewport={vi.fn()}
+      onSelect={vi.fn()}
+      onError={vi.fn()}
+      fit
+      nodes={[{ id: "a", label: "A" }]}
+    />,
+  );
+  expect(view.getByLabelText("Connections canvas").style.visibility).toBe(
+    "hidden",
+  );
+});

@@ -168,10 +168,12 @@ function overlap(a: Rect, b: Rect): boolean {
 const LABEL_GAP = 4;
 
 /**
- * The spot, nearest the middle of the line, where a label of `size` touches no
- * card and none of the `taken` labels. Tries points along the line first, then
- * points beside it (above and below), and stays inside `bounds` when given so a
- * label is never cut at the canvas edge. Falls back to the middle.
+ * The spot on the line where a label of `size` goes. Every candidate is a point
+ * of the line itself, so a label always sits on its own edge. The first choice
+ * is the point nearest the middle where the label touches no card and none of
+ * the `taken` labels (and stays inside `bounds` when given). When no point of
+ * the line is free of cards, the label is drawn over the cards as an opaque pill
+ * at the free point nearest the middle, rather than moved away from its line.
  */
 export function placeLabel(
   points: Point[],
@@ -180,41 +182,62 @@ export function placeLabel(
   taken: Rect[] = [],
   bounds?: Rect,
 ): Point {
-  const avoid = [...cards.map((rect) => inflate(rect, LABEL_GAP)), ...taken];
-  const fits = (at: Point) => {
-    const box = {
-      x: at.x - size.width / 2,
-      y: at.y - size.height / 2,
-      width: size.width,
-      height: size.height,
-    };
-    if (
-      bounds &&
-      (box.x < bounds.x ||
-        box.y < bounds.y ||
-        box.x + box.width > bounds.x + bounds.width ||
-        box.y + box.height > bounds.y + bounds.height)
-    )
-      return false;
-    return !avoid.some((rect) => overlap(box, rect));
+  const boxAt = (at: Point): Rect => ({
+    x: at.x - size.width / 2,
+    y: at.y - size.height / 2,
+    width: size.width,
+    height: size.height,
+  });
+  const avoidCards = cards.map((rect) => inflate(rect, LABEL_GAP));
+  const clear = (at: Point, rects: Rect[]) => {
+    const box = boxAt(at);
+    return !rects.some((rect) => overlap(box, rect));
+  };
+  const inside = (at: Point) => {
+    if (!bounds) return true;
+    const box = boxAt(at);
+    return (
+      box.x >= bounds.x &&
+      box.y >= bounds.y &&
+      box.x + box.width <= bounds.x + bounds.width &&
+      box.y + box.height <= bounds.y + bounds.height
+    );
   };
   const fractions = Array.from({ length: 49 }, (_, i) => 0.02 + i * 0.02).sort(
     (a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5),
   );
   for (const fraction of fractions) {
     const at = pointAt(points, fraction);
-    if (fits(at)) return at;
+    if (inside(at) && clear(at, [...avoidCards, ...taken])) return at;
   }
-  // Nowhere on the line is clear: sit just above or below it.
-  const step = size.height + LABEL_GAP;
-  for (const lift of [1, 2, 3])
-    for (const fraction of fractions)
-      for (const side of [-1, 1]) {
-        const at = pointAt(points, fraction);
-        const candidate = { x: at.x, y: at.y + side * lift * step };
-        if (fits(candidate)) return candidate;
-      }
-  return pointAt(points, 0.5);
+  // No point of the line is clear of the cards: the label rides on the line,
+  // above the cards, at the point nearest the middle that misses other labels.
+  let best = pointAt(points, 0.5);
+  let least = Infinity;
+  for (const fraction of fractions) {
+    const at = pointAt(points, fraction);
+    const box = boxAt(at);
+    const covered = taken.reduce(
+      (sum, rect) =>
+        sum +
+        Math.max(
+          0,
+          Math.min(box.x + box.width, rect.x + rect.width) -
+            Math.max(box.x, rect.x),
+        ) *
+          Math.max(
+            0,
+            Math.min(box.y + box.height, rect.y + rect.height) -
+              Math.max(box.y, rect.y),
+          ),
+      0,
+    );
+    if (covered < least) {
+      least = covered;
+      best = at;
+    }
+  }
+  return best;
 }
 
 /** Rough pixel size of an edge label at the map's label font. */
