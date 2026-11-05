@@ -174,3 +174,13 @@
   padding-block: 8px;
   background: var(--background);
 }
+
+.activity-meta .activity-latest {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground);
+}

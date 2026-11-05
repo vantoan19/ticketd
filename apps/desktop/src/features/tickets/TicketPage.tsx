@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
@@ -59,14 +57,7 @@ export function TicketPage({
 }) {
   const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
-  const [noEvidence, setNoEvidence] = useState(false);
-  const [composeKey, setComposeKey] = useState(0);
   const work = useLinkedWork(ticket, revision, refresh, active);
-  const links = work.current?.links;
-  const noSubtickets =
-    !!links &&
-    links.children_progress.total === 0 &&
-    !work.rows.some((row) => row.kind === "subticket");
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
   const source = externalSource(ticket);
@@ -187,12 +178,7 @@ export function TicketPage({
           </TicketEditor>
         )}
         {active && !ticket.trashed && (
-          <Subtickets
-            work={work}
-            select={select}
-            external={Boolean(source)}
-            quiet
-          />
+          <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
           <Evidence
@@ -200,34 +186,7 @@ export function TicketPage({
             revision={revision}
             trashed={ticket.trashed}
             refresh={refresh}
-            quiet
-            onEmptyChange={setNoEvidence}
-            composeKey={composeKey}
           />
-        )}
-        {active && !ticket.trashed && (noSubtickets || noEvidence) && (
-          <div className="detail-quiet-actions">
-            {noSubtickets && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => work.openLink("subticket")}
-              >
-                <Plus aria-hidden="true" />
-                Link subticket
-              </Button>
-            )}
-            {noEvidence && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setComposeKey((value) => value + 1)}
-              >
-                <Plus aria-hidden="true" />
-                Add evidence
-              </Button>
-            )}
-          </div>
         )}
         {active && (
           <Backlinks
