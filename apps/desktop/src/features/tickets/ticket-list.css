@@ -457,6 +457,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
+.ticket-row-contextual .ticket-row-tags {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 50%;
+}
+.ticket-row-contextual .ticket-tag:first-child {
+  flex: 0 1 auto;
+  min-width: 4ch;
+}
+.ticket-row-contextual .ticket-tag-more {
+  flex: none;
+}
 /* The context item carries its type icon: layers for a Plan, a folder for a
    project, so the two names are never mistaken for each other. */
 .ticket-row-context {

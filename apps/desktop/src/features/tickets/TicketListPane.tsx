@@ -222,7 +222,9 @@ export function TicketListPane({
             {scopeName}
           </h1>
           <p>
-            {total} {total === 1 ? "ticket" : "tickets"}
+            {filtered && scopeTotal !== undefined
+              ? `${total} of ${scopeTotal}`
+              : `${total} ${total === 1 ? "ticket" : "tickets"}`}
           </p>
           <IconButton
             className="list-refresh"
@@ -234,7 +236,9 @@ export function TicketListPane({
           >
             <RefreshCw />
           </IconButton>
-          {!trash && <TicketFilters part="controls" {...filterProps} />}
+          {!trash && (
+            <TicketFilters part="controls" labeledFilter {...filterProps} />
+          )}
           {configuredSources.length > 0 && (
             <SourceRefresh
               providers={configuredSources}

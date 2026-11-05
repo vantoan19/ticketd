@@ -673,9 +673,14 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(screen.getByLabelText("Active filters").textContent).toContain(
-    "3 of 7",
+  // The count sits beside the title, not in the constraint row.
+  expect(screen.getByLabelText("Active filters").textContent).not.toContain(
+    "of 7",
   );
+  expect(
+    screen.getByRole("heading", { name: "All tickets" }).parentElement!
+      .textContent,
+  ).toContain("3 of 7");
   expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
   // The Done status chip shares the name; the footer button comes last.
   fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);

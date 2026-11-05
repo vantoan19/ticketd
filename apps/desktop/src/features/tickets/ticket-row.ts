@@ -79,3 +79,11 @@ export function rowContextItem(
       : undefined;
   return project ? { kind: "project", label: project.name } : null;
 }
+
+/** Line two shows the first tag whole and the others as a "+N" count. */
+export function rowTagSlot(
+  tags: readonly string[],
+): { first: string; more: number } | null {
+  const [first, ...rest] = tags;
+  return first === undefined ? null : { first, more: rest.length };
+}

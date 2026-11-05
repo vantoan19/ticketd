@@ -107,7 +107,8 @@ test("shows one context item and tags as pills", () => {
   expect(screen.getAllByText("Launch")).toHaveLength(1);
   expect(screen.queryByText("Website")).toBeNull();
   expect(screen.getByText("ui")).toBeTruthy();
-  expect(screen.getByText("bug")).toBeTruthy();
+  expect(screen.queryByText("bug")).toBeNull();
+  expect(screen.getByText("+1")).toBeTruthy();
 });
 
 test("omits the project already in scope", () => {
