@@ -2,13 +2,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Picker } from "@/components/ui/picker";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
@@ -352,10 +346,8 @@ export function Evidence({
         <fieldset disabled={pending}>
           <FieldGroup>
             <Field>
-              <span className="evidence-label" id="evidence-type-label">
-                Type
-              </span>
-              <Select
+              <Picker
+                label="Type"
                 value={draft.kind}
                 onValueChange={(value) => {
                   if (
@@ -367,18 +359,11 @@ export function Evidence({
                   )
                     setDraft({ ...draft, kind: value });
                 }}
-              >
-                <SelectTrigger size="sm" aria-labelledby="evidence-type-label">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(labels).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={Object.entries(labels).map(([key, label]) => ({
+                  value: key,
+                  label,
+                }))}
+              />
             </Field>
             <Field>
               <label className="evidence-label">

@@ -468,31 +468,17 @@ export function TicketProperties({
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
-        <DialogContent
-          className="duplicate-dialog"
-          onCloseAutoFocus={(event) => {
-            // The Status choice that opened this unmounts with its menu, so
-            // focus returns to the Status control explicitly.
-            event.preventDefault();
-            statusTrigger.current?.focus();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Mark as duplicate</DialogTitle>
-            <DialogDescription>
-              Choose the canonical ticket for {ticket.reference} and review its
-              dependencies.
-            </DialogDescription>
-          </DialogHeader>
-          <Duplicates
-            ticket={ticket}
-            refresh={refresh}
-            onDone={() => setDuplicateOpen(false)}
-            onCancel={() => setDuplicateOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {duplicateOpen && (
+        <Duplicates
+          ticket={ticket}
+          refresh={refresh}
+          open
+          onOpenChange={setDuplicateOpen}
+          title="Mark as duplicate"
+          description={`Choose the canonical ticket for ${ticket.reference} and review its dependencies.`}
+          returnFocus={statusTrigger}
+        />
+      )}
       <SourceRail ticket={ticket} refresh={refresh} />
       {property(
         "Project",

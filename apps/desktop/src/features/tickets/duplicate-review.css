@@ -47,9 +47,6 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.duplicate-form .duplicate-change {
-  margin-top: 12px;
-}
 .dependencies h3 {
   margin: 0 0 4px;
   font-size: 14px;
@@ -111,19 +108,6 @@
 }
 
 /* The form that asks for the canonical ticket, or the endpoint to replace. */
-.duplicate-form {
-  margin-top: 16px;
-}
-.duplicate-input {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: end;
-}
-.duplicate-input > input {
-  flex: 1;
-  min-width: 120px;
-}
 .duplicate-pick {
   display: flex;
   flex-direction: column;

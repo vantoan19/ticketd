@@ -58,12 +58,23 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
-it("returns without creating an untouched capture", async () => {
+it("disables Done with a stated reason until a thought is written", async () => {
   const close = vi.fn();
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
-  fireEvent.click(screen.getByText("Done"));
-  expect(close).toHaveBeenCalledOnce();
+  const done = screen.getByRole("button", { name: "Done" });
+  expect((done as HTMLButtonElement).disabled).toBe(true);
+  expect(done.getAttribute("aria-describedby")).toBeTruthy();
+  expect(screen.getByText("Write a thought to finish")).toBeTruthy();
+  fireEvent.click(done);
+  expect(close).not.toHaveBeenCalled();
   expect(documents.save).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  expect(
+    (screen.getByRole("button", { name: "Done" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
 });
 it("keeps a failed capture open and retries the same request before returning", async () => {
   vi.mocked(documents.save)
@@ -743,11 +754,20 @@ it("says nothing is saved and explains a blocked Back to work while the conflict
   expect(document.activeElement).toBe(notice);
   expect(notice.textContent).toContain("Choose Reload or Save my draft first");
 });
-it("keeps Done in place through the pointer sequence that blurs the editor", () => {
+it("keeps Done in place through the pointer sequence that blurs the editor", async () => {
+  vi.mocked(documents.save).mockResolvedValue({
+    id: "d1",
+    title: null,
+    body: "A thought",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
   const close = vi.fn();
   renderEditor(<DocumentEditor initial={null} onClose={close} />);
-  const done = screen.getByRole("button", { name: "Done" });
   const editor = screen.getByLabelText("Your thought");
+  fireEvent.change(editor, { target: { value: "A thought" } });
+  const done = screen.getByRole("button", { name: "Done" });
   editor.focus();
   fireEvent.pointerDown(done);
   fireEvent.mouseDown(done);
@@ -756,7 +776,7 @@ it("keeps Done in place through the pointer sequence that blurs the editor", () 
   fireEvent.pointerUp(done);
   fireEvent.mouseUp(done);
   fireEvent.click(done);
-  expect(close).toHaveBeenCalledOnce();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });
 
 it("asks the editor to take focus back after each conflict action (D2)", async () => {

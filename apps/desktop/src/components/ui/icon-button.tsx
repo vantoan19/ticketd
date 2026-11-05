@@ -16,14 +16,23 @@ function IconButton({
   label,
   variant = "ghost",
   size = "icon-sm",
+  hideTooltip,
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "aria-label" | "children"> & {
   label: string;
   children: React.ReactNode;
+  /** Keeps the tooltip closed, for example once the button's menu item opened a dialog. */
+  hideTooltip?: boolean;
 }) {
+  const [open, setOpen] = React.useState(false);
   return (
     <TooltipProvider>
-      <Tooltip>
+      <Tooltip
+        {...(hideTooltip !== undefined && {
+          open: open && !hideTooltip,
+          onOpenChange: setOpen,
+        })}
+      >
         <TooltipTrigger asChild>
           <Button aria-label={label} variant={variant} size={size} {...props} />
         </TooltipTrigger>

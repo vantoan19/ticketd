@@ -289,26 +289,12 @@ export function CreateTicketDialog({
           <TokenField
             label="Add tag"
             placeholder="Add a tag"
+            suggestions={suggestions}
             values={draft.tags}
             onChange={(tags) =>
               update({ tags: tags.map((tag) => tag.toLowerCase()) })
             }
           />
-          {suggestions.length > 0 && (
-            <ul className="create-tag-suggestions" aria-label="Tag suggestions">
-              {suggestions.map((tag) => (
-                <li key={tag}>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => update({ tags: [...draft.tags, tag] })}
-                  >
-                    {tag}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
         {error && (
           <Alert variant="destructive">

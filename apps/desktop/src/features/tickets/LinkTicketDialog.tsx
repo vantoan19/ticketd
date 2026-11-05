@@ -3,13 +3,7 @@ import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Picker } from "@/components/ui/picker";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
 import { useTicketSearch } from "./useTicketSearch";
@@ -123,7 +117,8 @@ export function LinkTicketDialog({
           </FieldLabel>
           <div className="link-ticket-sentence">
             <span>{ticket.reference}</span>
-            <Select
+            <Picker
+              label="Relationship"
               value={kind}
               onValueChange={(value) => {
                 setKind(
@@ -132,18 +127,11 @@ export function LinkTicketDialog({
                 );
                 setError("");
               }}
-            >
-              <SelectTrigger id={`link-kind-${ticket.id}`} size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {addableKinds.map((item) => (
-                  <SelectItem key={item.kind} value={item.kind}>
-                    {item.phrase}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={addableKinds.map((item) => ({
+                value: item.kind,
+                label: item.phrase,
+              }))}
+            />
           </div>
         </Field>
         <Field data-invalid={!!(error || search.error)}>
