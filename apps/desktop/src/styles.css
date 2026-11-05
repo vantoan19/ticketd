@@ -1389,3 +1389,11 @@
 [data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
   pointer-events: none;
 }
+
+/* After a pointer interaction controls show no focus ring (see
+   useInputModality); text fields keep their outline so typing stays visible. */
+html[data-input="pointer"]
+  :is(button, summary, a, [role="radio"], [role="combobox"]):focus-visible {
+  box-shadow: none;
+  outline: none;
+}
