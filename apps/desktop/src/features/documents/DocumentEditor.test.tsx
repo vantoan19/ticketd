@@ -594,6 +594,45 @@ it("lists each connected item once and names Plans that use the Document as spec
   ).toBeTruthy();
 });
 
+it("names a Plan that only has the Document attached as a supporting Document", async () => {
+  const document = {
+    id: "d1",
+    title: "Checkout spec",
+    body: "x",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.links).mockResolvedValue([
+    [],
+    [
+      {
+        source_id: "p1",
+        target_id: "d1",
+        source_kind: "plan",
+        target_kind: "document",
+        source_label: "Checkout revamp",
+        target_label: "",
+        source_trashed: false,
+        target_trashed: false,
+        passage: "",
+        explicit: true,
+      },
+    ],
+  ]);
+  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
+  expect(
+    await screen.findByRole("button", {
+      name: "Supporting Document of Checkout revamp",
+    }),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /^Updated .* · supporting Document of the Plan Checkout revamp$/,
+    ),
+  ).toBeTruthy();
+});
+
 it("Edit shows the heading once: the title field holds it and the editor keeps the saved text", async () => {
   const doc = {
     id: "d1",

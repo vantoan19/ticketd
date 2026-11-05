@@ -133,11 +133,23 @@ fn plain_snippet(body: &str, query: Option<&str>) -> String {
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
     let mut text = String::new();
     let mut in_code_block = false;
+    // A leading heading is the Document's own heading, which the list already shows.
+    let mut skipping_heading = false;
+    let mut started = false;
     for event in Parser::new_ext(
         body,
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES,
     ) {
+        if !started && matches!(event, Event::Start(_)) {
+            started = true;
+            skipping_heading = matches!(event, Event::Start(Tag::Heading { .. }));
+            if skipping_heading {
+                continue;
+            }
+        }
         match event {
+            Event::End(TagEnd::Heading(_)) if skipping_heading => skipping_heading = false,
+            _ if skipping_heading => {}
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Text(part) | Event::Code(part) | Event::InlineMath(part) if !in_code_block => {

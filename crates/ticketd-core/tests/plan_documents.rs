@@ -158,3 +158,22 @@ fn plan_spec_and_keep_do_not_record_a_browsing_visit() {
             .any(|d| d.id == detail)
     );
 }
+
+#[test]
+fn document_plans_tell_spec_from_supporting_documents() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Checkout revamp").unwrap();
+    let doc = workspace.create_document(Some("Spec"), "body").unwrap();
+    assert!(workspace.document_plans(&doc.id).unwrap().is_empty());
+    workspace
+        .set_plan_document(&plan.id, &doc.id, true)
+        .unwrap();
+    let plans = workspace.document_plans(&doc.id).unwrap();
+    assert_eq!(
+        (plans[0].0.name.as_str(), plans[0].1),
+        ("Checkout revamp", false)
+    );
+    workspace.set_plan_spec(&plan.id, Some(&doc.id)).unwrap();
+    assert!(workspace.document_plans(&doc.id).unwrap()[0].1);
+}

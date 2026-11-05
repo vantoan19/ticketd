@@ -121,6 +121,27 @@ impl Workspace {
             })?
             .collect::<Result<Vec<_>, _>>()?)
     }
+    /// Active Plans a Document is attached to, with whether it is that Plan's designated spec.
+    pub fn document_plans(&self, document_id: &str) -> Result<Vec<(Plan, bool)>, Error> {
+        let mut stmt = self.connection.prepare(
+            "SELECT p.id, p.name, p.archived, p.purpose, p.spec_document_id FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = ?1 AND p.archived = 0 ORDER BY p.name, p.id",
+        )?;
+        Ok(stmt
+            .query_map([document_id], |r| {
+                let spec: Option<String> = r.get(4)?;
+                Ok((
+                    Plan {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        archived: r.get(2)?,
+                        purpose: r.get(3)?,
+                        spec_document_id: spec.clone(),
+                    },
+                    spec.as_deref() == Some(document_id),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
     pub fn show_plan(&self, id: &str) -> Result<PlanView, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let plan = get(&tx, id)?;
