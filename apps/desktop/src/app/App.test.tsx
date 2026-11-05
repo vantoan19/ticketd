@@ -1773,3 +1773,39 @@ test("opens Capture from anywhere with the global shortcut", async () => {
   fireEvent.keyDown(window, { key: "N", shiftKey: true, ctrlKey: true });
   expect(await screen.findByRole("dialog")).toBeTruthy();
 });
+
+test("the ticket detail has one bounded scroller so the wheel can move it", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return command === "count_tickets" ? bridgeDefault(command) : [];
+  });
+  const { container } = render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  const panel = container.querySelector<HTMLElement>(".detail-panel")!;
+  // The panel clips; if it scrolled, its child would have no bounded height.
+  expect(panel.style.overflow).toBe("hidden");
+  expect(panel.style.display).toBe("flex");
+  const detail = panel.querySelector<HTMLElement>(".ticket-detail")!;
+  expect(detail.querySelectorAll(".detail-scroll")).toHaveLength(1);
+  expect(detail.querySelector(".detail-scroll")!.parentElement).toBe(detail);
+});
