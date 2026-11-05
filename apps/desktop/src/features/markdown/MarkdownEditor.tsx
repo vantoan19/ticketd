@@ -680,6 +680,13 @@ export interface MarkdownEditorProps {
   persistentToolbar?: boolean;
 }
 
+let pointerDown = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("pointerdown", () => (pointerDown = true), true);
+  for (const type of ["pointerup", "pointercancel"])
+    document.addEventListener(type, () => (pointerDown = false), true);
+}
+
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
 export function MarkdownEditor({
   value,
@@ -922,6 +929,17 @@ export function MarkdownEditor({
             ))
         )
           return;
+        // The toolbar docks in the frame, so hiding it moves everything below. A press elsewhere
+        // (Post, Done) blurs on pointer down; collapse only after the pointer is released so the
+        // click still lands on the control that was pressed.
+        if (pointerDown) {
+          globalThis.document.addEventListener(
+            "pointerup",
+            () => setTimeout(() => setActive(false), 0),
+            { once: true },
+          );
+          return;
+        }
         setActive(false);
       }}
     >

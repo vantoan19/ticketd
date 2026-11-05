@@ -104,7 +104,8 @@
      above and below it; margins cancel the padding so the text does not move. */
   margin: 8px -8px 0;
   padding: 4px 8px;
-  min-height: 0;
+  /* Tall enough that the Edit button (32px, 4px inset) stays inside the outline, never on its border. */
+  min-height: 40px;
   border-radius: 8px;
 }
 .description-reading:hover .description-document,
@@ -113,8 +114,8 @@
 }
 .description-edit {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 12px;
+  right: 0;
   z-index: 1;
   opacity: 0;
 }

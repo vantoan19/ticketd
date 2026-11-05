@@ -221,11 +221,15 @@ export function CreateTicketDialog({
           >
             <LazyMarkdownEditor
               label="Description"
+              placeholder="Steps, acceptance criteria, or a checklist"
               readOnly={pending}
               value={draft.body}
               onChange={(body) => update({ body })}
             />
           </div>
+          <small className="create-description-hint">
+            Markdown works · type / for blocks
+          </small>
         </Field>
         {draft.restored && (
           <p className="create-restored" role="status">

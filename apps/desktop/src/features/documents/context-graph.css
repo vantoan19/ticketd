@@ -325,9 +325,16 @@
 }
 /* A mask on the scroll container itself follows the container's edges and works
    on any background, light or dark. useScrollFade sets data-more-above/below. */
+/* No mask at all unless content is cut off at an edge: an unconditional gradient mask
+   rendered a stray strip at scroll top in WebKit. */
 .context-graph-unconnected-list,
 .context-graph-preview-body {
   --fade: 16px;
+}
+:is(.context-graph-unconnected-list, .context-graph-preview-body):is(
+  [data-more-above],
+  [data-more-below]
+) {
   --fade-top: 0px;
   --fade-bottom: 0px;
   -webkit-mask-image: linear-gradient(
@@ -345,10 +352,16 @@
     transparent
   );
 }
-[data-more-above] {
+:is(
+  .context-graph-unconnected-list,
+  .context-graph-preview-body
+)[data-more-above] {
   --fade-top: var(--fade);
 }
-[data-more-below] {
+:is(
+  .context-graph-unconnected-list,
+  .context-graph-preview-body
+)[data-more-below] {
   --fade-bottom: var(--fade);
 }
 /* A mask would clip an outer ring, so the focus ring sits inside the box. */
