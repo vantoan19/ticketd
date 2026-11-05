@@ -339,13 +339,13 @@ export function PlanDependencies({
                       variant="outline"
                       size="sm"
                       aria-expanded={open}
-                      aria-label={`${member.reference}: ${count} ${count === 1 ? "blocker" : "blockers"}`}
+                      aria-label={`${member.reference}: ${count} open ${count === 1 ? "blocker" : "blockers"}`}
                       onClick={() =>
                         setSelected(open ? null : member.reference)
                       }
                     >
                       <Link2 aria-hidden="true" />
-                      {count} {count === 1 ? "blocker" : "blockers"}
+                      {count} open {count === 1 ? "blocker" : "blockers"}
                     </Button>
                   </div>
                   {open && (
