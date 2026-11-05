@@ -180,19 +180,19 @@ export function ContextGraph({
   const neighbours = graph ? graph.nodes.length - 1 : 0;
   const [mapChoice, setMapChoice] = useState<boolean | null>(null);
   const tooDense = neighbours > MAP_LIMIT;
-  // The automatic map/list choice is made once per centre; expanding must not flip the view.
-  const [autoChoice, setAutoChoice] = useState<{
-    center: string;
-    map: boolean;
-  } | null>(null);
-  if (graph && autoChoice?.center !== graph.center)
-    setAutoChoice({
-      center: graph.center,
-      map: opensAsMap(neighbours, null),
-    });
+  // The automatic map/list choice is made once per centre and kept, so expanding
+  // (or coming Back to that centre) must not flip the view.
+  const [autoChoices, setAutoChoices] = useState<Record<string, boolean>>({});
+  if (graph && autoChoices[graph.center] === undefined)
+    setAutoChoices((choices) => ({
+      ...choices,
+      [graph.center]: opensAsMap(neighbours, null),
+    }));
   const showMap =
     neighbours <= MAP_LIMIT &&
-    (mapChoice ?? autoChoice?.map ?? opensAsMap(neighbours, null));
+    (mapChoice ??
+      (graph ? autoChoices[graph.center] : undefined) ??
+      opensAsMap(neighbours, null));
   const [shownPerKind, setShownPerKind] = useState<Record<string, number>>({});
   // Items per relationship, so the summary counts the rows below it.
   const groupItems = new Map<string, Set<string>>();
@@ -483,7 +483,7 @@ export function ContextGraph({
                   }))
                 }
               >
-                Show {Math.min(GROUP_PAGE, group.nodes.length - limit)} more
+                Load {Math.min(GROUP_PAGE, group.nodes.length - limit)} more
               </Button>
             )}
           </div>

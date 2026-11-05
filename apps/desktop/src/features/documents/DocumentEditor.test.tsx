@@ -369,9 +369,7 @@ it("opens the originating ticket from document details", () => {
   renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "T-3 · Activity details" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "T-3 · Update details" }));
   expect(open).toHaveBeenCalledWith("T-3");
 });
 

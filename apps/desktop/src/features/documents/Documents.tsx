@@ -241,7 +241,7 @@ export function Documents({
               </Button>
               {doc.origin_ticket && (
                 <p className="document-origin">
-                  Activity details · {doc.origin_ticket}
+                  Update details · {doc.origin_ticket}
                 </p>
               )}
               {doc.snippet && !sameText(doc.snippet, doc.heading) && (
@@ -352,7 +352,7 @@ export function Documents({
                     setAllOffset(0);
                   }}
                 />{" "}
-                Include Activity details
+                Include update details
               </label>
             )}
           </div>
@@ -443,7 +443,7 @@ export function Documents({
                 {query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}.
                 {!includeSupport &&
                   hiddenMatches &&
-                  " Activity details are hidden; turn on Include Activity details to search them."}
+                  " Update details are hidden; turn on Include update details to search them."}
               </p>
             ) : (
               <>

@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
 import { ContextGraph } from "./ContextGraph";
@@ -133,4 +139,51 @@ test("Back with no history names the source item and returns it", async () => {
   render(<ContextGraph origin="T-15" onBack={onBack} onOpen={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: "Back to T-15" }));
   expect(onBack).toHaveBeenCalledWith(node);
+});
+
+test("Back to a centre that opened as a map and grew past the list limit keeps the map", async () => {
+  const make = (count: number) =>
+    Array.from({ length: count + 1 }, (_, index) => ({
+      id: index === 0 ? "hub" : `n${index}`,
+      kind: "ticket" as const,
+      label: index === 0 ? "hub" : `n${index}`,
+      state: null,
+      trashed: false,
+      activity_detail: false,
+    }));
+  const graphFor = (center: string, count: number) => ({
+    center,
+    nodes: center === "hub" ? make(count) : make(1),
+    edges: [],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 100,
+    max_edges: 300,
+    max_work: 1000,
+  });
+  vi.mocked(client.contextGraphExpanded).mockImplementation(
+    async (reference, _details, expanded) =>
+      graphFor(reference === "n1" ? "n1" : "hub", expanded.length ? 13 : 12),
+  );
+  cleanup();
+  render(<ContextGraph origin="hub" onBack={vi.fn()} onOpen={vi.fn()} />);
+  await screen.findByTestId("view");
+  fireEvent.click(screen.getByRole("button", { name: "n2" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  await screen.findByRole("button", { name: "Show list" });
+  fireEvent.click(screen.getByRole("button", { name: "n1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
+  await waitFor(() =>
+    expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
+      "n1",
+      false,
+      [],
+      [],
+    ),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+  await screen.findByRole("button", { name: "Show list" });
+  expect(screen.getByTestId("view")).toBeTruthy();
 });
