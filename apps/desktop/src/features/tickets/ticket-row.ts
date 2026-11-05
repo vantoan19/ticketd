@@ -37,6 +37,13 @@ export function readinessLabel(value: Readiness) {
   return `Blocked by ${value.by}${value.trashed ? " (in Trash)" : ""}${value.more > 0 ? ` and ${value.more} more` : ""}`;
 }
 
+/** Visible form: the count comes right after the first blocker so truncation cannot hide it. */
+export function readinessShortLabel(value: Readiness) {
+  if (value.kind !== "blocked" || value.more === 0)
+    return readinessLabel(value);
+  return `Blocked by ${value.by}${value.trashed ? " (in Trash)" : ""} +${value.more}`;
+}
+
 /** At most one context item: duplicate, parent, Plan, then project. */
 export function rowContext(ticket: Ticket, scope: RowScope): string | null {
   if (ticket.duplicate_of) return `Duplicate of ${ticket.duplicate_of}`;

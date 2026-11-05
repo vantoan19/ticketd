@@ -16,6 +16,7 @@ import { groupTickets } from "./ticket-groups";
 import {
   readiness,
   readinessLabel,
+  readinessShortLabel,
   rowContext,
   type RowScope,
 } from "./ticket-row";
@@ -247,8 +248,18 @@ function RowDetails({
               {state.kind !== "status" && (
                 <StatusDot tone={state.kind} size={10} />
               )}
-              <span className="ticket-row-state-label">
-                {readinessLabel(state)}
+              <span
+                className="ticket-row-state-label"
+                title={readinessLabel(state)}
+              >
+                {readinessShortLabel(state) === readinessLabel(state) ? (
+                  readinessLabel(state)
+                ) : (
+                  <>
+                    <span aria-hidden="true">{readinessShortLabel(state)}</span>
+                    <span className="sr-only">{readinessLabel(state)}</span>
+                  </>
+                )}
               </span>
             </span>
           )

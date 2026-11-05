@@ -864,3 +864,28 @@ test("restores the whole draft, brief, details and attached Document, from one o
   expect(await screen.findByText("Brief")).toBeTruthy();
   expect(screen.getByText("Draft kept on this device")).toBeTruthy();
 });
+
+test("opening the composer puts the caret in the update editor", async () => {
+  bridge.invoke.mockImplementation(() => Promise.resolve([]));
+  render(
+    <Activity
+      reference="T-77"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  await screen.findByRole(
+    "button",
+    { name: "Edit Markdown source" },
+    { timeout: 5000 },
+  );
+  await waitFor(() =>
+    expect(
+      document.activeElement?.closest(".activity-composer"),
+    ).not.toBeNull(),
+  );
+});

@@ -625,7 +625,10 @@ export function Activity({
         <button
           type="button"
           className="activity-compact-composer"
-          onClick={() => setComposing(true)}
+          onClick={() => {
+            setComposing(true);
+            setFocusUpdate((count) => count + 1);
+          }}
         >
           Write an update…
         </button>
