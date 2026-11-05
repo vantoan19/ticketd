@@ -12,6 +12,29 @@
   z-index: 6;
   background: var(--background);
 }
+.context-graph-page .list-header {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.context-graph-page .list-header > * {
+  flex: none;
+  white-space: nowrap;
+}
+/* The title is the one item that gives way, so the row stays one line. */
+.context-graph-page .list-header > .context-graph-subject {
+  flex: 0 1 auto;
+}
+.context-graph-page .list-header > p {
+  margin: 0;
+}
+.context-graph-page .list-header > .flex-1 {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.context-graph-page {
+  scroll-padding-top: 56px;
+  overflow-anchor: none;
+}
 .context-graph-subject {
   min-width: 0;
   overflow: hidden;
@@ -231,7 +254,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px 16px;
-  max-height: 120px;
+  max-height: 168px;
   overflow: auto;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
@@ -252,6 +275,8 @@
   gap: 4px 16px;
 }
 .context-graph-unconnected {
+  max-height: 120px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

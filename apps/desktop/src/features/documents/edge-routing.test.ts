@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   borderPoint,
+  labelSize,
   pathFor,
   placeLabel,
   routeAll,
@@ -79,4 +80,57 @@ test("pathFor rounds bends and keeps both ends", () => {
   expect(d.startsWith("M 0 0")).toBe(true);
   expect(d.endsWith("L 100 100")).toBe(true);
   expect(d).toContain("Q 100 0");
+});
+
+const touches = (at: { x: number; y: number }, text: string, rect: Rect) => {
+  const size = labelSize(text);
+  return (
+    at.x - size.width / 2 < rect.x + rect.width &&
+    rect.x < at.x + size.width / 2 &&
+    at.y - size.height / 2 < rect.y + rect.height &&
+    rect.y < at.y + size.height / 2
+  );
+};
+
+test("a mention label stays off every card when a third card hugs the line", () => {
+  // Spec on the left, two tickets stacked right beside its path to T-3.
+  const cards = {
+    spec: { x: 0, y: 100, width: 180, height: 72 },
+    t3: { x: 300, y: 100, width: 180, height: 72 },
+    t2: { x: 150, y: 0, width: 180, height: 90 },
+    t1: { x: 150, y: 182, width: 180, height: 90 },
+  };
+  const routes = routeAll(cards, [
+    { id: "e", source: "spec", target: "t3", label: "mentions" },
+  ]);
+  const at = routes["e"]!.label;
+  for (const rect of Object.values(cards))
+    expect(touches(at, "mentions", rect)).toBe(false);
+});
+
+test("a blocks label between cards that nearly touch lands outside both", () => {
+  const cards = {
+    a: { x: 0, y: 0, width: 180, height: 72 },
+    b: { x: 200, y: 0, width: 180, height: 72 },
+  };
+  const routes = routeAll(cards, [
+    { id: "e", source: "a", target: "b", label: "blocks" },
+  ]);
+  const at = routes["e"]!.label;
+  expect(touches(at, "blocks", cards.a)).toBe(false);
+  expect(touches(at, "blocks", cards.b)).toBe(false);
+});
+
+test("labels stay inside the area the cards span so the canvas edge never cuts them", () => {
+  const cards = {
+    a: { x: 0, y: 0, width: 180, height: 72 },
+    b: { x: 0, y: 140, width: 180, height: 72 },
+  };
+  const routes = routeAll(cards, [
+    { id: "e", source: "a", target: "b", label: "mentions" },
+  ]);
+  const at = routes["e"]!.label;
+  const size = labelSize("mentions");
+  expect(at.x - size.width / 2).toBeGreaterThanOrEqual(-40);
+  expect(at.x + size.width / 2).toBeLessThanOrEqual(220);
 });
