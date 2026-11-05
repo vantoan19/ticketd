@@ -1360,6 +1360,22 @@ test("totals and group counts describe the whole result, not the loaded page", a
   expect(countCall?.[1].filter.order).toBe("Workflow");
 });
 
+test("single-status views say in one line what they list", async () => {
+  await renderBulk({});
+  const settle = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  expect(screen.getByText(/nothing left to wait on/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
+  await settle();
+  expect(screen.getByText(/working on right now/)).toBeTruthy();
+  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
+});
+
 test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
   const github = bulkTicket(1, {
     source: {

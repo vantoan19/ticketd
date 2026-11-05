@@ -3,12 +3,20 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 24px 12px;
+  padding: 12px 24px;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
 }
+.ui-button:has(> .filter-count) {
+  position: relative;
+}
+/* Overlaid on the icon so the button keeps its width and the popover, which
+   opens beside the button, never covers the badge. */
 .filter-count {
+  position: absolute;
+  top: 0;
+  right: 0;
   min-width: 16px;
   padding: 0 4px;
   border-radius: 999px;
