@@ -283,7 +283,13 @@ export function RestoreDialog({
           </DialogDescription>
         </div>
 
-        <div className="restore-body">
+        {/* Focusable so End, Page Down and the arrow keys scroll the review; focus is otherwise on the buttons outside it. */}
+        <div
+          className="restore-body"
+          role="region"
+          aria-label="Backup review"
+          tabIndex={0}
+        >
           <div className="restore-file">
             <Database aria-hidden="true" />
             <span className="restore-file-text">

@@ -99,6 +99,7 @@ export function ContextGraphCanvas({
   onFitted,
   centerId,
   centerOn = null,
+  loading = false,
 }: {
   nodes: {
     id: string;
@@ -122,6 +123,8 @@ export function ContextGraphCanvas({
   centerId?: string | undefined;
   /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
   centerOn?: string | null;
+  /** The items have not arrived yet: the canvas stays unseen rather than flashing an empty grid. */
+  loading?: boolean;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -450,10 +453,11 @@ export function ContextGraphCanvas({
         ref={container}
         className="context-graph-canvas"
         aria-label="Connections canvas"
-        style={
-          shown || restored || !nodes.length
-            ? undefined
-            : { visibility: "hidden" }
+        // Opacity, not visibility: React Flow marks each measured card
+        // `visibility: visible`, which would show cards through a hidden
+        // canvas while the edges, grid and zoom control are still waiting.
+        data-pending={
+          shown || restored || (!nodes.length && !loading) ? undefined : ""
         }
         onKeyDown={selectFromKey}
       >

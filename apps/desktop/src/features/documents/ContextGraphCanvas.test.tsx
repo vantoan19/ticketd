@@ -145,7 +145,9 @@ test("the canvas stays hidden until the first fit, so the map is never seen at t
       nodes={[{ id: "a", label: "A" }]}
     />,
   );
-  expect(view.getByLabelText("Connections canvas").style.visibility).toBe(
-    "hidden",
-  );
+  // Pending is an opacity fade, not visibility: React Flow shows measured cards
+  // with `visibility: visible`, which would leak them through a hidden canvas.
+  const canvas = view.getByLabelText("Connections canvas");
+  expect(canvas.hasAttribute("data-pending")).toBe(true);
+  expect(canvas.style.visibility).toBe("");
 });

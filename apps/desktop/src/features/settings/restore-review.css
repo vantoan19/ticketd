@@ -95,6 +95,11 @@
   pointer-events: none;
   background: linear-gradient(transparent, var(--popover));
 }
+/* The ring sits inside the box: the dialog clips anything outside it. */
+.restore-body:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
 .restore-body p {
   margin: 0;
 }

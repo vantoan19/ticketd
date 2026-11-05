@@ -387,6 +387,7 @@ export function ContextGraph({
                 fit={fit}
                 centerOn={centerOn}
                 centerId={graph?.center}
+                loading={!graph}
                 onFitted={() => {
                   setFit(false);
                   setCenterOn(null);
