@@ -437,6 +437,57 @@ test("lists No project after the named projects and shows a quiet hint with noth
   expect(screen.getByText("Select a ticket to read it here.")).toBeTruthy();
 });
 
+test("changing the scope drops an open ticket that is outside it", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  let scoped = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_projects")
+        return [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }];
+      if (command === "find_tickets") return scoped ? [] : [ticket];
+      if (command === "show_ticket") return ticket;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("textbox", { name: "Title" })).toBeTruthy();
+  scoped = true;
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Project scopes" }),
+    ).getByRole("button", { name: "Billing API" }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+  expect(
+    screen.queryByText("This ticket is outside the current results."),
+  ).toBeNull();
+});
+
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string) =>

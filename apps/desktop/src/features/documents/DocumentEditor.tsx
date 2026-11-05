@@ -154,6 +154,9 @@ export function DocumentEditor({
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
   const [writing, setWriting] = useState(initial === null);
+  // The heading line the title already shows, kept out of the editor while editing
+  // and put back in front of what is typed, so the saved text never changes.
+  const [hiddenHead, setHiddenHead] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [creatingFromDocument, setCreatingFromDocument] = useState(false);
@@ -551,6 +554,9 @@ export function DocumentEditor({
     savedDocument?.heading ||
     initial?.origin_brief?.trim() ||
     "Document";
+  // The heading line left out of the editor, while the body still starts with it.
+  const head =
+    writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
   const titleInput = (
     <Input
       id="document-title"
@@ -560,7 +566,7 @@ export function DocumentEditor({
         capture ? "Add a title (optional)" : "Add a title (optional)"
       }
       readOnly={locked}
-      value={title}
+      value={title || (head ? heading : "")}
       onChange={(event) => {
         draft.current = { ...draft.current, title: event.target.value };
         setTitle(event.target.value);
@@ -657,7 +663,20 @@ export function DocumentEditor({
             <SegmentedControl
               aria-label="Document mode"
               value={writing ? "edit" : "read"}
-              onValueChange={(value) => setWriting(value === "edit")}
+              onValueChange={(value) => {
+                const edit = value === "edit";
+                const stripped = withoutDerivedHeading(
+                  body,
+                  title,
+                  savedDocument?.heading,
+                );
+                setHiddenHead(
+                  edit && initial
+                    ? body.slice(0, body.length - stripped.length)
+                    : "",
+                );
+                setWriting(edit);
+              }}
               options={[
                 { value: "read", label: "Read" },
                 { value: "edit", label: "Edit" },
@@ -724,8 +743,14 @@ export function DocumentEditor({
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
-        {initial && planSpec && (
-          <p className="document-subtitle">Spec of the Plan {planSpec.label}</p>
+        {initial && (
+          <p className="document-subtitle">
+            Updated{" "}
+            <DocumentDate
+              value={savedDocument?.updated_at ?? initial.updated_at}
+            />
+            {planSpec && ` · spec of the Plan ${planSpec.label}`}
+          </p>
         )}
         {suggestion && (
           <p>
@@ -818,10 +843,11 @@ export function DocumentEditor({
         <div className="document-body">
           {!initial || writing ? (
             <LazyMarkdownEditor
-              value={body}
+              value={head ? body.slice(head.length) : body}
               onChange={(value) => {
-                draft.current = { ...draft.current, body: value };
-                setBody(value);
+                const next = head + value;
+                draft.current = { ...draft.current, body: next };
+                setBody(next);
               }}
               label={capture ? "Your thought" : "Document"}
               {...(capture ? { placeholder: "Write a thought…" } : {})}

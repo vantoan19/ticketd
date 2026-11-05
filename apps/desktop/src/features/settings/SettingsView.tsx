@@ -130,7 +130,10 @@ function AppearanceCard() {
               className="layout-choice"
             >
               <LayoutPreview kind={option.value} />
-              <span className="layout-choice-label">{option.label}</span>
+              <span className="layout-choice-label">
+                <span className="layout-choice-dot" aria-hidden="true" />
+                {option.label}
+              </span>
               <span className="settings-hint">{option.hint}</span>
             </RadioGroup.Item>
           ))}

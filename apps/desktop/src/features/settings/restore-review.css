@@ -67,6 +67,14 @@
   gap: 16px;
   padding: 20px 24px 24px;
   overflow-y: auto;
+  /* Edge shadows appear only while there is more to scroll to. */
+  background:
+    linear-gradient(var(--popover) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--popover) 70%) bottom / 100% 24px local,
+    linear-gradient(var(--header-boundary), transparent) top / 100% 8px scroll,
+    linear-gradient(transparent, var(--header-boundary)) bottom / 100% 8px
+      scroll;
+  background-repeat: no-repeat;
 }
 .restore-body p {
   margin: 0;
@@ -168,6 +176,7 @@
   text-align: left;
   font-weight: 400;
   color: var(--muted-foreground);
+  white-space: nowrap;
 }
 .restore-compare td[data-differs="true"] {
   font-weight: 500;
