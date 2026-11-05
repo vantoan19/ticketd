@@ -135,7 +135,9 @@ async function chooseAction(name: string) {
   fireEvent.keyDown(screen.getByRole("button", { name: "Plan actions" }), {
     key: "Enter",
   });
-  fireEvent.click(await screen.findByRole("menuitem", { name }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: new RegExp(`^${name}`) }),
+  );
 }
 async function openLaunch() {
   render(<App />);
@@ -275,7 +277,11 @@ test("adds an existing ticket from search", async () => {
 
 test("edits a Plan purpose", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Add purpose" }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add a purpose: the outcome this Plan pursues",
+    }),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
     target: { value: "Ship safely" },
   });
@@ -286,7 +292,11 @@ test("edits a Plan purpose", async () => {
 test("an open purpose draft does not carry over to another Plan", async () => {
   plans.push({ id: "e2", name: "Beta", archived: false, purpose: "" });
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Add purpose" }));
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Add a purpose: the outcome this Plan pursues",
+    }),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
     target: { value: "Launch draft" },
   });
@@ -298,4 +308,31 @@ test("an open purpose draft does not carry over to another Plan", async () => {
   );
   await screen.findByRole("heading", { name: "Beta" });
   expect(screen.queryByRole("textbox", { name: "Purpose" })).toBeNull();
+});
+
+test("the title row carries the labeled view toggle, and a summary line sits above the list", async () => {
+  await openLaunch();
+  const toggle = screen.getByRole("radiogroup", { name: "Plan view" });
+  expect(within(toggle).getByText("Dependencies")).toBeTruthy();
+  // The header spans both panes: the toggle is not inside the list section.
+  const list = screen.getByRole("region", { name: "Launch" });
+  expect(list.contains(toggle)).toBe(false);
+  expect(await screen.findByText("2 tickets · no project")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Filters" }).textContent).toContain(
+    "Filter",
+  );
+});
+
+test("renaming focuses the title, shows its hint, and F2 starts it", async () => {
+  await openLaunch();
+  await chooseAction("Rename");
+  const field = screen.getByRole("textbox", { name: "Plan name" });
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(screen.getByText("saves", { exact: false })).toBeTruthy();
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
+  fireEvent.keyDown(document.body, { key: "F2" });
+  expect(
+    await screen.findByRole("textbox", { name: "Plan name" }),
+  ).toBeTruthy();
 });

@@ -1,6 +1,11 @@
-import { useContext } from "react";
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
-import { useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -24,11 +29,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { plansClient, type Plan } from "@/lib/api/plans";
@@ -39,19 +47,21 @@ import type { PlanViewState } from "./usePlanView";
 import "./plan.css";
 
 /**
- * The Plan's name and state, status counts, and actions, shown above its
- * member list. Counts include every non-trashed member, subtickets too.
+ * The Plan's name and state, view toggle, actions, purpose, and status counts,
+ * shown across the full width above the list and detail panes. Counts include every non-trashed member, subtickets too.
  */
 export function PlanHeader({
   plan,
   plans,
   state,
-  children,
+  mode,
+  onModeChange,
 }: {
-  children?: ReactNode;
   plan: Plan;
   plans: Plan[];
   state: PlanViewState;
+  mode: "list" | "dependencies";
+  onModeChange: (mode: "list" | "dependencies") => void;
 }) {
   const { view, loadError, pending, actionError, run } = state;
   const openGraph = useContext(ContextGraphNavigation);
@@ -65,11 +75,32 @@ export function PlanHeader({
   // The list's own copy is current after a change; the loaded view adds counts.
   const current = view?.plan.id === plan.id ? view.plan : plan;
 
+  const nameInput = useRef<HTMLInputElement>(null);
+  const focusRename = useRef(false);
   function startRename() {
     setName(current.name);
     setNameError("");
     setRenaming(true);
+    focusRename.current = true;
   }
+  const renameAvailable = !current.archived && !pending && !renaming;
+  // F2 renames from anywhere except while typing in a field.
+  useEffect(() => {
+    if (!renameAvailable) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "F2") return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+      setName(current.name);
+      setNameError("");
+      setRenaming(true);
+      focusRename.current = true;
+      window.setTimeout(() => nameInput.current?.select(), 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [renameAvailable, current.name]);
   async function rename() {
     if (!name.trim()) {
       setNameError("Enter a name for this Plan.");
@@ -86,6 +117,7 @@ export function PlanHeader({
     } else if (event.key === "Escape") {
       event.stopPropagation();
       setRenaming(false);
+      focusRename.current = false;
     }
   }
   // Counts include parents and subtickets; a Duplicate is resolved by its
@@ -104,6 +136,7 @@ export function PlanHeader({
         {renaming ? (
           <>
             <Input
+              ref={nameInput}
               className="plan-name-input"
               aria-label="Plan name"
               value={name}
@@ -135,7 +168,15 @@ export function PlanHeader({
         )}
         <span className="plan-title-spacer" />
         <div className="plan-actions">
-          {children}
+          <SegmentedControl
+            aria-label="Plan view"
+            value={mode}
+            onValueChange={onModeChange}
+            options={[
+              { value: "list", label: "List" },
+              { value: "dependencies", label: "Dependencies" },
+            ]}
+          />
           {current.archived ? (
             <Button
               size="sm"
@@ -163,10 +204,24 @@ export function PlanHeader({
                   <MoreHorizontal />
                 </IconButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4}>
+              <DropdownMenuContent
+                align="end"
+                sideOffset={4}
+                onCloseAutoFocus={(event) => {
+                  // Rename puts the cursor in the title, not back on the menu.
+                  if (!focusRename.current) return;
+                  event.preventDefault();
+                  focusRename.current = false;
+                  window.setTimeout(() => {
+                    nameInput.current?.focus();
+                    nameInput.current?.select();
+                  }, 0);
+                }}
+              >
                 {canArchive && (
                   <DropdownMenuItem disabled={pending} onSelect={startRename}>
                     <Pencil /> Rename
+                    <DropdownMenuShortcut>F2</DropdownMenuShortcut>
                   </DropdownMenuItem>
                 )}
                 {openGraph && (
@@ -190,6 +245,11 @@ export function PlanHeader({
           )}
         </div>
       </div>
+      {renaming && (
+        <p className="plan-rename-hint">
+          <Kbd>Enter</Kbd> saves · <Kbd>Esc</Kbd> cancels
+        </p>
+      )}
       {editingPurpose ? (
         <form
           className="plan-purpose-form"
@@ -205,6 +265,7 @@ export function PlanHeader({
           <FieldLabel htmlFor="plan-purpose">Purpose</FieldLabel>
           <Input
             id="plan-purpose"
+            placeholder="Add a purpose: the outcome this Plan pursues"
             value={purpose}
             onChange={(event) => setPurpose(event.target.value)}
             autoFocus
@@ -235,7 +296,9 @@ export function PlanHeader({
               }}
             >
               <Pencil data-icon="inline-start" />
-              {current.purpose ? "Edit purpose" : "Add purpose"}
+              {current.purpose
+                ? "Edit purpose"
+                : "Add a purpose: the outcome this Plan pursues"}
             </Button>
           )}
         </div>
