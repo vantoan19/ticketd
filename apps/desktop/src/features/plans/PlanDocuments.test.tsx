@@ -168,3 +168,60 @@ test("the picker says when every Document is already linked", async () => {
     await screen.findByText("All Documents are already linked"),
   ).toBeTruthy();
 });
+
+const twoDocuments = {
+  plan: {
+    id: "plan",
+    name: "Plan",
+    purpose: "",
+    archived: false,
+    spec_document_id: null,
+  },
+  members: [],
+  counts: {
+    todo: 0,
+    in_progress: 0,
+    in_review: 0,
+    done: 0,
+    canceled: 0,
+    duplicate: 0,
+  },
+  documents: [
+    { id: "a", heading: "First", trashed: false },
+    { id: "b", heading: "Second", trashed: false },
+  ],
+};
+
+test("with several Documents the first stays named and the rest sit behind +N", async () => {
+  bridge.invoke.mockResolvedValue([]);
+  cleanup();
+  render(
+    <PlanDocuments
+      view={twoDocuments}
+      state={{ run: vi.fn(), pending: false } as unknown as PlanViewState}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Document: First" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Second/ })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "1 more linked Document" }),
+  );
+  expect(await screen.findByRole("button", { name: "Second" })).toBeTruthy();
+});
+
+test("Escape closes the Add context popover", async () => {
+  bridge.invoke.mockResolvedValue([]);
+  cleanup();
+  render(
+    <PlanDocuments
+      view={twoDocuments}
+      state={{ run: vi.fn(), pending: false } as unknown as PlanViewState}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add context" }));
+  const search = await screen.findByLabelText("Search Documents by title");
+  fireEvent.keyDown(search, { key: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByLabelText("Search Documents by title")).toBeNull(),
+  );
+});

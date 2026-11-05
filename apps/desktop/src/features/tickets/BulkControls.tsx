@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -107,11 +107,17 @@ export function BulkControls({
               variant="ghost"
               size="sm"
               disabled={pending}
+              aria-label={`Select all ${visible.length}`}
               onClick={() =>
                 bulk.selectAll(visible.map((ticket) => ticket.reference))
               }
             >
-              Select all {visible.length}
+              <span className="bulk-long" aria-hidden="true">
+                Select all {visible.length}
+              </span>
+              <span className="bulk-short" aria-hidden="true">
+                All {visible.length}
+              </span>
             </Button>
           )}
           <DropdownMenu>
@@ -249,11 +255,14 @@ export function BulkControls({
           <Button
             variant="ghost"
             size="sm"
+            className="bulk-clear"
             aria-label="Clear selection"
+            title="Clear selection"
             disabled={pending}
             onClick={bulk.clearSelection}
           >
-            Clear
+            <X className="bulk-clear-icon" aria-hidden="true" />
+            <span className="bulk-clear-text">Clear</span>
             <kbd className="bulk-kbd" aria-hidden="true">
               Esc
             </kbd>

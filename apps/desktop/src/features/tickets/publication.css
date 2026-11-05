@@ -296,13 +296,14 @@
   background: var(--surface);
 }
 
-/* An inline link in a rail note keeps the note's line box, and the note gets
-   room for the focus ring so it never touches the descenders above. */
+/* An inline link in a rail note: the focus ring reaches 4px past the link, so
+   the link is its own inline-block with a 4px lead-in (beside the space) and the
+   note's lines are far enough apart for the ring to clear the line below. */
 .rail-note:has(.rail-publish-link) {
-  line-height: 22px;
+  line-height: 26px;
 }
 .rail-note .rail-publish-link {
-  display: inline;
+  display: inline-block;
   height: auto;
   min-height: 0;
   font-size: inherit;
@@ -310,9 +311,7 @@
   vertical-align: baseline;
   border-radius: 4px;
 }
-/* The ring hugs the padding box, so padding is the ring's offset from the
-   words beside it; the negative margin keeps the text where it was. */
 .rail-source .rail-note .ui-button.rail-publish-link {
-  padding: 2px 4px;
-  margin: 0 -4px;
+  padding: 0;
+  margin: 0 0 0 4px;
 }

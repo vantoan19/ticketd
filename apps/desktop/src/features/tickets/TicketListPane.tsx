@@ -424,6 +424,7 @@ export function TicketListPane({
                   projects,
                 }}
                 selected={selected}
+                readyView={navigation.kind === "ready"}
                 singleStatus={
                   navigation.kind === "ready" ||
                   navigation.kind === "progress" ||

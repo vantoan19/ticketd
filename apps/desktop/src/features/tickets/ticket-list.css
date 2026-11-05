@@ -182,23 +182,6 @@
   min-height: 48px;
   padding: 0 8px 0 12px;
 }
-/* Narrow list: drop the key hint so Clear keeps its label; if it still does
-   not fit, the bar wraps rather than clipping a control. */
-@container (max-width: 440px) {
-  .bulk-kbd {
-    display: none;
-  }
-  .bulk-bar {
-    gap: 0;
-    padding-inline: 4px 4px;
-  }
-  .bulk-bar .ui-button {
-    padding-inline: 6px;
-  }
-  .bulk-count {
-    padding-inline: 4px;
-  }
-}
 .bulk-spacer {
   flex: 1;
 }
@@ -231,6 +214,42 @@
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
+}
+.bulk-short,
+.bulk-clear-icon {
+  display: none;
+}
+/* Narrow list (the default width is ~387pt, the floor 360pt): this block
+   follows the base rules so it wins. Clear becomes an icon, the Esc hint
+   and the menu chevrons go, and Select all shortens, so every control fits
+   one 48pt row. */
+@container (max-width: 440px) {
+  .bulk-kbd,
+  .bulk-clear-text,
+  .bulk-long,
+  .bulk-bar .ui-button svg[data-icon="inline-end"] {
+    display: none;
+  }
+  .bulk-short {
+    display: inline;
+  }
+  .bulk-clear-icon {
+    display: block;
+  }
+  .bulk-bar {
+    gap: 0;
+    padding-inline: 4px;
+  }
+  .bulk-bar .ui-button {
+    padding-inline: 6px;
+  }
+  .bulk-bar .bulk-clear {
+    padding-inline: 0;
+    width: 32px;
+  }
+  .bulk-count {
+    padding-inline: 4px;
+  }
 }
 .bulk-message {
   display: flex;
