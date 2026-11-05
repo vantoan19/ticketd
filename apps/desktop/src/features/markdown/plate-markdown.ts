@@ -38,7 +38,12 @@ const lenient = unified()
             /[!-/:-@[-`{-~]/.test(text[index + 1] ?? "")
           ) {
             const candidate = text.slice(0, index) + text.slice(index + 1);
-            if (isPlainText(candidate, node.value)) {
+            // A typed URL reads back as an autolink, so `https\://` is noise, not protection.
+            const urlColon =
+              text[index + 1] === ":" &&
+              text.startsWith("//", index + 2) &&
+              /\b(?:https?|ftp)$/i.test(text.slice(0, index));
+            if (urlColon || isPlainText(candidate, node.value)) {
               text = candidate;
               relaxed = true;
               continue;

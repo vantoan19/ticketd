@@ -12,6 +12,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { slashChoices, slashMayOpen } from "./slash-menu";
 vi.mock("./MermaidDiagram", () => ({
   MermaidDiagram: () => <div>Diagram preview</div>,
 }));
@@ -75,7 +76,7 @@ describe("Markdown draft editor", () => {
     expect(
       document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
         ?.textContent,
-    ).toBe("Paragraph");
+    ).toBe("Heading 1");
     fireEvent.compositionStart(combo);
     fireEvent.keyDown(combo, { key: "/", isComposing: true, keyCode: 229 });
     expect(screen.queryByRole("listbox", { name: "Insert block" })).toBeNull();
@@ -155,6 +156,43 @@ describe("Markdown draft editor", () => {
       expect(onChange).not.toHaveBeenCalled();
     }
     Reflect.deleteProperty(document, "caretRangeFromPoint");
+  });
+  it("opens the slash menu only at the start of a block or after whitespace", () => {
+    expect(slashMayOpen("")).toBe(true);
+    expect(slashMayOpen("See ")).toBe(true);
+    expect(slashMayOpen("See https://example.com")).toBe(false);
+    expect(slashMayOpen("a")).toBe(false);
+  });
+  it("matches slash commands by title prefix only", () => {
+    expect(slashChoices("tab").map(([type]) => type)).toEqual(["table"]);
+    expect(slashChoices("ist")).toEqual([]);
+    expect(slashChoices("").length).toBeGreaterThan(5);
+  });
+  it("closes the slash menu on a non-matching key, whitespace and blur, and resets it", () => {
+    render(<MarkdownEditor value="" onChange={vi.fn()} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    editable.focus();
+    const open = () => {
+      fireEvent.keyDown(editable, { key: "/" });
+      expect(screen.getByRole("listbox")).toBeTruthy();
+    };
+    open();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "t" });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "z" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    open();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: " " });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    open();
+    fireEvent.blur(editable);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(editable, { key: "/" });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.queryByText("No matching blocks")).toBeNull();
   });
   it("inserts a divider from the slash menu", async () => {
     const onChange = vi.fn();

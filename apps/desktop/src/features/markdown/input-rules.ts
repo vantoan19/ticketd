@@ -2,6 +2,7 @@ import { PathApi, defineInputRule, type TElement } from "platejs";
 import type { PlateEditor } from "platejs/react";
 import { toggleTaskList } from "@platejs/list-classic";
 import { upsertLink } from "@platejs/link";
+import { documents } from "@/features/documents/api";
 
 function isInCodeBlock(editor: PlateEditor) {
   return editor.api.some({ match: { type: "code_block" } });
@@ -140,6 +141,41 @@ export const markdownLinkRule = defineInputRule({
   apply: ({ editor }, match) => {
     editor.tf.delete({ at: match.range });
     upsertLink(editor, { url: match.url, text: match.text || match.url });
+    const documentId = /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(
+      match.url,
+    )?.[1];
+    if (!match.text && documentId)
+      void labelWithHeading(editor, match.url, documentId);
     return true;
   },
 });
+
+/** An unlabelled Document link reads as the Document's heading; the URL stays if the lookup fails. */
+async function labelWithHeading(
+  editor: PlateEditor,
+  url: string,
+  documentId: string,
+) {
+  let heading: string | undefined;
+  try {
+    heading = (await documents.show(documentId)).heading;
+  } catch {
+    return;
+  }
+  if (!heading) return;
+  const entry = editor.api.node<TElement>({
+    at: [],
+    match: (node) =>
+      "type" in node &&
+      node.type === "a" &&
+      (node as { url?: string }).url === url &&
+      (node as TElement).children.length === 1 &&
+      ((node as TElement).children[0] as { text?: string }).text === url,
+  });
+  if (!entry) return;
+  const [, path] = entry;
+  editor.tf.withoutNormalizing(() => {
+    editor.tf.insertNodes({ text: heading }, { at: [...path, 1] });
+    editor.tf.removeNodes({ at: [...path, 0] });
+  });
+}

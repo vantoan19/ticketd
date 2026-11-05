@@ -159,6 +159,7 @@ export function TicketEditor({
   // "Keep my draft" saves at once instead of waiting out the typing delay.
   const immediate = useRef(false);
   const [bodyFocus, setBodyFocus] = useState(0);
+  const [bodyCaret, setBodyCaret] = useState<string | undefined>();
   const [bodyMode, setBodyMode] = useState<"unopened" | "editing" | "reading">(
     "unopened",
   );
@@ -167,7 +168,11 @@ export function TicketEditor({
   const reference = ticket.reference;
   useEffect(() => {
     const edit = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === reference) {
+      const detail = (
+        event as CustomEvent<{ reference: string; documentId?: string }>
+      ).detail;
+      if (detail.reference === reference) {
+        setBodyCaret(detail.documentId);
         setBodyMode("editing");
         setBodyFocus((count) => count + 1);
       }
@@ -522,6 +527,7 @@ export function TicketEditor({
               label="Description"
               autoFocus={editingBody}
               focusRequest={bodyFocus}
+              {...(bodyCaret ? { focusLink: bodyCaret } : {})}
             />
           </div>
         )}

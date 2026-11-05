@@ -85,10 +85,10 @@ export function TicketDocuments({
     setOpen(false);
     await change(picked.id, true);
   }
-  function editDescription() {
+  function editDescription(documentId: string) {
     window.dispatchEvent(
       new CustomEvent("ticketd:edit-description", {
-        detail: ticket.reference,
+        detail: { reference: ticket.reference, documentId },
       }),
     );
   }
@@ -127,7 +127,7 @@ export function TicketDocuments({
                   size="icon-xs"
                   className="ticket-documents-edit"
                   label={`Edit description to remove ${link.target_label}`}
-                  onClick={editDescription}
+                  onClick={() => editDescription(link.target_id)}
                 >
                   <Pencil aria-hidden="true" />
                 </IconButton>

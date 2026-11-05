@@ -105,6 +105,7 @@ import {
   openFenceRule,
 } from "./input-rules";
 import { linkPluginOptions } from "./link-options";
+import { insertions, slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
@@ -323,20 +324,15 @@ function moveBlock(editor: PlateEditor, direction: number) {
   editor.tf.focus();
 }
 
-const insertions = [
-  ["p", "Paragraph"],
-  ["h1", "Heading 1"],
-  ["h2", "Heading 2"],
-  ["h3", "Heading 3"],
-  ["ul", "Bullet list"],
-  ["ol", "Numbered list"],
-  ["task", "Checklist"],
-  ["blockquote", "Quote"],
-  ["code_block", "Code fence"],
-  ["hr", "Divider"],
-  ["table", "Table"],
-  ["mermaid", "Mermaid diagram"],
-] as const;
+function textBeforeCaret(editor: PlateEditor) {
+  const selection = editor.selection;
+  if (!selection) return "";
+  if (!editor.api.isCollapsed()) return null;
+  const block = editor.api.block();
+  if (!block) return "";
+  const anchor = editor.api.start(block[1]);
+  return anchor ? editor.api.string({ anchor, focus: selection.anchor }) : "";
+}
 
 function insert(editor: PlateEditor, type: string) {
   editor.tf.focus();
@@ -667,6 +663,8 @@ export interface MarkdownEditorProps {
   placeholder?: string;
   /** Bump to return focus to the editor at its last caret (e.g. after a conflict action). */
   focusRequest?: number;
+  /** With a focus request, put the caret after the first link whose URL contains this text. */
+  focusLink?: string;
   /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
   paragraphAfterQuote?: boolean;
 }
@@ -680,6 +678,7 @@ export function MarkdownEditor({
   autoFocus = false,
   placeholder,
   focusRequest = 0,
+  focusLink,
   paragraphAfterQuote = false,
 }: MarkdownEditorProps) {
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
@@ -771,13 +770,23 @@ export function MarkdownEditor({
           { at: [editor.children.length] },
         );
         editor.tf.select(editor.api.end([]) ?? [editor.children.length - 1]);
+      } else if (focusLink) {
+        const found = editor.api.node({
+          at: [],
+          match: (node) =>
+            "type" in node &&
+            node.type === "a" &&
+            String((node as { url?: unknown }).url ?? "").includes(focusLink),
+        });
+        const end = found && editor.api.end(found[1]);
+        if (end) editor.tf.select(end);
       } else if (!editor.selection && lastSelection.current)
         editor.tf.select(lastSelection.current);
       editor.tf.focus();
       container.current?.querySelector<HTMLElement>(".rich-document")?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusRequest, readOnly, source, editor, paragraphAfterQuote]);
+  }, [focusRequest, focusLink, readOnly, source, editor, paragraphAfterQuote]);
   useEffect(() => {
     if (value === emitted.current) return;
     synchronizing.current = true;
@@ -787,9 +796,12 @@ export function MarkdownEditor({
     applyExternalValue(editor, next, lastSelection.current);
     synchronizing.current = false;
   }, [value, document, editor]);
-  const choices = insertions.filter(([, title]) =>
-    title.toLowerCase().includes(slashQuery.toLowerCase()),
-  );
+  const choices = slashChoices(slashQuery);
+  function closeSlash() {
+    setSlash(false);
+    setSlashQuery("");
+    setSlashIndex(0);
+  }
   function choose(type: string) {
     // Slash text stays in the document until an insertion is explicitly accepted.
     editor.tf.delete({
@@ -798,8 +810,7 @@ export function MarkdownEditor({
       reverse: true,
     });
     insert(editor, type);
-    setSlash(false);
-    setSlashQuery("");
+    closeSlash();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || readOnly)
@@ -827,11 +838,17 @@ export function MarkdownEditor({
     }
     if (
       event.key === "/" &&
+      !slash &&
+      !event.metaKey &&
+      !event.ctrlKey &&
       !editor.api.some({ match: { type: "code_block" } })
     ) {
-      setSlash(true);
-      setSlashIndex(0);
-      setSlashQuery("");
+      const before = textBeforeCaret(editor);
+      if (before !== null && slashMayOpen(before)) {
+        setSlash(true);
+        setSlashIndex(0);
+        setSlashQuery("");
+      }
       return;
     }
     if (!slash) return;
@@ -857,15 +874,24 @@ export function MarkdownEditor({
       event.stopPropagation();
       choose(choices[slashIndex][0]);
     } else if (event.key === "Backspace") {
-      if (!slashQuery) setSlash(false);
+      if (!slashQuery) closeSlash();
       else {
         setSlashQuery((current) => current.slice(0, -1));
         setSlashIndex(0);
       }
     } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-      setSlashQuery((current) => current + event.key);
-      setSlashIndex(0);
-    }
+      const next = slashQuery + event.key;
+      if (/\s/.test(event.key) || slashChoices(next).length === 0) closeSlash();
+      else {
+        setSlashQuery(next);
+        setSlashIndex(0);
+      }
+    } else if (
+      ["ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Tab"].includes(
+        event.key,
+      )
+    )
+      closeSlash();
   }
   return (
     <section
@@ -874,6 +900,7 @@ export function MarkdownEditor({
       aria-label={label}
       onFocus={() => setActive(true)}
       onBlur={(event) => {
+        closeSlash();
         const next = event.relatedTarget;
         if (
           next instanceof Element &&
@@ -906,7 +933,7 @@ export function MarkdownEditor({
             : {})}
           onClick={() => {
             setSourceMode((current) => !current);
-            setSlash(false);
+            closeSlash();
           }}
         >
           {document.reasons.length > 0 ? (
@@ -992,7 +1019,8 @@ export function MarkdownEditor({
                 ? `${slashMenuId}-${choices[slashIndex][0]}`
                 : undefined
             }
-            onCompositionStart={() => setSlash(false)}
+            onCompositionStart={closeSlash}
+            onMouseDown={closeSlash}
             className="rich-document"
             onKeyDown={keyDown}
             onPaste={(event) => {
