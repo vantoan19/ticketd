@@ -136,7 +136,11 @@ export function ContextGraphCanvas({
   const topology = JSON.stringify({
     nodes: nodes.map((node) => node.id).sort(),
     edges: edges
-      .map(({ source, target }) => ({ source, target }))
+      .map(({ source, target, label }) => ({
+        source,
+        target,
+        label: typeof label === "string" ? label : "",
+      }))
       .sort((a, b) =>
         `${a.source}:${a.target}`.localeCompare(`${b.source}:${b.target}`),
       ),
@@ -145,7 +149,7 @@ export function ContextGraphCanvas({
   useEffect(() => {
     const request = JSON.parse(topology) as {
       nodes: string[];
-      edges: { source: string; target: string }[];
+      edges: { source: string; target: string; label: string }[];
     };
     if (!request.nodes.length) return;
     const currentGeneration = generation;
@@ -208,8 +212,11 @@ export function ContextGraphCanvas({
   useEffect(() => {
     shownRef.current = shown;
   }, [shown]);
+  // A fit that was asked for and not yet painted keeps the canvas hidden, even
+  // after the parent has stopped asking (it clears `fit` as soon as the fit runs).
+  const [fitting, setFitting] = useState(false);
   // Nothing asks for a fit (a restored view): there is nothing to wait for.
-  const restored = !fit && !centerOn && placed && ready;
+  const restored = !fit && !centerOn && placed && ready && !fitting;
   useEffect(() => {
     if ((!fit && !centerOn) || !placed || !ready) return;
     // Fit only once React Flow has measured every card; fitting earlier centres
@@ -227,6 +234,7 @@ export function ContextGraphCanvas({
         frame = window.requestAnimationFrame(attempt);
         return;
       }
+      setFitting(!shownRef.current);
       const target = centerOn ? positions[centerOn] : undefined;
       if (centerOn && target && instance.current) {
         // Centre on the card's middle without changing the zoom.
@@ -235,6 +243,7 @@ export function ContextGraphCanvas({
           target.y + CARD_HEIGHT / 2,
           { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
+        setFitting(false);
         setShown(true);
       } else {
         const options = fitOptions(
@@ -249,9 +258,10 @@ export function ContextGraphCanvas({
         // Reveal once the viewport the fit chose has been painted into place.
         void Promise.resolve(applied).then(() => {
           revealFrame.current = window.requestAnimationFrame(() => {
-            revealFrame.current = window.requestAnimationFrame(() =>
-              setShown(true),
-            );
+            revealFrame.current = window.requestAnimationFrame(() => {
+              setFitting(false);
+              setShown(true);
+            });
           });
         });
         // The pane can still be settling (toolbar, side panel) on open; fit once
