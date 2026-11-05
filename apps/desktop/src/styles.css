@@ -56,6 +56,7 @@
   --accent-foreground: #171717;
   --muted: #f2f2f2;
   --border: #00000014;
+  --group-hairline: #0000000d;
   --input: #00000014;
   --header-boundary: #0000001a;
   --ring: #0072f5;
@@ -135,6 +136,7 @@
   --accent-foreground: #ededed;
   --muted: #1a1a1a;
   --border: #ffffff24;
+  --group-hairline: #ffffff14;
   --input: #ffffff24;
   --header-boundary: #ffffff24;
   --error-surface: #2b1414;
@@ -622,15 +624,14 @@
   flex: none;
 }
 .sidebar-heading {
-  color: var(--foreground);
+  color: var(--muted-foreground);
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin: 20px 8px 0;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
+  line-height: 16px;
 }
 .sidebar-heading button {
   display: grid;
