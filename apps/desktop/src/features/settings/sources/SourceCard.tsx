@@ -217,7 +217,7 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
         title="Connection"
         actions={
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
             disabled={working}
             onClick={checkConnection}
@@ -298,6 +298,16 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
               >
                 Discard changes
               </Button>
+              {!preview && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={working}
+                  onClick={previewMatches}
+                >
+                  {busy === "previewing" ? "Previewing…" : "Preview matches"}
+                </Button>
+              )}
               <Button size="sm" disabled={!canSave} onClick={save}>
                 {busy === "saving" ? "Saving…" : "Save"}
               </Button>
@@ -317,18 +327,6 @@ export function SourceCard({ entry }: { entry: SourceEntry }) {
           loadOptions={loadOptions}
           onChange={edit}
         />
-        {!preview && (
-          <div className="settings-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={working}
-              onClick={previewMatches}
-            >
-              {busy === "previewing" ? "Previewing…" : "Preview matches"}
-            </Button>
-          </div>
-        )}
         {!preview && !working && (
           <p className="settings-hint">
             {saved && !dirty

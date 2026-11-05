@@ -156,18 +156,15 @@
 }
 
 /* Attention footer */
-.settings-footer {
+.settings-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-top: 4px;
 }
-.settings-link {
-  color: var(--foreground);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.settings-link:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-  border-radius: 2px;
+.settings-footer-row p {
+  flex: 1;
 }
 
 /* Command line card: detection summary and the agent quick reference. */
@@ -250,11 +247,11 @@
   box-shadow: var(--shadow-border-base), var(--focus-ring);
 }
 .layout-choice[data-state="checked"] {
-  box-shadow: 0 0 0 2px var(--foreground);
+  box-shadow: inset 0 0 0 2px var(--ring);
 }
 .layout-choice[data-state="checked"]:focus-visible {
   box-shadow:
-    0 0 0 2px var(--foreground),
+    inset 0 0 0 2px var(--ring),
     var(--focus-ring);
 }
 .layout-choice-label {
@@ -348,8 +345,8 @@
 }
 .workspace-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
   margin: 16px 0 0;
 }
 /* A label that wraps keeps its value on the same line as the others. */
@@ -360,14 +357,16 @@
 }
 .workspace-fact dt {
   font-size: 12px;
-  line-height: 20px;
+  line-height: 16px;
+  white-space: nowrap;
   color: var(--muted-foreground);
 }
 .workspace-fact dd {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
-  line-height: 20px;
+  line-height: 24px;
+  font-variant-numeric: tabular-nums;
   color: var(--foreground);
 }
 

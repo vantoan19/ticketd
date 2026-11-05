@@ -188,7 +188,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
   const manager = fileManagerName();
   const facts = info && [
     ["Tickets", String(info.tickets)],
-    ["Documents (including details and Trash)", String(info.documents)],
+    ["Documents", String(info.documents)],
     ["Projects", String(info.projects)],
     ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],
@@ -414,7 +414,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
           </p>
           <Button
             type="button"
-            variant="ghost"
+            variant="secondary"
             size="sm"
             aria-expanded={showSafety}
             onClick={() => setShowSafety((shown) => !shown)}
