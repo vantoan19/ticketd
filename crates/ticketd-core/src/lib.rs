@@ -73,6 +73,8 @@ pub const FORMAT_VERSION: i64 = 44;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("document '{0}' was changed elsewhere since it was loaded")]
+    DocumentChanged(String),
     #[error("document '{0}' was not found")]
     DocumentNotFound(String),
     #[error("backup or restore failed: {0}")]

@@ -18,8 +18,10 @@
   padding: 4px;
   background: var(--background);
 }
+/* Hidden, not collapsed: controls below must not move when the editor loses focus. */
 .rich-toolbar[hidden] {
-  display: none;
+  display: flex;
+  visibility: hidden;
 }
 .rich-document {
   padding: 16px;

@@ -92,6 +92,10 @@ export const documents = {
     ),
   show: async (id: string) =>
     schema.parse(await invoke("show_document", { id })),
+  version: async (id: string) =>
+    z
+      .tuple([z.string(), z.boolean()])
+      .parse(await invoke("document_version", { id })),
   open: async (id: string) =>
     schema.parse(await invoke("open_document", { id })),
   save: async (
@@ -99,6 +103,7 @@ export const documents = {
     title: string | null,
     body: string | null,
     titleChanged: boolean,
+    expectedUpdatedAt: string | null,
     requestId: string,
   ) =>
     schema.parse(
@@ -107,6 +112,7 @@ export const documents = {
         title,
         body,
         titleChanged,
+        expectedUpdatedAt,
         requestId,
       }),
     ),

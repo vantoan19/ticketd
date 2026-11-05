@@ -145,6 +145,12 @@ fn show_document(id: String) -> Result<Document, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn document_version(id: String) -> Result<(String, bool), String> {
+    Workspace::open_default()
+        .and_then(|w| w.document_version(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn open_document(id: String) -> Result<Document, String> {
     Workspace::open_default()
         .and_then(|mut w| w.open_document(&id))
@@ -156,6 +162,7 @@ fn save_document(
     title: Option<String>,
     body: Option<String>,
     title_changed: bool,
+    expected_updated_at: Option<String>,
     request_id: String,
 ) -> Result<Document, String> {
     // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
@@ -177,6 +184,7 @@ fn save_document(
     let patch = DocumentPatch {
         title: title_changed.then_some(title),
         body,
+        expected_updated_at,
     };
     Workspace::open_default()
         .and_then(|mut w| w.change_document(&id, patch))
@@ -1354,6 +1362,7 @@ pub fn run() -> Result<(), tauri::Error> {
             trashed_documents,
             set_document_trashed,
             show_document,
+            document_version,
             open_document,
             save_document,
             backup_workspace,

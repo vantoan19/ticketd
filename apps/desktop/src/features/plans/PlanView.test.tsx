@@ -250,3 +250,20 @@ test("edits a Plan purpose", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Save purpose" }));
   await waitFor(() => expect(screen.getByText("Ship safely")).toBeTruthy());
 });
+
+test("an open purpose draft does not carry over to another Plan", async () => {
+  plans.push({ id: "e2", name: "Beta", archived: false, purpose: "" });
+  await openLaunch();
+  fireEvent.click(screen.getByRole("button", { name: "Add purpose" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Purpose" }), {
+    target: { value: "Launch draft" },
+  });
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "Plan scopes" })).getByRole(
+      "button",
+      { name: "Beta" },
+    ),
+  );
+  await screen.findByRole("heading", { name: "Beta" });
+  expect(screen.queryByRole("textbox", { name: "Purpose" })).toBeNull();
+});

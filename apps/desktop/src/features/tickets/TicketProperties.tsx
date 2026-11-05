@@ -395,12 +395,14 @@ export function TicketProperties({
           )}
         </>,
       )}
-      <LatestUpdate
-        reference={ticket.reference}
-        active={active}
-        revision={revision}
-        onOpen={onOpenNote}
-      />
+      {(ticket.status === "In progress" || ticket.status === "In review") && (
+        <LatestUpdate
+          reference={ticket.reference}
+          active={active}
+          revision={revision}
+          onOpen={onOpenNote}
+        />
+      )}
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent
           className="duplicate-dialog"

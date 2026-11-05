@@ -256,7 +256,7 @@ function RowDetails({
         )}
       </span>
       <span className="ticket-row-time">
-        {active ? (
+        {active && !ticket.trashed ? (
           ticket.progress_summary ? (
             <>
               <time

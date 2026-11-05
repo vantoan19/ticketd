@@ -58,6 +58,10 @@ pub struct DocumentPatch {
     )]
     pub title: Option<Option<String>>,
     pub body: Option<String>,
+    /// The `updated_at` the caller last saw. When present and stale the change is rejected, so
+    /// an editor's autosave cannot silently overwrite a change made elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_updated_at: Option<String>,
 }
 
 fn present_title<'de, D: serde::Deserializer<'de>>(
@@ -237,6 +241,18 @@ impl Workspace {
                         heading: row.get(9)?,
                     })
                 },
+            )
+            .optional()?
+            .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
+    }
+
+    /// Cheap change check for an open editor: `(updated_at, trashed)` without reading the body.
+    pub fn document_version(&self, id: &str) -> Result<(String, bool), Error> {
+        self.connection
+            .query_row(
+                "SELECT updated_at, trashed FROM documents WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
@@ -437,6 +453,11 @@ impl Workspace {
         let result = (|| {
             // Take the write lock first so a busy database waits instead of failing.
             crate::transaction_write_lock(&self.connection)?;
+            if let Some(expected) = &patch.expected_updated_at
+                && *expected != self.show_document(id)?.updated_at
+            {
+                return Err(Error::DocumentChanged(id.to_owned()));
+            }
             let body_to_index = patch.body.clone();
             let changes = match (patch.title, patch.body) {
             (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,

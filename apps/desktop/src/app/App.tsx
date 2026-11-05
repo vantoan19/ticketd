@@ -335,10 +335,13 @@ export function App() {
                         view === "tickets" ? workspace.selected : null
                       }
                       onOpenPlan={(id) => {
+                        // Leaving through a link ends the return trip.
+                        setDocumentReturn(null);
                         scope("all", "all", id);
                         setView("tickets");
                       }}
                       onOpenTicket={(reference) => {
+                        setDocumentReturn(null);
                         setSelected(reference);
                         setView("tickets");
                       }}

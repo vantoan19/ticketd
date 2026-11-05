@@ -102,6 +102,7 @@ export function Documents({
         setRecent(r);
         setPins(p);
         setBrowseLoaded(true);
+        setError("");
       })
       .catch((e: unknown) => setError(String(e)));
   }, [recentOffset, pinOffset, includeSupport]);
@@ -113,6 +114,7 @@ export function Documents({
         .then((items) => {
           setTrash(items);
           setTrashLoaded(true);
+          setError("");
         })
         .catch((e: unknown) => setError(String(e)));
     load();
@@ -125,6 +127,7 @@ export function Documents({
         .then(([doc, values]) => {
           setSelected(doc);
           setTags(values);
+          setError("");
         })
         .catch((e: unknown) => setError(String(e)));
   }, [target]);
@@ -143,6 +146,7 @@ export function Documents({
         .then((r) => {
           if (current) {
             setResults(r);
+            setError("");
             setSearchKey(
               JSON.stringify([query, filter, offset, includeSupport]),
             );
@@ -164,6 +168,7 @@ export function Documents({
       .then(([doc, values]) => {
         setSelected(doc);
         setTags(values);
+        setError("");
         refresh();
       })
       .catch((e: unknown) => setError(String(e)));

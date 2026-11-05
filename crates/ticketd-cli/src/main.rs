@@ -1032,6 +1032,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                         title.map(Some)
                     },
                     body: read_content(body, body_file)?,
+                    expected_updated_at: None,
                 };
                 match request_id {
                     None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,

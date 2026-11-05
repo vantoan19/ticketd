@@ -170,6 +170,7 @@ export function TicketListPane({
     >
       {scopedPlan ? (
         <PlanHeader
+          key={scopedPlan.id}
           plan={scopedPlan}
           plans={plans}
           projects={projects}
