@@ -152,10 +152,12 @@ test("a rejected blocker is explained next to the form", async () => {
       onClose={vi.fn()}
     />,
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: Add blocker/ }),
-  );
-  fireEvent.change(screen.getByLabelText("Add a blocker"), {
+  expect(
+    await screen.findByText("Nothing blocks anything in this Plan yet"),
+  ).toBeTruthy();
+  expect(screen.getByText(/T-1 is its only ticket/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Add blocker…" }));
+  fireEvent.change(await screen.findByLabelText("Add a blocker"), {
     target: { value: "Other" },
   });
   fireEvent.click(await screen.findByRole("button", { name: /T-3/ }));

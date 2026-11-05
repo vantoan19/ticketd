@@ -131,10 +131,18 @@ afterEach(() => {
   bridge.invoke.mockReset();
 });
 
+async function chooseAction(name: string) {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Plan actions" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
+}
 async function openLaunch() {
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
-  return screen.findByRole("heading", { name: "Launch" });
+  const heading = await screen.findByRole("heading", { name: "Launch" });
+  await screen.findByLabelText("Tickets by status");
+  return heading;
 }
 test("shows status counts and members for the Plan, and updates both when a member is removed", async () => {
   tickets.push({
@@ -148,7 +156,7 @@ test("shows status counts and members for the Plan, and updates both when a memb
   await waitFor(() => expect(group.textContent).toContain("Done1"));
   expect(group.textContent).toContain("Todo1");
   expect(group.textContent).toContain("Duplicate1");
-  expect(screen.getByText(/^Plan · 3 tickets/)).toBeTruthy();
+  expect(screen.getByText("1 of 2 done")).toBeTruthy();
   expect(screen.getByText("Active")).toBeTruthy();
 
   fireEvent.click(
@@ -157,50 +165,42 @@ test("shows status counts and members for the Plan, and updates both when a memb
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: /^T-1/ })).toBeNull(),
   );
-  await waitFor(() =>
-    expect(screen.getByText(/^Plan · 2 tickets/)).toBeTruthy(),
-  );
+  await waitFor(() => expect(screen.getByText("1 of 1 done")).toBeTruthy());
   expect(calls).toContainEqual(["set_plan", { reference: "T-1", plan: null }]);
   expect(screen.getByLabelText("Tickets by status").textContent).toContain(
     "Todo0",
   );
 });
 
-test("progress leaves out Canceled and Duplicate tickets and says when none are in a project", async () => {
+test("progress leaves out Canceled and Duplicate tickets", async () => {
   tickets = [
     { id: "1", reference: "T-1", status: "Done", plan: "e1" },
     { id: "2", reference: "T-2", status: "Canceled", plan: "e1" },
     { id: "3", reference: "T-3", status: "Duplicate", plan: "e1" },
   ];
   await openLaunch();
-  expect(
-    await screen.findByText(
-      "Plan · 3 tickets, not in a project · 1 of 1 done · 1 canceled · 1 duplicate",
-    ),
-  ).toBeTruthy();
+  expect(await screen.findByText("1 of 1 done")).toBeTruthy();
 });
 
 test("an empty name shows an inline error and changes nothing", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Rename Plan" }));
-  fireEvent.change(screen.getByLabelText("Plan name"), {
-    target: { value: "   " },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  await chooseAction("Rename");
+  const field = screen.getByRole("textbox", { name: "Plan name" });
+  fireEvent.change(field, { target: { value: "   " } });
+  fireEvent.keyDown(field, { key: "Enter" });
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Enter a name",
   );
   expect(calls.some(([command]) => command === "change_plan")).toBe(false);
-  expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
+  expect((field as HTMLInputElement).value).toBe("   ");
 });
 
 test("renames the Plan", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Rename Plan" }));
-  fireEvent.change(screen.getByLabelText("Plan name"), {
-    target: { value: "Release" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  await chooseAction("Rename");
+  const field = screen.getByRole("textbox", { name: "Plan name" });
+  fireEvent.change(field, { target: { value: "Release" } });
+  fireEvent.keyDown(field, { key: "Enter" });
   await screen.findByRole("heading", { name: "Release" });
   expect(calls).toContainEqual([
     "change_plan",
@@ -208,9 +208,20 @@ test("renames the Plan", async () => {
   ]);
 });
 
+test("Escape cancels an in-place rename and keeps the name", async () => {
+  await openLaunch();
+  await chooseAction("Rename");
+  const field = screen.getByRole("textbox", { name: "Plan name" });
+  fireEvent.change(field, { target: { value: "Other" } });
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
+  expect(calls.some(([command]) => command === "change_plan")).toBe(false);
+});
+
 test("archiving moves the Plan to Archived, where it can be reactivated", async () => {
   await openLaunch();
-  fireEvent.click(screen.getByRole("button", { name: "Archive Plan" }));
+  await chooseAction("Archive Plan…");
   expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
   await screen.findByText("Archived", { selector: ".plan-state" });

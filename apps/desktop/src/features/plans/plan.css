@@ -4,43 +4,81 @@
   gap: 12px;
   padding: 20px 20px 12px;
 }
-/* The name and actions share the first line; the context line runs the full
-   width beneath them instead of wrapping in the space the actions leave. */
+/* One full-width row: name and state, then the actions. The rename input
+   takes the title's place at the same size, so nothing below moves. */
 .plan-title-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "name actions"
-    "context context";
-  align-items: center;
-  gap: 4px 16px;
-}
-.plan-title {
-  display: contents;
-}
-.plan-name-row {
-  grid-area: name;
-}
-.plan-title p {
-  grid-area: context;
-}
-.plan-actions {
-  grid-area: actions;
-}
-@container (max-width: 440px) {
-  .plan-title-row {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "name"
-      "context"
-      "actions";
-  }
-}
-.plan-name-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
+  min-height: 32px;
+}
+.plan-title-spacer {
+  flex: 1;
+}
+.plan-name-input {
+  flex: 1 1 240px;
+  max-width: 480px;
+  height: 36px;
+  margin: -2px 0 -2px -8px;
+  padding: 0 8px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+}
+.plan-name-error {
+  color: var(--destructive);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-purpose-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.plan-purpose-edit {
+  margin-left: -8px;
+  color: var(--muted-foreground);
+}
+.plan-purpose-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+}
+.plan-progress-bar {
+  width: 96px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--muted);
+}
+.plan-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--foreground);
+}
+.plan-summary-rule {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
 }
 .plan-header h1,
 .plan-index h1 {
@@ -60,10 +98,6 @@
   font-size: 12px;
   line-height: 16px;
 }
-.plan-title p {
-  margin: 0;
-  color: var(--muted-foreground);
-}
 .plan-actions {
   display: flex;
   flex-wrap: wrap;
@@ -72,19 +106,21 @@
 .plan-counts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 4px 0 0;
+  gap: 4px 16px;
+  margin: 0;
+}
+.plan-counts > div[data-zero="true"] {
+  opacity: 0.6;
 }
 .plan-counts > div {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .plan-counts dt {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted-foreground);
 }
 .plan-counts dd {
   margin: 0;
@@ -97,14 +133,12 @@
   font-size: 12px;
   line-height: 16px;
 }
-.plan-rename,
 .plan-create {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
 }
-.plan-rename [data-slot="field"],
 .plan-create [data-slot="field"] {
   flex: 1 1 200px;
   max-width: 360px;
@@ -199,10 +233,27 @@
   margin: 0;
   color: var(--destructive);
 }
-.plan-documents p,
+.plan-documents {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-left: auto;
+}
+.plan-documents > details {
+  flex-basis: 100%;
+}
 .plan-documents summary {
   color: var(--muted-foreground);
   font-size: 12px;
+}
+.plan-spec-chip {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground);
+  font-size: 13px;
 }
 .plan-documents ul {
   list-style: none;
@@ -228,6 +279,26 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.plan-dependencies-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border-base);
+  text-align: center;
+}
+.plan-dependencies-empty p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.plan-dependencies-empty strong {
+  display: block;
+  color: var(--foreground);
+  font-weight: 500;
 }
 .plan-dependencies-header h2 {
   color: var(--muted-foreground);
@@ -320,14 +391,6 @@
   margin: 0;
   font-size: 14px;
   line-height: 20px;
-}
-.plan-rename {
-  align-items: flex-start;
-}
-.plan-rename-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 22px;
 }
 .plan-blocker-form {
   margin-top: 4px;

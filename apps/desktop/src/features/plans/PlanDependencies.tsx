@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
-import { ArrowLeft, Layers, Link2 } from "lucide-react";
+import { ArrowLeft, Layers, Link2, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -325,30 +325,59 @@ export function PlanDependencies({
       )}
       {graph && members.length > 0 && (
         <>
-          <div className="plan-graph-canvas">
-            <Canvas
-              graph={graph}
-              origin=""
-              selected={selected}
-              onSelect={setSelected}
-              projects={projects}
-              readable
+          {graph.edges.length === 0 ? (
+            // Nothing to draw: say what the arrows will mean and how to get one.
+            <EmptyState
+              icon={<Workflow />}
+              title="Nothing blocks anything in this Plan yet"
+              description={`${
+                members.length === 1
+                  ? `${members[0]?.reference} is its only ticket. `
+                  : `None of its ${members.length} tickets waits on another. `
+              }When one ticket must finish before another, add a blocker and the order appears here.`}
+              action={
+                !archived && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelected(members[0]?.reference ?? null)}
+                  >
+                    Add blocker…
+                  </Button>
+                )
+              }
+              footnote="Arrows run from a blocker to the ticket that waits. Dashed tickets are outside this Plan."
             />
-          </div>
-          {graph.nodes.find((node) => node.reference === selected) && (
-            <SelectionPanel
-              ticket={graph.nodes.find((node) => node.reference === selected)!}
-              origin=""
-              projects={projects}
-              nodes={graph.nodes}
-              version={graph}
-              onOpen={onOpen}
-            />
+          ) : (
+            <>
+              <div className="plan-graph-canvas">
+                <Canvas
+                  graph={graph}
+                  origin=""
+                  selected={selected}
+                  onSelect={setSelected}
+                  projects={projects}
+                  readable
+                />
+              </div>
+              {graph.nodes.find((node) => node.reference === selected) && (
+                <SelectionPanel
+                  ticket={graph.nodes.find(
+                    (node) => node.reference === selected,
+                  )!}
+                  origin=""
+                  projects={projects}
+                  nodes={graph.nodes}
+                  version={graph}
+                  onOpen={onOpen}
+                />
+              )}
+              <p className="plan-note plan-legend">
+                Arrows run from blocker to the ticket that waits. Dashed tickets
+                are outside this Plan.
+              </p>
+            </>
           )}
-          <p className="plan-note plan-legend">
-            Arrows run from blocker to the ticket that waits. Dashed tickets are
-            outside this Plan.
-          </p>
           {total > members.length && (
             <p className="plan-callout" role="status">
               Showing {members.length} of {total} tickets.{" "}
