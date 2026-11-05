@@ -147,7 +147,14 @@ export function Reminder({
             Bring this ticket back to your inbox.
           </PopoverDescription>
         </PopoverHeader>
-        {due && <p>Scheduled: {formatDateTime(due)}</p>}
+        {due && (
+          <p>
+            {reminderSummary(due) === "Reminder due"
+              ? "Due since"
+              : "Scheduled:"}{" "}
+            {formatDateTime(due)}
+          </p>
+        )}
         <label htmlFor="reminder-time">Local reminder date and time</label>
         <Input
           id="reminder-time"

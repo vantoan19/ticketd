@@ -64,9 +64,7 @@ describe("typed Markdown input rules", () => {
     );
     expect(JSON.stringify(editor.children)).toContain('"type":"a"');
     const ticketd = typing("", [..."[](ticketd://document/abc)"]);
-    expect(writeMarkdown(ticketd.children)).toBe(
-      "<ticketd://document/abc>",
-    );
+    expect(writeMarkdown(ticketd.children)).toBe("<ticketd://document/abc>");
   });
   it("leaves other targets as typed", () => {
     const editor = typing("", [..."[x](javascript:alert)"]);

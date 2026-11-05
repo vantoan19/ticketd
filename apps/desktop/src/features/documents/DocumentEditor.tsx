@@ -931,8 +931,8 @@ export function DocumentEditor({
                     </p>
                     {item.passages.map((passage) =>
                       bareLinkLabel(passage) ? (
-                        // The direction above already says this Document links out.
-                        item.to ? null : (
+                        // The direction above already states the link, either way.
+                        item.to || item.from ? null : (
                           <p key={passage} className="document-passage">
                             Links to {bareLinkLabel(passage)}
                           </p>
@@ -980,7 +980,11 @@ export function DocumentEditor({
               <Button
                 variant="outline"
                 disabled={locked}
-                onClick={() => setCreatingFromDocument(true)}
+                onClick={() => {
+                  // One click creates: the title starts as the Document's heading.
+                  if (!ticketTitle.trim()) setTicketTitle(heading);
+                  setCreatingFromDocument(true);
+                }}
               >
                 Create ticket
               </Button>

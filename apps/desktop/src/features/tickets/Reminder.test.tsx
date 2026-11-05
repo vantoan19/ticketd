@@ -85,7 +85,7 @@ test("retries a lost snooze response with the original request and instant", asy
   });
   const view = render(<Reminder reference="T-2" revision={0} />);
   fireEvent.click(screen.getByRole("button", { name: "Manage reminder" }));
-  await screen.findByText(/Scheduled:/);
+  await screen.findByText(/Due since/);
   fireEvent.click(screen.getByRole("button", { name: "Snooze 1 hour" }));
   await screen.findByRole("alert");
   vi.spyOn(Date, "now").mockReturnValue(1_900_000_060_000);
