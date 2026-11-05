@@ -14,14 +14,23 @@
 .rich-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  padding: 4px;
+  min-height: 40px;
+  padding: 4px 76px 4px 4px;
   background: var(--background);
 }
-/* Hidden, not collapsed: controls below must not move when the editor loses focus. */
-.rich-toolbar[hidden] {
-  display: flex;
+/* Hidden by visibility, never removed: controls below must not move when the editor loses focus. */
+.rich-toolbar[data-visible="false"] {
   visibility: hidden;
+}
+.editor-mode--inline {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  align-items: center;
+  padding: 0;
 }
 .rich-document {
   padding: 16px;

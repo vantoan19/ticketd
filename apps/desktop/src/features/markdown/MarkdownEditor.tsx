@@ -81,20 +81,25 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowDown,
-  ArrowUp,
-  GripVertical,
-  Plus,
-  Undo2,
-  Redo2,
+  Bold as BoldIcon,
+  Code,
+  Italic as ItalicIcon,
   Link,
+  List,
+  ListChecks,
+  MoreHorizontal,
+  FileCode2,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { checklistRule, closeCodeFence, openFenceRule } from "./input-rules";
+import { linkPluginOptions } from "./link-options";
+import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
 
@@ -360,13 +365,7 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({
-  editorId,
-  visible,
-}: {
-  editorId: string;
-  visible: boolean;
-}) {
+function Toolbar({ visible }: { visible: boolean }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -374,81 +373,96 @@ function Toolbar({
   );
   const [url, setUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
+  const keepFocus = (event: MouseEvent) => event.preventDefault();
+  const essentials = [
+    [
+      "Bold",
+      <BoldIcon key="b" />,
+      () => {
+        editor.tf.toggleMark("bold");
+        editor.tf.focus();
+      },
+    ],
+    [
+      "Italic",
+      <ItalicIcon key="i" />,
+      () => {
+        editor.tf.toggleMark("italic");
+        editor.tf.focus();
+      },
+    ],
+  ] as const;
+  const listButtons = [
+    ["Bullet list", <List key="l" />, "ul"],
+    ["Checklist", <ListChecks key="c" />, "task"],
+  ] as const;
   return (
+    // Never `hidden`: a collapsed toolbar would move everything below it, so a first click
+    // on Post/Done/Retry (which blurs the editor) would land on the wrong element.
     <div
       className="rich-toolbar"
-      hidden={!visible}
+      data-visible={visible}
+      aria-hidden={!visible}
+      inert={!visible}
       role="toolbar"
       aria-label={selected ? "Selection formatting" : "Document formatting"}
     >
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <Plus data-icon="inline-start" />
-            Insert
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuGroup>
-            {insertions.map(([type, title]) => (
-              <DropdownMenuItem
-                key={type}
-                onSelect={() => insert(editor, type)}
-              >
-                {title}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {(
-        [
-          ["bold", "Bold"],
-          ["italic", "Italic"],
-          ["strikethrough", "Strikethrough"],
-          ["code", "Inline code"],
-        ] as const
-      ).map(([key, title]) => (
+      {essentials.map(([title, icon, run]) => (
         <Button
-          key={key}
+          key={title}
           type="button"
-          size="sm"
+          size="icon-sm"
           variant="ghost"
           aria-label={title}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            editor.tf.toggleMark(key);
-            editor.tf.focus();
-          }}
+          title={title}
+          onMouseDown={keepFocus}
+          onClick={run}
         >
-          {title}
+          {icon}
         </Button>
       ))}
-      <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+      <Popover
+        open={linkOpen}
+        onOpenChange={(open) => {
+          setLinkOpen(open);
+          if (open) setUrl("");
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             aria-label="Link"
-            onMouseDown={(event) => event.preventDefault()}
+            title="Link"
+            onMouseDown={keepFocus}
           >
             <Link />
           </Button>
         </PopoverTrigger>
         <PopoverContent>
+          <p className="mb-2 text-xs text-muted-foreground">Link a Document</p>
+          <DocumentPicker
+            autoFocus
+            onPick={(picked) => {
+              const collapsed = !editor.selection || editor.api.isCollapsed();
+              upsertLink(editor, {
+                url: `ticketd://document/${picked.id}`,
+                ...(collapsed ? { text: picked.heading } : {}),
+              });
+              setLinkOpen(false);
+              editor.tf.focus();
+            }}
+          />
           <form
-            className="flex flex-col gap-2"
+            className="mt-3 flex flex-col gap-2"
             onSubmit={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(url)) {
-                upsertLink(editor, { url });
+              const target = url.trim();
+              if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
+                upsertLink(editor, { url: target });
+                setUrl("");
                 setLinkOpen(false);
                 editor.tf.focus();
               }
@@ -463,93 +477,87 @@ function Toolbar({
             />
             <Button type="submit">Apply link</Button>
           </form>
-          <p className="my-2 text-xs text-muted-foreground">
-            Or link a Document
-          </p>
-          <DocumentPicker
-            autoFocus={false}
-            onPick={(picked) => {
-              const collapsed = !editor.selection || editor.api.isCollapsed();
-              upsertLink(editor, {
-                url: `ticketd://document/${picked.id}`,
-                ...(collapsed ? { text: picked.heading } : {}),
-              });
-              setLinkOpen(false);
-              editor.tf.focus();
-            }}
-          />
         </PopoverContent>
       </Popover>
+      {listButtons.map(([title, icon, type]) => (
+        <Button
+          key={type}
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={title}
+          title={title}
+          onMouseDown={keepFocus}
+          onClick={() => insert(editor, type)}
+        >
+          {icon}
+        </Button>
+      ))}
       <Button
         type="button"
-        variant="ghost"
         size="icon-sm"
-        aria-label="Undo"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => editor.undo()}
-      >
-        <Undo2 />
-      </Button>
-      <Button
-        type="button"
         variant="ghost"
-        size="icon-sm"
-        aria-label="Redo"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => editor.redo()}
-      >
-        <Redo2 />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Move block up"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => moveBlock(editor, -1)}
-      >
-        <ArrowUp />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Move block down"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => moveBlock(editor, 1)}
-      >
-        <ArrowDown />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Drag selected block"
-        draggable
-        onDragStart={(event) => {
-          const index = editor.selection?.anchor.path[0];
-          if (index !== undefined)
-            event.dataTransfer.setData(
-              "application/x-ticketd-block",
-              JSON.stringify({ editorId, index }),
-            );
+        aria-label="Inline code"
+        title="Inline code"
+        onMouseDown={keepFocus}
+        onClick={() => {
+          editor.tf.toggleMark("code");
+          editor.tf.focus();
         }}
       >
-        <GripVertical />
+        <Code />
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            onMouseDown={(event) => event.preventDefault()}
+            size="icon-sm"
+            aria-label="More formatting"
+            title="More formatting"
+            onMouseDown={keepFocus}
           >
-            Table
+            <MoreHorizontal />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent align="start" className="max-h-80">
           <DropdownMenuGroup>
+            <DropdownMenuItem
+              onSelect={() => {
+                editor.tf.toggleMark("strikethrough");
+                editor.tf.focus();
+              }}
+            >
+              Strikethrough
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => editor.undo()}>
+              Undo
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => editor.redo()}>
+              Redo
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
+              Move block up
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
+              Move block down
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Insert</DropdownMenuLabel>
+            {insertions.map(([type, title]) => (
+              <DropdownMenuItem
+                key={type}
+                onSelect={() => insert(editor, type)}
+              >
+                {title}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Table</DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
               Add row
             </DropdownMenuItem>
@@ -597,7 +605,7 @@ const richPlugins = [
     ],
   }),
   TablePlugin.configure({ options: { disableMerge: true } }),
-  LinkPlugin,
+  LinkPlugin.configure({ options: linkPluginOptions }),
   CodeBlockPlugin.configure({
     inputRules: [openFenceRule],
   }),
@@ -649,6 +657,8 @@ export function MarkdownEditor({
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
   const source = sourceMode || document.reasons.length > 0;
+  // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
+  const inlineMode = !source && !readOnly;
   const container = useRef<HTMLElement>(null);
   const emitted = useRef(value);
   const synchronizing = useRef(false);
@@ -706,7 +716,7 @@ export function MarkdownEditor({
     emitted.current = value;
     const next = document.value;
     previousMarkdown.current = writeMarkdown(next);
-    editor.tf.setValue(next);
+    applyExternalValue(editor, next);
     synchronizing.current = false;
   }, [value, document, editor]);
   const choices = insertions.filter(([, title]) =>
@@ -808,7 +818,7 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
-      <div className="editor-mode">
+      <div className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}>
         <CopySourceButton
           compact
           source={value}
@@ -818,18 +828,28 @@ export function MarkdownEditor({
           disabled={document.reasons.length > 0}
           type="button"
           variant="ghost"
-          size="sm"
+          size={inlineMode ? "icon-sm" : "sm"}
           aria-pressed={source}
+          {...(inlineMode
+            ? {
+                "aria-label": "Edit Markdown source",
+                title: "Edit Markdown source",
+              }
+            : {})}
           onClick={() => {
             setSourceMode((current) => !current);
             setSlash(false);
           }}
         >
-          {document.reasons.length > 0
-            ? "Markdown source required"
-            : source
-              ? "Use rich editor"
-              : "Edit Markdown source"}
+          {document.reasons.length > 0 ? (
+            "Markdown source required"
+          ) : source ? (
+            "Use rich editor"
+          ) : inlineMode ? (
+            <FileCode2 />
+          ) : (
+            "Edit Markdown source"
+          )}
         </Button>
       </div>
       {document.reasons.length > 0 && (
@@ -886,7 +906,7 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar editorId={editorId} visible={active} />}
+          {!readOnly && <Toolbar visible={active} />}
           <PlateContent
             readOnly={readOnly}
             {...(placeholder ? { placeholder } : {})}

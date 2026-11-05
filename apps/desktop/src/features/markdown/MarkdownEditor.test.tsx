@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -240,5 +241,42 @@ describe("Formatting toolbar", () => {
     );
     fireEvent(screen.getByRole("button", { name: "Link" }), down);
     expect(down.defaultPrevented).toBe(true);
+  });
+});
+
+describe("Toolbar layout and links", () => {
+  it("keeps the toolbar in layout when blurred so a first click lands", () => {
+    const { container } = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} />,
+    );
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    fireEvent.focus(editable);
+    const toolbar = container.querySelector(".rich-toolbar");
+    expect(toolbar?.getAttribute("data-visible")).toBe("true");
+    fireEvent.blur(editable);
+    expect(container.querySelector(".rich-toolbar")).toBe(toolbar);
+    expect(toolbar?.hasAttribute("hidden")).toBe(false);
+    expect(toolbar?.getAttribute("data-visible")).toBe("false");
+    expect(toolbar?.hasAttribute("inert")).toBe(true);
+  });
+  it("offers one row of essentials and keeps the rest in More", () => {
+    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    fireEvent.focus(
+      screen.getByRole("textbox", { name: "Markdown document rich text" }),
+    );
+    const names = within(screen.getByRole("toolbar"))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names).toEqual([
+      "Bold",
+      "Italic",
+      "Link",
+      "Bullet list",
+      "Checklist",
+      "Inline code",
+      "More formatting",
+    ]);
   });
 });
