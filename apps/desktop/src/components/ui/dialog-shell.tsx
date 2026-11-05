@@ -23,6 +23,7 @@ export function DialogShell({
   primaryLabel,
   blockedReason,
   onSubmit,
+  onCancel,
   returnFocus,
   children,
 }: {
@@ -33,6 +34,8 @@ export function DialogShell({
   primaryLabel: string;
   blockedReason: string | null;
   onSubmit: () => void;
+  /** Cancel only (not Escape or an outside click): discard the draft. */
+  onCancel?: () => void;
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: RefObject<HTMLElement | null>;
   children: ReactNode;
@@ -65,7 +68,12 @@ export function DialogShell({
               {blockedReason}
             </p>
             <DialogClose asChild>
-              <Button type="button" variant="ghost" size="sm">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+              >
                 Cancel
               </Button>
             </DialogClose>

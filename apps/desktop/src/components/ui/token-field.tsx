@@ -4,7 +4,7 @@ import { cn } from "cn";
 
 /**
  * A text field that turns typed values into removable tokens. Enter or comma
- * adds the draft (duplicates and blanks are ignored); Backspace on an empty
+ * adds the draft (duplicates, ignoring case, and blanks are ignored); Backspace on an empty
  * draft removes the last token; each token has its own named remove button.
  * The caller owns `values`.
  */
@@ -26,7 +26,8 @@ export function TokenField({
   function commit() {
     const value = draft.trim();
     setDraft("");
-    if (value && !values.includes(value)) onChange([...values, value]);
+    if (value && !values.some((v) => v.toLowerCase() === value.toLowerCase()))
+      onChange([...values, value]);
   }
   return (
     <div
@@ -60,6 +61,8 @@ export function TokenField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
+          // An IME confirming a candidate also sends Enter or a comma.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
             commit();

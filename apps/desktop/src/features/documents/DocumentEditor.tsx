@@ -4,6 +4,7 @@ import {
   Check,
   FileText,
   Layers,
+  CircleDashed,
   Link2,
   MoreHorizontal,
   Network,
@@ -1092,15 +1093,23 @@ function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
   });
   return [...rows.values()];
 }
+/** Looked-up ticket summaries by reference, so reopening a Document does not refetch them. */
+const ticketSummaries = new Map<string, { title: string; status: string }>();
 /** Tickets show their status and title beside the reference; Plans using this Document read "Spec of …". */
 function ConnectedLabel({ item }: { item: Connection }) {
-  const [ticket, setTicket] = useState<{ title: string; status: string }>();
+  const [, refresh] = useState(0);
+  const ticket =
+    item.kind === "ticket" ? ticketSummaries.get(item.label) : undefined;
   useEffect(() => {
-    if (item.kind !== "ticket") return;
+    if (item.kind !== "ticket" || ticketSummaries.has(item.label)) return;
     let current = true;
     void client.showTicket(item.label).then(
       (found) => {
-        if (current) setTicket({ title: found.title, status: found.status });
+        ticketSummaries.set(item.label, {
+          title: found.title,
+          status: found.status,
+        });
+        if (current) refresh((n) => n + 1);
       },
       () => {},
     );
@@ -1118,7 +1127,11 @@ function ConnectedLabel({ item }: { item: Connection }) {
   return (
     <>
       {item.kind === "ticket" ? (
-        <StatusIcon status={ticket?.status ?? "Todo"} decorative />
+        ticket ? (
+          <StatusIcon status={ticket.status} decorative />
+        ) : (
+          <CircleDashed aria-hidden="true" />
+        )
       ) : item.kind === "plan" ? (
         <Layers aria-hidden="true" />
       ) : (

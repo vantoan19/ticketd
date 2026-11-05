@@ -6,6 +6,7 @@ import { client, type ContextGraph as Graph } from "@/lib/api/client";
 import { KindIcon } from "./GraphLegend";
 import {
   cardParts,
+  nodeAriaLabel,
   connectionRows,
   edgeLabels,
   flowEdges,
@@ -341,7 +342,7 @@ export function ContextGraph({
             <ContextGraphCanvas
               nodes={(graph?.nodes ?? []).map((node) => ({
                 id: node.id,
-                label: node.label,
+                label: nodeAriaLabel(node),
                 ...cardParts(node),
               }))}
               edges={edges}

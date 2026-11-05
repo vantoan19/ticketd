@@ -79,7 +79,3 @@ export function rowContextItem(
       : undefined;
   return project ? { kind: "project", label: project.name } : null;
 }
-
-export function rowContext(ticket: Ticket, scope: RowScope): string | null {
-  return rowContextItem(ticket, scope)?.label ?? null;
-}

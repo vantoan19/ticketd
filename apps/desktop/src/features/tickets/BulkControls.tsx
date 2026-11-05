@@ -196,11 +196,11 @@ export function BulkControls({
                     onSelect={() =>
                       organize(
                         { project_id: null },
-                        `Unlinked ${tickets(count)} from their project`,
+                        `Removed ${tickets(count)} from their project`,
                       )
                     }
                   >
-                    Unlinked
+                    No project
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>

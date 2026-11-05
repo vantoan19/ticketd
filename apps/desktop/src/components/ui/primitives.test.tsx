@@ -64,6 +64,20 @@ test("a token field adds on Enter, ignores duplicates, and removes by name or Ba
   expect(screen.queryByRole("button", { name: "Remove ui" })).toBeNull();
 });
 
+test("a token field ignores case-insensitive duplicates and IME composition", () => {
+  render(<Tokens />);
+  const input = screen.getByRole("textbox", { name: "Tags" });
+  fireEvent.change(input, { target: { value: "API" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(1);
+  fireEvent.change(input, { target: { value: "ui" } });
+  fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+  fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+  expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(1);
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(screen.getAllByRole("button", { name: /^Remove/ })).toHaveLength(2);
+});
+
 test("a dialog's primary action stays disabled and says why until the form is valid", () => {
   const onSubmit = vi.fn();
   const shell = (blockedReason: string | null) => (

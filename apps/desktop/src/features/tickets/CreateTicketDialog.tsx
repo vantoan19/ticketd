@@ -266,7 +266,7 @@ export function CreateTicketDialog({
               update({ project: project === NONE ? "" : project })
             }
             options={[
-              { value: NONE, label: "Unlinked" },
+              { value: NONE, label: "No project" },
               ...projects.map((p) => ({ value: p.id, label: p.name })),
             ]}
           />

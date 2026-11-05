@@ -122,7 +122,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
     within(rail).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
-    within(rail).getByRole("button", { name: "Project: Unlinked" }),
+    within(rail).getByRole("button", { name: "Project: No project" }),
   ).toBeTruthy();
 });
 
