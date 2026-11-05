@@ -43,6 +43,32 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Explicit-link mentions plus numeric `T-n` mentions resolved when read, so a reference to a
+/// ticket created later appears, and the context graph and link lists always agree.
+const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage FROM context_mentions UNION SELECT n.source_id, t.id, n.passage FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0)";
+
+/// Every standalone `T-n` ticket reference in plain text, as the byte offset and length of the
+/// token and its number. This is the one rule for what counts as a numeric mention.
+pub(crate) fn ticket_numbers(text: &str) -> Vec<(usize, usize, i64)> {
+    let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
+    let mut found = Vec::new();
+    for (at, _) in text.match_indices("T-") {
+        let rest = &text[at + 2..];
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0
+            || rest.starts_with('0')
+            || !text[..at].chars().next_back().is_none_or(boundary)
+            || !rest[digits..].chars().next().is_none_or(boundary)
+        {
+            continue;
+        }
+        if let Ok(number) = rest[..digits].parse::<i64>() {
+            found.push((at, 2 + digits, number));
+        }
+    }
+    found
+}
+
 fn passage(body: &str, at: usize) -> String {
     let start = body[..at].rfind('\n').map_or(0, |i| i + 1);
     let end = body[at..].find('\n').map_or(body.len(), |i| at + i);
@@ -65,31 +91,19 @@ pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<()
     // Backlinks recognize visible ticket references even in link text and
     // decoded Markdown runs; retain those established references here too.
     for (text, range) in crate::backlinks::text_runs(body) {
-        for (at, _) in text.match_indices("T-") {
-            let rest = &text[at + 2..];
-            let digits = rest.chars().take_while(char::is_ascii_digit).count();
-            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
-            if digits == 0
-                || rest.starts_with('0')
-                || !text[..at].chars().next_back().is_none_or(boundary)
-                || !rest[digits..].chars().next().is_none_or(boundary)
-            {
-                continue;
-            }
-            if let Ok(number) = rest[..digits].parse::<i64>() {
-                let target: Option<String> = tx
-                    .query_row(
-                        "SELECT id FROM tickets WHERE number = ?1",
-                        [number],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                if let Some(target) = target {
-                    let offset = body[range.clone()]
-                        .find(&text[at..at + 2 + digits])
-                        .map_or(range.start, |n| range.start + n);
-                    tx.execute("INSERT OR IGNORE INTO activity_mentions (activity_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, offset)])?;
-                }
+        for (at, len, number) in ticket_numbers(&text) {
+            let target: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM tickets WHERE number = ?1",
+                    [number],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(target) = target {
+                let offset = body[range.clone()]
+                    .find(&text[at..at + len])
+                    .map_or(range.start, |n| range.start + n);
+                tx.execute("INSERT OR IGNORE INTO activity_mentions (activity_id, target_id, passage) VALUES (?1, ?2, ?3)", params![id, target, passage(body, offset)])?;
             }
         }
     }
@@ -102,23 +116,11 @@ fn index_numbers(tx: &Connection, id: &str, body: &str, activity: bool) -> Resul
         params![id, activity],
     )?;
     for (text, range) in crate::backlinks::text_runs(body) {
-        for (at, _) in text.match_indices("T-") {
-            let rest = &text[at + 2..];
-            let digits = rest.chars().take_while(char::is_ascii_digit).count();
-            let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
-            if digits == 0
-                || rest.starts_with('0')
-                || !text[..at].chars().next_back().is_none_or(boundary)
-                || !rest[digits..].chars().next().is_none_or(boundary)
-            {
-                continue;
-            }
-            if let Ok(number) = rest[..digits].parse::<i64>() {
-                let offset = body[range.clone()]
-                    .find(&text[at..at + 2 + digits])
-                    .map_or(range.start, |n| range.start + n);
-                tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, offset)])?;
-            }
+        for (at, len, number) in ticket_numbers(&text) {
+            let offset = body[range.clone()]
+                .find(&text[at..at + len])
+                .map_or(range.start, |n| range.start + n);
+            tx.execute("INSERT OR IGNORE INTO numeric_mentions(source_id, activity, number, passage) VALUES (?1, ?2, ?3, ?4)", params![id, activity, number, passage(body, offset)])?;
         }
     }
     for (event, range) in Parser::new(body).into_offset_iter() {
@@ -155,32 +157,18 @@ fn index_text(tx: &Connection, id: &str, body: &str, activity: bool) -> Result<(
             Event::End(TagEnd::Link) => in_link = false,
             Event::Start(Tag::CodeBlock(_)) => in_code = true,
             Event::End(TagEnd::CodeBlock) => in_code = false,
-            Event::Text(text) if !in_link && !in_code => {
-                for (at, _) in text.match_indices("T-") {
-                    let rest = &text[at + 2..];
-                    let digits = rest.chars().take_while(char::is_ascii_digit).count();
-                    let before = text[..at].chars().next_back();
-                    let after = rest[digits..].chars().next();
-                    let boundary = |c: char| !c.is_alphanumeric() && c != '-' && c != '_';
-                    if digits == 0
-                        || rest.starts_with('0')
-                        || !before.is_none_or(boundary)
-                        || !after.is_none_or(boundary)
-                    {
-                        continue;
-                    }
-                    if let Ok(number) = rest[..digits].parse::<i64>() {
-                        let target = tx
-                            .query_row("SELECT id FROM tickets WHERE number = ?1", [number], |r| {
-                                r.get::<_, String>(0)
-                            })
-                            .optional()?;
-                        if let Some(target) = target {
-                            let at = body[range.clone()]
-                                .find(&text[at..at + 2 + digits])
-                                .map_or(range.start, |offset| range.start + offset);
-                            tx.execute(insert, params![id, target, passage(body, at)])?;
-                        }
+            Event::Text(text) if activity && !in_link && !in_code => {
+                for (at, len, number) in ticket_numbers(text) {
+                    let target = tx
+                        .query_row("SELECT id FROM tickets WHERE number = ?1", [number], |r| {
+                            r.get::<_, String>(0)
+                        })
+                        .optional()?;
+                    if let Some(target) = target {
+                        let at = body[range.clone()]
+                            .find(&text[at..at + len])
+                            .map_or(range.start, |offset| range.start + offset);
+                        tx.execute(insert, params![id, target, passage(body, at)])?;
                     }
                 }
             }
@@ -312,14 +300,29 @@ impl Workspace {
         }
     }
     pub fn create_ticket_from_document(&mut self, id: &str, title: &str) -> Result<Ticket, Error> {
+        self.create_ticket_from_document_following(id, title, false)
+    }
+
+    /// Like `create_ticket_from_document`; with `follow` the local person follows the new
+    /// ticket, starting after its setup so it does not fill the inbox.
+    pub fn create_ticket_from_document_following(
+        &mut self,
+        id: &str,
+        title: &str,
+        follow: bool,
+    ) -> Result<Ticket, Error> {
         self.connection
             .execute_batch("SAVEPOINT create_ticket_from_document")?;
         let result = (|| {
+            crate::transaction_write_lock(&self.connection)?;
             let source = self.show_document(id)?;
             if source.trashed {
-                return Err(Error::Trashed(id.to_owned()));
+                return Err(Error::DocumentTrashed(id.to_owned()));
             }
             let ticket = self.create_ticket(title)?;
+            if follow {
+                crate::inbox::follow(&self.connection, &ticket.id)?;
+            }
             self.change_ticket(
                 &ticket.reference,
                 TicketPatch {
@@ -353,6 +356,12 @@ impl Workspace {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<ContextLink>, Error> {
+        // Accept a ticket's T-n reference as well as an entity ID.
+        let id = &if id.starts_with("T-") {
+            crate::relationships::id(&self.connection, id)?
+        } else {
+            id.to_owned()
+        };
         let exists: bool = self.connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM entities WHERE id = ?1)",
             [id],
@@ -362,7 +371,7 @@ impl Workspace {
             return Err(Error::NotFound(id.to_owned()));
         }
         let column = if outgoing { "source_id" } else { "target_id" };
-        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT COALESCE(NULLIF(title,''), 'Untitled Document') FROM documents WHERE id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM (SELECT source_id, target_id, passage, NULL AS activity_id FROM context_mentions UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3"))?;
+        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT {h} FROM documents d WHERE d.id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT {h} FROM documents d WHERE d.id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM (SELECT source_id, target_id, passage, NULL AS activity_id FROM {mentions} UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3", h = crate::documents::HEADING, mentions = DOCUMENT_MENTIONS))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(ContextLink {
@@ -404,7 +413,7 @@ impl Workspace {
         offset: u32,
     ) -> Result<Vec<DocumentBacklink>, Error> {
         self.show_document(id)?;
-        let mut statement = self.connection.prepare("SELECT t.number, t.title, m.passage FROM context_mentions m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3")?;
+        let mut statement = self.connection.prepare("SELECT t.number, t.title, m.passage FROM (SELECT source_id, target_id, passage FROM context_mentions UNION SELECT n.source_id, t.id, n.passage FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0) m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3")?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(DocumentBacklink {

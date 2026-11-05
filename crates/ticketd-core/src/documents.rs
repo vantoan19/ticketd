@@ -281,7 +281,7 @@ impl Workspace {
     pub fn pinned_documents(&self, limit: u32, offset: u32) -> Result<Vec<DocumentSummary>, Error> {
         let columns = summary_columns();
         let sql = format!(
-            "SELECT {columns} FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 AND (d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.id LIMIT ?1 OFFSET ?2"
+            "SELECT {columns} FROM document_pins p JOIN documents d ON d.id = p.document_id WHERE d.trashed = 0 ORDER BY d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement
@@ -341,7 +341,12 @@ impl Workspace {
                 )?
                 .collect::<Result<_, _>>()?);
         }
-        let expression = format!("\"{}\"", query.replace('"', "\"\""));
+        // Every word is a quoted prefix term, so partial words match as the user types.
+        let expression = query
+            .split_whitespace()
+            .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
         let tag = tag.map(|value| value.trim().to_lowercase());
         let columns = summary_columns();
         let sql = format!(
@@ -369,7 +374,7 @@ impl Workspace {
     pub fn keep_document(&mut self, id: &str) -> Result<Document, Error> {
         let doc = self.show_document(id)?;
         if doc.trashed {
-            return Err(Error::Trashed(id.to_owned()));
+            return Err(Error::DocumentTrashed(id.to_owned()));
         }
         self.connection
             .execute("UPDATE documents SET kept = 1 WHERE id = ?1", [id])?;
@@ -397,6 +402,7 @@ impl Workspace {
         }
         self.show_document(id)?;
         let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
         if present {
             tx.execute("INSERT OR IGNORE INTO tags(name) VALUES (?1)", [&tag])?;
             tx.execute(
@@ -425,10 +431,12 @@ impl Workspace {
 
     pub fn change_document(&mut self, id: &str, patch: DocumentPatch) -> Result<Document, Error> {
         if self.show_document(id)?.trashed {
-            return Err(Error::Trashed(id.to_owned()));
+            return Err(Error::DocumentTrashed(id.to_owned()));
         }
         self.connection.execute_batch("SAVEPOINT change_document")?;
         let result = (|| {
+            // Take the write lock first so a busy database waits instead of failing.
+            crate::transaction_write_lock(&self.connection)?;
             let body_to_index = patch.body.clone();
             let changes = match (patch.title, patch.body) {
             (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
@@ -438,7 +446,7 @@ impl Workspace {
         };
             let document = self.show_document(id)?;
             if changes == 0 && document.trashed {
-                return Err(Error::Trashed(id.to_owned()));
+                return Err(Error::DocumentTrashed(id.to_owned()));
             }
             if let Some(body) = body_to_index {
                 crate::document_links::index_body(&self.connection, id, &body)?;

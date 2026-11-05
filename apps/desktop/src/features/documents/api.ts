@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { loadPreferences } from "@/lib/preferences";
 
 const schema = z.object({
   id: z.string(),
@@ -33,9 +34,14 @@ const linkDocuments = {
       .tuple([z.array(linkSchema), z.array(linkSchema)])
       .parse(await invoke("document_context_links", { id })),
   createTicket: async (id: string, title: string, requestId: string) =>
-    z
-      .object({ reference: z.string() })
-      .parse(await invoke("ticket_from_document", { id, title, requestId })),
+    z.object({ reference: z.string() }).parse(
+      await invoke("ticket_from_document", {
+        id,
+        title,
+        requestId,
+        follow: loadPreferences().followCreated,
+      }),
+    ),
 };
 const summary = z.object({
   id: z.string(),

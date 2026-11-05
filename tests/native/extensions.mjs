@@ -99,15 +99,15 @@ async function chooseFromSubmenu(submenu, item) {
   await browser.keys("Enter");
 }
 try {
-  // Follow in desktop, observe external CLI changes and navigate to the note.
+  // Follow in desktop, observe external CLI changes and navigate to the update.
   await open(source.title);
   await click(await (await rail()).$("button=Follow"));
   run("change", source.reference, "--status", "In progress");
   run(
-    "note",
+    "activity",
     "add",
     source.reference,
-    "--content",
+    "--brief",
     `Native finding referencing ${target.reference}`,
   );
   await (
@@ -115,7 +115,7 @@ try {
   ).waitForDisplayed({ timeout: 12000 });
   await click(await browser.$('[aria-label^="Inbox,"]'));
   await (
-    await browser.$("span*=New note: Native finding")
+    await browser.$("span*=New update: Native finding")
   ).waitForDisplayed({ timeout: 12000 });
   await click(await browser.$("button=Mark shown as read"));
   await waitFor(
@@ -128,13 +128,15 @@ try {
   );
   await click(
     await browser.$(
-      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "New note: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
+      '//li[contains(concat(" ", normalize-space(@class), " "), " inbox-entry ")][.//span[contains(., "New update: Native finding")]]//button[contains(concat(" ", normalize-space(@class), " "), " inbox-ticket ")]',
     ),
   );
   await (await detail()).waitForDisplayed({ timeout: 10000 });
-  const selectedNote = await (await detail()).$('[aria-label="Selected note"]');
-  await selectedNote.waitForDisplayed({ timeout: 10000 });
-  assert((await selectedNote.getText()).includes("Native finding"));
+  const selectedUpdate = await (
+    await detail()
+  ).$('[aria-label="Selected update"]');
+  await selectedUpdate.waitForDisplayed({ timeout: 10000 });
+  assert((await selectedUpdate.getText()).includes("Native finding"));
 
   // Schedule locally through the UI and watch attention appear while Projects is open.
   const future = new Date();

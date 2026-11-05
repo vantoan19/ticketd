@@ -75,6 +75,7 @@ export function bridgeDefault(
         path: "/data/ticketd/workspace.sqlite3",
         tickets: 0,
         projects: 0,
+        documents: 0,
         active_plans: 0,
         size_bytes: 4096,
         format_version: 26,

@@ -163,6 +163,10 @@ pub(crate) const PRE_MIGRATION_MARKER: &str = ".pre-migration-";
 
 /// Restore accepts exactly the files that inspecting a backup calls valid.
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
+    // A backup from before Efforts became Plans gets the legacy-schema message, not a missing table.
+    if table_exists(connection, "efforts")? {
+        return Err(Error::LegacyEffortWorkspace);
+    }
     match check_backup(connection)? {
         BackupCheck::Valid { .. } => Ok(()),
         BackupCheck::NewerFormat { backup_version, .. } => {
