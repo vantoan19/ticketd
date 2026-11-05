@@ -99,6 +99,15 @@ export const workspaceClient = {
     });
     return typeof chosen === "string" ? chosen : null;
   },
+  /** Opens a native folder picker; resolves to null when it is cancelled. */
+  async chooseFolder(options: { title: string }) {
+    const chosen = await open({
+      title: options.title,
+      multiple: false,
+      directory: true,
+    });
+    return typeof chosen === "string" ? chosen : null;
+  },
   /** Checks a backup and summarizes it beside this workspace; changes nothing. */
   async inspectBackup(path: string) {
     return backupInspectionSchema.parse(
