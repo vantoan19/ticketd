@@ -80,11 +80,46 @@ test("Fit shows every ticket and the opening view keeps the hub in sight", () =>
     expect(at.y * fit.zoom + fit.y).toBeGreaterThanOrEqual(0);
     expect((at.y + NODE_HEIGHT) * fit.zoom + fit.y).toBeLessThanOrEqual(600);
   }
-  const open = openViewport(dense, positions, "", size, 0.45)!;
-  expect(open.zoom).toBeGreaterThanOrEqual(0.45);
+  const open = openViewport(dense, positions, null, size, 0.7)!;
+  expect(open.zoom).toBeGreaterThanOrEqual(0.7);
   const hub = positions.get("T-1")!;
   const left = hub.x * open.zoom + open.x;
   expect(left).toBeGreaterThanOrEqual(0);
   expect(left + NODE_WIDTH * open.zoom).toBeLessThanOrEqual(900);
   expect(hub.y * open.zoom + open.y).toBeGreaterThanOrEqual(0);
+});
+
+test("a dense graph wraps to five per rank and opens readable on the selected ticket", () => {
+  const big: DependencyGraph = {
+    ...dense,
+    nodes: Array.from({ length: 50 }, (_, index) => node(`T-${index + 1}`)),
+    edges: [
+      ...Array.from({ length: 24 }, (_, index) => ({
+        blocker: "T-1",
+        dependent: `T-${index + 2}`,
+      })),
+      { blocker: "T-40", dependent: "T-41" },
+      { blocker: "T-41", dependent: "T-42" },
+    ],
+  };
+  const positions = layoutGraph(big);
+  const perRow = new Map<number, number>();
+  for (const at of positions.values())
+    perRow.set(at.y, (perRow.get(at.y) ?? 0) + 1);
+  const linkedRows = [...perRow.entries()].filter(([y]) => y <= 600);
+  expect(Math.max(...linkedRows.map(([, count]) => count))).toBeLessThanOrEqual(
+    5,
+  );
+  const size = { width: 1000, height: 650 };
+  for (const focus of ["T-41", null]) {
+    const open = openViewport(big, positions, focus, size, 0.7)!;
+    expect(open.zoom).toBeGreaterThanOrEqual(0.7);
+    const target = positions.get(focus ?? "T-1")!;
+    const left = target.x * open.zoom + open.x;
+    const top = target.y * open.zoom + open.y;
+    expect(left).toBeGreaterThanOrEqual(0);
+    expect(left + NODE_WIDTH * open.zoom).toBeLessThanOrEqual(size.width);
+    expect(top).toBeGreaterThanOrEqual(0);
+    expect(top + NODE_HEIGHT * open.zoom).toBeLessThanOrEqual(size.height);
+  }
 });

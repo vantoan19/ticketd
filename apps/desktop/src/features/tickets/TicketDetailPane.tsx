@@ -47,6 +47,9 @@ export function TicketDetailPane({
         projects={projects}
         refresh={refresh}
         onClose={closePlanMode}
+        archived={
+          plans.find((item) => item.id === planScope)?.archived ?? false
+        }
         onOpen={(reference) => {
           closePlanMode();
           onSelect(reference);

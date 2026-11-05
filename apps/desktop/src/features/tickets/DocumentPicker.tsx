@@ -69,7 +69,12 @@ export function DocumentPicker({
             <button
               type="button"
               className="document-picker-item"
-              onClick={() => onPick(item)}
+              onClick={() => {
+                onPick(item);
+                // The linked Document leaves the list, so a kept query would
+                // only show "No Documents match".
+                setQuery("");
+              }}
             >
               <FileText aria-hidden="true" />
               <span className="truncate">{item.heading}</span>

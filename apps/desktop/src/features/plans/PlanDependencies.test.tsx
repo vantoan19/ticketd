@@ -150,7 +150,7 @@ test("a rejected blocker is explained next to the form", async () => {
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: 0 open blockers/ }),
+    await screen.findByRole("button", { name: /^T-1: Add blocker/ }),
   );
   fireEvent.change(screen.getByLabelText("Add a blocker"), {
     target: { value: "Other" },
@@ -160,4 +160,60 @@ test("a rejected blocker is explained next to the form", async () => {
   expect((await screen.findByText(/already blocks T-3/)).textContent).toContain(
     "T-1",
   );
+});
+
+test("an archived Plan shows its blockers without add or remove controls", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "plan_dependency_graph"
+      ? {
+          nodes: [
+            {
+              id: "1",
+              reference: "T-1",
+              title: "Member",
+              status: "Todo",
+              availability: "Blocked",
+              trashed: false,
+              boundary: false,
+            },
+            {
+              id: "2",
+              reference: "T-2",
+              title: "Other",
+              status: "Todo",
+              availability: "Ready",
+              trashed: false,
+              boundary: false,
+            },
+          ],
+          edges: [{ blocker: "T-2", dependent: "T-1" }],
+          max_nodes: 50,
+          max_depth: 1,
+          max_edges: 300,
+          max_work: 3000,
+          omitted_neighbors: false,
+          omitted_edges: false,
+          truncated: false,
+        }
+      : [],
+  );
+  render(
+    <PlanDependencies
+      id="plan"
+      revision={1}
+      projects={[]}
+      refresh={vi.fn(async () => {})}
+      onOpen={vi.fn()}
+      onClose={vi.fn()}
+      archived
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^T-1: 1 open blocker/ }),
+  );
+  expect(screen.getByLabelText("Blockers of T-1")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Remove blocker/ })).toBeNull();
+  expect(screen.queryByLabelText("Add a blocker")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^T-2: No blockers/ }));
+  expect(screen.queryByLabelText("Add a blocker")).toBeNull();
 });

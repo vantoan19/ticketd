@@ -442,6 +442,70 @@ fn concurrent_hierarchy_assignments_preserve_one_level() {
 }
 
 #[test]
+fn archived_plan_refuses_writes_but_tickets_can_leave() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Old").unwrap();
+    let other = workspace.create_plan("New").unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    let spare = workspace.create_ticket("Spare").unwrap();
+    workspace
+        .set_plan(&ticket.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace.change_plan(&plan.id, None, Some(true)).unwrap();
+    let archived = |result: Result<(), ticketd_core::Error>| {
+        let message = result.unwrap_err().to_string();
+        assert!(
+            message.contains("archived") && message.contains("reactivate"),
+            "{message}"
+        );
+    };
+    archived(
+        workspace
+            .change_plan(&plan.id, Some("Renamed"), None)
+            .map(|_| ()),
+    );
+    archived(workspace.set_plan_purpose(&plan.id, "why").map(|_| ()));
+    archived(
+        workspace
+            .set_plan(&spare.reference, Some(&plan.id), None)
+            .map(|_| ()),
+    );
+    archived(
+        workspace
+            .create_ticket_in_context("New", None, Some(&plan.id))
+            .map(|_| ()),
+    );
+    // Moving out is allowed, to another Plan or to none.
+    workspace
+        .set_plan(&ticket.reference, Some(&other.id), None)
+        .unwrap();
+    workspace.set_plan(&ticket.reference, None, None).unwrap();
+    workspace.change_plan(&plan.id, None, Some(false)).unwrap();
+    workspace.set_plan_purpose(&plan.id, "why").unwrap();
+}
+
+#[test]
+fn dependency_cycle_error_names_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let a = workspace.create_ticket("A").unwrap();
+    let b = workspace.create_ticket("B").unwrap();
+    let c = workspace.create_ticket("C").unwrap();
+    workspace
+        .add_dependency(&a.reference, &b.reference, None)
+        .unwrap();
+    workspace
+        .add_dependency(&b.reference, &c.reference, None)
+        .unwrap();
+    let message = workspace
+        .add_dependency(&c.reference, &a.reference, None)
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("T-1 → T-2 → T-3"), "{message}");
+}
+
+#[test]
 fn plan_membership_progress_and_archiving_preserve_tickets() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

@@ -91,6 +91,9 @@ export function TicketListPane({
   }, [removed]);
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
+  // An archived Plan is read-only: no new tickets into it, no removing from it.
+  const planWritable = scopedPlan !== undefined && !scopedPlan.archived;
+  const addDisabled = scopedPlan?.archived === true;
   const planState = usePlanView(planScope, revision, refresh);
   const filtered =
     navigation.plan !== plan ||
@@ -374,10 +377,12 @@ export function TicketListPane({
                   counts && {
                     grouping: {
                       counts,
-                      onAdd: (status: string, trigger: HTMLButtonElement) => {
-                        if (status === "Duplicate") setMarkingDuplicate(true);
-                        else onCreate(trigger, status);
-                      },
+                      ...(!addDisabled && {
+                        onAdd: (status: string, trigger: HTMLButtonElement) => {
+                          if (status === "Duplicate") setMarkingDuplicate(true);
+                          else onCreate(trigger, status);
+                        },
+                      }),
                     },
                   })}
                 selectable={!trash}
@@ -385,33 +390,34 @@ export function TicketListPane({
                 bulkSelection={bulk.selection}
                 onToggle={bulk.toggle}
                 onOpen={onOpen}
-                {...(scopedPlan && {
-                  rowAction: (ticket: Ticket) => (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled={planState.pending}
-                      aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                      title="Remove from Plan"
-                      onClick={() =>
-                        void planState
-                          .run(() =>
-                            plansClient.setMember(ticket.reference, null),
-                          )
-                          .then((done) => {
-                            if (done)
-                              setRemoved({
-                                reference: ticket.reference,
-                                plan: scopedPlan.id,
-                                name: scopedPlan.name,
-                              });
-                          })
-                      }
-                    >
-                      <X />
-                    </Button>
-                  ),
-                })}
+                {...(scopedPlan &&
+                  planWritable && {
+                    rowAction: (ticket: Ticket) => (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={planState.pending}
+                        aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                        title="Remove from Plan"
+                        onClick={() =>
+                          void planState
+                            .run(() =>
+                              plansClient.setMember(ticket.reference, null),
+                            )
+                            .then((done) => {
+                              if (done)
+                                setRemoved({
+                                  reference: ticket.reference,
+                                  plan: scopedPlan.id,
+                                  name: scopedPlan.name,
+                                });
+                            })
+                        }
+                      >
+                        <X />
+                      </Button>
+                    ),
+                  })}
               />
             </>
           )}
