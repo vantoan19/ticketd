@@ -320,3 +320,8 @@ export function stateLine(node: {
     .filter(Boolean)
     .join(" · ");
 }
+
+/** A graph card accessible name: its kind, its label, and a Trash suffix. */
+export function nodeAriaLabel(node: GraphNode): string {
+  return `${kindNames[node.kind]}: ${node.label}${node.trashed ? " (Trash)" : ""}`;
+}

@@ -15,7 +15,7 @@ import { TicketDetails } from "./TicketDetails";
 import { TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
 import { freshness, sourceLocation, sourceState } from "./ticket-source";
-import { rowContext } from "./ticket-row";
+import { rowContextItem } from "./ticket-row";
 
 window.ResizeObserver = class {
   observe() {}
@@ -269,13 +269,13 @@ test("a resolved canonical issue opens its local ticket, and a loop is not follo
   fireEvent.click(screen.getByRole("button", { name: "Open T-9" }));
   expect(onOpen).toHaveBeenCalledWith("T-9");
   const rows = (target: object) =>
-    rowContext(
+    rowContextItem(
       ticket({
         status: "Duplicate",
         source: source({ ...closed, duplicate_target: target as never }),
       }),
       { showPlan: false, showProject: false, plans: [], projects: [] },
-    );
+    )?.label ?? null;
   expect(rows({ ...external, ticket: "T-9" })).toBe("Duplicate of T-9");
   expect(rows({ ...external, problem: "cycle" })).toBe(
     "Duplicate of acme/api#7",
@@ -523,13 +523,13 @@ test("source wording: location, state and freshness", () => {
     "Not synced yet",
   );
   expect(
-    rowContext(
+    rowContextItem(
       ticket({
         status: "Duplicate",
         source: source({ duplicate_target: { kind: "unknown" } }),
       }),
       { showPlan: false, showProject: false, plans: [], projects: [] },
-    ),
+    )?.label,
   ).toBe("Duplicate · target unknown");
 });
 

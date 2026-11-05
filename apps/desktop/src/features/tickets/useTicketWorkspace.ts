@@ -121,6 +121,10 @@ export function useTicketWorkspace(
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
   const detailGeneration = useRef(0);
+  // Only the scope's own fields matter to a fetch; depending on the object would
+  // refetch whenever the same scope is chosen again.
+  const scopeKind = navigation.kind;
+  const scopePlan = navigation.plan;
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     let timeout = 0;
@@ -153,10 +157,10 @@ export function useTicketWorkspace(
       const unfiltered: FindFilter = {
         ...filterArgs,
         query: "",
-        plan: navigation.plan || null,
-        status: navigation.kind === "progress" ? "In progress" : null,
+        plan: scopePlan || null,
+        status: scopeKind === "progress" ? "In progress" : null,
         tags: [],
-        availability: navigation.kind === "ready" ? "Ready" : null,
+        availability: scopeKind === "ready" ? "Ready" : null,
         family: null,
         order: "Workflow",
       };
@@ -239,7 +243,8 @@ export function useTicketWorkspace(
     availability,
     family,
     source,
-    navigation,
+    scopeKind,
+    scopePlan,
   ]);
   useEffect(() => {
     let active = true;

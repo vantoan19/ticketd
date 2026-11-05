@@ -5,6 +5,7 @@ import { KindIcon } from "./GraphLegend";
 import {
   connectionRows,
   cardParts,
+  nodeAriaLabel,
   edgeLabels,
   flowEdges,
   kindNames,
@@ -196,7 +197,7 @@ export function WorkspaceGraph({
     () =>
       connected.map((node) => ({
         id: node.id,
-        label: `${node.label}${node.trashed ? " (Trash)" : ""}`,
+        label: nodeAriaLabel(node),
         ...cardParts(node),
       })),
     [connected],

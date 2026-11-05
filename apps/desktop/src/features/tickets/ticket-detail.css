@@ -271,10 +271,3 @@
   line-height: 20px;
   letter-spacing: -0.28px;
 }
-
-.detail-quiet-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 16px;
-}

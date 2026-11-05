@@ -248,9 +248,11 @@ function RowDetails({
   const context = rowContextItem(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
-    !singleStatus &&
-    (state.kind !== "status" ||
-      (!grouped && !context?.label.startsWith("Duplicate")));
+    // A single-status view already says Ready or the status; Blocked is still news.
+    state.kind === "blocked" ||
+    (!singleStatus &&
+      (state.kind !== "status" ||
+        (!grouped && !context?.label.startsWith("Duplicate"))));
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">

@@ -264,3 +264,16 @@ test("a single-status view drops the group header and the Ready dot", () => {
   expect(screen.queryByText("Ready")).toBeNull();
   expect(screen.getByRole("button", { name: /First ticket/ })).toBeTruthy();
 });
+
+test("a single-status view still shows that a ticket is blocked", () => {
+  renderList(
+    [
+      ticket({
+        availability: "Blocked",
+        prerequisites: [prerequisite("T-9", "Todo")],
+      }),
+    ],
+    { singleStatus: true },
+  );
+  expect(screen.getByText("Blocked by T-9")).toBeTruthy();
+});

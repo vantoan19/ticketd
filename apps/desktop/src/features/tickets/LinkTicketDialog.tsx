@@ -114,6 +114,7 @@ export function LinkTicketDialog({
         pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
       }
       onSubmit={() => void submit()}
+      onCancel={discard}
     >
       <div className="link-ticket-dialog flex flex-col gap-4">
         <Field>

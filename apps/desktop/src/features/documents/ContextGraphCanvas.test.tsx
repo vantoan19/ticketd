@@ -113,9 +113,9 @@ test("the legend and one zoom and Fit control stay on the canvas, and Fit never 
   fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));
   expect(instance.zoomIn).toHaveBeenCalled();
   fireEvent.click(within(zoom).getByRole("button", { name: "Fit" }));
-  // No readable-zoom floor: a crowded map zooms out until every card is inside.
+  // Fit keeps cards legible; the user pans for the rest.
   expect(instance.fitView).toHaveBeenCalledWith(
-    expect.objectContaining({ minZoom: 0.05 }),
+    expect.objectContaining({ minZoom: 0.5 }),
   );
   expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
 });

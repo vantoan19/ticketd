@@ -260,7 +260,7 @@ export function TicketProperties({
   const statusChoices = owner ? owner.status_choices : ticketStatuses;
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
-    (ticket.project_id || "Unlinked");
+    (ticket.project_id || "No project");
   const plan = plans.find((e) => e.id === ticket.plan_id);
   const planName = plan
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`
@@ -505,7 +505,7 @@ export function TicketProperties({
           value={projectName}
           disabled={disabled}
           choices={[
-            { value: "", label: "Unlinked" },
+            { value: "", label: "No project" },
             ...projects.map((p) => ({ value: p.id, label: p.name })),
           ]}
           onChoose={(value) =>

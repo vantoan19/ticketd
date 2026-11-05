@@ -273,3 +273,28 @@ test("Add evidence stays disabled with its reason until name and evidence are fi
   });
   expect(primary).toHaveProperty("disabled", false);
 });
+
+test("Cancel discards the draft but Escape keeps it", async () => {
+  render(
+    <Evidence
+      reference="T-1"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Draft name" },
+  });
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    "Draft name",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+});

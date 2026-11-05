@@ -11,6 +11,7 @@ import {
   Handle,
   ReactFlow,
   type Edge,
+  type FitViewOptions,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -28,16 +29,30 @@ import "@xyflow/react/dist/style.css";
 const MIN_ZOOM = 0.05;
 /** A lone card must not be blown up to fill the view. */
 const MAX_FIT_ZOOM = 1;
+/** Fit never zooms out past this, so card text stays legible; the user pans. */
+const MIN_FIT_ZOOM = 0.5;
+/** The container width at which Fit's margins are their full size. */
+const FULL_MARGIN_WIDTH = 1000;
+
 /**
- * Fit never clips a card: the zoom may go as low as the canvas allows, and the
- * right margin keeps cards clear of the pinned legend.
+ * Fit options for a container this wide. The right margin keeps cards clear of
+ * the pinned legend; both side margins shrink with a narrow window so they do
+ * not swallow the canvas.
  */
-const FIT = {
-  padding: { top: "32px", right: "248px", bottom: "72px", left: "32px" },
-  duration: 200,
-  minZoom: MIN_ZOOM,
-  maxZoom: MAX_FIT_ZOOM,
-} as const;
+function fitOptions(width: number): FitViewOptions {
+  const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));
+  return {
+    padding: {
+      top: "32px",
+      right: `${Math.round(248 * scale)}px`,
+      bottom: "72px",
+      left: `${Math.round(32 * scale)}px`,
+    },
+    duration: 200,
+    minZoom: MIN_FIT_ZOOM,
+    maxZoom: MAX_FIT_ZOOM,
+  };
+}
 
 type CardData = { ref: string; title: string; caption: string };
 
@@ -215,7 +230,9 @@ export function ContextGraphCanvas({
           { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
       } else {
-        void instance.current?.fitView(FIT);
+        void instance.current?.fitView(
+          fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+        );
       }
       onFittedRef.current?.();
     };
@@ -298,7 +315,13 @@ export function ContextGraphCanvas({
         return;
       }
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void instance.current?.fitView(FIT), 150);
+      timer = window.setTimeout(
+        () =>
+          void instance.current?.fitView(
+            fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+          ),
+        150,
+      );
     });
     observer.observe(element);
     return () => {
@@ -423,7 +446,11 @@ export function ContextGraphCanvas({
         <span className="context-graph-zoom-rule" aria-hidden="true" />
         <button
           type="button"
-          onClick={() => void instance.current?.fitView(FIT)}
+          onClick={() =>
+            void instance.current?.fitView(
+              fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+            )
+          }
         >
           <Maximize aria-hidden="true" />
           Fit

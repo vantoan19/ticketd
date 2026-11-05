@@ -321,8 +321,12 @@ export function Evidence({
       )}
       <DialogShell
         open={!trashed && composing}
-        // Closing keeps the draft; only Cancel or a save clears it.
+        // Escape and an outside click keep the draft; Cancel or a save clears it.
         onOpenChange={setComposing}
+        onCancel={() => {
+          setDraft(blank);
+          setEditing(null);
+        }}
         title={editing ? "Edit evidence" : "Add evidence"}
         description="Record a pull request, commit, branch, worktree, or verification result for this ticket."
         primaryLabel={editing ? "Save evidence" : "Add evidence"}

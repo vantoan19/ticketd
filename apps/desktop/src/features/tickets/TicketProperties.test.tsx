@@ -45,7 +45,7 @@ test("keeps the saved project and reports a failed change", async () => {
       refresh={async () => {}}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Project: Unlinked/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
   const search = await screen.findByLabelText("Search Project");
   fireEvent.change(search, {
     target: { value: "Project" },
@@ -60,7 +60,7 @@ test("keeps the saved project and reports a failed change", async () => {
   );
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: /Project: Unlinked/ }),
+      screen.getByRole("button", { name: /Project: No project/ }),
     ),
   );
 });
