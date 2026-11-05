@@ -107,10 +107,19 @@
 }
 .context-graph-canvas {
   position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+/* The map fills the canvas above the zoom control, which gets a row of its own
+   so a card is never drawn under it at any zoom. */
+.context-graph-flow {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
 }
 .context-graph-preview {
   padding: 16px 20px;
@@ -342,10 +351,9 @@
 
 /* One control: zoom out, percentage, zoom in, Fit. */
 .context-graph-zoom {
-  position: absolute;
-  left: 16px;
-  bottom: 16px;
-  z-index: 5;
+  flex: none;
+  align-self: flex-start;
+  margin: 8px 16px;
   height: 32px;
   display: flex;
   align-items: center;

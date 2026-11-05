@@ -528,9 +528,11 @@
   font-size: 12px;
 }
 
-.list-description {
+/* Two classes: the generic `.ticket-list > p` padding must not win, or the note
+   starts 4px right of the header title. */
+.ticket-list > .list-description {
   margin: 0;
-  padding: 8px 20px 0;
+  padding: 24px 20px;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;

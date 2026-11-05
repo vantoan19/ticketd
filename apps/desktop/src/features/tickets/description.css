@@ -100,7 +100,11 @@
   position: relative;
 }
 .description-reading .description-document {
-  margin-top: 12px;
+  /* The hover outline sits 8px outside the text on the left and right and 4px
+     above and below it; margins cancel the padding so the text does not move. */
+  margin: 8px -8px 0;
+  padding: 4px 8px;
+  min-height: 0;
   border-radius: 8px;
 }
 .description-reading:hover .description-document,
