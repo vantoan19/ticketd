@@ -6,6 +6,7 @@ import { ListHeader } from "@/components/ui/list-header";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
+import { useKeepPaneScroll } from "./keep-scroll";
 import { KindIcon } from "./GraphLegend";
 import {
   cardParts,
@@ -41,6 +42,7 @@ export function ContextGraph({
   onBack: (origin: Graph["nodes"][number] | null) => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
+  const keepScroll = useKeepPaneScroll();
   const changeVersion = useWorkspaceChange();
   const [center, setCenter] = useState(origin);
   const [selected, setSelected] = useState<string | null>(null);
@@ -456,7 +458,10 @@ export function ContextGraph({
                 {group.nodes.slice(0, limit).map((node) => (
                   <li key={node.id}>
                     <KindIcon kind={node.kind} />
-                    <button type="button" onClick={() => setSelected(node.id)}>
+                    <button
+                      type="button"
+                      {...keepScroll(() => setSelected(node.id))}
+                    >
                       {node.label}
                     </button>
                     <Button

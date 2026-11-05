@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import {
   Background,
@@ -100,7 +99,6 @@ export function ContextGraphCanvas({
   onFitted,
   centerId,
   centerOn = null,
-  overlay,
 }: {
   nodes: {
     id: string;
@@ -124,8 +122,6 @@ export function ContextGraphCanvas({
   centerId?: string | undefined;
   /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
   centerOn?: string | null;
-  /** Shown under the legend, pinned to the canvas. */
-  overlay?: ReactNode;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -203,6 +199,17 @@ export function ContextGraphCanvas({
   }, [onFitted]);
   const placed = nodes.some((node) => positions[node.id]);
   const [ready, setReady] = useState(false);
+  // The canvas stays hidden until its first fit is applied, so the map is never
+  // seen at the starting zoom and then moved.
+  const [shown, setShown] = useState(false);
+  const shownRef = useRef(false);
+  const revealFrame = useRef(0);
+  useEffect(() => () => window.cancelAnimationFrame(revealFrame.current), []);
+  useEffect(() => {
+    shownRef.current = shown;
+  }, [shown]);
+  // Nothing asks for a fit (a restored view): there is nothing to wait for.
+  const restored = !fit && !centerOn && placed && ready;
   useEffect(() => {
     if ((!fit && !centerOn) || !placed || !ready) return;
     // Fit only once React Flow has measured every card; fitting earlier centres
@@ -228,12 +235,25 @@ export function ContextGraphCanvas({
           target.y + CARD_HEIGHT / 2,
           { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
+        setShown(true);
       } else {
         const options = fitOptions(
           container.current?.clientWidth || FULL_MARGIN_WIDTH,
         );
-        void instance.current?.fitView(options);
+        // The first fit is not animated: it is applied before anything is shown.
+        const first = !shownRef.current;
+        const applied = instance.current?.fitView(
+          first ? { ...options, duration: 0 } : options,
+        );
         fitSized.current = sized;
+        // Reveal once the viewport the fit chose has been painted into place.
+        void Promise.resolve(applied).then(() => {
+          revealFrame.current = window.requestAnimationFrame(() => {
+            revealFrame.current = window.requestAnimationFrame(() =>
+              setShown(true),
+            );
+          });
+        });
         // The pane can still be settling (toolbar, side panel) on open; fit once
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
@@ -420,6 +440,11 @@ export function ContextGraphCanvas({
         ref={container}
         className="context-graph-canvas"
         aria-label="Connections canvas"
+        style={
+          shown || restored || !nodes.length
+            ? undefined
+            : { visibility: "hidden" }
+        }
         onKeyDown={selectFromKey}
       >
         <ReactFlow
@@ -476,7 +501,6 @@ export function ContextGraphCanvas({
       </div>
       <div className="context-graph-pinned">
         <GraphLegend />
-        {overlay}
       </div>
     </div>
   );

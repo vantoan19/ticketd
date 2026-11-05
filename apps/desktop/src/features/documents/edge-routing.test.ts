@@ -58,6 +58,23 @@ test("a label is moved off a card that sits on the middle of its line", () => {
   expect(touches).toBe(false);
 });
 
+test("a label stays on its line when every point of the line is covered by cards", () => {
+  const points = [
+    { x: 0, y: 0 },
+    { x: 24, y: 40 },
+  ];
+  const cards = [
+    { x: -100, y: -100, width: 100, height: 100 },
+    { x: 24, y: 40, width: 100, height: 100 },
+    { x: -100, y: 20, width: 124, height: 20 },
+  ];
+  const at = placeLabel(points, { width: 60, height: 18 }, cards);
+  // On the line, never lifted above or below it.
+  expect(at.y).toBeGreaterThanOrEqual(0);
+  expect(at.y).toBeLessThanOrEqual(40);
+  expect(at.x / 24).toBeCloseTo(at.y / 40);
+});
+
 test("labels of edges that share a line do not sit on each other", () => {
   const cards = { a: card(0, 0), b: card(400, 0) };
   const routes = routeAll(cards, [
@@ -108,7 +125,7 @@ test("a mention label stays off every card when a third card hugs the line", () 
     expect(touches(at, "mentions", rect)).toBe(false);
 });
 
-test("a blocks label between cards that nearly touch lands outside both", () => {
+test("a blocks label between cards that nearly touch sits on its line, over the cards", () => {
   const cards = {
     a: { x: 0, y: 0, width: 180, height: 72 },
     b: { x: 200, y: 0, width: 180, height: 72 },
@@ -116,9 +133,11 @@ test("a blocks label between cards that nearly touch lands outside both", () => 
   const routes = routeAll(cards, [
     { id: "e", source: "a", target: "b", label: "blocks" },
   ]);
-  const at = routes["e"]!.label;
-  expect(touches(at, "blocks", cards.a)).toBe(false);
-  expect(touches(at, "blocks", cards.b)).toBe(false);
+  const route = routes["e"]!;
+  // Too little room for the pill: it stays on the line rather than leaving it.
+  expect(route.label.y).toBeCloseTo(36);
+  expect(route.label.x).toBeGreaterThan(180);
+  expect(route.label.x).toBeLessThan(200);
 });
 
 test("labels stay inside the area the cards span so the canvas edge never cuts them", () => {
