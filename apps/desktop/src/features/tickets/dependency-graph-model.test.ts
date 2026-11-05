@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 import type { DependencyGraph } from "@/lib/api/client";
-import { layoutGraph, scopeNotice } from "./dependency-graph-model";
+import {
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  boundsOf,
+  fitViewport,
+  layoutGraph,
+  openViewport,
+  scopeNotice,
+} from "./dependency-graph-model";
 
 const node = (reference: string) => ({
   id: reference,
@@ -37,4 +45,46 @@ test("only a limited graph states how far it reaches", () => {
   expect(scopeNotice({ ...graph, truncated: true }, "T-2")).toContain(
     "up to 5 links from T-2 and at most 50 tickets",
   );
+});
+
+const dense: DependencyGraph = {
+  ...graph,
+  nodes: Array.from({ length: 55 }, (_, index) => node(`T-${index + 1}`)),
+  edges: [
+    ...Array.from({ length: 12 }, (_, index) => ({
+      blocker: "T-1",
+      dependent: `T-${index + 2}`,
+    })),
+    { blocker: "T-2", dependent: "T-20" },
+    { blocker: "T-20", dependent: "T-21" },
+  ],
+};
+
+test("a hub with many dependents wraps into rows within a width budget", () => {
+  const positions = layoutGraph(dense);
+  const bounds = boundsOf(positions, positions.keys());
+  expect(bounds!.width).toBeLessThanOrEqual(8 * (NODE_WIDTH + 32));
+  expect(positions.get("T-1")!.y).toBeLessThan(positions.get("T-2")!.y);
+  const spots = new Set([...positions.values()].map((at) => `${at.x},${at.y}`));
+  expect(spots.size).toBe(dense.nodes.length);
+});
+
+test("Fit shows every ticket and the opening view keeps the hub in sight", () => {
+  const positions = layoutGraph(dense);
+  const size = { width: 900, height: 600 };
+  const all = boundsOf(positions, positions.keys())!;
+  const fit = fitViewport(all, size, { minZoom: 0.2, maxZoom: 1 });
+  for (const at of positions.values()) {
+    expect(at.x * fit.zoom + fit.x).toBeGreaterThanOrEqual(0);
+    expect((at.x + NODE_WIDTH) * fit.zoom + fit.x).toBeLessThanOrEqual(900);
+    expect(at.y * fit.zoom + fit.y).toBeGreaterThanOrEqual(0);
+    expect((at.y + NODE_HEIGHT) * fit.zoom + fit.y).toBeLessThanOrEqual(600);
+  }
+  const open = openViewport(dense, positions, "", size, 0.45)!;
+  expect(open.zoom).toBeGreaterThanOrEqual(0.45);
+  const hub = positions.get("T-1")!;
+  const left = hub.x * open.zoom + open.x;
+  expect(left).toBeGreaterThanOrEqual(0);
+  expect(left + NODE_WIDTH * open.zoom).toBeLessThanOrEqual(900);
+  expect(hub.y * open.zoom + open.y).toBeGreaterThanOrEqual(0);
 });

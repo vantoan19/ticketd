@@ -4,6 +4,11 @@ import type { DependencyGraph } from "@/lib/api/client";
 export const NODE_WIDTH = 224;
 export const NODE_HEIGHT = 76;
 
+/** Widest rank drawn on one row; wider ranks wrap onto more rows. */
+export const MAX_PER_ROW = 8;
+const COLUMN_GAP = 32;
+const ROW_GAP = 64;
+
 export type GraphTicket = DependencyGraph["nodes"][number];
 
 /** Top-left positions with blockers above the tickets they block. Tickets with no
@@ -28,20 +33,54 @@ export function layoutGraph(graph: DependencyGraph) {
     for (const edge of graph.edges)
       layout.setEdge(edge.blocker, edge.dependent);
     dagre.layout(layout);
+    // dagre puts every dependent of a hub on one rank, which can be thousands
+    // of pixels wide. Wrap each rank into rows of at most MAX_PER_ROW, keeping
+    // dagre's left-to-right order and centering each row on the rank.
+    const ranks = new Map<number, { reference: string; x: number }[]>();
     for (const node of linked) {
       const { x, y } = layout.node(node.reference) as { x: number; y: number };
-      positions.set(node.reference, {
-        x: x - NODE_WIDTH / 2,
-        y: y - NODE_HEIGHT / 2,
-      });
-      bottom = Math.max(bottom, y + NODE_HEIGHT / 2);
+      ranks.set(y, [...(ranks.get(y) ?? []), { reference: node.reference, x }]);
     }
+    const wide = [...ranks.values()].some((rank) => rank.length > MAX_PER_ROW);
+    const all = [...ranks.values()].flat();
+    const middle =
+      (Math.min(...all.map((m) => m.x)) + Math.max(...all.map((m) => m.x))) / 2;
+    let y = 0;
+    for (const rank of [...ranks.entries()].sort(([a], [b]) => a - b)) {
+      const members = rank[1].sort((a, b) => a.x - b.x);
+      for (let start = 0; start < members.length; start += MAX_PER_ROW) {
+        const row = members.slice(start, start + MAX_PER_ROW);
+        // Without a wide rank dagre's own alignment is kept. With one, every
+        // rank is repacked around a shared center so narrow ranks stay under it.
+        const left =
+          (wide ? middle : (row[0]!.x + row[row.length - 1]!.x) / 2) -
+          ((row.length - 1) * (NODE_WIDTH + COLUMN_GAP)) / 2;
+        row.forEach((member, column) =>
+          positions.set(member.reference, {
+            x:
+              (wide ? left + column * (NODE_WIDTH + COLUMN_GAP) : member.x) -
+              NODE_WIDTH / 2,
+            y,
+          }),
+        );
+        const more = start + MAX_PER_ROW < members.length;
+        y += NODE_HEIGHT + (more ? 32 : ROW_GAP);
+      }
+    }
+    bottom = y - ROW_GAP;
   }
-  const columns = Math.max(1, Math.ceil(Math.sqrt(loose.length * 2)));
+  const columns = Math.min(
+    MAX_PER_ROW,
+    Math.max(1, Math.ceil(Math.sqrt(loose.length * 2))),
+  );
+  // Line the loose grid up with the left edge of the linked tickets above it.
+  const left = positions.size
+    ? Math.min(...[...positions.values()].map((at) => at.x))
+    : 0;
   const top = linked.length > 0 ? bottom + 64 : 0;
   loose.forEach((node, index) => {
     positions.set(node.reference, {
-      x: (index % columns) * (NODE_WIDTH + 32),
+      x: left + (index % columns) * (NODE_WIDTH + 32),
       y: top + Math.floor(index / columns) * (NODE_HEIGHT + 32),
     });
   });
@@ -52,4 +91,134 @@ export function layoutGraph(graph: DependencyGraph) {
 export function scopeNotice(graph: DependencyGraph, origin: string) {
   if (!graph.truncated) return null;
   return `This graph is limited. It reaches up to ${graph.max_depth} links from ${origin} and at most ${graph.max_nodes} tickets and ${graph.max_edges} relationships. Some tickets or relationships may be missing. Select a ticket and center the graph on it to explore further.`;
+}
+
+export type Rect = { x: number; y: number; width: number; height: number };
+export type Viewport = { x: number; y: number; zoom: number };
+
+/** The smallest rectangle holding the given tickets, or null for none. */
+export function boundsOf(
+  positions: Map<string, { x: number; y: number }>,
+  references: Iterable<string>,
+): Rect | null {
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const reference of references) {
+    const at = positions.get(reference);
+    if (!at) continue;
+    left = Math.min(left, at.x);
+    top = Math.min(top, at.y);
+    right = Math.max(right, at.x + NODE_WIDTH);
+    bottom = Math.max(bottom, at.y + NODE_HEIGHT);
+  }
+  if (left === Infinity) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+type Padding = { top: number; right: number; bottom: number; left: number };
+/** Leaves room above the first node for the zoom controls. */
+export const FIT_PADDING: Padding = {
+  top: 56,
+  right: 24,
+  bottom: 24,
+  left: 24,
+};
+
+/**
+ * A viewport showing `bounds` as large as `maxZoom` allows, but never smaller
+ * than `minZoom`. When even `minZoom` is too large the bounds are centered
+ * across and pinned to the top, so some of the tickets are always in view.
+ */
+export function fitViewport(
+  bounds: Rect,
+  size: { width: number; height: number },
+  { minZoom, maxZoom }: { minZoom: number; maxZoom: number },
+  padding: Padding = FIT_PADDING,
+): Viewport {
+  const room = {
+    width: Math.max(1, size.width - padding.left - padding.right),
+    height: Math.max(1, size.height - padding.top - padding.bottom),
+  };
+  const zoom = Math.min(
+    maxZoom,
+    Math.max(
+      minZoom,
+      Math.min(room.width / bounds.width, room.height / bounds.height),
+    ),
+  );
+  const slack = room.width - bounds.width * zoom;
+  const x = padding.left + slack / 2 - bounds.x * zoom;
+  const yBase = padding.top - bounds.y * zoom;
+  const spare = room.height - bounds.height * zoom;
+  return { x, y: yBase + Math.max(0, spare) / 2, zoom };
+}
+
+/** The tickets joined to `origin` by any chain of links, else the largest such group. */
+export function focusGroup(graph: DependencyGraph, origin: string) {
+  const neighbors = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    neighbors.set(edge.blocker, [
+      ...(neighbors.get(edge.blocker) ?? []),
+      edge.dependent,
+    ]);
+    neighbors.set(edge.dependent, [
+      ...(neighbors.get(edge.dependent) ?? []),
+      edge.blocker,
+    ]);
+  }
+  const seen = new Set<string>();
+  const groups: string[][] = [];
+  for (const node of graph.nodes) {
+    if (seen.has(node.reference) || !neighbors.has(node.reference)) continue;
+    const group: string[] = [];
+    const pending = [node.reference];
+    seen.add(node.reference);
+    while (pending.length > 0) {
+      const next = pending.pop()!;
+      group.push(next);
+      for (const other of neighbors.get(next) ?? [])
+        if (!seen.has(other)) {
+          seen.add(other);
+          pending.push(other);
+        }
+    }
+    groups.push(group);
+  }
+  return (
+    groups.find((group) => group.includes(origin)) ??
+    groups.reduce<string[]>(
+      (best, group) => (group.length > best.length ? group : best),
+      [],
+    )
+  );
+}
+
+/**
+ * Where a graph opens: everything when that stays readable, otherwise the
+ * group around the opened ticket (or the largest one) at the readable zoom.
+ */
+export function openViewport(
+  graph: DependencyGraph,
+  positions: Map<string, { x: number; y: number }>,
+  origin: string,
+  size: { width: number; height: number },
+  readableZoom: number,
+): Viewport | null {
+  const all = boundsOf(positions, positions.keys());
+  if (!all) return null;
+  const whole = fitViewport(all, size, { minZoom: 0, maxZoom: 1 });
+  if (whole.zoom >= readableZoom) return whole;
+  const group = boundsOf(positions, focusGroup(graph, origin)) ?? all;
+  return fitViewport(group, size, { minZoom: readableZoom, maxZoom: 1 });
+}
+
+const referenceNumber = (reference: string) =>
+  Number(reference.replace(/\D+/g, "")) || 0;
+/** Tickets in T-number order, so a list reads the same every time. */
+export function byReference<T extends { reference: string }>(items: T[]) {
+  return [...items].sort(
+    (a, b) => referenceNumber(a.reference) - referenceNumber(b.reference),
+  );
 }

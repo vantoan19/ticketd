@@ -11,11 +11,14 @@ export function DocumentPicker({
   onPick,
   exclude = [],
   autoFocus = true,
+  includeSupport = false,
 }: {
   onPick: (document: DocumentSummary) => void;
   /** Document IDs already chosen; they are not offered again. */
   exclude?: string[];
   autoFocus?: boolean;
+  /** Also offer Activity details, which are Documents that support a ticket. */
+  includeSupport?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocumentSummary[] | null>(null);
@@ -27,8 +30,8 @@ export function DocumentPicker({
       () => {
         const text = query.trim();
         const request = text
-          ? documents.search(text, null, 0)
-          : documents.recent(0);
+          ? documents.search(text, null, 0, includeSupport)
+          : documents.recent(0, includeSupport);
         void request
           .then((found) => {
             if (current) {
@@ -46,7 +49,7 @@ export function DocumentPicker({
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, includeSupport]);
   const shown = (results ?? []).filter((item) => !exclude.includes(item.id));
   return (
     <div className="document-picker">
@@ -70,6 +73,9 @@ export function DocumentPicker({
             >
               <FileText aria-hidden="true" />
               <span className="truncate">{item.heading}</span>
+              {item.origin_ticket && (
+                <small>{item.origin_ticket} · Activity details</small>
+              )}
             </button>
           </li>
         ))}

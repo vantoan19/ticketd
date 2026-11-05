@@ -51,6 +51,11 @@ export function usePlanView(
       try {
         await change();
         await refresh();
+        // Show this change now rather than at the next workspace poll.
+        await plansClient.show(planId).then(
+          (view) => setLoaded({ id: planId, view, error: "" }),
+          () => {},
+        );
         return true;
       } catch (reason) {
         setActionError(String(reason));
@@ -59,7 +64,7 @@ export function usePlanView(
         setPending(false);
       }
     },
-    [refresh],
+    [refresh, planId],
   );
   return {
     view: current?.view ?? null,

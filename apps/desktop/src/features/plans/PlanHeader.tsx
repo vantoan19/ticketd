@@ -37,13 +37,16 @@ function planContext(
   const names = projects
     .filter((project) => members.some((item) => item.project_id === project.id))
     .map((project) => project.name);
+  const unlinked = members.some((item) => !item.project_id);
   const tickets = `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`;
   const done = members.filter((item) => item.status === "Done").length;
   const blocked = members.filter(
     (item) => item.availability === "Blocked",
   ).length;
   return [
-    names.length ? `${tickets} across ${list(names)}` : tickets,
+    names.length || unlinked
+      ? `${tickets} across ${list([...names, ...(unlinked ? ["Unlinked"] : [])])}`
+      : tickets,
     ...(members.length ? [`${done} of ${members.length} done`] : []),
     ...(blocked ? [`${blocked} blocked`] : []),
   ].join(" · ");
@@ -111,27 +114,35 @@ export function PlanHeader({
           </p>
         </div>
         <div className="plan-actions">
-          <Button size="sm" disabled={pending} onClick={() => setAdding(true)}>
-            <Plus data-icon="inline-start" /> Add tickets
-          </Button>
-          <IconButton
-            label="Rename Plan"
-            disabled={pending}
-            onClick={startRename}
-          >
-            <Pencil />
-          </IconButton>
           {current.archived ? (
-            <IconButton
-              label="Reactivate Plan"
+            <Button
+              size="sm"
               disabled={pending}
               onClick={() =>
                 void run(() => plansClient.change(plan.id, null, false))
               }
             >
-              <ArchiveRestore />
-            </IconButton>
+              <ArchiveRestore data-icon="inline-start" /> Reactivate
+            </Button>
           ) : (
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => setAdding(true)}
+            >
+              <Plus data-icon="inline-start" /> Add tickets
+            </Button>
+          )}
+          {!current.archived && (
+            <IconButton
+              label="Rename Plan"
+              disabled={pending}
+              onClick={startRename}
+            >
+              <Pencil />
+            </IconButton>
+          )}
+          {!current.archived && (
             <IconButton
               label="Archive Plan"
               disabled={pending}
@@ -215,16 +226,18 @@ export function PlanHeader({
       ) : (
         <div>
           {current.purpose && <p className="plan-purpose">{current.purpose}</p>}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setPurpose(current.purpose);
-              setEditingPurpose(true);
-            }}
-          >
-            {current.purpose ? "Edit purpose" : "Add purpose"}
-          </Button>
+          {!current.archived && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setPurpose(current.purpose);
+                setEditingPurpose(true);
+              }}
+            >
+              {current.purpose ? "Edit purpose" : "Add purpose"}
+            </Button>
+          )}
         </div>
       )}
       {view && <PlanDocuments view={view} state={state} />}
