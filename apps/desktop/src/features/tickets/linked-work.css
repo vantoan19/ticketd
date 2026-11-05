@@ -212,7 +212,8 @@
   .linked-work-row[data-kind="blocked_by"] .linked-work-status,
   .linked-work-row[data-kind="blocks"] .linked-work-status {
     display: block;
-    grid-column: 2 / -1;
+    /* Same column as the title, never under the reference. */
+    grid-column: 3;
     white-space: normal;
   }
   .linked-work-external {

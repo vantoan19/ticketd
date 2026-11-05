@@ -68,6 +68,10 @@
   align-items: center;
   gap: 4px;
 }
+.create-description-hint {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
 .create-restored {
   color: var(--muted-foreground);
   font-size: 14px;

@@ -21,7 +21,7 @@ export function TokenField({
   /** Accessible name of the text input. */
   label: string;
   placeholder?: string;
-  /** Existing values offered in a dropdown under the field while it has focus. */
+  /** Existing values offered in a dropdown above the field (it sits at a dialog's bottom edge) while it has focus. */
   suggestions?: string[];
   className?: string;
 }) {
@@ -114,7 +114,7 @@ export function TokenField({
           id={listId}
           role="listbox"
           aria-label={`${label} suggestions`}
-          className="absolute top-full right-0 left-0 z-10 mt-1 flex max-h-48 flex-col overflow-auto rounded-md bg-popover p-1 text-sm shadow-(--shadow-border-base)"
+          className="absolute right-0 bottom-full left-0 z-10 mb-1 flex max-h-48 flex-col overflow-auto rounded-md bg-popover p-1 text-sm shadow-(--shadow-border-base)"
         >
           {offered.map((tag, index) => (
             <li

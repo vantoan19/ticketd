@@ -143,6 +143,17 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   expect(screen.getByText(/Draft restored/)).toBeTruthy();
 });
 
+test("the empty description says what to write and that Markdown works", async () => {
+  render(<Harness create={vi.fn()} />);
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  expect(editor.style.getPropertyValue("--editor-placeholder")).toBe(
+    '"Steps, acceptance criteria, or a checklist"',
+  );
+  expect(screen.getByText("Markdown works · type / for blocks")).toBeTruthy();
+});
+
 test("Create ticket stays disabled with its reason until there is a title", () => {
   const create = vi.fn();
   render(<Harness create={create} />);
