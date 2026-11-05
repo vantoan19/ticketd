@@ -427,6 +427,8 @@ export function useTicketWorkspace(
     // sit beside it as "outside the current results", so entering or leaving
     // Trash starts without a selection.
     if ((next === "trash") !== trash) selectTicket(null);
+    // Another Plan opens on its own list, not on the previous Plan's open ticket.
+    if (planId && planId !== navigation.plan) setSelected(null);
     setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");

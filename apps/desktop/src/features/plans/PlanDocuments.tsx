@@ -36,7 +36,7 @@ export function PlanDocuments({
         <button
           type="button"
           title={doc.heading}
-          onClick={() => openDocument?.(doc.id)}
+          onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
         >
           {doc.heading}
           {doc.trashed && " (Trashed)"}

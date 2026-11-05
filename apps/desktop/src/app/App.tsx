@@ -70,8 +70,10 @@ function AppContent() {
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
+      // The reader stays mounted while hidden, so ask it to close from any view.
       setDocumentReturn(null);
-      if (view === "documents") setDocumentListRequest((count) => count + 1);
+      setDocumentTarget(null);
+      setDocumentListRequest((count) => count + 1);
     }
     if (next === "settings" && view !== "settings") {
       setViewBeforeSettings(view);
@@ -235,13 +237,14 @@ function AppContent() {
         }}
       >
         <DocumentNavigation.Provider
-          value={(id) => {
+          value={(id, backLabel) => {
             if (view !== "documents") {
               setDocumentReturn(view);
               setDocumentReturnLabel(
-                view === "tickets" && workspace.selected
-                  ? `Back to ${workspace.selected}`
-                  : null,
+                backLabel ??
+                  (view === "tickets" && workspace.selected
+                    ? `Back to ${workspace.selected}`
+                    : null),
               );
             }
             setDocumentTarget({ id, key: Date.now() });

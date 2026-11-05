@@ -19,6 +19,14 @@
 }
 .activity-heading span,
 .activity-muted,
+.activity-entry {
+  transition: background-color 600ms ease;
+}
+.activity-entry.activity-entry-target {
+  background-color: color-mix(in oklab, var(--ring) 22%, transparent);
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--ring) 22%, transparent);
+  border-radius: 4px;
+}
 .activity-meta {
   color: var(--muted-foreground);
   font-size: 12px;

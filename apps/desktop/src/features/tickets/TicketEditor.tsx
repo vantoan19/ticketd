@@ -167,8 +167,10 @@ export function TicketEditor({
   const reference = ticket.reference;
   useEffect(() => {
     const edit = (event: Event) => {
-      if ((event as CustomEvent<string>).detail === reference)
+      if ((event as CustomEvent<string>).detail === reference) {
         setBodyMode("editing");
+        setBodyFocus((count) => count + 1);
+      }
     };
     window.addEventListener("ticketd:edit-description", edit);
     return () => window.removeEventListener("ticketd:edit-description", edit);
@@ -380,6 +382,7 @@ export function TicketEditor({
             size="sm"
             type="button"
             onClick={() => adoptSaved()}
+            autoFocus
           >
             Discard draft
           </Button>
@@ -563,28 +566,38 @@ export function TicketEditor({
       <p role="status" className="editor-save-state">
         {saving
           ? "Saving…"
-          : dirty && state !== "failed"
-            ? "Pending save"
-            : state === "failed"
-              ? "Save failed"
-              : state === "saved"
-                ? "Saved"
-                : ""}
+          : conflict
+            ? "Unsaved — choose a version"
+            : dirty && state !== "failed"
+              ? "Pending save"
+              : state === "failed"
+                ? "Save failed"
+                : state === "saved"
+                  ? "Saved"
+                  : ""}
       </p>
       {state === "failed" && (
-        <p role="alert">
-          {error}{" "}
-          <button
-            type="button"
-            className="underline"
-            onClick={() => {
-              setState("pending");
-              setRetry((value) => value + 1);
-            }}
-          >
-            Retry
-          </button>
-        </p>
+        <div role="alert">
+          <p>
+            Couldn&apos;t save your changes.{" "}
+            <button
+              type="button"
+              className="underline"
+              onClick={() => {
+                setState("pending");
+                setRetry((value) => value + 1);
+              }}
+            >
+              Retry
+            </button>
+          </p>
+          {error && (
+            <details>
+              <summary>Details</summary>
+              {error}
+            </details>
+          )}
+        </div>
       )}
     </div>
   );

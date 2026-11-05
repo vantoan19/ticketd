@@ -195,7 +195,7 @@ export function TicketFilters(p: Props) {
                   )}
                   <Field>
                     <FieldLabel htmlFor="filter-family">
-                      Parent family reference
+                      Parent ticket
                     </FieldLabel>
                     <Input
                       id="filter-family"

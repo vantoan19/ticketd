@@ -100,5 +100,5 @@ test("adds context, designates a spec, and opens its source", async () => {
     ),
   );
   fireEvent.click(screen.getByRole("button", { name: "Proposal" }));
-  expect(open).toHaveBeenCalledWith("doc");
+  expect(open).toHaveBeenCalledWith("doc", "Back to Plan");
 });
