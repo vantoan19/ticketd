@@ -35,10 +35,11 @@ export function PlanDocuments({
         <FileText aria-hidden="true" size={14} />
         <button
           type="button"
+          className={isSpec ? "plan-spec-chip" : undefined}
           title={doc.heading}
           onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
         >
-          {doc.heading}
+          {isSpec ? `Spec: ${doc.heading}` : doc.heading}
           {doc.trashed && " (Trashed)"}
         </button>
         {!readOnly && (
@@ -91,12 +92,7 @@ export function PlanDocuments({
   }
   return (
     <section className="plan-documents" aria-label="Plan context">
-      {spec && (
-        <div>
-          <p>Primary spec</p>
-          <ul>{documentRow(spec)}</ul>
-        </div>
-      )}
+      {spec && <ul>{documentRow(spec)}</ul>}
       {supporting.length > 0 && (
         <details>
           <summary>
@@ -107,7 +103,12 @@ export function PlanDocuments({
         </details>
       )}
       {!readOnly && (
-        <Button variant="ghost" size="sm" onClick={() => setAdding(!adding)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-expanded={adding}
+          onClick={() => setAdding(!adding)}
+        >
           Add context
         </Button>
       )}

@@ -1,7 +1,14 @@
 import { useContext } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
-import { Archive, ArchiveRestore, Network, Pencil, Plus } from "lucide-react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Archive,
+  ArchiveRestore,
+  MoreHorizontal,
+  Network,
+  Pencil,
+  Plus,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,56 +19,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { plansClient, type Plan, type View } from "@/lib/api/plans";
+import { plansClient, type Plan } from "@/lib/api/plans";
 import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { PlanDocuments } from "./PlanDocuments";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import type { PlanViewState } from "./usePlanView";
 import "./plan.css";
-
-const list = (names: string[]) =>
-  names.length < 3
-    ? names.join(" and ")
-    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-
-/** The summary line: scope, progress and what is held up. */
-function planContext(
-  members: View["members"],
-  projects: { id: string; name: string }[],
-) {
-  const names = projects
-    .filter((project) => members.some((item) => item.project_id === project.id))
-    .map((project) => project.name);
-  const unlinked = members.some((item) => !item.project_id);
-  const tickets = `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`;
-  const done = members.filter((item) => item.status === "Done").length;
-  // A Duplicate is resolved by its original and a Canceled ticket will not be
-  // done, so neither holds progress back.
-  const duplicates = members.filter(
-    (item) => item.status === "Duplicate",
-  ).length;
-  const canceled = members.filter((item) => item.status === "Canceled").length;
-  const counted = members.length - duplicates - canceled;
-  const blocked = members.filter(
-    (item) => item.availability === "Blocked",
-  ).length;
-  return [
-    names.length === 0 && unlinked
-      ? `${tickets}, not in a project`
-      : names.length
-        ? `${tickets} across ${list([...names, ...(unlinked ? ["Unlinked"] : [])])}`
-        : tickets,
-    ...(counted ? [`${done} of ${counted} done`] : []),
-    ...(canceled ? [`${canceled} canceled`] : []),
-    ...(duplicates ? [`${duplicates} duplicate`] : []),
-    ...(blocked ? [`${blocked} blocked`] : []),
-  ].join(" · ");
-}
 
 /**
  * The Plan's name and state, status counts, and actions, shown above its
@@ -70,14 +45,12 @@ function planContext(
 export function PlanHeader({
   plan,
   plans,
-  projects,
   state,
   children,
 }: {
   children?: ReactNode;
   plan: Plan;
   plans: Plan[];
-  projects: { id: string; name: string }[];
   state: PlanViewState;
 }) {
   const { view, loadError, pending, actionError, run } = state;
@@ -97,8 +70,7 @@ export function PlanHeader({
     setNameError("");
     setRenaming(true);
   }
-  async function rename(event: FormEvent) {
-    event.preventDefault();
+  async function rename() {
     if (!name.trim()) {
       setNameError("Enter a name for this Plan.");
       return;
@@ -107,11 +79,51 @@ export function PlanHeader({
     if (await run(() => plansClient.change(plan.id, name, null)))
       setRenaming(false);
   }
+  function renameKey(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void rename();
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      setRenaming(false);
+    }
+  }
+  // Counts include parents and subtickets; a Duplicate is resolved by its
+  // original and a Canceled ticket will not be done, so neither holds
+  // progress back.
+  const done = view?.counts.done ?? 0;
+  const counted = view
+    ? Object.values(view.counts).reduce((sum, n) => sum + n, 0) -
+      view.counts.canceled -
+      view.counts.duplicate
+    : 0;
+  const canArchive = !current.archived;
   return (
     <header className="plan-header">
       <div className="plan-title-row">
-        <div className="plan-title">
-          <div className="plan-name-row">
+        {renaming ? (
+          <>
+            <Input
+              className="plan-name-input"
+              aria-label="Plan name"
+              value={name}
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+              aria-invalid={nameError ? true : undefined}
+              onChange={(event) => {
+                setName(event.target.value);
+                setNameError("");
+              }}
+              onKeyDown={renameKey}
+            />
+            {nameError && (
+              <span className="plan-name-error" role="alert">
+                {nameError}
+              </span>
+            )}
+          </>
+        ) : (
+          <>
             <h1 id="tickets-heading" tabIndex={-1}>
               {current.name}
             </h1>
@@ -119,12 +131,11 @@ export function PlanHeader({
               <StatusDot tone={current.archived ? "neutral" : "positive"} />
               {current.archived ? "Archived" : "Active"}
             </span>
-          </div>
-          <p>
-            {view ? `Plan · ${planContext(view.members, projects)}` : "Plan"}
-          </p>
-        </div>
+          </>
+        )}
+        <span className="plan-title-spacer" />
         <div className="plan-actions">
+          {children}
           {current.archived ? (
             <Button
               size="sm"
@@ -137,7 +148,7 @@ export function PlanHeader({
             </Button>
           ) : (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               disabled={pending}
               onClick={() => setAdding(true)}
@@ -145,68 +156,43 @@ export function PlanHeader({
               <Plus data-icon="inline-start" /> Add tickets
             </Button>
           )}
-          {!current.archived && (
-            <IconButton
-              label="Rename Plan"
-              disabled={pending}
-              onClick={startRename}
-            >
-              <Pencil />
-            </IconButton>
+          {(canArchive || openGraph) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton label="Plan actions">
+                  <MoreHorizontal />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                {canArchive && (
+                  <DropdownMenuItem disabled={pending} onSelect={startRename}>
+                    <Pencil /> Rename
+                  </DropdownMenuItem>
+                )}
+                {openGraph && (
+                  <DropdownMenuItem onSelect={() => openGraph(plan.id)}>
+                    <Network /> Open context graph
+                  </DropdownMenuItem>
+                )}
+                {canArchive && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={pending}
+                      onSelect={() => setArchiving(true)}
+                    >
+                      <Archive /> Archive Plan…
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-          {!current.archived && (
-            <IconButton
-              label="Archive Plan"
-              disabled={pending}
-              onClick={() => setArchiving(true)}
-            >
-              <Archive />
-            </IconButton>
-          )}
-          {openGraph && (
-            <IconButton
-              label="Context graph"
-              onClick={() => openGraph(plan.id)}
-            >
-              <Network />
-            </IconButton>
-          )}
-          {children}
         </div>
       </div>
-      {renaming && (
-        <form className="plan-rename" onSubmit={(event) => void rename(event)}>
-          <Field data-invalid={nameError ? true : undefined}>
-            <FieldLabel htmlFor="plan-rename-name">Plan name</FieldLabel>
-            <Input
-              id="plan-rename-name"
-              value={name}
-              autoFocus
-              aria-invalid={nameError ? true : undefined}
-              onChange={(event) => {
-                setName(event.target.value);
-                setNameError("");
-              }}
-            />
-            {nameError && <FieldError>{nameError}</FieldError>}
-          </Field>
-          <div className="plan-rename-actions">
-            <Button type="submit" size="sm" disabled={pending}>
-              Save name
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setRenaming(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      )}
       {editingPurpose ? (
         <form
+          className="plan-purpose-form"
           onSubmit={(event) => {
             event.preventDefault();
             void run(() => plansClient.setPurpose(plan.id, purpose)).then(
@@ -236,10 +222,11 @@ export function PlanHeader({
           </Button>
         </form>
       ) : (
-        <div>
+        <div className="plan-purpose-row">
           {current.purpose && <p className="plan-purpose">{current.purpose}</p>}
           {!current.archived && (
             <Button
+              className="plan-purpose-edit"
               variant="ghost"
               size="sm"
               onClick={() => {
@@ -247,33 +234,48 @@ export function PlanHeader({
                 setEditingPurpose(true);
               }}
             >
+              <Pencil data-icon="inline-start" />
               {current.purpose ? "Edit purpose" : "Add purpose"}
             </Button>
           )}
         </div>
       )}
-      {view && <PlanDocuments view={view} state={state} />}
       {(actionError || loadError) && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{actionError || loadError}</AlertDescription>
         </Alert>
       )}
       {view && (
-        <dl
-          className="plan-counts"
-          aria-label="Tickets by status"
-          title="Counts include parents and subtickets equally."
-        >
-          {ticketStatuses.map((status) => (
-            <div key={status}>
-              <dt>
-                <StatusIcon status={status} size={14} decorative />
-                {status}
-              </dt>
-              <dd>{view.counts[statusCountKey[status]]}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="plan-summary">
+          <span className="plan-progress">
+            <span className="plan-progress-bar" aria-hidden="true">
+              <span
+                style={{ width: `${counted ? (done / counted) * 100 : 0}%` }}
+              />
+            </span>
+            {done} of {counted} done
+          </span>
+          <span className="plan-summary-rule" aria-hidden="true" />
+          <dl
+            className="plan-counts"
+            aria-label="Tickets by status"
+            title="Counts include parents and subtickets equally."
+          >
+            {ticketStatuses.map((status) => (
+              <div
+                key={status}
+                data-zero={view.counts[statusCountKey[status]] === 0}
+              >
+                <dt>
+                  <StatusIcon status={status} size={14} decorative />
+                  {status}
+                </dt>
+                <dd>{view.counts[statusCountKey[status]]}</dd>
+              </div>
+            ))}
+          </dl>
+          <PlanDocuments view={view} state={state} />
+        </div>
       )}
       <Dialog open={archiving} onOpenChange={setArchiving}>
         <DialogContent>

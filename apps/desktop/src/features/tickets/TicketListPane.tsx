@@ -182,7 +182,6 @@ export function TicketListPane({
           key={scopedPlan.id}
           plan={scopedPlan}
           plans={plans}
-          projects={projects}
           state={planState}
         >
           <TicketFilters part="controls" {...filterProps} />
