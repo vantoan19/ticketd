@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
@@ -58,6 +58,21 @@ export function TicketPage({
   const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const work = useLinkedWork(ticket, revision, refresh, active);
+  // Pages stay mounted while hidden and the shared scrollers keep their
+  // offset, so showing a ticket starts it at the top: document, rail, detail.
+  const page = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const content = page.current;
+    if (!active || !content) return;
+    for (const node of [
+      content.parentElement,
+      content,
+      content.querySelector(".detail-document"),
+      content.querySelector(":scope > .ticket-properties"),
+    ]) {
+      if (node) node.scrollTop = 0;
+    }
+  }, [active]);
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
   const source = externalSource(ticket);
@@ -123,6 +138,7 @@ export function TicketPage({
   const contentLocked = Boolean(source?.content_locked);
   return (
     <div
+      ref={page}
       className="detail-content"
       hidden={!active}
       data-trashed={ticket.trashed || undefined}

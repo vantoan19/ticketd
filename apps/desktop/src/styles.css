@@ -1518,3 +1518,10 @@ html[data-theme="dark"][data-input="pointer"]
   opacity: 1;
   cursor: default;
 }
+
+/* The New ticket dialog grows by the docked editor toolbar on focus; a centred
+   dialog would shift up, so its top edge is anchored instead. */
+.ui-dialog:has(.create-form) {
+  top: max(16px, 10dvh);
+  translate: -50% 0;
+}

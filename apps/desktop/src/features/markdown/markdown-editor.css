@@ -130,7 +130,9 @@
   margin-right: 8px;
   accent-color: var(--primary);
 }
-.rich-document li > div[data-slate-node] {
+/* Only a task item keeps its text inline beside the checkbox; a plain item's
+   text stays a block so the engine anchors the bullet to its first line. */
+.rich-document li:has(> input[type="checkbox"]) > div[data-slate-node] {
   display: inline;
 }
 .rich-document a {

@@ -735,6 +735,16 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
       .textContent,
   ).toContain("3 of 7");
   expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
+  // Clear all sits in the footer beside Done, not in the header.
+  const footer = panel.getByRole("status").parentElement!;
+  expect(
+    within(footer).getByRole("button", { name: "Clear all" }),
+  ).toBeTruthy();
+  expect(
+    within(
+      panel.getByRole("heading", { name: "Filters" }).parentElement!,
+    ).queryByRole("button", { name: "Clear all" }),
+  ).toBeNull();
   // The Done status chip shares the name; the footer button comes last.
   fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
   expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();

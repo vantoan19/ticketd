@@ -174,6 +174,7 @@ export function BulkControls({
                 variant="outline"
                 size="sm"
                 disabled={pending}
+                className="bulk-organize"
                 aria-label="Organize selected tickets"
               >
                 Organize

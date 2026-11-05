@@ -173,9 +173,6 @@ export function TicketFilters(p: Props) {
             >
               <div className="filters-head">
                 <h2>Filters</h2>
-                <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-                  Clear all
-                </Button>
               </div>
               {p.navigation.kind !== "progress" && (
                 <FilterSection label="Status">
@@ -247,9 +244,14 @@ export function TicketFilters(p: Props) {
                 <span role="status">
                   {ofTotal} {p.total === 1 ? "ticket matches" : "tickets match"}
                 </span>
-                <Button size="sm" onClick={() => setFiltersOpen(false)}>
-                  Done
-                </Button>
+                <span className="filters-actions">
+                  <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+                    Clear all
+                  </Button>
+                  <Button size="sm" onClick={() => setFiltersOpen(false)}>
+                    Done
+                  </Button>
+                </span>
               </div>
             </PopoverContent>
           </Popover>

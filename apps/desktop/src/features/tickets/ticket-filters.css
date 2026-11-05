@@ -77,6 +77,11 @@
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.filters-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .parent-search ul {
   margin-top: 4px;
   list-style: none;
