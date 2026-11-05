@@ -137,11 +137,9 @@ function Comparison({
       </caption>
       <thead>
         <tr>
-          <th scope="col">
-            <span className="sr-only">Item</span>
-          </th>
-          <th scope="col">This workspace</th>
-          <th scope="col">Backup</th>
+          <th scope="col">Replaces</th>
+          <th scope="col">Current workspace</th>
+          <th scope="col">This backup</th>
         </tr>
       </thead>
       <tbody>
@@ -277,7 +275,7 @@ export function RestoreDialog({
         onInteractOutside={(event) => event.preventDefault()}
       >
         <div className="restore-head">
-          <DialogTitle>Restore from a backup</DialogTitle>
+          <DialogTitle>Restore from backup</DialogTitle>
           <DialogDescription>
             {done
               ? "The workspace now matches the backup."
@@ -467,7 +465,7 @@ export function RestoreDialog({
                 <RotateCcw aria-hidden="true" />
                 {phase.name === "restoring"
                   ? "Restoring…"
-                  : "Replace workspace"}
+                  : "Replace workspace with backup"}
               </Button>
             </span>
           )}
