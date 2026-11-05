@@ -402,10 +402,15 @@ test("Add subticket opens the link dialog already saying this ticket is the pare
   });
   renderSection(base);
   fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
-  const dialog = await screen.findByRole("dialog");
+  const dialog = await screen.findByRole("dialog", { name: "Add subticket" });
   expect(
     within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
   ).toContain("parent of");
+  // The primary waits for a chosen ticket and says why.
+  expect(
+    within(dialog).getByRole("button", { name: "Link ticket" }),
+  ).toHaveProperty("disabled", true);
+  expect(within(dialog).getByText("Choose a ticket to link")).toBeTruthy();
 });
 
 test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {
