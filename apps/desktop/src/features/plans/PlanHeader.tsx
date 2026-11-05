@@ -330,11 +330,12 @@ export function PlanHeader({
             {ticketStatuses.map((status) => (
               <div
                 key={status}
+                title={status}
                 data-zero={view.counts[statusCountKey[status]] === 0}
               >
                 <dt>
                   <StatusIcon status={status} size={14} decorative />
-                  {status}
+                  <span className="plan-count-name">{status}</span>
                 </dt>
                 <dd>{view.counts[statusCountKey[status]]}</dd>
               </div>

@@ -7,6 +7,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { IconButton } from "@/components/ui/icon-button";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
@@ -28,12 +33,11 @@ export function PlanDocuments({
     (doc) => doc.id === view.plan.spec_document_id,
   );
   const supporting = view.documents.filter((doc) => doc.id !== spec?.id);
-  // The named chip is the designated spec. A Plan linked to a single Document
-  // that was never designated (`plan document` without `plan spec`) shows that
-  // Document as the chip too, labeled "Document:", so context never hides
-  // behind a disclosure when there is only one thing to show.
-  const featured =
-    spec ?? (supporting.length === 1 ? supporting[0] : undefined);
+  // The named chip is the designated spec. A Plan with no designated spec
+  // shows its first linked Document as the chip, labeled "Document:", so the
+  // context is named however many Documents there are; the others sit behind
+  // a "+N" popover.
+  const featured = spec ?? supporting[0];
   const rest = supporting.filter((doc) => doc.id !== featured?.id);
   function documentRow(doc: View["documents"][number], chip = false) {
     const isSpec = doc.id === spec?.id;
@@ -109,37 +113,51 @@ export function PlanDocuments({
   }
   return (
     <section className="plan-documents" aria-label="Plan context">
-      {rest.length > 0 && (
-        <details>
-          <summary>
-            {rest.length} linked {rest.length === 1 ? "Document" : "Documents"}
-          </summary>
-          <ul>{rest.map((doc) => documentRow(doc))}</ul>
-        </details>
-      )}
       {featured && <ul>{documentRow(featured, true)}</ul>}
-      {!readOnly && (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={adding}
-          onClick={() => setAdding(!adding)}
-        >
-          <Plus data-icon="inline-start" /> Add context
-        </Button>
+      {rest.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="plan-documents-more"
+              aria-label={`${rest.length} more linked ${rest.length === 1 ? "Document" : "Documents"}`}
+            >
+              +{rest.length}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="plan-documents-popover"
+            aria-label="More linked Documents"
+          >
+            <ul>{rest.map((doc) => documentRow(doc))}</ul>
+          </PopoverContent>
+        </Popover>
       )}
-      {adding && !readOnly && (
-        <div className="plan-document-picker">
-          <DocumentPicker
-            includeSupport
-            exclude={view.documents.map((doc) => doc.id)}
-            onPick={(doc) =>
-              void state.run(() =>
-                plansClient.setDocument(view.plan.id, doc.id, true),
-              )
-            }
-          />
-        </div>
+      {!readOnly && (
+        <Popover open={adding} onOpenChange={setAdding}>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <Plus data-icon="inline-start" /> Add context
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="plan-document-picker"
+            aria-label="Add context"
+          >
+            <DocumentPicker
+              includeSupport
+              exclude={view.documents.map((doc) => doc.id)}
+              onPick={(doc) =>
+                void state.run(() =>
+                  plansClient.setDocument(view.plan.id, doc.id, true),
+                )
+              }
+            />
+          </PopoverContent>
+        </Popover>
       )}
     </section>
   );

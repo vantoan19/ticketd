@@ -256,9 +256,15 @@ test("a Plan and a project carry different icons", () => {
   expect(container.querySelectorAll(".ticket-row-context svg")).toHaveLength(2);
 });
 
-test("a single-status view drops the group header and the Ready dot", () => {
+test("a filtered Todo list keeps each row's Ready word", () => {
+  renderList([ticket({ availability: "Ready" })], { singleStatus: true });
+  expect(screen.getByText("Ready")).toBeTruthy();
+});
+
+test("the Ready view drops the group header and the Ready dot", () => {
   renderList([ticket({ availability: "Ready" })], {
     singleStatus: true,
+    readyView: true,
     grouping: { counts: { ...counts, todo: 1 }, onAdd: vi.fn() },
   });
   expect(screen.queryByRole("heading", { level: 2 })).toBeNull();

@@ -44,6 +44,7 @@ export function TicketList({
   rowAction,
   grouping,
   singleStatus = false,
+  readyView = false,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -65,10 +66,13 @@ export function TicketList({
     onAdd?: (status: string, trigger: HTMLButtonElement) => void;
   };
   /**
-   * The view lists one status (Ready, In progress): no group header and no
-   * per-row Ready dot or status word, since the view's title says it.
+   * The view lists one status (Ready, In progress, or a status filter): no
+   * group header and no per-row status word, since the view's title says it.
+   * A Todo row still carries Ready or Blocked.
    */
   singleStatus?: boolean;
+  /** Every row is Ready (the Ready view), so the per-row Ready dot is omitted. */
+  readyView?: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   // Groups and rows share one list so a row that changes group keeps its
@@ -198,6 +202,7 @@ export function TicketList({
                   scope={scope}
                   grouped={grouping !== undefined}
                   singleStatus={singleStatus}
+                  readyView={readyView}
                 />
               </button>
               {rowAction && (
@@ -242,11 +247,13 @@ function RowDetails({
   scope,
   grouped,
   singleStatus,
+  readyView,
 }: {
   ticket: Ticket;
   scope: RowScope;
   grouped: boolean;
   singleStatus: boolean;
+  readyView: boolean;
 }) {
   const now = useNow();
   const state = readiness(ticket);
@@ -254,11 +261,14 @@ function RowDetails({
   const tagSlot = rowTagSlot(ticket.tags);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
-    // A single-status view already says Ready or the status; Blocked is still news.
+    // The Ready view already says Ready, and a status view says its status;
+    // Blocked is still news, and so is Ready inside a filtered Todo list.
     state.kind === "blocked" ||
-    (!singleStatus &&
-      (state.kind !== "status" ||
-        (!grouped && !context?.label.startsWith("Duplicate"))));
+    (state.kind === "ready" && !readyView) ||
+    (state.kind === "status" &&
+      !singleStatus &&
+      !grouped &&
+      !context?.label.startsWith("Duplicate"));
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">

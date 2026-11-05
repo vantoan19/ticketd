@@ -154,6 +154,26 @@
 .plan-counts > div[data-zero="true"] {
   opacity: 0.6;
 }
+/* Below ~1100pt the status words give way to their icons (the word stays
+   available to screen readers and as a tooltip) so the Document chip keeps the
+   row instead of wrapping under the counts. */
+.plan-summary {
+  container-type: inline-size;
+}
+@container (max-width: 1100px) {
+  .plan-counts {
+    flex-wrap: nowrap;
+    gap: 4px 12px;
+  }
+  .plan-count-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 .plan-counts > div {
   display: flex;
   align-items: center;
@@ -278,31 +298,23 @@
 .plan-documents {
   position: relative;
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: 4px 8px;
   margin-left: auto;
   text-align: left;
 }
-.plan-documents > details > ul,
-.plan-document-picker {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
+.plan-document-picker,
+.plan-documents-popover {
   width: 320px;
+  max-width: calc(100vw - 32px);
   padding: 8px;
-  border-radius: 8px;
-  background: var(--popover, var(--background));
-  box-shadow:
-    var(--shadow-border-base),
-    0 8px 24px -8px #0000002e;
 }
-.plan-documents > details {
-  position: static;
-}
-.plan-documents summary {
-  color: var(--muted-foreground);
-  font-size: 12px;
+.plan-documents-more {
+  flex: none;
+  padding-inline: 6px;
+  font-variant-numeric: tabular-nums;
 }
 .plan-spec-chip {
   display: inline-flex;

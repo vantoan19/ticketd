@@ -351,11 +351,12 @@ export function PlanDependencies({
               action={
                 !archived && (
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     aria-expanded={selected === members[0]?.reference}
                     onClick={() => setSelected(members[0]?.reference ?? null)}
                   >
+                    <Link2 data-icon="inline-start" aria-hidden="true" />
                     Add blocker…
                   </Button>
                 )
@@ -429,7 +430,7 @@ export function PlanDependencies({
                         {member.title}
                       </span>
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
                         aria-expanded={open}
                         aria-label={`${member.reference}: ${label}`}
