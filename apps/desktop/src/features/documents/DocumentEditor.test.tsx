@@ -31,12 +31,15 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({
     value,
     onChange,
+    focusRequest = 0,
   }: {
     value: string;
     onChange: (value: string) => void;
+    focusRequest?: number;
   }) => (
     <textarea
       aria-label="Your thought"
+      data-focus-request={focusRequest}
       value={value}
       onChange={(event) => onChange(event.target.value)}
     />
@@ -757,4 +760,28 @@ it("keeps Done in place through the pointer sequence that blurs the editor", () 
   fireEvent.mouseUp(done);
   fireEvent.click(done);
   expect(close).toHaveBeenCalledOnce();
+});
+
+it("asks the editor to take focus back after each conflict action (D2)", async () => {
+  vi.useFakeTimers();
+  const original = {
+    id: "d1",
+    title: "T",
+    body: "Original",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  };
+  vi.mocked(documents.save).mockRejectedValue("offline");
+  outside({ ...original, body: "Changed externally" });
+  renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  const editor = screen.getByLabelText("Your thought");
+  fireEvent.change(editor, { target: { value: "Local draft" } });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(editor.getAttribute("data-focus-request")).toBe("0");
+  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  expect(editor.getAttribute("data-focus-request")).toBe("1");
 });

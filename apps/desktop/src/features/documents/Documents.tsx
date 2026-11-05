@@ -2,7 +2,7 @@ import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Pin, Plus, Search } from "lucide-react";
+import { FileText, Pin, Plus, Search } from "lucide-react";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import {
   documents,
@@ -107,6 +107,9 @@ export function Documents({
   const [recentOffset, setRecentOffset] = useState(0);
   const [pinOffset, setPinOffset] = useState(0);
   const [error, setError] = useState("");
+  const [keptId, setKeptId] = useState<string | null>(null);
+  // Only mention hidden Activity details when including them would actually find something.
+  const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
   const searchInput = useRef<HTMLInputElement>(null);
   const refresh = useCallback(() => {
     void Promise.all([
@@ -188,6 +191,25 @@ export function Documents({
       current = false;
     };
   }, [active, query, filter, offset, includeSupport, changeVersion]);
+  const noVisible =
+    searchKey === JSON.stringify([query, filter, offset, includeSupport]) &&
+    results.length === 0;
+  const probeKey = JSON.stringify([query, filter]);
+  useEffect(() => {
+    let current = true;
+    if (!active || includeSupport || !noVisible) return;
+    void documents
+      .search(query, filter.trim() || null, 0, true)
+      .then(
+        (r) =>
+          current && setHiddenProbe({ key: probeKey, found: r.length > 0 }),
+      )
+      .catch(() => current && setHiddenProbe({ key: probeKey, found: false }));
+    return () => {
+      current = false;
+    };
+  }, [active, includeSupport, noVisible, query, filter, probeKey]);
+  const hiddenMatches = hiddenProbe.key === probeKey && hiddenProbe.found;
   const open = (id: string) => {
     void Promise.all([documents.open(id), documents.tags(id)])
       .then(([doc, values]) => {
@@ -205,6 +227,7 @@ export function Documents({
         const date = relativeDate(doc.updated_at);
         return (
           <li key={doc.id}>
+            <FileText aria-hidden="true" className="document-list-kind" />
             <div className="document-list-content">
               <Button
                 variant="ghost"
@@ -301,7 +324,7 @@ export function Documents({
             {(
               [
                 ["recent", "Recently opened"],
-                ["all", "All"],
+                ["all", "All documents"],
                 ["trash", "Trash"],
               ] as const
             ).map(([value, label]) => (
@@ -416,6 +439,7 @@ export function Documents({
                 No Documents match{" "}
                 {query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}.
                 {!includeSupport &&
+                  hiddenMatches &&
                   " Activity details are hidden; turn on Include Activity details to search them."}
               </p>
             ) : (
@@ -553,6 +577,7 @@ export function Documents({
           }
           onOpenDocument={open}
           closeRequest={listRequest ?? 0}
+          backLabel="Back to Documents"
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
             setSelected(null);
@@ -570,13 +595,14 @@ export function Documents({
         >
           {({ trashed }) => (
             <>
-              {selected.origin_brief && !selected.kept && (
+              {!trashed && selected.origin_brief && !selected.kept && (
                 <Button
                   onClick={() =>
                     void documents
                       .keep(selected.id, crypto.randomUUID())
                       .then((doc) => {
                         setSelected(doc);
+                        setKeptId(doc.id);
                         refresh();
                       })
                       .catch((e: unknown) => setError(String(e)))
@@ -584,6 +610,9 @@ export function Documents({
                 >
                   Keep in Documents
                 </Button>
+              )}
+              {keptId === selected.id && selected.kept && (
+                <p role="status">Kept in Documents.</p>
               )}
               <section aria-label="Document tags">
                 <h2>Tags</h2>
@@ -640,6 +669,7 @@ export function Documents({
                     <label htmlFor="new-document-tag">Add tag</label>
                     <Input
                       id="new-document-tag"
+                      autoFocus
                       value={newTag}
                       onChange={(e) => setNewTag(e.target.value)}
                     />

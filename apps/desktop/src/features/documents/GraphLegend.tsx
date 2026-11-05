@@ -1,3 +1,4 @@
+import { FileText, Layers, Ticket } from "lucide-react";
 import { edgeStyles } from "./graph-text";
 
 /** One sample per line style, naming the relationships it stands for; arrows point source to target. */
@@ -23,4 +24,11 @@ export function GraphLegend() {
       ))}
     </ul>
   );
+}
+
+/** Small kind glyph for list rows; decorative, the row text already names the item. */
+export function KindIcon({ kind }: { kind: string }) {
+  const Icon =
+    kind === "plan" ? Layers : kind === "document" ? FileText : Ticket;
+  return <Icon aria-hidden="true" className="context-graph-kind" />;
 }

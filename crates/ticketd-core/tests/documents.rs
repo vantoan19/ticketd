@@ -1064,3 +1064,16 @@ fn stale_expected_revision_rejects_a_document_change() {
     assert!(error.to_string().contains("changed elsewhere"));
     assert_eq!(workspace.show_document(&doc.id).unwrap().body, "Fresh");
 }
+
+#[test]
+fn heading_keeps_literal_html_text() {
+    use ticketd_core::derive_heading;
+    assert_eq!(
+        derive_heading("Use <b>bold</b> tags").as_deref(),
+        Some("Use <b>bold</b> tags")
+    );
+    assert_eq!(
+        derive_heading("<div>raw</div>").as_deref(),
+        Some("<div>raw</div>")
+    );
+}

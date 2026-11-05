@@ -3,7 +3,7 @@ import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
-import { GraphLegend } from "./GraphLegend";
+import { GraphLegend, KindIcon } from "./GraphLegend";
 import {
   connectionRows,
   edgeLabels,
@@ -395,6 +395,7 @@ export function ContextGraph({
             <ul className="context-graph-list">
               {group.nodes.slice(0, limit).map((node) => (
                 <li key={node.id}>
+                  <KindIcon kind={node.kind} />
                   <button type="button" onClick={() => setSelected(node.id)}>
                     {node.label}
                   </button>

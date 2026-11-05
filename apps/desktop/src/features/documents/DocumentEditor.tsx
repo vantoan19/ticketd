@@ -106,6 +106,7 @@ export function DocumentEditor({
   pinned = false,
   onTogglePin,
   closeRequest = 0,
+  backLabel = "Back to work",
   children,
 }: {
   initial: Document | null;
@@ -122,8 +123,12 @@ export function DocumentEditor({
   onTogglePin?: () => void;
   /** Bumped by the host (sidebar "Documents") to ask the reader to save and return to the list. */
   closeRequest?: number;
+  /** Label of the reader's footer button; the Documents list says where it returns to. */
+  backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
+  const [focusRequest, setFocusRequest] = useState(0);
+  const refocusEditor = () => setFocusRequest((value) => value + 1);
   const [writing, setWriting] = useState(initial === null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
@@ -279,6 +284,7 @@ export function DocumentEditor({
     saving.current = true;
     setStatus("Saving…");
     setFailed(false);
+    const slow = window.setTimeout(() => setStatus("Still saving…"), 2000);
     try {
       const result = await documents.save(
         request.id,
@@ -288,6 +294,7 @@ export function DocumentEditor({
         request.revision,
         request.requestId,
       );
+      window.clearTimeout(slow);
       id.current = result.id;
       revision.current = result.updated_at;
       lastVersion.current = `${result.updated_at}|${result.trashed}`;
@@ -309,6 +316,7 @@ export function DocumentEditor({
       else if (transition.current) void finishTransition();
       else if (closeRequested.current) finish();
     } catch (error) {
+      window.clearTimeout(slow);
       saving.current = false;
       closeRequested.current = false;
       afterSave.current = null;
@@ -465,6 +473,8 @@ export function DocumentEditor({
     if (!externalRef.current) return false;
     setBlockedLeaving(true);
     noticeRef.current?.focus();
+    // A click's own focus change can land after this handler; keep the notice focused.
+    window.requestAnimationFrame(() => noticeRef.current?.focus());
     return true;
   };
   const navigate = (action: () => void) => {
@@ -656,6 +666,7 @@ export function DocumentEditor({
               onClick={() => {
                 draft.current = { ...draft.current, suggestion: null };
                 setSuggestion(null);
+                refocusEditor();
               }}
             >
               Remove
@@ -693,6 +704,7 @@ export function DocumentEditor({
                   setSuggestion(null);
                   setFailed(false);
                   setStatus("Loaded saved content");
+                  refocusEditor();
                 }}
               >
                 Reload saved content
@@ -707,6 +719,7 @@ export function DocumentEditor({
                   setExternal(null);
                   setBlockedLeaving(false);
                   void save();
+                  refocusEditor();
                 }}
               >
                 Save my draft
@@ -727,6 +740,7 @@ export function DocumentEditor({
               {...(capture ? { placeholder: "Write a thought…" } : {})}
               readOnly={locked}
               autoFocus={capture}
+              focusRequest={focusRequest}
             />
           ) : (
             <DocumentNavigation.Provider
@@ -765,7 +779,7 @@ export function DocumentEditor({
             variant={capture ? "default" : "outline"}
             onClick={requestClose}
           >
-            {capture ? "Done" : "Back to work"}
+            {capture ? "Done" : backLabel}
           </Button>
         </footer>
       </div>
@@ -804,8 +818,8 @@ export function DocumentEditor({
               <dt>Visibility</dt>
               <dd>
                 {initial.origin_brief && !initial.kept
-                  ? "Activity details"
-                  : "Documents"}
+                  ? "Hidden with its update"
+                  : "Shown in Documents"}
               </dd>
             </dl>
           </section>
@@ -920,6 +934,7 @@ export function DocumentEditor({
             </section>
           )}
           <section aria-label="Create ticket">
+            <h2>Tickets</h2>
             {!creatingFromDocument && (
               <Button
                 variant="outline"

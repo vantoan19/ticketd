@@ -27,4 +27,28 @@ describe("external value while editing", () => {
     expect(mapOffset("abcXYZdef", "abc12345def", 8)).toBe(10);
     expect(mapOffset("abcXYZdef", "abc12345def", 4)).toBe(4);
   });
+  it("keeps the caret in its paragraph when the CLI shortens that paragraph (D1)", () => {
+    const editor = createPlateEditor({
+      value: paragraphs("Alpha", "Beta shorXYZt.", "Gamma"),
+    });
+    editor.tf.select({ path: [1, 0], offset: 12 });
+    applyExternalValue(editor, paragraphs("Alpha", "Beta s.", "Gamma"));
+    expect(editor.selection?.anchor).toEqual({ path: [1, 0], offset: 6 });
+    expect(editor.selection?.focus).toEqual({ path: [1, 0], offset: 6 });
+    editor.tf.insertText("!");
+    expect(editor.children[1]).toMatchObject({
+      children: [{ text: "Beta s!." }],
+    });
+    expect(editor.children[2]).toMatchObject({ children: [{ text: "Gamma" }] });
+  });
+  it("restores the remembered caret when the editor lost its selection, never resetting to 0 (D2)", () => {
+    const editor = createPlateEditor({ value: paragraphs("first", "second") });
+    const remembered = {
+      anchor: { path: [1, 0], offset: 3 },
+      focus: { path: [1, 0], offset: 3 },
+    };
+    editor.tf.deselect();
+    applyExternalValue(editor, paragraphs("first", "second!"), remembered);
+    expect(editor.selection?.anchor).toEqual({ path: [1, 0], offset: 3 });
+  });
 });

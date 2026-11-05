@@ -339,15 +339,31 @@
 .document-list-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
 }
 .document-list-tags button {
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: 0;
+  border: 0;
   background: none;
   color: inherit;
   cursor: pointer;
+}
+.document-list-tags button:hover,
+.document-list-tags button:focus-visible {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.document-list-tags button + button::before {
+  content: "·";
+  margin: 0 6px;
+  display: inline-block;
+  text-decoration: none;
+}
+.document-list-kind {
+  flex: none;
+  margin-top: 8px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
 }
 .document-list mark {
   background: color-mix(in srgb, var(--primary) 20%, transparent);

@@ -52,14 +52,65 @@
 }
 .context-graph-list {
   list-style: none;
+  margin: 0;
   padding: 0;
 }
 .context-graph-list li {
-  padding: 12px 0;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: start;
+  padding: 12px 8px;
   border-bottom: 1px solid var(--border);
+  border-radius: 6px;
 }
-.context-graph-list button {
+.context-graph-list li:hover,
+.context-graph-list li:focus-within {
+  background: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+.context-graph-kind {
+  grid-column: 1;
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.context-graph-list li > button {
+  grid-column: 2;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
   text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.context-graph-list li > button:hover {
+  text-decoration: underline;
+}
+.context-graph-list li > button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.context-graph-list li > [data-slot="button"] {
+  grid-column: 3;
+  grid-row: 1;
+  margin: -4px 0;
+}
+.context-graph-list li > p {
+  grid-column: 2;
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.context-graph-list li > p strong {
+  font-weight: 500;
 }
 @media (max-width: 700px) {
   .context-graph-main {
