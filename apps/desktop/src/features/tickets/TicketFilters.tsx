@@ -257,7 +257,6 @@ export function TicketFilters(p: Props) {
       )}
       {p.part !== "controls" && chips.length > 0 && (
         <div className="filter-chips" aria-label="Active filters">
-          <span className="filter-match-count">{ofTotal}</span>
           {chips.map((chip, index) => (
             <Button
               key={`${chip.label}-${index}`}

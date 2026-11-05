@@ -3,20 +3,17 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 24px;
+  padding: 12px 20px;
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 16px;
 }
-.ui-button:has(> .filter-count) {
-  position: relative;
+/* The text link sits on the row's left edge when it wraps. */
+.filter-chips > .ui-button[data-variant="ghost"] {
+  padding-inline: 0;
 }
-/* Overlaid on the icon so the button keeps its width and the popover, which
-   opens beside the button, never covers the badge. */
+/* Inline after the word, clear of the glyph: the labeled "Filter | 1". */
 .filter-count {
-  position: absolute;
-  top: 0;
-  right: 0;
   min-width: 16px;
   padding: 0 4px;
   border-radius: 999px;

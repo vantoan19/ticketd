@@ -24,6 +24,7 @@ import {
   readinessLabel,
   readinessShortLabel,
   rowContextItem,
+  rowTagSlot,
   type RowContextKind,
   type RowScope,
 } from "./ticket-row";
@@ -250,6 +251,7 @@ function RowDetails({
   const now = useNow();
   const state = readiness(ticket);
   const context = rowContextItem(ticket, scope);
+  const tagSlot = rowTagSlot(ticket.tags);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
     // A single-status view already says Ready or the status; Blocked is still news.
@@ -297,13 +299,17 @@ function RowDetails({
             <span className="ticket-row-context-label">{context.label}</span>
           </span>
         )}
-        {ticket.tags.length > 0 && (
+        {tagSlot && (
           <span className="ticket-row-tags">
-            {ticket.tags.map((tag) => (
-              <span key={tag} className="ticket-tag">
-                {tag}
+            <span className="ticket-tag">{tagSlot.first}</span>
+            {tagSlot.more > 0 && (
+              <span
+                className="ticket-tag ticket-tag-more"
+                title={ticket.tags.slice(1).join(", ")}
+              >
+                +{tagSlot.more}
               </span>
-            ))}
+            )}
           </span>
         )}
       </span>

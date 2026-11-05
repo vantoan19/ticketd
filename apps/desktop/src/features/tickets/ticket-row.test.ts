@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
 import type { Ticket } from "@/lib/api/client";
-import { readiness, readinessLabel, readinessShortLabel } from "./ticket-row";
+import {
+  readiness,
+  readinessLabel,
+  readinessShortLabel,
+  rowTagSlot,
+} from "./ticket-row";
 
 test("a blocker in Trash is named as such", () => {
   const ticket = {
@@ -32,4 +37,13 @@ test("the visible label keeps the blocker count short", () => {
   } as unknown as Ticket;
   expect(readinessShortLabel(readiness(ticket))).toBe("Blocked by T-2 +2");
   expect(readinessLabel(readiness(ticket))).toBe("Blocked by T-2 and 2 more");
+});
+
+test("the row tag slot shows the first tag whole and counts the rest", () => {
+  expect(rowTagSlot(["frontend", "docs", "backend"])).toEqual({
+    first: "frontend",
+    more: 2,
+  });
+  expect(rowTagSlot(["docs"])).toEqual({ first: "docs", more: 0 });
+  expect(rowTagSlot([])).toBeNull();
 });

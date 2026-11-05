@@ -71,5 +71,4 @@ test("an active search shows as a removable chip", () => {
   );
   expect(setQuery).toHaveBeenCalledWith("");
   expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
-  expect(screen.getByText("1 of 7")).toBeTruthy();
 });
