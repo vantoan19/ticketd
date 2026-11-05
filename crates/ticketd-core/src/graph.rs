@@ -70,10 +70,12 @@ impl Workspace {
             let mut parameters = Vec::new();
             for id in &frontier {
                 for (column, other, outgoing) in [
-                    ("blocker_id", "dependent_id", 1),
                     ("dependent_id", "blocker_id", 0),
+                    ("blocker_id", "dependent_id", 1),
                 ] {
-                    terms.push(format!("SELECT ? AS root, {outgoing} AS outgoing, neighbor FROM (SELECT {other} AS neighbor FROM dependencies WHERE {column} = ? ORDER BY {other} LIMIT {})", quota + 1));
+                    // Neighbors are chosen by ticket number so the same ones are shown on
+                    // every read, whatever their opaque ids happen to be.
+                    terms.push(format!("SELECT ? AS root, {outgoing} AS outgoing, neighbor FROM (SELECT d.{other} AS neighbor FROM dependencies d JOIN tickets t ON t.id = d.{other} WHERE d.{column} = ? ORDER BY t.number LIMIT {})", quota + 1));
                     parameters.push(id.clone());
                     parameters.push(id.clone());
                 }
@@ -89,6 +91,10 @@ impl Workspace {
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
             drop(statement);
+            // Blockers take the node budget before dependents; the sort is stable, so
+            // each group keeps its ticket-number order.
+            let mut rows = rows;
+            rows.sort_by_key(|(_, outgoing, _)| *outgoing);
             let mut seen_per_direction: HashMap<(String, bool), usize> = HashMap::new();
             let mut next = Vec::new();
             for (id, outgoing, neighbor) in rows {

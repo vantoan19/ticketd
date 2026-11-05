@@ -28,10 +28,10 @@ const linkSchema = z.object({
 const linkDocuments = {
   linkMarkdown: async (reference: string) =>
     z.string().parse(await invoke("context_link_markdown", { reference })),
-  links: async (id: string) =>
+  links: async (id: string, offset = 0) =>
     z
       .tuple([z.array(linkSchema), z.array(linkSchema)])
-      .parse(await invoke("document_context_links", { id })),
+      .parse(await invoke("document_context_links", { id, offset })),
   createTicket: async (id: string, title: string, requestId: string) =>
     z
       .object({ reference: z.string() })

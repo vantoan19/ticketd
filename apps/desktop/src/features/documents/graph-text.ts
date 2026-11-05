@@ -12,6 +12,9 @@ export const edgeLabels: Record<string, string> = {
   mention: "Mentions",
   activity: "Update mentions",
   support: "Update cites",
+  subticket: "Subticket",
+  related: "Related",
+  discovered: "Discovered",
 };
 
 /** Relationships that are weaker than a rule; drawn dashed. */
@@ -62,6 +65,12 @@ export function describeEdge(
       return `An update on ${source} mentions ${target}${quoted}`;
     case "support":
       return `An update on ${source} cites ${target}${quoted}`;
+    case "subticket":
+      return `${target} is a subticket of ${source}`;
+    case "related":
+      return `${source} is related to ${target}`;
+    case "discovered":
+      return `${target} was discovered while working on ${source}`;
   }
 }
 

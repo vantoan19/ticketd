@@ -27,6 +27,8 @@ Object.defineProperty(window, "matchMedia", {
     removeEventListener: vi.fn(),
   }),
 });
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => bridge);
 afterEach(cleanup);
 
 test("renders GFM while keeping executable links and raw HTML inert", () => {
@@ -110,4 +112,27 @@ test("opens a Plan link from Markdown", () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Plan" }));
   expect(open).toHaveBeenCalledWith("plan-1");
+});
+
+test("marks a linked Document that is in the Trash", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "show_document")
+      return {
+        id: "doc",
+        title: "Old",
+        body: "",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        trashed: true,
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(
+    <DocumentNavigation.Provider value={vi.fn()}>
+      <MarkdownDocument source="See [Old](ticketd://document/doc)" />
+    </DocumentNavigation.Provider>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Old (Trash)" }),
+  ).toBeTruthy();
 });

@@ -4430,3 +4430,27 @@ fn the_author_is_not_notified_and_deleted_updates_read_as_deleted() {
     let entries = workspace.inbox(100, 0).unwrap();
     assert!(entries[0].read && entries[0].deleted);
 }
+
+#[test]
+fn dependency_graph_shows_blockers_of_a_ticket_with_many_dependents() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("many.sqlite")).unwrap();
+    let hub = workspace.create_ticket("Hub").unwrap();
+    for _ in 0..60 {
+        let dependent = workspace.create_ticket("Dependent").unwrap();
+        workspace
+            .add_dependency(&hub.reference, &dependent.reference, None)
+            .unwrap();
+    }
+    let blocker = workspace.create_ticket("Blocker").unwrap();
+    workspace
+        .add_dependency(&blocker.reference, &hub.reference, None)
+        .unwrap();
+    let graph = workspace.dependency_graph(&hub.reference).unwrap();
+    assert!(graph.nodes.iter().any(|n| n.reference == blocker.reference));
+    let again = workspace.dependency_graph(&hub.reference).unwrap();
+    let refs = |g: &ticketd_core::DependencyGraph| {
+        g.nodes.iter().map(|n| n.reference.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(refs(&graph), refs(&again));
+}

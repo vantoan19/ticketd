@@ -1,6 +1,14 @@
 import { dashedKinds, edgeLabels } from "./graph-text";
 
-const legendKinds = ["blocks", "membership", "mention", "support"];
+const legendKinds = [
+  "blocks",
+  "membership",
+  "subticket",
+  "related",
+  "discovered",
+  "mention",
+  "support",
+];
 
 /** Line samples for the relationships a graph draws; arrows point source to target. */
 export function GraphLegend() {

@@ -58,6 +58,18 @@ export function ContextGraph({
         .then((value) => {
           if (!live || request !== latest) return;
           setGraph(value);
+          // An expansion or page whose item is no longer shown has nothing to expand.
+          const shown = new Set(value.nodes.map((node) => node.id));
+          setExpandedIds((ids) =>
+            ids.every((id) => shown.has(id))
+              ? ids
+              : ids.filter((id) => shown.has(id)),
+          );
+          setPages((items) =>
+            items.every((item) => shown.has(item.anchor))
+              ? items
+              : items.filter((item) => shown.has(item.anchor)),
+          );
           setSelected((previous) =>
             previous && value.nodes.some((node) => node.id === previous)
               ? previous

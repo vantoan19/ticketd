@@ -64,3 +64,40 @@ test("lists each mention with its location and opens the source passage", async 
     end: 7,
   });
 });
+
+test("finds Document mentions beyond the first hundred incoming links", async () => {
+  const link = (index: number, kind: string) => ({
+    source_id: `${kind}-${index}`,
+    target_id: "ticket",
+    source_kind: kind,
+    target_kind: "ticket",
+    passage: `Mentions T-1 ${index}`,
+    source_label: `${kind} ${index}`,
+    target_label: "T-1",
+    source_trashed: false,
+    target_trashed: false,
+    activity_id: null,
+  });
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { offset?: number }) => {
+      if (command === "ticket_backlinks") return [];
+      if (command === "document_context_links")
+        return [
+          [],
+          args?.offset
+            ? [link(1, "document")]
+            : Array.from({ length: 100 }, (_, index) => link(index, "ticket")),
+        ];
+      throw new Error(`Unexpected ${command}`);
+    },
+  );
+  render(
+    <Backlinks
+      reference="T-1"
+      ticketId="ticket"
+      revision={0}
+      select={vi.fn()}
+    />,
+  );
+  expect(await screen.findByText("document 1")).toBeTruthy();
+});

@@ -1604,6 +1604,31 @@ test("a sidebar view leaves an open workspace graph", async () => {
   expect(screen.queryByText("Back to context graph")).toBeNull();
 });
 
+test("opening the workspace graph from Plans does not stack the Plans list", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      total: 0,
+      nodes: [],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Manage Plans" }));
+  expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("region", { name: "Workspace graph" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Plans" })).toBeNull();
+});
+
 test("returns to local graph state after opening an item", async () => {
   const ticket = bulkTicket(1);
   const node = {

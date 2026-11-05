@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { vi, test, expect } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, vi, test, expect } from "vitest";
+
+afterEach(cleanup);
 import { ContextGraph } from "./ContextGraph";
 import { client } from "@/lib/api/client";
 
@@ -76,4 +84,45 @@ test("previews a connection and focuses it only on request", async () => {
     ),
   );
   expect(screen.getByRole("heading", { name: "Discovery" })).toBeTruthy();
+});
+
+test("drops an expansion whose item is no longer shown", async () => {
+  const node = (id: string, label: string) => ({
+    id,
+    kind: "ticket" as const,
+    label,
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  });
+  const graph = (nodes: ReturnType<typeof node>[]) => ({
+    center: "one",
+    nodes,
+    edges: [],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 50,
+    max_edges: 300,
+    max_work: 800,
+  });
+  const first = node("one", "T-1 · First");
+  const second = node("two", "T-2 · Second");
+  vi.mocked(client.contextGraphExpanded)
+    .mockReset()
+    .mockImplementation(async (_center, _details, expanded) =>
+      expanded.includes("two") ? graph([first]) : graph([first, second]),
+    );
+  render(<ContextGraph origin="one" onBack={vi.fn()} onOpen={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "T-2 · Second" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  await waitFor(() =>
+    expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
+      "one",
+      false,
+      [],
+      [],
+    ),
+  );
 });
