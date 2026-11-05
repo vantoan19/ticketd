@@ -18,6 +18,11 @@ import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
+const DETAIL_PANEL_STYLE = {
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+} as const;
 const NARROW_QUERY = "(max-width: 1071px)";
 
 function subscribeNarrow(callback: () => void) {
@@ -171,7 +176,15 @@ export function TicketWorkspaceView({
         className="split-handle"
         aria-label="Resize ticket list"
       />
-      <ResizablePanel id="detail" minSize={480} className="detail-panel">
+      <ResizablePanel
+        id="detail"
+        minSize={480}
+        className="detail-panel"
+        // The panel library makes its content box `overflow: auto` with an
+        // auto height, so a percentage-height child never gets a bound and the
+        // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
+        style={DETAIL_PANEL_STYLE}
+      >
         <TicketDetailPane
           workspace={workspace}
           expanded={expanded}
