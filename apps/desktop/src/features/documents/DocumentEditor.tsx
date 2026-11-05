@@ -22,7 +22,10 @@ import {
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { documentLinkMarkdown } from "./document-link";
 import { documents, type Document } from "./api";
-import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import {
+  useOnWorkspaceChange,
+  useWorkspaceChange,
+} from "@/lib/workspace-change";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 
 function DocumentSurface({
@@ -127,6 +130,8 @@ export function DocumentEditor({
   backLabel?: string;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
+  // Referenced tickets shown inside the Document (their Trash state) follow workspace changes.
+  const workspaceRevision = useWorkspaceChange();
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
   const [writing, setWriting] = useState(initial === null);
@@ -685,9 +690,7 @@ export function DocumentEditor({
               content” to discard your draft, or “Save my draft” to replace the
               saved content with it.
             </p>
-            {blockedLeaving && (
-              <p>Choose one of these before leaving this Document.</p>
-            )}
+            {blockedLeaving && <p>Choose Reload or Save my draft first.</p>}
             <div className="document-conflict-actions">
               <Button
                 variant="outline"
@@ -756,6 +759,7 @@ export function DocumentEditor({
                 }
               >
                 <MarkdownDocument
+                  revision={workspaceRevision}
                   source={withoutDerivedHeading(
                     body,
                     title,
@@ -883,7 +887,6 @@ export function DocumentEditor({
                       }}
                     >
                       <ConnectedLabel item={item} />
-                      {item.trashed ? " (Trash)" : ""}
                     </Button>
                     <p className="document-direction">
                       {item.attached && item.passages.length === 0
@@ -898,36 +901,46 @@ export function DocumentEditor({
                               ? "Uses this Document as its spec"
                               : "Linked from"}
                     </p>
-                    {item.passages.map((passage) => (
-                      <DocumentNavigation.Provider
-                        key={passage}
-                        value={
-                          onOpenDocument
-                            ? (id) => navigate(() => onOpenDocument(id))
-                            : null
-                        }
-                      >
-                        <PlanNavigation.Provider
+                    {item.passages.map((passage) =>
+                      bareLinkLabel(passage) ? (
+                        // The direction above already says this Document links out.
+                        item.to ? null : (
+                          <p key={passage} className="document-passage">
+                            Links to {bareLinkLabel(passage)}
+                          </p>
+                        )
+                      ) : (
+                        <DocumentNavigation.Provider
+                          key={passage}
                           value={
-                            onOpenPlan
-                              ? (id) => navigate(() => onOpenPlan(id))
+                            onOpenDocument
+                              ? (id) => navigate(() => onOpenDocument(id))
                               : null
                           }
                         >
-                          <div className="document-passage">
-                            <MarkdownDocument
-                              source={passage}
-                              select={
-                                onOpenTicket
-                                  ? (reference) =>
-                                      navigate(() => onOpenTicket(reference))
-                                  : undefined
-                              }
-                            />
-                          </div>
-                        </PlanNavigation.Provider>
-                      </DocumentNavigation.Provider>
-                    ))}
+                          <PlanNavigation.Provider
+                            value={
+                              onOpenPlan
+                                ? (id) => navigate(() => onOpenPlan(id))
+                                : null
+                            }
+                          >
+                            <div className="document-passage">
+                              <MarkdownDocument
+                                revision={workspaceRevision}
+                                source={passage}
+                                select={
+                                  onOpenTicket
+                                    ? (reference) =>
+                                        navigate(() => onOpenTicket(reference))
+                                    : undefined
+                                }
+                              />
+                            </div>
+                          </PlanNavigation.Provider>
+                        </DocumentNavigation.Provider>
+                      ),
+                    )}
                   </li>
                 ))}
               </ul>
@@ -996,6 +1009,11 @@ export function DocumentEditor({
   );
 }
 
+/** A passage that is only a link says nothing but its target's title: name it instead of quoting it. */
+function bareLinkLabel(passage: string) {
+  return /^\s*\[([^\]]+)\]\([^)]*\)\s*$/.exec(passage)?.[1] ?? null;
+}
+
 type Connection = {
   kind: string;
   id: string;
@@ -1052,7 +1070,16 @@ function ConnectedLabel({ item }: { item: Connection }) {
       current = false;
     };
   }, [item.kind, item.label]);
-  if (item.kind === "plan" && item.passages.length === 0)
-    return <>Spec of {item.label}</>;
-  return <>{title ? `${item.label} · ${title}` : item.label}</>;
+  const text =
+    item.kind === "plan" && item.passages.length === 0
+      ? `Spec of ${item.label}`
+      : title
+        ? `${item.label} · ${title}`
+        : item.label;
+  const shown = item.trashed ? `${text} (Trash)` : text;
+  return (
+    <span className="connected-label" title={shown}>
+      {shown}
+    </span>
+  );
 }

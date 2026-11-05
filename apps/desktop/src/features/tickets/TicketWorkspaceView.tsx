@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   ResizableHandle,
@@ -13,6 +19,20 @@ import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
 const NARROW_QUERY = "(max-width: 1071px)";
+
+function subscribeNarrow(callback: () => void) {
+  const media = window.matchMedia(NARROW_QUERY);
+  media.addEventListener("change", callback);
+  return () => media.removeEventListener("change", callback);
+}
+
+function useNarrow() {
+  return useSyncExternalStore(
+    subscribeNarrow,
+    () => window.matchMedia(NARROW_QUERY).matches,
+    () => false,
+  );
+}
 
 /**
  * Arranges the list and detail panes and the split, expanded, and narrow
@@ -80,6 +100,7 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
+  const narrow = useNarrow();
   useEffect(() => {
     const media = window.matchMedia(NARROW_QUERY);
     const showSelected = (event: MediaQueryListEvent) => {
@@ -106,6 +127,9 @@ export function TicketWorkspaceView({
   return (
     <ResizablePanelGroup
       orientation="horizontal"
+      // The split handle is hidden here; left enabled, the panel library still
+      // claims presses nearby, which stopped the sidebar's New menu from opening.
+      disabled={narrow}
       className={cn(
         "ticket-workspace",
         expanded && "expanded",

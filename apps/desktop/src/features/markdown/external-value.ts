@@ -54,7 +54,13 @@ export function mapOffset(before: string, after: string, offset: number) {
   if (offset <= prefix) return offset;
   if (offset >= before.length - suffix)
     return after.length - (before.length - offset);
-  return Math.min(offset, after.length - suffix);
+  // A caret inside the replaced text lands at the end of it. Whole words count as replaced, so
+  // a few letters the old and new text happen to share ("...short." vs "...it.") do not
+  // leave the caret inside a word.
+  let whole = suffix;
+  while (whole > 0 && !/\s/.test(after[after.length - whole - 1] ?? " "))
+    whole -= 1;
+  return Math.min(offset, after.length - whole);
 }
 
 function blockTexts(nodes: readonly Descendant[]) {

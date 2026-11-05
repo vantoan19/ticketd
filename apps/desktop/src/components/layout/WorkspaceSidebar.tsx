@@ -78,7 +78,7 @@ export function WorkspaceSidebar({
   view: View;
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
-  onCapture: () => void;
+  onCapture: (from: HTMLElement | null) => void;
   counts: SidebarCounts | null;
   setView: (view: View) => void;
   projects: Project[];
@@ -95,6 +95,8 @@ export function WorkspaceSidebar({
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
   const newTrigger = useRef<HTMLButtonElement>(null);
+  // Choosing an item moves focus on its own; dismissing the menu returns it to New.
+  const chose = useRef(false);
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const archivedPlans = plans.filter((e) => e.archived).length;
@@ -122,10 +124,14 @@ export function WorkspaceSidebar({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              onCloseAutoFocus={(event) => event.preventDefault()}
+              onCloseAutoFocus={(event) => {
+                if (chose.current) event.preventDefault();
+                chose.current = false;
+              }}
             >
               <DropdownMenuItem
                 onSelect={() => {
+                  chose.current = true;
                   createTriggerRef.current = newTrigger.current;
                   setView("tickets");
                   // After the menu has closed, so it cannot take focus back.
@@ -134,7 +140,12 @@ export function WorkspaceSidebar({
               >
                 New ticket
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onCapture}>
+              <DropdownMenuItem
+                onSelect={() => {
+                  chose.current = true;
+                  onCapture(newTrigger.current);
+                }}
+              >
                 Capture a thought
               </DropdownMenuItem>
             </DropdownMenuContent>

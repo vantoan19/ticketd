@@ -364,25 +364,40 @@ impl Workspace {
             .join(" ");
         let tag = tag.map(|value| value.trim().to_lowercase());
         let columns = summary_columns();
+        // An Activity-details Document is shown under its originating Activity's brief, which is
+        // not in the full-text index; match every word against that displayed heading too.
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        let heading_match: String = (0..words.len())
+            .map(|i| format!(" AND instr(lower({HEADING}), ?{})", i + 6))
+            .collect();
         let sql = format!(
-            "SELECT {columns} FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL OR d.kept = 1) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)) ORDER BY rank, d.id LIMIT ?3 OFFSET ?4"
+            "SELECT * FROM (
+                SELECT {columns}, 0 AS source, rank AS score FROM document_fts JOIN documents d ON d.rowid = document_fts.rowid WHERE d.trashed = 0 AND (?5 OR d.originating_activity_id IS NULL OR d.kept = 1) AND document_fts MATCH ?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2))
+                UNION ALL
+                SELECT {columns}, 1, 0 FROM documents d WHERE d.trashed = 0 AND d.originating_activity_id IS NOT NULL AND (?5 OR d.kept = 1) AND d.rowid NOT IN (SELECT rowid FROM document_fts WHERE document_fts MATCH ?1) AND (?2 IS NULL OR EXISTS (SELECT 1 FROM document_tags t WHERE t.document_id = d.id AND t.tag_name = ?2)){heading_match}
+            ) ORDER BY source, score, 1 LIMIT ?3 OFFSET ?4"
         );
         let mut statement = self.connection.prepare(&sql)?;
+        let mut values: Vec<rusqlite::types::Value> = vec![
+            expression.into(),
+            tag.into(),
+            i64::from(limit.min(100)).into(),
+            i64::from(offset).into(),
+            include_support.into(),
+        ];
+        values.extend(words.into_iter().map(rusqlite::types::Value::from));
         Ok(statement
-            .query_map(
-                params![expression, tag, limit.min(100), offset, include_support],
-                |row| {
-                    let summary = summary_from_row(row, Some(query))?;
-                    Ok(DocumentSearchResult {
-                        id: summary.id,
-                        heading: summary.heading,
-                        snippet: summary.snippet,
-                        origin_ticket: summary.origin_ticket,
-                        tags: summary.tags,
-                        updated_at: summary.updated_at,
-                    })
-                },
-            )?
+            .query_map(rusqlite::params_from_iter(values), |row| {
+                let summary = summary_from_row(row, Some(query))?;
+                Ok(DocumentSearchResult {
+                    id: summary.id,
+                    heading: summary.heading,
+                    snippet: summary.snippet,
+                    origin_ticket: summary.origin_ticket,
+                    tags: summary.tags,
+                    updated_at: summary.updated_at,
+                })
+            })?
             .collect::<Result<_, _>>()?)
     }
 

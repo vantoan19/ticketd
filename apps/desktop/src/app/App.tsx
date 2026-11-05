@@ -131,6 +131,24 @@ function AppContent() {
   const setView = (next: typeof view) =>
     navigate({ view: next, keepGraph: keepGraph.current });
   const [capture, setCapture] = useState(false);
+  // Capture has no trigger of its own, so closing it returns focus to whatever opened it.
+  const captureReturn = useRef<HTMLElement | null>(null);
+  const openCapture = (from?: HTMLElement | null) => {
+    captureReturn.current =
+      from ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    setCapture(true);
+  };
+  const closeCapture = () => {
+    setCapture(false);
+    const target = captureReturn.current;
+    captureReturn.current = null;
+    window.setTimeout(() => {
+      if (target?.isConnected) target.focus();
+    }, 0);
+  };
   // Capture is reachable from anywhere: Mod+Shift+N opens it without leaving the current view.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -141,7 +159,7 @@ function AppContent() {
         event.key.toLowerCase() === "n"
       ) {
         event.preventDefault();
-        setCapture(true);
+        openCapture();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -259,7 +277,7 @@ function AppContent() {
                   />
                 ) : (
                   <WorkspaceSidebar
-                    onCapture={() => setCapture(true)}
+                    onCapture={openCapture}
                     counts={counts}
                     view={view}
                     workspaceGraphOpen={graphOrigin === "__workspace__"}
@@ -376,6 +394,7 @@ function AppContent() {
                       listRequest={documentListRequest}
                       target={documentTarget}
                       capture={capture}
+                      onCapture={() => openCapture()}
                       currentTicket={
                         view === "tickets" ? workspace.selected : null
                       }
@@ -396,7 +415,7 @@ function AppContent() {
                           setDocumentReturn(null);
                         }
                       }}
-                      onCaptureClose={() => setCapture(false)}
+                      onCaptureClose={closeCapture}
                     />
                   </div>
                   {workspaceGraphMounted && (

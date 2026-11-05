@@ -1077,3 +1077,32 @@ fn heading_keeps_literal_html_text() {
         Some("<div>raw</div>")
     );
 }
+
+#[test]
+fn activity_details_document_is_found_by_its_displayed_heading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Work").unwrap();
+    let activity = workspace
+        .add_activity_with_details(
+            &ticket.reference,
+            "Zebrafish migration notes",
+            None,
+            Some("plain body without the words"),
+            None,
+        )
+        .unwrap();
+    let id = activity.supporting_document_id.unwrap();
+    assert!(
+        workspace
+            .search_documents("zebrafish", None, 10, 0)
+            .unwrap()
+            .is_empty(),
+        "hidden unless Activity details are included"
+    );
+    let found = workspace
+        .search_documents_including_support("zebra migration", None, 10, 0, true)
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, id);
+}
