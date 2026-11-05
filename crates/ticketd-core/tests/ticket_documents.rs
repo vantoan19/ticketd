@@ -104,3 +104,59 @@ fn a_description_mention_is_not_explicit_and_a_trashed_document_cannot_be_attach
             .is_err()
     );
 }
+
+#[test]
+fn context_documents_name_how_each_one_relates_to_the_ticket() {
+    use ticketd_core::TicketPatch;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    let attached = workspace.create_document(Some("Attached"), "").unwrap();
+    let described = workspace.create_document(Some("Described"), "").unwrap();
+    let updated = workspace.create_document(Some("Updated"), "").unwrap();
+    workspace
+        .set_ticket_document(&ticket.reference, &attached.id, true)
+        .unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some(format!("See [d](ticketd://document/{})", described.id)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let activity = workspace
+        .add_activity(
+            &ticket.reference,
+            &format!(
+                "Read [u](ticketd://document/{}) and [a](ticketd://document/{})",
+                updated.id, attached.id
+            ),
+            None,
+        )
+        .unwrap();
+    let context = workspace
+        .ticket_context(
+            &ticket.reference,
+            ContextOptions {
+                documents: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let items = context.documents.unwrap().items;
+    let found: Vec<_> = items
+        .iter()
+        .map(|item| (item.id.as_str(), item.source.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (attached.id.as_str(), "explicit"),
+            (described.id.as_str(), "description"),
+            (updated.id.as_str(), "update"),
+        ]
+    );
+    assert_eq!(items[2].activity_id.as_deref(), Some(activity.id.as_str()));
+}

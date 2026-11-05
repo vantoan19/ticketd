@@ -345,3 +345,31 @@ fn document_trash_cli_pages_metadata() {
     assert!(first[0].get("body").is_none());
     assert_ne!(first[0]["id"], second[0]["id"]);
 }
+
+#[test]
+fn context_documents_include_mentioned_documents_with_their_source() {
+    let dir = tempfile::tempdir().unwrap();
+    run(dir.path(), &["create", "Task"]);
+    let document: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["document", "create", "--body", "Investigation"],
+    ))
+    .unwrap();
+    let id = document["id"].as_str().unwrap();
+    run(
+        dir.path(),
+        &[
+            "activity",
+            "add",
+            "T-1",
+            "--brief",
+            &format!("See [it](ticketd://document/{id})"),
+        ],
+    );
+    let context: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["context", "T-1", "--documents"])).unwrap();
+    let item = &context["documents"]["items"][0];
+    assert_eq!(item["id"], id);
+    assert_eq!(item["source"], "update");
+    assert!(item["activity_id"].is_string());
+}

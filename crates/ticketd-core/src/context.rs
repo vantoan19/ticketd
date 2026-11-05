@@ -18,7 +18,7 @@ pub struct ContextOptions {
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
-    /// The Documents explicitly attached to the ticket.
+    /// The Documents the ticket attaches, mentions in its text or mentions in an update.
     #[serde(default)]
     pub documents: bool,
     /// The source's comments and events for an externally sourced ticket.
@@ -96,10 +96,14 @@ pub struct ContextActivity {
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
 }
-/// A Document a person explicitly attached to the ticket.
+/// A Document the ticket relates to, with how it got there.
 #[derive(Debug, Serialize)]
 pub struct ContextDocument {
     pub id: String,
+    /// `explicit` (attached), `description` (mentioned in the ticket text) or
+    /// `update` (mentioned in an update; `activity_id` names it).
+    pub source: String,
+    pub activity_id: Option<String>,
     pub heading: BoundedText,
     pub trashed: bool,
     pub fetch: String,
@@ -362,18 +366,32 @@ impl Workspace {
             None
         };
         let documents = if options.documents {
-            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed FROM ticket_documents td JOIN documents d ON d.id = td.document_id WHERE td.ticket_id = ?1 ORDER BY td.rowid LIMIT ?2 OFFSET ?3", crate::documents::HEADING))?;
-            let rows = stmt
-                .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    let document_id: String = r.get(0)?;
-                    Ok(ContextDocument {
-                        fetch: format!("ticketd document read {document_id}"),
-                        id: document_id,
-                        heading: text(r.get(1)?, LABEL),
-                        trashed: r.get(2)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
+            // One row per Document, by the strongest source: attached, then
+            // mentioned in the description, then mentioned in an update.
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, x.source, x.activity_id FROM (SELECT document_id AS did, 'explicit' AS source, NULL AS activity_id, 0 AS rank, rowid AS position FROM ticket_documents WHERE ticket_id = ?1 UNION ALL SELECT target_id, 'description', NULL, 1, rowid FROM context_mentions WHERE source_id = ?1 UNION ALL SELECT m.target_id, 'update', m.activity_id, 2, m.rowid FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE a.ticket_id = ?1) x JOIN documents d ON d.id = x.did ORDER BY x.rank, x.position", crate::documents::HEADING))?;
+            let mut seen = std::collections::HashSet::new();
+            let mut rows = Vec::new();
+            for row in stmt.query_map(params![id], |r| {
+                let document_id: String = r.get(0)?;
+                Ok(ContextDocument {
+                    fetch: format!("ticketd document read {document_id}"),
+                    id: document_id,
+                    heading: text(r.get(1)?, LABEL),
+                    trashed: r.get(2)?,
+                    source: r.get(3)?,
+                    activity_id: r.get(4)?,
+                })
+            })? {
+                let row = row?;
+                if seen.insert(row.id.clone()) {
+                    rows.push(row);
+                }
+            }
+            let rows = rows
+                .into_iter()
+                .skip(options.offset as usize)
+                .take(PAGE + 1)
+                .collect::<Vec<_>>();
             Some(page(rows, options.offset))
         } else {
             None
