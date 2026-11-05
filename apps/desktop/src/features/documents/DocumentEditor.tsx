@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { documents, type Document } from "./api";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 
 function DocumentSurface({
@@ -415,28 +416,26 @@ export function DocumentEditor({
   useEffect(() => {
     reconcileRef.current = reconcile;
   });
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(() => {
-      if (!id.current || saving.current) return;
-      // Links change when other Documents or tickets are edited, not only this one.
-      refreshLinksRef.current();
-      const polled = id.current;
-      void documents
-        .version(polled)
-        .then(async (version) => {
-          // Only fetch the body when the stored Document actually changed.
-          if (version.join("|") === lastVersion.current) return;
-          const document = await documents.show(polled);
-          if (saving.current) return;
-          // Remembered only once resolved: a deferred conflict must be re-checked next poll.
-          if (reconcileRef.current(document))
-            lastVersion.current = version.join("|");
-        })
-        .catch(() => {});
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [active]);
+  // Another writer may have changed this Document or its links: look only when
+  // the workspace says something changed.
+  useOnWorkspaceChange(() => {
+    if (!id.current || saving.current) return;
+    // Links change when other Documents or tickets are edited, not only this one.
+    refreshLinksRef.current();
+    const polled = id.current;
+    void documents
+      .version(polled)
+      .then(async (version) => {
+        // Only fetch the body when the stored Document actually changed.
+        if (version.join("|") === lastVersion.current) return;
+        const document = await documents.show(polled);
+        if (saving.current) return;
+        // Remembered only once resolved: a deferred conflict must be re-checked next poll.
+        if (reconcileRef.current(document))
+          lastVersion.current = version.join("|");
+      })
+      .catch(() => {});
+  }, active);
   // While the conflict notice is up, clicks that would leave or Trash the Document are
   // ignored (not queued), so they cannot fire later after the person resolves it.
   const navigate = (action: () => void) => {

@@ -11,6 +11,7 @@ import {
   type DocumentSearchResult,
 } from "./api";
 import { DocumentEditor } from "./DocumentEditor";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./documents.css";
 
 /** Today and Yesterday read naturally; anything older is a short calendar date. */
@@ -88,6 +89,7 @@ export function Documents({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("");
   const [results, setResults] = useState<DocumentSearchResult[]>([]);
+  const changeVersion = useWorkspaceChange();
   const [offset, setOffset] = useState(0);
   const [recentOffset, setRecentOffset] = useState(0);
   const [pinOffset, setPinOffset] = useState(0);
@@ -118,9 +120,7 @@ export function Documents({
         })
         .catch((e: unknown) => setError(String(e)));
     load();
-    const timer = window.setInterval(load, 5000);
-    return () => window.clearInterval(timer);
-  }, [active, showTrash, trashOffset]);
+  }, [active, showTrash, trashOffset, changeVersion]);
   useEffect(() => {
     if (target)
       void Promise.all([documents.open(target.id), documents.tags(target.id)])
@@ -134,9 +134,7 @@ export function Documents({
   useEffect(() => {
     if (!active) return;
     refresh();
-    const timer = window.setInterval(refresh, 5000);
-    return () => window.clearInterval(timer);
-  }, [active, capture, refresh]);
+  }, [active, capture, refresh, changeVersion]);
   useEffect(() => {
     let current = true;
     if (!active || (!query.trim() && !filter.trim())) return;
@@ -157,12 +155,10 @@ export function Documents({
         });
     };
     search();
-    const timer = window.setInterval(search, 5000);
     return () => {
       current = false;
-      window.clearInterval(timer);
     };
-  }, [active, query, filter, offset, includeSupport]);
+  }, [active, query, filter, offset, includeSupport, changeVersion]);
   const open = (id: string) => {
     void Promise.all([documents.open(id), documents.tags(id)])
       .then(([doc, values]) => {

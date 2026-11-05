@@ -7,9 +7,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DocumentEditor } from "./DocumentEditor";
 import { documents } from "./api";
+import { TickingChanges } from "@/test/ticking-changes";
+const renderEditor = (ui: ReactElement) =>
+  render(<TickingChanges>{ui}</TickingChanges>);
 vi.mock("./api", () => ({
   documents: {
     save: vi.fn(),
@@ -51,7 +55,7 @@ afterEach(() => {
 });
 it("returns without creating an untouched capture", async () => {
   const close = vi.fn();
-  render(<DocumentEditor initial={null} onClose={close} />);
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
   fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
   expect(documents.save).not.toHaveBeenCalled();
@@ -68,7 +72,7 @@ it("keeps a failed capture open and retries the same request before returning", 
       trashed: false,
     });
   const close = vi.fn();
-  render(<DocumentEditor initial={null} onClose={close} />);
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "A thought" },
   });
@@ -99,7 +103,7 @@ it("notices saved changes beneath a focused draft and offers reload", async () =
     ...original,
     body: "Changed externally",
   });
-  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
@@ -136,7 +140,7 @@ it("preserves an unrelated saved title when saving over a conflicting body", asy
     title: "External title",
     body: "External body",
   });
-  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
@@ -161,7 +165,7 @@ it("suggests only the current ticket and lets it be removed before capture", asy
     updated_at: "now",
     trashed: false,
   });
-  render(
+  renderEditor(
     <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
   );
   fireEvent.click(
@@ -178,7 +182,7 @@ it("inserts a validated link into the draft", async () => {
   vi.mocked(documents.linkMarkdown).mockResolvedValue(
     "[T-4](ticketd://ticket/T-4)",
   );
-  render(
+  renderEditor(
     <DocumentEditor
       initial={{
         id: "d1",
@@ -229,7 +233,7 @@ it("opens a connected ticket after saving a document draft", async () => {
   ]);
   vi.mocked(documents.save).mockResolvedValue({ ...document, body: "Updated" });
   const open = vi.fn();
-  render(
+  renderEditor(
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
   await screen.findByText("Source");
@@ -255,7 +259,7 @@ it("opens a trashed Document readably and restores it", async () => {
     ...original,
     trashed: false,
   });
-  render(<DocumentEditor initial={original} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
   expect(screen.getByText("In Trash")).toBeTruthy();
   expect(screen.getByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
@@ -284,7 +288,7 @@ it("keeps capture typing unchanged while saving the suggested connection", async
     updated_at: "now",
     trashed: false,
   });
-  render(
+  renderEditor(
     <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -308,7 +312,7 @@ it("removes a suggested connection after the first save", async () => {
     updated_at: "now",
     trashed: false,
   });
-  render(
+  renderEditor(
     <DocumentEditor initial={null} onClose={vi.fn()} currentTicket="T-12" />,
   );
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -333,7 +337,7 @@ it("saves a draft before opening the context graph without a dialog", async () =
   };
   vi.mocked(documents.save).mockResolvedValue({ ...doc, body: "Draft" });
   const graph = vi.fn();
-  render(
+  renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
   );
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -359,7 +363,7 @@ it("opens the originating ticket from document details", () => {
     trashed: false,
   };
   const open = vi.fn();
-  render(
+  renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
   );
   fireEvent.click(
@@ -384,7 +388,7 @@ it("reads an untitled Document with its core heading and current save details", 
     heading: "Changed",
     updated_at: "after",
   });
-  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
   expect(screen.getByText("before")).toBeTruthy();
   expect(screen.getAllByText("Saved locally")).toHaveLength(1);
@@ -411,7 +415,7 @@ it("consumes graph navigation after saving so later edits stay on the Document",
     body: body ?? doc.body,
   }));
   const graph = vi.fn();
-  render(
+  renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={graph} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
@@ -459,14 +463,16 @@ it("preserves successive unrelated saved title changes under a body conflict", a
       body: "External body",
     })
     .mockResolvedValue({ ...doc, title: "External 2", body: "External body" });
-  render(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Local draft" },
   });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(4000);
-  });
+  // One poll per act: batched ticks inside a single act would be one change.
+  for (let poll = 0; poll < 2; poll++)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
   fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
   await act(async () => {});
   expect(vi.mocked(documents.save).mock.calls[1]?.slice(1, 4)).toEqual([
@@ -494,7 +500,7 @@ it("shows readable linked context and opens a Document referenced in its passage
     ],
   ]);
   const open = vi.fn();
-  render(
+  renderEditor(
     <DocumentEditor
       initial={{
         id: "d1",
@@ -551,7 +557,7 @@ it("lists each connected item once and names Plans that use the Document as spec
       },
     ],
   ]);
-  render(<DocumentEditor initial={document} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
   expect(await screen.findAllByText("Links to and linked from")).toHaveLength(
     1,
   );
@@ -575,7 +581,7 @@ it("clears the conflict notice once the outside change is undone", async () => {
   vi.mocked(documents.save).mockRejectedValueOnce("offline");
   vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "Typed" });
   outside({ ...stored, body: "Outside" });
-  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Typed" },
@@ -595,7 +601,7 @@ it("clears the conflict notice once the outside change is undone", async () => {
 it("refreshes silently when an outside change arrives and nothing is unsaved", async () => {
   vi.useFakeTimers();
   outside({ ...stored, body: "Outside" });
-  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
@@ -609,7 +615,7 @@ it("sends the loaded revision and keeps the draft when the save is stale", async
     "document 'd1' was changed elsewhere since it was loaded",
   );
   outside({ ...stored, body: "Via CLI", updated_at: "later" });
-  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Typed" },
@@ -630,7 +636,7 @@ it("drops a failed Trash request instead of replaying it on the next autosave", 
   vi.useFakeTimers();
   vi.mocked(documents.setTrashed).mockRejectedValue("busy");
   vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "More" });
-  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
   await tick(0);
   expect(documents.setTrashed).toHaveBeenCalledOnce();
@@ -647,7 +653,7 @@ it("ignores Back to work under the conflict notice instead of replaying it", asy
   const close = vi.fn();
   vi.mocked(documents.save).mockRejectedValue("offline");
   outside({ ...stored, body: "Outside" });
-  render(<DocumentEditor initial={stored} onClose={close} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={close} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
@@ -666,7 +672,7 @@ it("restores a Document trashed elsewhere without resending the unsaved draft", 
     ...stored,
     trashed: false,
   });
-  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
@@ -683,7 +689,7 @@ it("does not report a conflict after saving a whitespace-only title", async () =
   const titled = { ...stored, title: "Doc" };
   vi.mocked(documents.save).mockResolvedValue({ ...stored, title: null });
   outside({ ...stored, title: null });
-  render(<DocumentEditor initial={titled} onClose={vi.fn()} />);
+  renderEditor(<DocumentEditor initial={titled} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   screen.getByLabelText("Optional title").focus();
   fireEvent.change(screen.getByLabelText("Optional title"), {
@@ -700,7 +706,7 @@ it("does not report a conflict after saving a whitespace-only title", async () =
   expect(documents.save).toHaveBeenCalledTimes(2);
 });
 it("shows a derived heading once in the reader", () => {
-  render(
+  renderEditor(
     <DocumentEditor
       initial={{
         ...stored,

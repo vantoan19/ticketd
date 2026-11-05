@@ -14,6 +14,7 @@ import {
   type SourceHealth,
 } from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
@@ -241,13 +242,14 @@ export function useTicketWorkspace(
       setLoading(true);
       void refresh();
     }, 0);
-    const interval = window.setInterval(() => void refresh(), 2000);
     return () => {
       window.clearTimeout(timer);
-      window.clearInterval(interval);
       generationRef.current++;
     };
   }, [refresh]);
+  // Changes from anywhere (the CLI, an agent, another window) refetch the list
+  // quietly; an unchanged workspace costs nothing here.
+  useOnWorkspaceChange(() => void refresh());
   // Previous or Next at the edge of a page moves to the neighboring page and
   // opens the ticket at its near edge once that page has loaded.
   if (pendingEdge && loadedOffset === offset) {

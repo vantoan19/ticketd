@@ -61,6 +61,7 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
 };
@@ -69,7 +70,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 44;
+pub const FORMAT_VERSION: i64 = 45;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -659,6 +660,9 @@ impl Workspace {
         if version < 44 {
             // The latest Activity of a ticket is read on every refresh.
             transaction.execute_batch("CREATE INDEX IF NOT EXISTS activities_ticket_number ON activities(ticket_id, number DESC); PRAGMA user_version = 44;")?;
+        }
+        if version < 45 {
+            change_token::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(())
