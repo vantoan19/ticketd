@@ -626,7 +626,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
       tags: [],
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await openNewTicket();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
@@ -1427,8 +1427,8 @@ test("a group's Add action starts a ticket in that status", async () => {
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "New ticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Status" }).textContent,
-  ).toContain("In review");
+    within(dialog).getByRole("combobox", { name: "Status: In review" }),
+  ).toBeTruthy();
 });
 
 test("the Duplicate group's Add action chooses a ticket and then reviews its canonical ticket", async () => {

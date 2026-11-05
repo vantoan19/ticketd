@@ -252,3 +252,24 @@ test("a full commit hash is shown short, with the whole value on hover", async (
   const value = await screen.findByText("0123456789");
   expect(value.getAttribute("title")).toBe(full);
 });
+
+test("Add evidence stays disabled with its reason until name and evidence are filled", () => {
+  render(
+    <Evidence
+      reference="T-1"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  const primary = screen.getByRole("button", { name: "Add evidence" });
+  expect(primary).toHaveProperty("disabled", true);
+  expect(screen.getByText("Add a name to continue")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
+  expect(screen.getByText("Add the evidence to continue")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
+    target: { value: "https://example.com/pr" },
+  });
+  expect(primary).toHaveProperty("disabled", false);
+});

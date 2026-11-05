@@ -47,7 +47,8 @@ function DocumentSurface({
       }}
     >
       <DialogContent
-        className="document-dialog inset-0 max-w-none translate-x-0 translate-y-0 sm:max-w-none md:inset-y-2 md:right-2 md:left-auto md:w-[min(560px,calc(100vw-16px))]"
+        // Centered like every other dialog, not a side sheet.
+        className="document-dialog sm:max-w-xl"
         showCloseButton={false}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
@@ -626,7 +627,9 @@ export function DocumentEditor({
             </>
           ) : (
             <>
-              <DialogTitle>Capture a thought</DialogTitle>
+              <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
+                Capture a thought
+              </DialogTitle>
               <Button
                 variant="ghost"
                 size="icon-sm"

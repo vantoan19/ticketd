@@ -61,12 +61,6 @@
 .document-dialog .editor-mode {
   flex-wrap: wrap;
 }
-@media (max-width: 767px) {
-  .document-dialog {
-    max-height: 100dvh;
-    border-radius: 0;
-  }
-}
 
 .document-workspace {
   display: grid;

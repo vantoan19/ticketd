@@ -1,19 +1,7 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { DialogShell } from "@/components/ui/dialog-shell";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -92,8 +80,7 @@ export function LinkTicketDialog({
     setChosen(null);
     setError("");
   }
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submit() {
     if (!chosen) return;
     const key = JSON.stringify([kind, chosen.reference]);
     const id =
@@ -113,129 +100,110 @@ export function LinkTicketDialog({
     }
   }
   const visible = query.trim() ? results : [];
+  // The title names the button that opened the dialog.
+  const title = initialKind === "subticket" ? "Link subticket" : "Link ticket";
   return (
-    <Dialog open={open} onOpenChange={change}>
-      <DialogContent className="link-ticket-dialog">
-        <DialogHeader>
-          <DialogTitle>Link ticket</DialogTitle>
-          <DialogDescription>
-            Choose how {ticket.reference} relates to another ticket.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={(event) => void submit(event)}>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`link-kind-${ticket.id}`}>
-                Relationship
-              </FieldLabel>
-              <div className="link-ticket-sentence">
-                <span>{ticket.reference}</span>
-                <Select
-                  value={kind}
-                  onValueChange={(value) => {
-                    setKind(
-                      addableKinds.find((item) => item.kind === value)?.kind ??
-                        kind,
-                    );
-                    setError("");
-                  }}
-                >
-                  <SelectTrigger id={`link-kind-${ticket.id}`} size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {addableKinds.map((item) => (
-                      <SelectItem key={item.kind} value={item.kind}>
-                        {item.phrase}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </Field>
-            <Field data-invalid={!!(error || search.error)}>
-              <FieldLabel htmlFor={`link-search-${ticket.id}`}>
-                Ticket
-              </FieldLabel>
-              {chosen ? (
-                <div className="link-ticket-chosen">
-                  <StatusIcon status={chosen.status} size={14} decorative />
-                  <span>
-                    {chosen.reference} {chosen.title}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setChosen(null);
-                      setError("");
-                    }}
-                  >
-                    Change ticket
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Input
-                    id={`link-search-${ticket.id}`}
-                    value={query}
-                    placeholder="Search by title, text or T-number"
-                    autoComplete="off"
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                  {visible.length > 0 && (
-                    <ul className="link-ticket-results" aria-label="Matches">
-                      {visible.map((item) => (
-                        <li key={item.reference}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setChosen(item);
-                              setError("");
-                            }}
-                          >
-                            <StatusIcon
-                              status={item.status}
-                              size={14}
-                              decorative
-                            />
-                            <span className="link-ticket-reference">
-                              {item.reference}
-                            </span>
-                            <span>{item.title}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-              <FieldError>{error || search.error}</FieldError>
-            </Field>
-          </FieldGroup>
-          {replacedParent && (
-            <p role="status" className="link-ticket-note">
-              This replaces the current parent {replacedParent}.
-            </p>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                discard();
-                change(false);
+    <DialogShell
+      open={open}
+      onOpenChange={change}
+      title={title}
+      description={`Choose how ${ticket.reference} relates to another ticket.`}
+      primaryLabel={pending ? "Linking…" : title}
+      blockedReason={
+        pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
+      }
+      onSubmit={() => void submit()}
+    >
+      <div className="link-ticket-dialog flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor={`link-kind-${ticket.id}`}>
+            Relationship
+          </FieldLabel>
+          <div className="link-ticket-sentence">
+            <span>{ticket.reference}</span>
+            <Select
+              value={kind}
+              onValueChange={(value) => {
+                setKind(
+                  addableKinds.find((item) => item.kind === value)?.kind ??
+                    kind,
+                );
+                setError("");
               }}
             >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!chosen || pending}>
-              {pending ? "Linking…" : "Link ticket"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+              <SelectTrigger id={`link-kind-${ticket.id}`} size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {addableKinds.map((item) => (
+                  <SelectItem key={item.kind} value={item.kind}>
+                    {item.phrase}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Field>
+        <Field data-invalid={!!(error || search.error)}>
+          <FieldLabel htmlFor={`link-search-${ticket.id}`}>Ticket</FieldLabel>
+          {chosen ? (
+            <div className="link-ticket-chosen">
+              <StatusIcon status={chosen.status} size={14} decorative />
+              <span>
+                {chosen.reference} {chosen.title}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setChosen(null);
+                  setError("");
+                }}
+              >
+                Change ticket
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Input
+                id={`link-search-${ticket.id}`}
+                value={query}
+                placeholder="Search by title, text or T-number"
+                autoComplete="off"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              {visible.length > 0 && (
+                <ul className="link-ticket-results" aria-label="Matches">
+                  {visible.map((item) => (
+                    <li key={item.reference}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChosen(item);
+                          setError("");
+                        }}
+                      >
+                        <StatusIcon status={item.status} size={14} decorative />
+                        <span className="link-ticket-reference">
+                          {item.reference}
+                        </span>
+                        <span>{item.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          <FieldError>{error || search.error}</FieldError>
+        </Field>
+        {replacedParent && (
+          <p role="status" className="link-ticket-note">
+            This replaces the current parent {replacedParent}.
+          </p>
+        )}
+      </div>
+    </DialogShell>
   );
 }

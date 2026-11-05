@@ -10,13 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MoreHorizontal, Plus } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,13 +21,7 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { formatDateTime } from "@/lib/format";
 import { useCopy } from "@/components/ui/use-copy";
 import "./evidence.css";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   client,
   type Evidence as EvidenceRecord,
@@ -134,8 +122,7 @@ export function Evidence({
       .then(load)
       .catch((reason: unknown) => setError(String(reason)));
   }, [load, revision]);
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function save() {
     if (pendingRef.current) return;
     pendingRef.current = true;
     setPending(true);
@@ -353,111 +340,92 @@ export function Evidence({
           Load more evidence
         </Button>
       )}
-      <Dialog
+      <DialogShell
         open={!trashed && composing}
         // Closing keeps the draft; only Cancel or a save clears it.
         onOpenChange={setComposing}
+        title={editing ? "Edit evidence" : "Add evidence"}
+        description="Record a pull request, commit, branch, worktree, or verification result for this ticket."
+        primaryLabel={editing ? "Save evidence" : "Add evidence"}
+        blockedReason={
+          !draft.name.trim()
+            ? "Add a name to continue"
+            : !draft.value.trim()
+              ? "Add the evidence to continue"
+              : pending
+                ? "Saving…"
+                : null
+        }
+        onSubmit={() => void save()}
+        returnFocus={returnFocus}
       >
-        <DialogContent returnFocus={returnFocus}>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit evidence" : "Add evidence"}
-            </DialogTitle>
-            <DialogDescription>
-              Record a pull request, commit, branch, worktree, or verification
-              result for this ticket.
-            </DialogDescription>
-          </DialogHeader>
-          {error && <p role="alert">{error}</p>}
-          {changed && (
-            <p role="status">
-              Saved evidence changed while you were editing. Your draft is
-              preserved; saving will replace it.
-            </p>
-          )}
-          <form onSubmit={(event) => void save(event)}>
-            <fieldset disabled={pending}>
-              <FieldGroup>
-                <Field>
-                  <span className="evidence-label" id="evidence-type-label">
-                    Type
-                  </span>
-                  <Select
-                    value={draft.kind}
-                    onValueChange={(value) => {
-                      if (
-                        value === "pull_request" ||
-                        value === "commit" ||
-                        value === "branch" ||
-                        value === "worktree" ||
-                        value === "verification"
-                      )
-                        setDraft({ ...draft, kind: value });
-                    }}
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      aria-labelledby="evidence-type-label"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(labels).map(([key, label]) => (
-                        <SelectItem key={key} value={key}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field>
-                  <label className="evidence-label">
-                    Name
-                    <Input
-                      required
-                      value={draft.name}
-                      onChange={(event) =>
-                        setDraft({ ...draft, name: event.target.value })
-                      }
-                    />
-                  </label>
-                </Field>
-                <Field>
-                  <label className="evidence-label">
-                    {draft.kind === "verification"
-                      ? "What was checked and its outcome"
-                      : "URL, reference, or path"}
-                    <Textarea
-                      required
-                      value={draft.value}
-                      onChange={(event) =>
-                        setDraft({ ...draft, value: event.target.value })
-                      }
-                    />
-                  </label>
-                </Field>
-                <div className="flex gap-2">
-                  <Button size="sm" type="submit">
-                    {editing ? "Save evidence" : "Add evidence"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setEditing(null);
-                      setComposing(false);
-                      setDraft(blank);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </FieldGroup>
-            </fieldset>
-          </form>
-        </DialogContent>
-      </Dialog>
+        {error && <p role="alert">{error}</p>}
+        {changed && (
+          <p role="status">
+            Saved evidence changed while you were editing. Your draft is
+            preserved; saving will replace it.
+          </p>
+        )}
+        <fieldset disabled={pending}>
+          <FieldGroup>
+            <Field>
+              <span className="evidence-label" id="evidence-type-label">
+                Type
+              </span>
+              <Select
+                value={draft.kind}
+                onValueChange={(value) => {
+                  if (
+                    value === "pull_request" ||
+                    value === "commit" ||
+                    value === "branch" ||
+                    value === "worktree" ||
+                    value === "verification"
+                  )
+                    setDraft({ ...draft, kind: value });
+                }}
+              >
+                <SelectTrigger size="sm" aria-labelledby="evidence-type-label">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(labels).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <label className="evidence-label">
+                Name
+                <Input
+                  required
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDraft({ ...draft, name: event.target.value })
+                  }
+                />
+              </label>
+            </Field>
+            <Field>
+              <label className="evidence-label">
+                {draft.kind === "verification"
+                  ? "What was checked and its outcome"
+                  : "URL, reference, or path"}
+                <Textarea
+                  required
+                  value={draft.value}
+                  onChange={(event) =>
+                    setDraft({ ...draft, value: event.target.value })
+                  }
+                />
+              </label>
+            </Field>
+          </FieldGroup>
+        </fieldset>
+      </DialogShell>
     </section>
   );
 }

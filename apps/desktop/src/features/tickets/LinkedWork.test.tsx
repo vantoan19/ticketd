@@ -404,10 +404,15 @@ test("Link subticket opens the link dialog already saying this ticket is the par
   fireEvent.click(
     await screen.findByRole("button", { name: "Link subticket" }),
   );
-  const dialog = await screen.findByRole("dialog");
+  const dialog = await screen.findByRole("dialog", { name: "Link subticket" });
   expect(
     within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
   ).toContain("parent of");
+  // The primary waits for a chosen ticket and says why.
+  expect(
+    within(dialog).getByRole("button", { name: "Link subticket" }),
+  ).toHaveProperty("disabled", true);
+  expect(within(dialog).getByText("Choose a ticket to link")).toBeTruthy();
 });
 
 test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {
