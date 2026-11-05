@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Canvas } from "@/features/tickets/DependencyGraph";
+import { byReference } from "@/features/tickets/dependency-graph-model";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useTicketSearch } from "@/features/tickets/useTicketSearch";
 import {
@@ -59,11 +60,13 @@ function Blockers({
   const blockers = graph.edges
     .filter((edge) => edge.dependent === member.reference)
     .map((edge) => edge.blocker);
-  const dependents = graph.edges
-    .filter((edge) => edge.blocker === member.reference)
-    .flatMap((edge) =>
-      graph.nodes.filter((node) => node.reference === edge.dependent),
-    );
+  const dependents = byReference(
+    graph.edges
+      .filter((edge) => edge.blocker === member.reference)
+      .flatMap((edge) =>
+        graph.nodes.filter((node) => node.reference === edge.dependent),
+      ),
+  );
   const search = useTicketSearch(
     query,
     !chosen,

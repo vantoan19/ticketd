@@ -1,11 +1,18 @@
 import { useContext, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { documents, type DocumentSummary } from "@/features/documents/api";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 import { DocumentNavigation } from "@/features/documents/navigation";
+import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { plansClient, type View } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
+import "@/features/tickets/ticket-documents.css";
 
 export function PlanDocuments({
   view,
@@ -15,27 +22,14 @@ export function PlanDocuments({
   state: PlanViewState;
 }) {
   const [adding, setAdding] = useState(false);
-  const [query, setQuery] = useState("");
-  const [choices, setChoices] = useState<DocumentSummary[]>([]);
-  const [error, setError] = useState("");
   const openDocument = useContext(DocumentNavigation);
-  async function find() {
-    try {
-      setChoices(
-        query.trim()
-          ? await documents.search(query, null, 0, true)
-          : await documents.recent(0, true),
-      );
-      setError("");
-    } catch (reason) {
-      setError(String(reason));
-    }
-  }
+  const readOnly = view.plan.archived;
   const spec = view.documents.find(
     (doc) => doc.id === view.plan.spec_document_id,
   );
   const supporting = view.documents.filter((doc) => doc.id !== spec?.id);
   function documentRow(doc: View["documents"][number]) {
+    const isSpec = doc.id === spec?.id;
     return (
       <li key={doc.id} className="plan-document-row">
         <FileText aria-hidden="true" size={14} />
@@ -47,41 +41,51 @@ export function PlanDocuments({
           {doc.heading}
           {doc.trashed && " (Trashed)"}
         </button>
-        {doc.id === spec?.id ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={state.pending}
-            onClick={() =>
-              void state.run(() => plansClient.setSpec(view.plan.id, null))
-            }
-          >
-            Stop using as spec
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={state.pending || doc.trashed}
-            onClick={() =>
-              void state.run(() => plansClient.setSpec(view.plan.id, doc.id))
-            }
-          >
-            Set as spec
-          </Button>
+        {!readOnly && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                label={`Actions for ${doc.heading}`}
+                disabled={state.pending}
+              >
+                <MoreHorizontal />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={4}>
+              {isSpec ? (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    void state.run(() =>
+                      plansClient.setSpec(view.plan.id, null),
+                    )
+                  }
+                >
+                  Stop using as spec
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  disabled={doc.trashed}
+                  onSelect={() =>
+                    void state.run(() =>
+                      plansClient.setSpec(view.plan.id, doc.id),
+                    )
+                  }
+                >
+                  Set as spec
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onSelect={() =>
+                  void state.run(() =>
+                    plansClient.setDocument(view.plan.id, doc.id, false),
+                  )
+                }
+              >
+                Remove from Plan
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={state.pending}
-          onClick={() =>
-            void state.run(() =>
-              plansClient.setDocument(view.plan.id, doc.id, false),
-            )
-          }
-        >
-          Remove from Plan
-        </Button>
       </li>
     );
   }
@@ -102,61 +106,21 @@ export function PlanDocuments({
           <ul>{supporting.map(documentRow)}</ul>
         </details>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => {
-          setAdding(!adding);
-          if (!adding) void find();
-        }}
-      >
-        Add context
-      </Button>
-      {adding && (
-        <div>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void find();
-            }}
-          >
-            <label htmlFor="plan-document-search">Find a Document</label>
-            <Input
-              id="plan-document-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <Button type="submit" variant="outline" size="sm">
-              Search
-            </Button>
-          </form>
-          {error && <p role="alert">{error}</p>}
-          <ul className="plan-document-choices">
-            {choices
-              .filter(
-                (doc) => !view.documents.some((linked) => linked.id === doc.id),
-              )
-              .map((doc) => (
-                <li key={doc.id}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={state.pending}
-                    onClick={() =>
-                      void state.run(() =>
-                        plansClient.setDocument(view.plan.id, doc.id, true),
-                      )
-                    }
-                  >
-                    <span title={doc.heading}>{doc.heading}</span>
-                    {doc.origin_ticket && (
-                      <small> {doc.origin_ticket} · Activity details</small>
-                    )}
-                  </Button>
-                </li>
-              ))}
-          </ul>
-        </div>
+      {!readOnly && (
+        <Button variant="ghost" size="sm" onClick={() => setAdding(!adding)}>
+          Add context
+        </Button>
+      )}
+      {adding && !readOnly && (
+        <DocumentPicker
+          includeSupport
+          exclude={view.documents.map((doc) => doc.id)}
+          onPick={(doc) =>
+            void state.run(() =>
+              plansClient.setDocument(view.plan.id, doc.id, true),
+            )
+          }
+        />
       )}
     </section>
   );

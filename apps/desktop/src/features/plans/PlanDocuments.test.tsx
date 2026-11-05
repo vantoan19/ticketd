@@ -5,12 +5,19 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { PlanDocuments } from "./PlanDocuments";
 import type { PlanViewState } from "./usePlanView";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = ResizeObserverStub;
+
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 
 test("adds context, designates a spec, and opens its source", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
-    if (command === "recent_documents")
+    if (command === "recent_documents" || command === "search_documents")
       return [{ id: "doc", heading: "Proposal" }];
     return null;
   });
@@ -55,6 +62,9 @@ test("adds context, designates a spec, and opens its source", async () => {
   );
   expect(screen.queryByText("Primary spec")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add context" }));
+  fireEvent.change(screen.getByLabelText("Search Documents by title"), {
+    target: { value: "Prop" },
+  });
   fireEvent.click(await screen.findByRole("button", { name: "Proposal" }));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
@@ -78,7 +88,11 @@ test("adds context, designates a spec, and opens its source", async () => {
     </DocumentNavigation.Provider>,
   );
   fireEvent.click(screen.getByText("1 linked Document"));
-  fireEvent.click(screen.getByRole("button", { name: "Set as spec" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Actions for Proposal" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Set as spec" }));
   await waitFor(() =>
     expect(bridge.invoke).toHaveBeenCalledWith(
       "set_plan_spec",

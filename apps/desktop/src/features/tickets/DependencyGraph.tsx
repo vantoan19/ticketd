@@ -22,7 +22,11 @@ import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   NODE_HEIGHT,
   NODE_WIDTH,
+  boundsOf,
+  byReference,
+  fitViewport,
   layoutGraph,
+  openViewport,
   scopeNotice,
   type GraphTicket,
 } from "@/features/tickets/dependency-graph-model";
@@ -88,17 +92,20 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
     </>
   );
 }
-// Leaves room above the first node for the zoom controls.
-const FIT_PADDING = {
-  top: "56px",
-  right: "24px",
-  bottom: "24px",
-  left: "24px",
-} as const;
 const nodeTypes = { ticket: TicketNode };
+/** Smallest zoom that still reads; the graph opens no smaller than this. */
+const READABLE_ZOOM = 0.45;
+/** Fit may zoom out this far so the whole graph is always visible. */
+const OVERVIEW_ZOOM = 0.2;
 
-function Toolbar() {
-  const { zoomIn, zoomOut, fitView } = useReactFlow();
+function Toolbar({
+  positions,
+}: {
+  positions: Map<string, { x: number; y: number }>;
+}) {
+  const { zoomIn, zoomOut, setViewport } = useReactFlow();
+  const width = useStore((state) => state.width);
+  const height = useStore((state) => state.height);
   const zoom = useStore((state) => state.transform[2]);
   return (
     <Panel position="top-left" className="graph-toolbar">
@@ -114,13 +121,59 @@ function Toolbar() {
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => void fitView({ padding: FIT_PADDING, maxZoom: 1 })}
+        onClick={() => {
+          const bounds = boundsOf(positions, positions.keys());
+          if (bounds)
+            void setViewport(
+              fitViewport(
+                bounds,
+                { width, height },
+                { minZoom: OVERVIEW_ZOOM, maxZoom: 1 },
+              ),
+            );
+        }}
       >
         <Maximize aria-hidden="true" />
         Fit
       </Button>
     </Panel>
   );
+}
+
+/** Sets the opening view once the canvas has a size. */
+function OpenView({
+  graph,
+  positions,
+  origin,
+  readable,
+}: {
+  graph: Graph;
+  positions: Map<string, { x: number; y: number }>;
+  origin: string;
+  readable: boolean;
+}) {
+  const { setViewport } = useReactFlow();
+  const width = useStore((state) => state.width);
+  const height = useStore((state) => state.height);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !width || !height) return;
+    opened.current = true;
+    const view = readable
+      ? openViewport(graph, positions, origin, { width, height }, READABLE_ZOOM)
+      : (() => {
+          const bounds = boundsOf(positions, positions.keys());
+          return bounds
+            ? fitViewport(
+                bounds,
+                { width, height },
+                { minZoom: OVERVIEW_ZOOM, maxZoom: 1 },
+              )
+            : null;
+        })();
+    if (view) void setViewport(view);
+  }, [graph, positions, origin, readable, width, height, setViewport]);
+  return null;
 }
 
 export function Canvas({
@@ -196,13 +249,7 @@ export function Canvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={
-          readable
-            ? { padding: FIT_PADDING, minZoom: 0.45, maxZoom: 1 }
-            : { padding: FIT_PADDING, maxZoom: 1 }
-        }
-        minZoom={readable ? 0.45 : 0.2}
+        minZoom={OVERVIEW_ZOOM}
         nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}
@@ -211,7 +258,13 @@ export function Canvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background />
-        <Toolbar />
+        <OpenView
+          graph={graph}
+          positions={positions}
+          origin={origin}
+          readable={readable}
+        />
+        <Toolbar positions={positions} />
       </ReactFlow>
     </ReactFlowProvider>
   );
@@ -239,15 +292,18 @@ function TicketList({
   tickets,
   placeholder = "None",
 }: {
-  tickets: { reference: string; title: string }[] | null;
+  tickets: { reference: string; title: string; status?: string }[] | null;
   /** Shown when there are none, or while they are still loading. */
   placeholder?: string;
 }) {
   if (!tickets?.length) return <p className="graph-none">{placeholder}</p>;
   return (
     <ul>
-      {tickets.map((ticket) => (
+      {byReference(tickets).map((ticket) => (
         <li key={ticket.reference}>
+          {ticket.status && (
+            <StatusIcon status={ticket.status} size={14} decorative />
+          )}{" "}
           <span className="graph-node-reference">{ticket.reference}</span>{" "}
           {ticket.title}
         </li>
@@ -300,6 +356,7 @@ function SelectionPanel({
   const blocks = ready?.blocks.items.map((item) => ({
     reference: item.reference,
     title: item.title.text,
+    status: item.status,
   }));
   const project = projects.find((item) => item.id === detail?.project_id);
   const plan = plans.find((item) => item.id === detail?.plan_id);

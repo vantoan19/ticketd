@@ -200,6 +200,10 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
   await screen.findByText("Archived", { selector: ".plan-state" });
+  // An archived Plan is read-only; Reactivate is its one action.
+  expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Add purpose" })).toBeNull();
   await waitFor(() =>
     expect(
       within(
