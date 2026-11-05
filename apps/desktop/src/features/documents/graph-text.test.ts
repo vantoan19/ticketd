@@ -53,10 +53,12 @@ test("edges state direction in plain language and rows are one per relationship"
   expect(rows[0]?.text).toBe("T-1 mentions T-2: “one” (+1 more)");
 });
 
-test("every relationship kind has its own stroke", async () => {
-  const { edgeDashes } = await import("./graph-text");
-  const kinds = Object.keys(edgeDashes);
-  expect(new Set(kinds.map((kind) => edgeDashes[kind] ?? "solid")).size).toBe(
-    kinds.length,
+test("every relationship kind has a style and styles differ by dash and colour", async () => {
+  const { edgeStyle, edgeStyles, edgeLabels } = await import("./graph-text");
+  for (const kind of Object.keys(edgeLabels))
+    expect(edgeStyle(kind)).toBeTruthy();
+  expect(new Set(edgeStyles.map((s) => `${s.dash}|${s.color}`)).size).toBe(
+    edgeStyles.length,
   );
+  expect(edgeStyle("spec").name).toMatch(/Primary spec/);
 });

@@ -3,7 +3,90 @@ export type LayoutRequest = {
   nodes: string[];
   edges: { source: string; target: string }[];
   positions: Record<string, Point>;
+  /** The item the map is about; it sits in the middle with the rest around it. */
+  center?: string;
 };
+
+/** Card footprint the layout keeps clear, matching the rendered node size. */
+export const CARD_WIDTH = 180;
+export const CARD_HEIGHT = 72;
+const GAP = 24;
+const MID = { x: 400, y: 240 };
+
+/** Concentric rings sized by card footprint, so a dense set starts without overlap. */
+function ringPlacement(ids: string[], center?: string): Record<string, Point> {
+  const points: Record<string, Point> = {};
+  const rest = ids.filter((id) => id !== center);
+  if (center && ids.includes(center)) points[center] = { ...MID };
+  let index = 0;
+  let ring = 0;
+  while (index < rest.length) {
+    const radius = 280 + ring * (CARD_HEIGHT + GAP + 40);
+    const capacity = Math.max(
+      6,
+      Math.floor((2 * Math.PI * radius) / (CARD_WIDTH + GAP)),
+    );
+    const count = Math.min(capacity, rest.length - index);
+    for (let i = 0; i < count; i++) {
+      const angle =
+        (2 * Math.PI * (i + (ring % 2) * 0.5)) / count - Math.PI / 2;
+      points[rest[index + i]!] = {
+        x: MID.x + radius * Math.cos(angle),
+        y: MID.y + radius * Math.sin(angle) * 0.8,
+      };
+    }
+    index += count;
+    ring++;
+  }
+  return points;
+}
+
+/** Pushes overlapping cards apart; cards that already had a position stay put. */
+function separate(
+  ids: string[],
+  points: Record<string, Point>,
+  fixed: Set<string>,
+) {
+  const w = CARD_WIDTH + GAP;
+  const h = CARD_HEIGHT + GAP;
+  for (let pass = 0; pass < 600; pass++) {
+    let moved = false;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = points[ids[i]!]!;
+        const b = points[ids[j]!]!;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const overlapX = w - Math.abs(dx);
+        const overlapY = h - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+        const fa = fixed.has(ids[i]!);
+        const fb = fixed.has(ids[j]!);
+        if (fa && fb) continue;
+        moved = true;
+        // Separate along the shorter way out; exact ties split by index.
+        const alongX = overlapX < overlapY;
+        const sign =
+          (alongX ? dx : dy) === 0
+            ? i % 2
+              ? 1
+              : -1
+            : Math.sign(alongX ? dx : dy);
+        const push = (alongX ? overlapX : overlapY) + 0.5;
+        const shareA = fa ? 0 : fb ? 1 : 0.5;
+        const shareB = fb ? 0 : fa ? 1 : 0.5;
+        if (alongX) {
+          a.x -= sign * push * shareA;
+          b.x += sign * push * shareB;
+        } else {
+          a.y -= sign * push * shareA;
+          b.y += sign * push * shareB;
+        }
+      }
+    }
+    if (!moved) return;
+  }
+}
 
 // A bounded force layout accepts cycles and leaves already positioned nodes fixed.
 export function layoutContextGraph(
@@ -11,18 +94,11 @@ export function layoutContextGraph(
 ): Record<string, Point> {
   const ids = [...request.nodes].sort();
   const points: Record<string, Point> = {};
-  // Enough circumference that a dense neighborhood does not start overlapped.
-  const radius = Math.max(220, ids.length * 24);
-  ids.forEach((id, index) => {
+  const start = ringPlacement(ids, request.center);
+  for (const id of ids) {
     const existing = request.positions[id];
-    const angle = (2 * Math.PI * index) / Math.max(ids.length, 1);
-    points[id] = existing
-      ? { ...existing }
-      : {
-          x: 400 + radius * Math.cos(angle),
-          y: 240 + radius * Math.sin(angle),
-        };
-  });
+    points[id] = existing ? { ...existing } : start[id]!;
+  }
   for (let iteration = 0; iteration < 100; iteration++) {
     const forces: Record<string, Point> = Object.fromEntries(
       ids.map((id) => [id, { x: 0, y: 0 }]),
@@ -56,10 +132,14 @@ export function layoutContextGraph(
       forces[edge.target]!.y -= (dy / distance) * force;
     }
     for (const id of ids) {
-      if (request.positions[id]) continue;
+      if (request.positions[id] || id === request.center) continue;
       points[id]!.x += forces[id]!.x;
       points[id]!.y += forces[id]!.y;
     }
   }
+  const fixed = new Set(
+    ids.filter((id) => request.positions[id] || id === request.center),
+  );
+  separate(ids, points, fixed);
   return points;
 }

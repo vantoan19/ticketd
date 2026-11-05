@@ -18,23 +18,51 @@ export const edgeLabels: Record<string, string> = {
 };
 
 /**
- * One stroke per relationship so lines differ without relying on colour: a rule
- * (blocks) is solid and heavier, weaker links are dashed or dotted differently.
+ * Four line styles, each with its own dash and colour so they differ without
+ * relying on either alone: rules (blocks), plan structure, work hierarchy and
+ * references.
  */
-export const edgeDashes: Record<string, string | undefined> = {
-  blocks: undefined,
-  membership: "2 4",
-  document: "8 3",
-  spec: "8 3 2 3",
-  mention: "5 5",
-  activity: "10 4",
-  support: "1 3",
-  subticket: "12 3 2 3 2 3",
-  related: "3 3",
-  discovered: "6 2 1 2",
+export type EdgeStyle = {
+  name: string;
+  kinds: string[];
+  dash: string | undefined;
+  width: number;
+  color: string;
 };
-export function edgeStrokeWidth(kind: string): number {
-  return kind === "blocks" ? 2 : 1.5;
+export const edgeStyles: EdgeStyle[] = [
+  {
+    name: "Blocks",
+    kinds: ["blocks"],
+    dash: undefined,
+    width: 2.5,
+    color: "currentColor",
+  },
+  {
+    name: "Plan membership, documents, Primary spec",
+    kinds: ["membership", "document", "spec"],
+    dash: "2 4",
+    width: 1.5,
+    color: "#4f8ef7",
+  },
+  {
+    name: "Subticket, Related, Discovered",
+    kinds: ["subticket", "related", "discovered"],
+    dash: "10 4",
+    width: 1.5,
+    color: "#b07cf0",
+  },
+  {
+    name: "Mentions, Update mentions, Update cites",
+    kinds: ["mention", "activity", "support"],
+    dash: "4 3 1 3",
+    width: 1.5,
+    color: "#e0a030",
+  },
+];
+export function edgeStyle(kind: string): EdgeStyle {
+  return (
+    edgeStyles.find((style) => style.kinds.includes(kind)) ?? edgeStyles[3]!
+  );
 }
 
 export const kindNames: Record<GraphNode["kind"], string> = {
@@ -66,7 +94,15 @@ export function describeEdge(
   const source = name(nodes.get(edge.source), "an item");
   const target = name(nodes.get(edge.target), "an item");
   const passage = edge.explanation ? plainText(edge.explanation) : "";
-  const quoted = passage ? `: “${passage}”` : "";
+  // A passage that only repeats an item's own name adds nothing.
+  const repeats = [nodes.get(edge.source), nodes.get(edge.target)].some(
+    (node) =>
+      node &&
+      [node.label, node.ticket_reference ?? ""].some(
+        (text) => text && plainText(text) === passage,
+      ),
+  );
+  const quoted = passage && !repeats ? `: “${passage}”` : "";
   switch (edge.kind) {
     case "blocks":
       return `${source} must be Done before ${target} is Ready`;
@@ -100,13 +136,17 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     label: edgeLabels[edge.kind] ?? edge.kind,
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
-    markerEnd: { type: MarkerType.ArrowClosed, color: "currentColor" },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: edgeStyle(edge.kind).color,
+    },
     // Straight lines between card centres never loop around a card.
     type: "straight",
     style: {
-      strokeWidth: edgeStrokeWidth(edge.kind),
-      ...(edgeDashes[edge.kind]
-        ? { strokeDasharray: edgeDashes[edge.kind] }
+      strokeWidth: edgeStyle(edge.kind).width,
+      stroke: edgeStyle(edge.kind).color,
+      ...(edgeStyle(edge.kind).dash
+        ? { strokeDasharray: edgeStyle(edge.kind).dash }
         : {}),
     },
   }));
