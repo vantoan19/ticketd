@@ -28,24 +28,33 @@ export function PlanDocuments({
     (doc) => doc.id === view.plan.spec_document_id,
   );
   const supporting = view.documents.filter((doc) => doc.id !== spec?.id);
-  function documentRow(doc: View["documents"][number]) {
+  // The named chip is the designated spec. A Plan linked to a single Document
+  // that was never designated (`plan document` without `plan spec`) shows that
+  // Document as the chip too, labeled "Document:", so context never hides
+  // behind a disclosure when there is only one thing to show.
+  const featured =
+    spec ?? (supporting.length === 1 ? supporting[0] : undefined);
+  const rest = supporting.filter((doc) => doc.id !== featured?.id);
+  function documentRow(doc: View["documents"][number], chip = false) {
     const isSpec = doc.id === spec?.id;
     return (
       <li key={doc.id} className="plan-document-row">
-        {!isSpec && <FileText aria-hidden="true" size={14} />}
+        {!chip && <FileText aria-hidden="true" size={14} />}
         <button
           type="button"
-          className={isSpec ? "plan-spec-chip" : undefined}
+          className={chip ? "plan-spec-chip" : undefined}
           title={doc.heading}
           onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
         >
-          {isSpec && (
+          {chip && (
             <>
               <FileText aria-hidden="true" size={14} />
-              <span className="plan-spec-label">Spec:</span>{" "}
+              <span className="plan-spec-label">
+                {isSpec ? "Spec:" : "Document:"}
+              </span>{" "}
             </>
           )}
-          <span className={isSpec ? "plan-spec-title" : undefined}>
+          <span className={chip ? "plan-spec-title" : undefined}>
             {doc.heading}
             {doc.trashed && " (Trashed)"}
           </span>
@@ -100,16 +109,15 @@ export function PlanDocuments({
   }
   return (
     <section className="plan-documents" aria-label="Plan context">
-      {supporting.length > 0 && (
+      {rest.length > 0 && (
         <details>
           <summary>
-            {supporting.length} linked{" "}
-            {supporting.length === 1 ? "Document" : "Documents"}
+            {rest.length} linked {rest.length === 1 ? "Document" : "Documents"}
           </summary>
-          <ul>{supporting.map(documentRow)}</ul>
+          <ul>{rest.map((doc) => documentRow(doc))}</ul>
         </details>
       )}
-      {spec && <ul>{documentRow(spec)}</ul>}
+      {featured && <ul>{documentRow(featured, true)}</ul>}
       {!readOnly && (
         <Button
           variant="ghost"

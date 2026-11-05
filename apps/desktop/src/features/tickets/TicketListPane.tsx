@@ -1,4 +1,3 @@
-import { planSummary as summarizePlan } from "@/features/plans/plan-summary";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   AlertCircle,
@@ -190,8 +189,6 @@ export function TicketListPane({
     total,
     scopeTotal,
   };
-  const members = planState.view?.members ?? [];
-  const planSummary = summarizePlan(members, projects);
   return (
     <section
       className="ticket-list"
@@ -201,7 +198,7 @@ export function TicketListPane({
     >
       {scopedPlan ? (
         <div className="plan-list-toolbar">
-          <p className="plan-list-summary">{planSummary}</p>
+          <span className="plan-list-spacer" />
           <TicketFilters part="controls" labeledFilter {...filterProps} />
         </div>
       ) : (

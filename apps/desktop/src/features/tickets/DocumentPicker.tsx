@@ -52,6 +52,8 @@ export function DocumentPicker({
     };
   }, [query, includeSupport]);
   const shown = (results ?? []).filter((item) => !exclude.includes(item.id));
+  // Everything on offer is already chosen, which is not the same as nothing existing.
+  const allChosen = !query.trim() && (results?.length ?? 0) > 0;
   return (
     <div className="document-picker">
       <Input
@@ -93,7 +95,13 @@ export function DocumentPicker({
           inline
           role="status"
           icon={<FileText />}
-          title={query.trim() ? "No Documents match" : "No Documents yet"}
+          title={
+            query.trim()
+              ? "No Documents match"
+              : allChosen
+                ? "All Documents are already linked"
+                : "No Documents yet"
+          }
           description={
             query.trim()
               ? "Try a different search."
