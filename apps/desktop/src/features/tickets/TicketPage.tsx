@@ -61,12 +61,7 @@ export function TicketPage({
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
   const [noEvidence, setNoEvidence] = useState(false);
   const [composeKey, setComposeKey] = useState(0);
-  const work = useLinkedWork(
-    ticket,
-    revision,
-    refresh,
-    active && !ticket.trashed,
-  );
+  const work = useLinkedWork(ticket, revision, refresh, active);
   const links = work.current?.links;
   const noSubtickets =
     !!links &&
@@ -187,25 +182,6 @@ export function TicketPage({
             {stateLine}
           </TicketEditor>
         )}
-        <Activity
-          reference={ticket.reference}
-          ticketId={ticket.id}
-          target={
-            updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
-              ? updateTarget
-              : noteTarget
-          }
-          projects={projects}
-          plans={plans}
-          status={ticket.status}
-          revision={revision}
-          active={active}
-          trashed={ticket.trashed}
-          select={select}
-          latestNoteId={ticket.latest_update?.activity_id}
-          sourceName={source?.provider_name}
-          onChanged={refresh}
-        />
         {active && !ticket.trashed && (
           <Subtickets
             work={work}
@@ -261,6 +237,25 @@ export function TicketPage({
             select={select}
           />
         )}
+        <Activity
+          reference={ticket.reference}
+          ticketId={ticket.id}
+          target={
+            updateTarget && (!noteTarget || updateTarget.key > noteTarget.key)
+              ? updateTarget
+              : noteTarget
+          }
+          projects={projects}
+          plans={plans}
+          status={ticket.status}
+          revision={revision}
+          active={active}
+          trashed={ticket.trashed}
+          select={select}
+          latestNoteId={ticket.latest_update?.activity_id}
+          sourceName={source?.provider_name}
+          onChanged={refresh}
+        />
       </div>
       <TicketProperties
         ticket={ticket}
@@ -274,14 +269,16 @@ export function TicketPage({
         onOpenNote={(id) => setUpdateTarget({ id, key: Date.now() })}
       >
         {active && !ticket.trashed && (
+          <TicketDocuments
+            ticket={ticket}
+            revision={revision}
+            refresh={refresh}
+          />
+        )}
+        {active && (
           <>
-            <TicketDocuments
-              ticket={ticket}
-              revision={revision}
-              refresh={refresh}
-            />
             <LinkedWork work={work} select={select} onOpenGraph={onOpenGraph} />
-            <LinkedWorkDialogs work={work} />
+            {!ticket.trashed && <LinkedWorkDialogs work={work} />}
           </>
         )}
         {active && (

@@ -423,6 +423,10 @@ export function useTicketWorkspace(
     project = "all",
     planId = "",
   ) {
+    // Trash lists only trashed tickets; an open ticket from another scope would
+    // sit beside it as "outside the current results", so entering or leaving
+    // Trash starts without a selection.
+    if ((next === "trash") !== trash) selectTicket(null);
     setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");

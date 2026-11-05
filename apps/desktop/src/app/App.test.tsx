@@ -826,19 +826,14 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
 });
 
-test("names the ticket that blocked a bulk change, keeps the selection, and retries with the same request ID", async () => {
+test("keeps the selection and retries a failed bulk change with the same request ID", async () => {
   const requests: string[] = [];
   let fail = true;
   await renderBulk({
     find_tickets: () => [bulkTicket(1), bulkTicket(2)],
     bulk_status: (args: { requestId: string }) => {
       requests.push(args.requestId);
-      if (fail)
-        throw {
-          code: "batch_operation",
-          index: 1,
-          message: "ticket is trashed",
-        };
+      if (fail) throw { code: "failed", message: "storage is busy" };
       return [];
     },
   });
@@ -852,8 +847,7 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
     screen.getByRole("button", { name: "Retry" }),
   );
   expect(alert).toContain("Nothing changed");
-  expect(alert).toContain("T-2");
-  expect(alert).toContain("ticket is trashed");
+  expect(alert).toContain("storage is busy");
   expect(screen.getByText("2 selected")).toBeTruthy();
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -866,6 +860,31 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   expect(document.activeElement).toBe(
     document.getElementById("tickets-heading"),
   );
+});
+
+test("names the ticket the core rejected and offers no Retry that cannot succeed", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    bulk_status: () => {
+      throw {
+        code: "batch_operation",
+        index: 1,
+        message: "invalid batch: T-2 is trashed",
+      };
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
+  await act(async () => {});
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toBe(
+    "Nothing changed. T-2 could not be updated: T-2 is trashed.",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(document.activeElement).toBe(alert);
+  expect(screen.getByText("2 selected")).toBeTruthy();
 });
 
 test("moves selected tickets to a project from the Organize menu", async () => {

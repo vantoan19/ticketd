@@ -676,7 +676,10 @@ export function Activity({
             )}
             <span className="activity-actions-end">
               {!edit && hasDraft(saved) && (
-                <span className="activity-muted">
+                <span
+                  className="activity-muted"
+                  title="Draft kept on this device"
+                >
                   Draft kept on this device
                 </span>
               )}

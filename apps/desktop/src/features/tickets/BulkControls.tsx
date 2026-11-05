@@ -40,12 +40,13 @@ export function BulkControls({
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
   const retry = useRef<HTMLButtonElement>(null);
+  const failureNote = useRef<HTMLDivElement>(null);
   const { pending, failure, notice, selection } = bulk;
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
   // success (its confirmation is already in the live region below).
   useEffect(() => {
-    if (failure) retry.current?.focus();
+    if (failure) (retry.current ?? failureNote.current)?.focus();
   }, [failure]);
   useEffect(() => {
     if (notice) document.getElementById("tickets-heading")?.focus();
@@ -214,17 +215,24 @@ export function BulkControls({
         </p>
       )}
       {failure && (
-        <div className="bulk-message bulk-error" role="alert">
+        <div
+          ref={failureNote}
+          tabIndex={-1}
+          className="bulk-message bulk-error"
+          role="alert"
+        >
           <span>{failure.message}</span>
-          <Button
-            ref={retry}
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={() => void bulk.retry()}
-          >
-            Retry
-          </Button>
+          {failure.retryable && (
+            <Button
+              ref={retry}
+              variant="outline"
+              size="sm"
+              disabled={pending}
+              onClick={() => void bulk.retry()}
+            >
+              Retry
+            </Button>
+          )}
         </div>
       )}
       {notice && (

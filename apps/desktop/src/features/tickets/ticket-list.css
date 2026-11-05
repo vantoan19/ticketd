@@ -159,9 +159,9 @@
   align-items: center;
   gap: 8px;
   width: fit-content;
-  max-width: calc(100% - 32px);
+  max-width: calc(100% - 16px);
   margin: 0 auto 16px;
-  padding: 6px 8px;
+  padding: 6px 4px;
   border-radius: 12px;
   color: var(--popover-foreground);
   background: var(--popover);
@@ -169,13 +169,17 @@
 }
 .bulk-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
+}
+/* One row at the narrowest list width: the bar sits over the list, so a second
+   row would cover another ticket. */
+.bulk-bar .ui-button {
+  padding-inline: 8px;
 }
 .bulk-count {
-  padding-inline: 8px;
+  padding-inline: 6px;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;

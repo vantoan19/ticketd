@@ -113,13 +113,16 @@ export function LinkedWork({
   onOpenGraph: () => void;
 }) {
   const { reference, current, pending, error } = work;
+  // A trashed ticket keeps its relationships visible (an unresolved blocker still
+  // matters) but they cannot be changed.
+  const readOnly = work.ticket.trashed;
   const openContextGraph = useContext(ContextGraphNavigation);
   const rows = work.rows.filter((row) => row.kind !== "subticket");
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
   const external = externalDuplicateTarget(work.ticket);
   const externalAt = rows.findIndex((row) => row.kind === "duplicates");
-  const linkAction = (
+  const linkAction = readOnly ? null : (
     <Button variant="ghost" size="sm" onClick={() => work.openLink()}>
       <Plus aria-hidden="true" />
       Add relationship
@@ -127,7 +130,8 @@ export function LinkedWork({
   );
   // Collapse to the bare action only after a successful read found nothing;
   // loading and failed look different from "no links".
-  if (!current?.links || (rows.length === 0 && !external))
+  if (!current?.links || (rows.length === 0 && !external)) {
+    if (readOnly && current?.links) return null;
     return (
       <RailSection label="Relationships">
         <div id={`linked-work-${reference}`} className="linked-work" data-empty>
@@ -162,6 +166,7 @@ export function LinkedWork({
         </div>
       </RailSection>
     );
+  }
   const split = externalAt < 0 ? rows.length : externalAt;
   const renderRow = (row: LinkRow, index: number) => (
     <li
@@ -204,8 +209,8 @@ export function LinkedWork({
       >
         {statusText(row)}
       </span>
-      {isDuplicateKind(row.kind) &&
-      !externalSource(work.ticket)?.status_locked ? (
+      {readOnly ? null : isDuplicateKind(row.kind) &&
+        !externalSource(work.ticket)?.status_locked ? (
         <RemoveDuplicate
           row={row}
           ticket={reference}

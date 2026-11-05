@@ -1211,6 +1211,8 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         project.map(Some)
                     },
+                    // The CLI never guards on a base revision: its change always applies.
+                    ..TicketPatch::default()
                 },
             )?)?
         }

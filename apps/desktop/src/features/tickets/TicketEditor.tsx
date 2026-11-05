@@ -191,8 +191,15 @@ export function TicketEditor({
       const patch: { title?: string; body?: string } = {};
       if (draft.title !== saved.title) patch.title = draft.title;
       if (draft.body !== saved.body) patch.body = draft.body;
+      // The core refuses the change if the stored text is no longer what this editor
+      // last loaded or saved, so an agent's edit is never silently overwritten.
+      const guarded = {
+        ...patch,
+        ...(patch.title !== undefined && { expected_title: saved.title }),
+        ...(patch.body !== undefined && { expected_body: saved.body }),
+      };
       void client
-        .changeTicket(ticket.reference, patch)
+        .changeTicket(ticket.reference, guarded)
         .then((result) => {
           setSaved({ title: result.title, body: result.body });
           setDraft((current) => ({
@@ -203,7 +210,25 @@ export function TicketEditor({
           setError("");
           setState("saved");
         })
-        .catch((reason: unknown) => {
+        .catch(async (reason: unknown) => {
+          if (String(reason).includes("changed elsewhere")) {
+            try {
+              const latest = await client.showTicket(ticket.reference);
+              // The parent adopts the stored ticket, so the notice below compares
+              // the draft with it. A field whose draft already equals the stored
+              // text has nothing to resolve.
+              setSaved((current) => ({
+                title:
+                  draft.title === latest.title ? latest.title : current.title,
+                body: draft.body === latest.body ? latest.body : current.body,
+              }));
+              onSaved(latest);
+              setState("pending");
+              return;
+            } catch {
+              /* Fall through to the ordinary failure. */
+            }
+          }
           setError(String(reason));
           setState("failed");
         })

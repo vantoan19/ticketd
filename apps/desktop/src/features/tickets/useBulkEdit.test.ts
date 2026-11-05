@@ -28,7 +28,7 @@ test("a retry of the same bulk change reuses its request ID", async () => {
 
 test("a rejected batch names the ticket that prevented it and keeps the selection", async () => {
   vi.spyOn(client, "bulkChange").mockRejectedValue(
-    new BridgeFailure("batch_operation", "ticket is trashed", 1),
+    new BridgeFailure("batch_operation", "invalid batch: ticket is trashed", 1),
   );
   const { result } = renderHook(() => useBulkEdit(async () => {}));
   act(() => result.current.selectAll(["T-1", "T-2", "T-3"]));
@@ -36,6 +36,8 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
   expect(result.current.failure).toEqual({
     reference: "T-2",
     message: "Nothing changed. T-2 could not be updated: ticket is trashed.",
+    // The core refused the change itself, so sending it again cannot succeed.
+    retryable: false,
   });
   expect(result.current.selection).toEqual(["T-1", "T-2", "T-3"]);
   act(() => result.current.toggle("T-3"));

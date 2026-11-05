@@ -94,6 +94,15 @@ export function TicketWorkspaceView({
     setNarrowDetail(selected !== null);
     if (!selected) setExpanded(false);
   }
+  // Choosing a sidebar scope while a ticket is open shows that scope's list, even
+  // where the panes are stacked and the ticket would otherwise keep the screen.
+  const [previousNavigation, setPreviousNavigation] = useState(
+    workspace.navigation,
+  );
+  if (previousNavigation !== workspace.navigation) {
+    setPreviousNavigation(workspace.navigation);
+    setNarrowDetail(false);
+  }
   return (
     <ResizablePanelGroup
       orientation="horizontal"

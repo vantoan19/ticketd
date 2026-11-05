@@ -33,6 +33,12 @@ import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
 /** Why the preview can no longer be applied: its review changed, or it is for the other kind of review. */
+/**
+ * The canonical ticket typed so far for each ticket. Escape closes the dialog
+ * without losing it; Cancel and a finished review discard it.
+ */
+const canonicalDrafts = new Map<string, string>();
+
 type Stale = "" | "changed" | "mode";
 
 function staleKind(code: string): Stale {
@@ -88,7 +94,13 @@ export function Duplicates({
   onCancel?: () => void;
 }) {
   const canonicalInput = useRef<HTMLInputElement>(null);
-  const [canonical, setCanonical] = useState(initialCanonical);
+  const [canonical, setCanonicalText] = useState(
+    initialCanonical || canonicalDrafts.get(ticket.reference) || "",
+  );
+  function setCanonical(value: string) {
+    setCanonicalText(value);
+    canonicalDrafts.set(ticket.reference, value);
+  }
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
@@ -156,7 +168,12 @@ export function Duplicates({
         const kind = staleKind(failure.code);
         if (kind) setStale(kind);
         // Never leave the previous choice's lines beside the error.
-        setAnswer({ key: answerKey, outcomes: [], failure: failure.message });
+        // A stale review has its own notice with a Refresh action.
+        setAnswer({
+          key: answerKey,
+          outcomes: [],
+          failure: kind ? "" : failure.message,
+        });
       });
     return () => {
       current = false;
@@ -252,6 +269,7 @@ export function Duplicates({
         );
       setAttempt(null);
       await refresh();
+      canonicalDrafts.delete(ticket.reference);
       onDone?.();
     } catch (reason) {
       const failure = toFailure(reason);
@@ -426,7 +444,14 @@ export function Duplicates({
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                canonicalDrafts.delete(ticket.reference);
+                onCancel?.();
+              }}
+            >
               Cancel
             </Button>
             <Button

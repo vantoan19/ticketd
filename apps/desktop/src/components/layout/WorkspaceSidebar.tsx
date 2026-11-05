@@ -135,22 +135,6 @@ export function WorkspaceSidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
-                isActive={view === "documents"}
-                onClick={() => setView("documents")}
-              >
-                <FileText size={16} /> Documents
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={workspaceGraphOpen}
-                onClick={() => openGraph?.("__workspace__")}
-              >
-                <Network size={16} /> Workspace graph
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
                 isActive={view === "inbox"}
                 aria-label={
                   unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
@@ -275,6 +259,29 @@ export function WorkspaceSidebar({
                     {archivedPlans > 0 && (
                       <SidebarCount value={archivedPlans} />
                     )}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </nav>
+          </SidebarGroup>
+          <SidebarGroup className="sidebar-group">
+            <div className="sidebar-heading">Context</div>
+            <nav aria-label="Context" className="sidebar-nav">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "documents"}
+                    onClick={() => setView("documents")}
+                  >
+                    <FileText size={16} /> Documents
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={workspaceGraphOpen}
+                    onClick={() => openGraph?.("__workspace__")}
+                  >
+                    <Network size={16} /> Workspace graph
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>

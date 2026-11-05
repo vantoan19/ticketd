@@ -101,10 +101,19 @@
 }
 .activity-actions-end {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
   margin-inline-start: auto;
+}
+/* "Draft kept on this device" shrinks before the actions wrap to a second row. */
+.activity-actions-end .activity-muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .activity-attached {
   display: flex;

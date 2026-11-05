@@ -75,6 +75,8 @@ pub const FORMAT_VERSION: i64 = 46;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("ticket '{0}' was changed elsewhere since it was loaded")]
+    TicketChanged(String),
     #[error("document '{0}' was changed elsewhere since it was loaded")]
     DocumentChanged(String),
     #[error("document '{0}' was not found")]
@@ -258,6 +260,14 @@ pub struct Ticket {
 pub struct TicketPatch {
     pub title: Option<String>,
     pub body: Option<String>,
+    /// The title the editor last loaded or saved. When set, a title change is
+    /// rejected with `TicketChanged` if the stored title has moved on, so an
+    /// editor never overwrites someone else's edit. Omitted by the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_title: Option<String>,
+    /// The body the editor last loaded or saved; guards a body change like `expected_title`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_body: Option<String>,
     pub status: Option<Status>,
     pub editing_agent: Option<String>,
     #[serde(
@@ -739,6 +749,17 @@ impl Workspace {
             .optional()?
             .ok_or_else(|| Error::NotFound(reference.to_owned()))?;
         ensure_editable(&transaction, &ticket.id)?;
+        let stale = |new: &Option<String>, expected: &Option<String>, stored: &str| {
+            new.is_some()
+                && expected
+                    .as_deref()
+                    .is_some_and(|expected| expected != stored)
+        };
+        if stale(&patch.title, &patch.expected_title, &ticket.title)
+            || stale(&patch.body, &patch.expected_body, &ticket.body)
+        {
+            return Err(Error::TicketChanged(reference.to_owned()));
+        }
         source::guard_change(
             &transaction,
             &ticket,
