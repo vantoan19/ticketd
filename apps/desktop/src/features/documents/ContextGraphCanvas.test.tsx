@@ -92,7 +92,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("the legend and one zoom and Fit control stay on the canvas, and Fit never clips", () => {
+test("the legend has its own row beside the canvas, one zoom and Fit control stays on it, and Fit never clips", () => {
   const view = render(
     <ContextGraphCanvas
       edges={[]}
@@ -107,7 +107,10 @@ test("the legend and one zoom and Fit control stay on the canvas, and Fit never 
     />,
   );
   const canvas = view.getByLabelText("Connections canvas");
-  expect(within(canvas).getByRole("list", { name: "Legend" })).toBeTruthy();
+  // The legend is not drawn over the canvas, so it can never cover a card.
+  const legend = view.getByRole("list", { name: "Legend" });
+  expect(canvas.contains(legend)).toBe(false);
+  expect(canvas.parentElement?.contains(legend)).toBe(true);
   const zoom = within(canvas).getByRole("group", { name: "Zoom" });
   expect(zoom.textContent).toContain("50%");
   fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));

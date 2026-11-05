@@ -168,10 +168,8 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
       type: MarkerType.ArrowClosed,
       color: edgeStyle(edge.kind).color,
     },
-    // Orthogonal routes leave and enter at card borders, so a line bends around
-    // cards instead of running under them.
-    type: "smoothstep",
-    pathOptions: { borderRadius: 8, offset: 24 },
+    // Drawn by RoutedEdge, which bends each line around the cards in its way.
+    type: "routed",
     style: {
       strokeWidth: edgeStyle(edge.kind).width,
       stroke: edgeStyle(edge.kind).color,

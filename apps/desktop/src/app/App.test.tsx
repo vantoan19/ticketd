@@ -1947,7 +1947,7 @@ test("returns to local graph state after opening an item", async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(
-    screen.getByRole("checkbox", { name: "Include update details" }),
+    screen.getByRole("switch", { name: "Include update details" }),
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1957,12 +1957,10 @@ test("returns to local graph state after opening an item", async () => {
     screen.getByRole("button", { name: "Back to context graph" }),
   );
   expect(
-    (
-      screen.getByRole("checkbox", {
-        name: "Include update details",
-      }) as HTMLInputElement
-    ).checked,
-  ).toBe(true);
+    screen
+      .getByRole("switch", { name: "Include update details" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test("opens Capture from anywhere with the global shortcut", async () => {

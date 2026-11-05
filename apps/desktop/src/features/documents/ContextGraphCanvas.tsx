@@ -22,6 +22,8 @@ import {
 import { Maximize, Minus, Plus } from "lucide-react";
 import { centerZoom, panToInclude } from "./graph-text";
 import { GraphLegend } from "./GraphLegend";
+import { routeAll, type Rect } from "./edge-routing";
+import { RoutedEdge } from "./RoutedEdge";
 import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
@@ -35,16 +37,16 @@ const MIN_FIT_ZOOM = 0.5;
 const FULL_MARGIN_WIDTH = 1000;
 
 /**
- * Fit options for a container this wide. The right margin keeps cards clear of
- * the pinned legend; both side margins shrink with a narrow window so they do
- * not swallow the canvas.
+ * Fit options for a container this wide. Margins shrink with a narrow window so
+ * they do not swallow the canvas; the legend has its own row, so nothing needs
+ * clearing on the right.
  */
 function fitOptions(width: number): FitViewOptions {
   const scale = Math.min(1, Math.max(0.4, width / FULL_MARGIN_WIDTH));
   return {
     padding: {
       top: "32px",
-      right: `${Math.round(248 * scale)}px`,
+      right: `${Math.round(32 * scale)}px`,
       bottom: "72px",
       left: `${Math.round(32 * scale)}px`,
     },
@@ -82,15 +84,7 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
   );
 }
 const NODE_TYPES = { card: CardNode };
-
-/** Which sides a line leaves and enters by: the ones facing each other. */
-function sides(from: Point, to: Point) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dx) * CARD_HEIGHT > Math.abs(dy) * CARD_WIDTH)
-    return dx > 0 ? ["right", "left"] : ["left", "right"];
-  return dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
-}
+const EDGE_TYPES = { routed: RoutedEdge };
 
 export function ContextGraphCanvas({
   nodes,
@@ -201,6 +195,8 @@ export function ContextGraphCanvas({
     };
   }, [topology]);
   const instance = useRef<ReactFlowInstance | null>(null);
+  const settleTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(settleTimer.current), []);
   const onFittedRef = useRef(onFitted);
   useEffect(() => {
     onFittedRef.current = onFitted;
@@ -230,8 +226,16 @@ export function ContextGraphCanvas({
           { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
       } else {
-        void instance.current?.fitView(
-          fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+        const options = fitOptions(
+          container.current?.clientWidth || FULL_MARGIN_WIDTH,
+        );
+        void instance.current?.fitView(options);
+        // The pane can still be settling (toolbar, side panel) on open; fit once
+        // more so a card is never left cut at the edge.
+        window.clearTimeout(settleTimer.current);
+        settleTimer.current = window.setTimeout(
+          () => void instance.current?.fitView({ ...options, duration: 0 }),
+          400,
         );
       }
       onFittedRef.current?.();
@@ -329,23 +333,6 @@ export function ContextGraphCanvas({
       observer.disconnect();
     };
   }, []);
-  // Every line names its relationship; it leaves and enters by the card sides
-  // that face each other.
-  const shownEdges = useMemo(
-    () =>
-      edges.map((edge) => {
-        const from = positions[edge.source];
-        const to = positions[edge.target];
-        if (!from || !to) return edge;
-        const [out, into] = sides(from, to);
-        return {
-          ...edge,
-          sourceHandle: `out-${out}`,
-          targetHandle: `in-${into}`,
-        };
-      }),
-    [edges, positions],
-  );
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
   >({});
@@ -358,6 +345,33 @@ export function ContextGraphCanvas({
     if (seen.length)
       setSizes((before) => ({ ...before, ...Object.fromEntries(seen) }));
   }
+  // Every line names its relationship. Lines bend around the cards in their way
+  // and each label sits clear of every card and of the other labels.
+  const shownEdges = useMemo<Edge[]>(() => {
+    const cards: Record<string, Rect> = {};
+    for (const node of nodes) {
+      const at = positions[node.id];
+      if (at)
+        cards[node.id] = {
+          x: at.x,
+          y: at.y,
+          width: sizes[node.id]?.width || CARD_WIDTH,
+          height: Math.max(CARD_HEIGHT, sizes[node.id]?.height ?? 0),
+        };
+    }
+    const routes = routeAll(
+      cards,
+      edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        ...(typeof edge.label === "string" ? { label: edge.label } : {}),
+      })),
+    );
+    return edges.map((edge) =>
+      routes[edge.id] ? { ...edge, data: { route: routes[edge.id] } } : edge,
+    );
+  }, [edges, nodes, positions, sizes]);
   const flowNodes = useMemo<Node[]>(
     () =>
       nodes
@@ -396,65 +410,68 @@ export function ContextGraphCanvas({
     onSelect(id);
   }
   return (
-    <div
-      ref={container}
-      className="context-graph-canvas"
-      aria-label="Connections canvas"
-      onKeyDown={selectFromKey}
-    >
-      <ReactFlow
-        nodes={flowNodes}
-        onNodesChange={rememberSizes}
-        edges={shownEdges}
-        minZoom={MIN_ZOOM}
-        proOptions={{ hideAttribution: true }}
-        nodeTypes={NODE_TYPES}
-        onNodeClick={(_, node) => onSelect(node.id)}
-        onInit={(value) => {
-          instance.current = value;
-          setReady(true);
-        }}
-        viewport={viewport}
-        onViewportChange={onViewport}
-        nodesDraggable={false}
-        // The Connected items list is the keyboard path to every card.
-        nodesFocusable={false}
-        edgesFocusable={false}
+    <div className="context-graph-stage">
+      <div
+        ref={container}
+        className="context-graph-canvas"
+        aria-label="Connections canvas"
+        onKeyDown={selectFromKey}
       >
-        <Background />
-      </ReactFlow>
+        <ReactFlow
+          nodes={flowNodes}
+          onNodesChange={rememberSizes}
+          edges={shownEdges}
+          minZoom={MIN_ZOOM}
+          proOptions={{ hideAttribution: true }}
+          nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
+          onNodeClick={(_, node) => onSelect(node.id)}
+          onInit={(value) => {
+            instance.current = value;
+            setReady(true);
+          }}
+          viewport={viewport}
+          onViewportChange={onViewport}
+          nodesDraggable={false}
+          // The Connected items list is the keyboard path to every card.
+          nodesFocusable={false}
+          edgesFocusable={false}
+        >
+          <Background />
+        </ReactFlow>
+        <div className="context-graph-zoom" role="group" aria-label="Zoom">
+          <button
+            type="button"
+            aria-label="Zoom out"
+            onClick={() => void instance.current?.zoomOut({ duration: 150 })}
+          >
+            <Minus aria-hidden="true" />
+          </button>
+          <span aria-live="polite">{Math.round(viewport.zoom * 100)}%</span>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            onClick={() => void instance.current?.zoomIn({ duration: 150 })}
+          >
+            <Plus aria-hidden="true" />
+          </button>
+          <span className="context-graph-zoom-rule" aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() =>
+              void instance.current?.fitView(
+                fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
+              )
+            }
+          >
+            <Maximize aria-hidden="true" />
+            Fit
+          </button>
+        </div>
+      </div>
       <div className="context-graph-pinned">
         <GraphLegend />
         {overlay}
-      </div>
-      <div className="context-graph-zoom" role="group" aria-label="Zoom">
-        <button
-          type="button"
-          aria-label="Zoom out"
-          onClick={() => void instance.current?.zoomOut({ duration: 150 })}
-        >
-          <Minus aria-hidden="true" />
-        </button>
-        <span aria-live="polite">{Math.round(viewport.zoom * 100)}%</span>
-        <button
-          type="button"
-          aria-label="Zoom in"
-          onClick={() => void instance.current?.zoomIn({ duration: 150 })}
-        >
-          <Plus aria-hidden="true" />
-        </button>
-        <span className="context-graph-zoom-rule" aria-hidden="true" />
-        <button
-          type="button"
-          onClick={() =>
-            void instance.current?.fitView(
-              fitOptions(container.current?.clientWidth || FULL_MARGIN_WIDTH),
-            )
-          }
-        >
-          <Maximize aria-hidden="true" />
-          Fit
-        </button>
       </div>
     </div>
   );

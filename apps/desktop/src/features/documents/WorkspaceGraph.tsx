@@ -14,6 +14,7 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
+import { ListHeader } from "@/components/ui/list-header";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
@@ -331,31 +332,35 @@ export function WorkspaceGraph({
   );
   return (
     <section className="context-graph-page" aria-label="Workspace graph">
-      <div className="context-graph-heading">
-        <h1>Workspace graph</h1>
+      <ListHeader
+        title="Workspace graph"
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              Back
+            </Button>
+            {!!graph?.nodes.length && (
+              <SegmentedControl
+                aria-label="View"
+                value={showMap ? "graph" : "list"}
+                onValueChange={(value) => setMapChoice(value === "graph")}
+                options={[
+                  { value: "graph", label: "Graph" },
+                  { value: "list", label: "List" },
+                ]}
+              />
+            )}
+          </>
+        }
+      >
         {graph && (
-          <span className="context-graph-scope">
+          <p>
             {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
             {relationshipCount}{" "}
             {relationshipCount === 1 ? "relationship" : "relationships"}
-          </span>
+          </p>
         )}
-        <span className="context-graph-grow" />
-        <Button variant="ghost" size="sm" onClick={onBack}>
-          Back
-        </Button>
-        {!!graph?.nodes.length && (
-          <SegmentedControl
-            aria-label="View"
-            value={showMap ? "graph" : "list"}
-            onValueChange={(value) => setMapChoice(value === "graph")}
-            options={[
-              { value: "graph", label: "Graph" },
-              { value: "list", label: "List" },
-            ]}
-          />
-        )}
-      </div>
+      </ListHeader>
       <div className="context-graph-toolbar">
         <input
           className="context-graph-search"
@@ -417,141 +422,146 @@ export function WorkspaceGraph({
           Update details
         </label>
       </div>
-      {error && <p role="alert">{error}</p>}
-      {showMap ? (
-        <div className="context-graph-main">
-          {active && (
-            <ContextGraphCanvas
-              nodes={nodes}
-              edges={edges}
-              selected={selected}
-              positions={positions}
-              onPositions={setPositions}
-              viewport={viewport}
-              onViewport={setViewport}
-              onSelect={setSelected}
-              onError={setError}
-              fit={fit}
-              onFitted={() => setFit(false)}
-              overlay={
-                unconnected.length > 0 && (
-                  <div
-                    className="context-graph-unconnected"
-                    role="group"
-                    aria-label="Not connected"
-                  >
-                    <strong>Not connected · {unconnected.length}</strong>
-                    {unconnected.map((node) => (
-                      <button
-                        key={node.id}
-                        type="button"
-                        onClick={() => setSelected(node.id)}
-                      >
-                        {node.label}
-                      </button>
-                    ))}
-                  </div>
-                )
-              }
-            />
-          )}
-          <aside className="context-graph-preview">
-            {(graph?.nodes.length ?? 0) > MAP_CARDS && (
-              <p>
-                The map shows the newest {MAP_CARDS} items; the list shows the{" "}
-                {graph?.nodes.length} loaded
-                {graph?.total && graph.total > graph.nodes.length
-                  ? ` of ${graph.total}`
-                  : ""}
-                .
-              </p>
+      <div className="context-graph-body">
+        {error && <p role="alert">{error}</p>}
+        {showMap ? (
+          <div className="context-graph-main">
+            {active && (
+              <ContextGraphCanvas
+                nodes={nodes}
+                edges={edges}
+                selected={selected}
+                positions={positions}
+                onPositions={setPositions}
+                viewport={viewport}
+                onViewport={setViewport}
+                onSelect={setSelected}
+                onError={setError}
+                fit={fit}
+                onFitted={() => setFit(false)}
+                overlay={
+                  unconnected.length > 0 && (
+                    <div
+                      className="context-graph-unconnected"
+                      role="group"
+                      aria-label="Not connected"
+                    >
+                      <strong>Not connected · {unconnected.length}</strong>
+                      {unconnected.map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          onClick={() => setSelected(node.id)}
+                        >
+                          {node.label}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                }
+              />
             )}
-            {previewPanel}
-          </aside>
-        </div>
-      ) : (
-        <aside className="context-graph-strip">{previewPanel}</aside>
-      )}
-      {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
-        <p role="status" className="context-graph-status">
-          {filtered ? "No items match these filters." : "Nothing to show yet."}{" "}
-          {kind && relationship
-            ? "A connection to an item of another type is not shown while Item type is set. "
-            : ""}
-          {filtered && (
-            <Button variant="outline" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          )}
-        </p>
-      ) : (
-        graph && (
-          <p role="status" className="context-graph-status">
-            {relationship && graph.nodes.length === 0
-              ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
-              : relationship
-                ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
-                : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
-            · {connectionSummary(graph)}
-            {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
-              <>
-                {" · "}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={loadingPage}
-                  onClick={() => void expandConnections()}
-                >
-                  Show more connections
-                </Button>
-              </>
-            )}
-            {graph.omitted_groups.length > 0 && adjacencyLimit >= 12 && (
-              <> · Some connections are hidden; open an item to see all</>
-            )}
-            {graph.next_cursor && (
-              <>
-                {" · "}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={loadingPage}
-                  onClick={() => void more()}
-                >
-                  Load more
-                </Button>
-              </>
-            )}
-          </p>
-        )
-      )}
-      <h2>Items</h2>
-      <ul className="context-graph-list">
-        {graph?.nodes.map((node) => (
-          <li key={node.id}>
-            <KindIcon kind={node.kind} />
-            <button type="button" onClick={() => setSelected(node.id)}>
-              {node.label}
-              {node.trashed ? " (Trash)" : ""}
-            </button>
-            {connectionRows(node.id, graph).map((row) => (
-              <p key={row.key}>
-                <strong>{edgeLabels[row.kind] ?? row.kind}</strong> · {row.text}
-              </p>
-            ))}
-            {connectionRows(node.id, graph).length === 0 &&
-              (graph.connection_counts?.[node.id] ?? 0) > 0 && (
+            <aside className="context-graph-preview">
+              {(graph?.nodes.length ?? 0) > MAP_CARDS && (
                 <p>
-                  {graph.connection_counts?.[node.id]}{" "}
-                  {graph.connection_counts?.[node.id] === 1
-                    ? "connection"
-                    : "connections"}{" "}
-                  in total · open its Context graph to see them
+                  The map shows the newest {MAP_CARDS} items; the list shows the{" "}
+                  {graph?.nodes.length} loaded
+                  {graph?.total && graph.total > graph.nodes.length
+                    ? ` of ${graph.total}`
+                    : ""}
+                  .
                 </p>
               )}
-          </li>
-        ))}
-      </ul>
+              {previewPanel}
+            </aside>
+          </div>
+        ) : (
+          <aside className="context-graph-strip">{previewPanel}</aside>
+        )}
+        {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
+          <p role="status" className="context-graph-status">
+            {filtered
+              ? "No items match these filters."
+              : "Nothing to show yet."}{" "}
+            {kind && relationship
+              ? "A connection to an item of another type is not shown while Item type is set. "
+              : ""}
+            {filtered && (
+              <Button variant="outline" size="sm" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </p>
+        ) : (
+          graph && (
+            <p role="status" className="context-graph-status">
+              {relationship && graph.nodes.length === 0
+                ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
+                : relationship
+                  ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
+                  : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+              · {connectionSummary(graph)}
+              {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
+                <>
+                  {" · "}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingPage}
+                    onClick={() => void expandConnections()}
+                  >
+                    Show more connections
+                  </Button>
+                </>
+              )}
+              {graph.omitted_groups.length > 0 && adjacencyLimit >= 12 && (
+                <> · Some connections are hidden; open an item to see all</>
+              )}
+              {graph.next_cursor && (
+                <>
+                  {" · "}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loadingPage}
+                    onClick={() => void more()}
+                  >
+                    Load more
+                  </Button>
+                </>
+              )}
+            </p>
+          )
+        )}
+        <h2>Items</h2>
+        <ul className="context-graph-list">
+          {graph?.nodes.map((node) => (
+            <li key={node.id}>
+              <KindIcon kind={node.kind} />
+              <button type="button" onClick={() => setSelected(node.id)}>
+                {node.label}
+                {node.trashed ? " (Trash)" : ""}
+              </button>
+              {connectionRows(node.id, graph).map((row) => (
+                <p key={row.key}>
+                  <strong>{edgeLabels[row.kind] ?? row.kind}</strong> ·{" "}
+                  {row.text}
+                </p>
+              ))}
+              {connectionRows(node.id, graph).length === 0 &&
+                (graph.connection_counts?.[node.id] ?? 0) > 0 && (
+                  <p>
+                    {graph.connection_counts?.[node.id]}{" "}
+                    {graph.connection_counts?.[node.id] === 1
+                      ? "connection"
+                      : "connections"}{" "}
+                    in total · open its Context graph to see them
+                  </p>
+                )}
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }
