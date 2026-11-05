@@ -817,8 +817,10 @@ export function DocumentEditor({
               )}
               <dt>Visibility</dt>
               <dd>
-                {initial.origin_brief && !initial.kept
-                  ? "Hidden with its update"
+                {initial.origin_brief
+                  ? initial.kept
+                    ? "Kept in Documents"
+                    : "Hidden with its update"
                   : "Shown in Documents"}
               </dd>
             </dl>

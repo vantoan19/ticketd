@@ -129,7 +129,13 @@ test("keeps a note draft when the ticket is left and revisited, until it is disc
   expect(
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Half-written finding");
-  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Draft actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Discard draft" }),
+  );
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
   cleanup();
   render(<Activity {...props} reference="T-21" />);
@@ -181,4 +187,35 @@ test("an empty composer offers Cancel and says why Post is disabled", async () =
   ).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
+});
+
+test("Reply starts a new update with a quote of the one it answers", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "activity_feed")
+      return [
+        {
+          type: "authored",
+          activity: {
+            ...note,
+            brief: "Found the cause. More detail follows.",
+            editing_agent: null,
+          },
+        },
+      ];
+    if (command === "ticket_history") return [];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<Activity {...props} reference="T-24" />);
+  await screen.findByText("Found the cause. More detail follows.");
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: /Actions for update from/ }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Reply" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  expect(
+    screen.getByRole("textbox", { name: "New update source" }),
+  ).toHaveProperty("value", expect.stringContaining("> Re: Found the cause"));
 });

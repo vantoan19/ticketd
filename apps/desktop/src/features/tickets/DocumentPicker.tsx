@@ -77,10 +77,12 @@ export function DocumentPicker({
               }}
             >
               <FileText aria-hidden="true" />
-              <span className="truncate">{item.heading}</span>
-              {item.origin_ticket && (
-                <small>{item.origin_ticket} · Activity details</small>
-              )}
+              <span className="document-picker-text">
+                <span className="truncate">{item.heading}</span>
+                {item.origin_ticket && (
+                  <small>{item.origin_ticket} · Activity details</small>
+                )}
+              </span>
             </button>
           </li>
         ))}

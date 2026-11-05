@@ -615,7 +615,10 @@ export function Documents({
                 </Button>
               )}
               {keptId === selected.id && selected.kept && (
-                <p role="status">Kept in Documents.</p>
+                // The Visibility row says it; this only announces the change.
+                <p role="status" className="sr-only">
+                  Kept in Documents.
+                </p>
               )}
               <section aria-label="Document tags">
                 <h2>Tags</h2>

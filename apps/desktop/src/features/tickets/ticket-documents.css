@@ -150,3 +150,15 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+
+/* The heading, with where it came from on its own muted line. */
+.document-picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-block: 4px;
+}
+.document-picker-text small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
