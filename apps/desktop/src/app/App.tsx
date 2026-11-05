@@ -29,7 +29,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 
 export function App() {
-  const [view, setView] = useState<
+  const [view, setViewState] = useState<
     | "tickets"
     | "projects"
     | "plans"
@@ -58,9 +58,6 @@ export function App() {
       setViewBeforeSettings(view);
       setSettingsSection("appearance");
     }
-    setGraphOrigin(null);
-    setLocalGraphOrigin(null);
-    setWorkspaceGraphOpen(false);
     setView(next);
   };
   const [inboxTarget, setInboxTarget] = useState<{
@@ -92,6 +89,32 @@ export function App() {
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
+  // Once opened it stays mounted (hidden), so coming back restores its filters,
+  // selection and viewport exactly as Back does.
+  const [workspaceGraphMounted, setWorkspaceGraphMounted] = useState(false);
+  // The only way to change the top-level view or the open graph: switching view
+  // closes any graph, and opening a graph leaves the view as it was.
+  // `keepGraph` only hides the graph so Back to context graph can return to it.
+  const navigate = (next: {
+    view?: typeof view;
+    graph?: string | null;
+    keepGraph?: boolean;
+  }) => {
+    if (next.keepGraph) {
+      setGraphOrigin(null);
+      if (next.view) setViewState(next.view);
+      return;
+    }
+    const graph = next.graph ?? null;
+    if (graph === "__workspace__") setWorkspaceGraphMounted(true);
+    setWorkspaceGraphOpen(graph === "__workspace__");
+    setLocalGraphOrigin(graph && graph !== "__workspace__" ? graph : null);
+    setGraphOrigin(graph);
+    if (next.view) setViewState(next.view);
+  };
+  const keepGraph = useRef(false);
+  const setView = (next: typeof view) =>
+    navigate({ view: next, keepGraph: keepGraph.current });
   const [capture, setCapture] = useState(false);
   // Capture is reachable from anywhere: Mod+Shift+N opens it without leaving the current view.
   useEffect(() => {
@@ -139,6 +162,14 @@ export function App() {
     navigation,
   } = workspace;
   const openGraphItem = (node: GraphData["nodes"][number]) => {
+    keepGraph.current = true;
+    try {
+      openGraphTarget(node);
+    } finally {
+      keepGraph.current = false;
+    }
+  };
+  const openGraphTarget = (node: GraphData["nodes"][number]) => {
     setGraphOrigin(null);
     if (node.kind === "document") {
       setDocumentTarget({ id: node.id, key: Date.now() });
@@ -159,13 +190,7 @@ export function App() {
   });
   const isMobile = useIsMobile();
   return (
-    <ContextGraphNavigation.Provider
-      value={(id) => {
-        setWorkspaceGraphOpen(id === "__workspace__");
-        setLocalGraphOrigin(id === "__workspace__" ? null : id);
-        setGraphOrigin(id);
-      }}
-    >
+    <ContextGraphNavigation.Provider value={(id) => navigate({ graph: id })}>
       <PlanNavigation.Provider
         value={(id) => {
           scope("all", "all", id);
@@ -222,14 +247,13 @@ export function App() {
                     onCapture={() => setCapture(true)}
                     counts={counts}
                     view={view}
+                    workspaceGraphOpen={graphOrigin === "__workspace__"}
                     setView={openView}
                     projects={projects}
                     plans={plans}
                     scope={(...args) => {
                       // A sidebar view always shows its list, not an open graph.
-                      setGraphOrigin(null);
-                      setLocalGraphOrigin(null);
-                      setWorkspaceGraphOpen(false);
+                      navigate({});
                       scope(...args);
                     }}
                     navigation={navigation}
@@ -279,7 +303,7 @@ export function App() {
                     plans={plans}
                     create={create}
                   />
-                  {view === "settings" && (
+                  {view === "settings" && graphOrigin === null && (
                     <SettingsView
                       selected={settingsSection}
                       onOpenInbox={() => setView("inbox")}
@@ -292,7 +316,10 @@ export function App() {
                     />
                   )}
                   {
-                    <div className="management" hidden={view !== "projects"}>
+                    <div
+                      className="management"
+                      hidden={view !== "projects" || graphOrigin !== null}
+                    >
                       <Projects
                         projects={projects}
                         loading={loading}
@@ -300,15 +327,16 @@ export function App() {
                       />
                     </div>
                   }
-                  {(view === "plans" || view === "archived-plans") && (
-                    <PlanList
-                      plans={plans}
-                      archived={view === "archived-plans"}
-                      onOpen={(id) => scope("all", "all", id)}
-                      refresh={refresh}
-                    />
-                  )}
-                  {view === "inbox" && (
+                  {(view === "plans" || view === "archived-plans") &&
+                    graphOrigin === null && (
+                      <PlanList
+                        plans={plans}
+                        archived={view === "archived-plans"}
+                        onOpen={(id) => scope("all", "all", id)}
+                        refresh={refresh}
+                      />
+                    )}
+                  {view === "inbox" && graphOrigin === null && (
                     <Inbox
                       revision={revision}
                       select={(reference, noteId) => {
@@ -354,7 +382,7 @@ export function App() {
                       onCaptureClose={() => setCapture(false)}
                     />
                   </div>
-                  {workspaceGraphOpen && (
+                  {workspaceGraphMounted && (
                     <div
                       className="context-view-wrapper"
                       hidden={graphOrigin !== "__workspace__"}

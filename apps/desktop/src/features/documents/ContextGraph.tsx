@@ -58,6 +58,18 @@ export function ContextGraph({
         .then((value) => {
           if (!live || request !== latest) return;
           setGraph(value);
+          // An expansion or page whose item is no longer shown has nothing to expand.
+          const shown = new Set(value.nodes.map((node) => node.id));
+          setExpandedIds((ids) =>
+            ids.every((id) => shown.has(id))
+              ? ids
+              : ids.filter((id) => shown.has(id)),
+          );
+          setPages((items) =>
+            items.every((item) => shown.has(item.anchor))
+              ? items
+              : items.filter((item) => shown.has(item.anchor)),
+          );
           setSelected((previous) =>
             previous && value.nodes.some((node) => node.id === previous)
               ? previous
@@ -123,6 +135,21 @@ export function ContextGraph({
   }
   const edges = useMemo(() => flowEdges(graph?.edges ?? []), [graph]);
   const preview = graph?.nodes.find((node) => node.id === selected);
+  // A crowded neighbourhood opens as a grouped list; the map is one click away.
+  const neighbours = graph ? graph.nodes.length - 1 : 0;
+  const [mapChoice, setMapChoice] = useState<{
+    center: string;
+    map: boolean;
+  } | null>(null);
+  const showMap =
+    mapChoice?.center === center ? mapChoice.map : neighbours <= 12;
+  const groupCounts = new Map<string, number>();
+  for (const edge of graph?.edges ?? [])
+    if (edge.source === graph?.center || edge.target === graph?.center)
+      groupCounts.set(edge.kind, (groupCounts.get(edge.kind) ?? 0) + 1);
+  const groupSummary = [...groupCounts]
+    .map(([kind, count]) => `${edgeLabels[kind] ?? kind} ${count}`)
+    .join(" · ");
   const hiddenDetails = !!graph?.hidden_details && !includeDetails;
   // Support connections stay hidden until update details are shown.
   const pending = (graph?.continuations ?? []).filter(
@@ -151,6 +178,15 @@ export function ContextGraph({
         {centerLabel && (
           <span className="context-graph-scope">Centered on {centerLabel}</span>
         )}
+        {neighbours > 12 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMapChoice({ center, map: !showMap })}
+          >
+            {showMap ? "Show list" : "Show map"}
+          </Button>
+        )}
         <label>
           <input
             type="checkbox"
@@ -170,8 +206,11 @@ export function ContextGraph({
       </div>
       {error && <p role="alert">{error}</p>}
       {layoutError && <p role="alert">{layoutError}</p>}
+      {groupSummary && neighbours > 12 && (
+        <p className="context-graph-groups">{groupSummary}</p>
+      )}
       <div className="context-graph-main">
-        {active && (
+        {active && showMap && (
           <ContextGraphCanvas
             nodes={(graph?.nodes ?? []).map((node) => ({
               id: node.id,

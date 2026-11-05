@@ -194,3 +194,83 @@ test("a filter with no matches says so and can be cleared", async () => {
   fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
   expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe("");
 });
+
+const nodeOf = (id: string, label: string, trashed = false) => ({
+  id,
+  kind: "ticket" as const,
+  label,
+  state: null,
+  trashed,
+  activity_detail: false,
+});
+const graphOf = (
+  nodes: ReturnType<typeof nodeOf>[],
+  next_cursor: string | null,
+) => ({
+  node_tags: {},
+  total: nodes.length,
+  nodes,
+  edges: [],
+  next_cursor,
+  omitted: next_cursor !== null,
+  omitted_groups: [],
+});
+
+test("a slow refresh does not erase pages loaded after it started", async () => {
+  const first = nodeOf("one", "T-1 · First");
+  const second = nodeOf("two", "T-2 · Second");
+  let releaseHydrate: (value: ReturnType<typeof graphOf>) => void = () => {};
+  vi.mocked(client.workspaceGraph)
+    .mockReset()
+    .mockImplementation((request) => {
+      if (request.hydrate_only && request.visible_ids.length === 1)
+        return new Promise((resolve) => {
+          releaseHydrate = resolve;
+        });
+      if (request.hydrate_only)
+        return Promise.resolve(graphOf([first, second], null));
+      if (request.cursor)
+        return Promise.resolve(graphOf([first, second], null));
+      return Promise.resolve(graphOf([first], "cursor"));
+    });
+  const props = {
+    active: true,
+    onBack: vi.fn(),
+    onFocus: vi.fn(),
+    onOpen: vi.fn(),
+  };
+  const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
+  await screen.findByRole("button", { name: "T-1 · First" });
+  rerender(<WorkspaceGraph {...props} revision={1} />);
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByRole("button", { name: "T-2 · Second" });
+  releaseHydrate(graphOf([first], "cursor"));
+  await waitFor(() =>
+    expect(client.workspaceGraph).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hydrate_only: true,
+        visible_ids: ["one", "two"],
+      }),
+    ),
+  );
+  expect(screen.getByRole("button", { name: "T-2 · Second" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+});
+
+test("marks items in the Trash", async () => {
+  vi.mocked(client.workspaceGraph)
+    .mockReset()
+    .mockResolvedValue(graphOf([nodeOf("one", "T-1 · Old", true)], null));
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={vi.fn()}
+      onOpen={vi.fn()}
+    />,
+  );
+  expect(
+    await screen.findByRole("button", { name: "T-1 · Old (Trash)" }),
+  ).toBeTruthy();
+});

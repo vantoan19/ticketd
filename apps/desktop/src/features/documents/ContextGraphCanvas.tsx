@@ -17,6 +17,9 @@ import {
 import type { Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
+/** Low enough that a dense neighbourhood fits whole instead of being clipped. */
+const MIN_ZOOM = 0.05;
+
 export function ContextGraphCanvas({
   nodes,
   edges,
@@ -113,13 +116,42 @@ export function ContextGraphCanvas({
   const [ready, setReady] = useState(false);
   useEffect(() => {
     if (!fit || !placed || !ready) return;
-    // Let React Flow measure the new nodes before fitting them.
-    const frame = window.requestAnimationFrame(() => {
-      void instance.current?.fitView({ padding: 0.2, duration: 200 });
+    // Fit only once React Flow has measured every card; fitting earlier centres
+    // each card's corner instead of its middle.
+    let frame = 0;
+    let tries = 0;
+    const attempt = () => {
+      const measured =
+        instance.current?.getNodes().every((node) => node.measured?.width) ??
+        false;
+      if (!measured && tries++ < 30) {
+        frame = window.requestAnimationFrame(attempt);
+        return;
+      }
+      void instance.current?.fitView({
+        padding: 0.2,
+        duration: 200,
+        minZoom: MIN_ZOOM,
+      });
       onFittedRef.current?.();
-    });
+    };
+    frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
   }, [fit, placed, ready, positions]);
+  // Labels crowd a dense map, so a line names itself only while hovered or
+  // when it touches the selected item.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const shownEdges = useMemo(
+    () =>
+      edges.map((edge) =>
+        edge.id === hovered ||
+        (selected !== null &&
+          (edge.source === selected || edge.target === selected))
+          ? edge
+          : { ...edge, label: undefined },
+      ),
+    [edges, hovered, selected],
+  );
   const flowNodes = useMemo<Node[]>(
     () =>
       nodes
@@ -151,7 +183,11 @@ export function ContextGraphCanvas({
     >
       <ReactFlow
         nodes={flowNodes}
-        edges={edges}
+        edges={shownEdges}
+        minZoom={MIN_ZOOM}
+        proOptions={{ hideAttribution: true }}
+        onEdgeMouseEnter={(_, edge) => setHovered(edge.id)}
+        onEdgeMouseLeave={() => setHovered(null)}
         onNodeClick={(_, node) => onSelect(node.id)}
         onInit={(value) => {
           instance.current = value;

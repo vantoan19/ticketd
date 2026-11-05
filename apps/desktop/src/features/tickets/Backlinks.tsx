@@ -87,15 +87,19 @@ export function Backlinks({
       return () => {
         active = false;
       };
-    void documents
-      .links(ticketId)
-      .then(([, incoming]) => {
-        if (active)
-          setDocumentLinks(
-            incoming.filter((link) => link.source_kind === "document"),
-          );
-      })
-      .catch(() => {});
+    // Incoming links mix tickets, Plans and Documents; page through them so
+    // Document mentions past the first 100 links are not lost.
+    void (async () => {
+      const found: typeof documentLinks = [];
+      for (let page = 0; page < 5; page += 1) {
+        const [, incoming] = await documents.links(ticketId, page * 100);
+        found.push(
+          ...incoming.filter((link) => link.source_kind === "document"),
+        );
+        if (incoming.length < 100) break;
+      }
+      if (active) setDocumentLinks(found);
+    })().catch(() => {});
     return () => {
       active = false;
     };

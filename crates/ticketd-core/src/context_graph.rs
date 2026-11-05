@@ -1,4 +1,4 @@
-const GROUPS: [(&str, &str); 16] = [
+const GROUPS: [(&str, &str); 22] = [
     (
         "SELECT blocker_id, dependent_id, NULL FROM dependencies WHERE blocker_id = ?1 ORDER BY dependent_id LIMIT ?2",
         "blocks",
@@ -24,44 +24,68 @@ const GROUPS: [(&str, &str); 16] = [
         "document",
     ),
     (
-        "SELECT m.source_id, COALESCE(t.id, ''), m.passage FROM numeric_mentions m LEFT JOIN tickets t ON t.number = m.number WHERE m.source_id = ?1 AND m.activity = 0 ORDER BY m.number, m.passage LIMIT ?2",
+        "SELECT m.source_id, COALESCE(t.id, ''), MIN(m.passage) FROM numeric_mentions m LEFT JOIN tickets t ON t.number = m.number WHERE m.source_id = ?1 AND m.activity = 0 GROUP BY m.number ORDER BY m.number LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT m.source_id, t.id, m.passage FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 0 WHERE t.id = ?1 ORDER BY m.source_id, m.passage LIMIT ?2",
+        "SELECT m.source_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 0 WHERE t.id = ?1 GROUP BY m.source_id ORDER BY m.source_id LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT m.ticket_id, COALESCE(t.id, ''), m.passage FROM activity_graph_numbers m LEFT JOIN tickets t ON t.number = m.number WHERE m.ticket_id = ?1 ORDER BY m.activity_id, m.number, m.passage LIMIT ?2",
+        "SELECT m.ticket_id, COALESCE(t.id, ''), MIN(m.passage) FROM activity_graph_numbers m LEFT JOIN tickets t ON t.number = m.number WHERE m.ticket_id = ?1 GROUP BY m.number ORDER BY m.number LIMIT ?2",
         "activity",
     ),
     (
-        "SELECT a.ticket_id, t.id, m.passage FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 1 JOIN activities a ON a.id = m.source_id WHERE t.id = ?1 ORDER BY m.source_id, m.passage LIMIT ?2",
+        "SELECT a.ticket_id, t.id, MIN(m.passage) FROM tickets t JOIN numeric_mentions m ON m.number = t.number AND m.activity = 1 JOIN activities a ON a.id = m.source_id WHERE t.id = ?1 GROUP BY a.ticket_id ORDER BY a.ticket_id LIMIT ?2",
         "activity",
     ),
     (
-        "SELECT source_id, target_id, passage FROM context_mentions WHERE source_id = ?1 ORDER BY target_id, passage LIMIT ?2",
+        "SELECT source_id, target_id, MIN(passage) FROM context_mentions WHERE source_id = ?1 GROUP BY target_id ORDER BY target_id LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT source_id, target_id, passage FROM context_mentions WHERE target_id = ?1 ORDER BY source_id, passage LIMIT ?2",
+        "SELECT source_id, target_id, MIN(passage) FROM context_mentions WHERE target_id = ?1 GROUP BY source_id ORDER BY source_id LIMIT ?2",
         "mention",
     ),
     (
-        "SELECT ticket_id, target_id, passage FROM activity_graph_targets WHERE ticket_id = ?1 ORDER BY activity_id, target_id, passage LIMIT ?2",
+        "SELECT ticket_id, target_id, MIN(passage) FROM activity_graph_targets WHERE ticket_id = ?1 GROUP BY target_id ORDER BY target_id LIMIT ?2",
         "activity",
     ),
     (
-        "SELECT a.ticket_id, m.target_id, m.passage FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE m.target_id = ?1 ORDER BY m.activity_id, m.passage LIMIT ?2",
+        "SELECT a.ticket_id, m.target_id, MIN(m.passage) FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE m.target_id = ?1 GROUP BY a.ticket_id ORDER BY a.ticket_id LIMIT ?2",
         "activity",
     ),
     (
-        "SELECT ticket_id, supporting_document_id, substr(brief, 1, 512) FROM activities WHERE ticket_id = ?1 AND supporting_document_id IS NOT NULL ORDER BY supporting_document_id, id LIMIT ?2",
+        "SELECT ticket_id, supporting_document_id, substr(brief, 1, 512) FROM activities WHERE ticket_id = ?1 AND supporting_document_id IS NOT NULL GROUP BY supporting_document_id ORDER BY supporting_document_id LIMIT ?2",
         "support",
     ),
     (
-        "SELECT ticket_id, supporting_document_id, substr(brief, 1, 512) FROM activities WHERE supporting_document_id = ?1 ORDER BY ticket_id, id LIMIT ?2",
+        "SELECT ticket_id, supporting_document_id, substr(brief, 1, 512) FROM activities WHERE supporting_document_id = ?1 GROUP BY ticket_id ORDER BY ticket_id LIMIT ?2",
         "support",
+    ),
+    (
+        "SELECT parent_id, child_id, NULL FROM ticket_parents WHERE parent_id = ?1 ORDER BY child_id LIMIT ?2",
+        "subticket",
+    ),
+    (
+        "SELECT parent_id, child_id, NULL FROM ticket_parents WHERE child_id = ?1 ORDER BY parent_id LIMIT ?2",
+        "subticket",
+    ),
+    (
+        "SELECT source_id, target_id, NULL FROM contextual_relationships WHERE kind = 'related' AND source_id = ?1 ORDER BY target_id LIMIT ?2",
+        "related",
+    ),
+    (
+        "SELECT source_id, target_id, NULL FROM contextual_relationships WHERE kind = 'related' AND target_id = ?1 ORDER BY source_id LIMIT ?2",
+        "related",
+    ),
+    (
+        "SELECT source_id, target_id, NULL FROM contextual_relationships WHERE kind = 'discovered' AND source_id = ?1 ORDER BY target_id LIMIT ?2",
+        "discovered",
+    ),
+    (
+        "SELECT source_id, target_id, NULL FROM contextual_relationships WHERE kind = 'discovered' AND target_id = ?1 ORDER BY source_id LIMIT ?2",
+        "discovered",
     ),
 ];
 
@@ -178,6 +202,9 @@ impl Workspace {
         let mut continuations = BTreeMap::<(String, usize), ContextGraphContinuation>::new();
         let mut anchors = vec![(center.clone(), None)];
         anchors.extend(expanded_ids.iter().cloned().map(|id| (id, None)));
+        // A page implies every earlier page of its group: the continuation chain is
+        // walked in order, so asking for page N alone still loads pages 1..N.
+        let mut wanted_pages = BTreeSet::new();
         for page in pages {
             if page.group >= groups.len()
                 || page.offset == 0
@@ -186,7 +213,12 @@ impl Workspace {
             {
                 return Err(Error::InvalidBatch("invalid graph continuation".into()));
             }
-            anchors.push((page.anchor.clone(), Some((page.group, page.offset))));
+            for offset in (GROUP_LIMIT..=page.offset).step_by(GROUP_LIMIT) {
+                wanted_pages.insert((page.anchor.clone(), page.group, offset));
+            }
+        }
+        for (anchor, group, offset) in wanted_pages {
+            anchors.push((anchor, Some((group, offset))));
         }
         let mut queue = VecDeque::from(anchors);
         let mut queried = BTreeSet::new();
@@ -198,9 +230,9 @@ impl Workspace {
                 queue.push_back((anchor, page));
                 stalled += 1;
                 if stalled >= queue.len() {
-                    return Err(Error::InvalidBatch(
-                        "graph expansion must target a visible item".into(),
-                    ));
+                    // What is left targets items that are no longer visible (deleted,
+                    // trashed details, or dropped by a newer snapshot): ignore it.
+                    break;
                 }
                 continue;
             }
@@ -310,6 +342,11 @@ impl Workspace {
                         omitted = true;
                         omitted_groups.insert(kind.clone());
                         continue;
+                    }
+                    if edges.len() == MAX_EDGES {
+                        omitted = true;
+                        omitted_groups.insert(kind.clone());
+                        break;
                     }
                     ids.insert(other.clone());
                 }
@@ -501,6 +538,9 @@ impl Workspace {
         let mut filter =
             String::from("FROM entities e WHERE e.kind IN ('ticket','document','plan')");
         let mut args: Vec<rusqlite::types::Value> = Vec::new();
+        // Trash is not part of the workspace map; a connected item that is trashed
+        // later stays visible (marked) until the next full load.
+        filter.push_str(" AND NOT COALESCE((SELECT trashed FROM tickets WHERE id = e.id), (SELECT trashed FROM documents WHERE id = e.id), 0)");
         if let Some(kind) = request.kind.as_deref().filter(|s| !s.is_empty()) {
             filter.push_str(" AND e.kind = ?");
             args.push(kind.to_owned().into());
@@ -546,8 +586,28 @@ impl Workspace {
             let mut page_args = args.clone();
             page_args.push(request.cursor.clone().unwrap_or_default().into());
             page_args.push(((remaining + 1) as i64).into());
+            // A relationship filter selects candidates before paging too, so a match
+            // deep in the workspace is not hidden behind pages of unrelated items.
+            let mut related = String::new();
+            if let Some(wanted) = request.relationship.as_deref() {
+                let probes: Vec<String> = GROUPS
+                    .iter()
+                    .filter(|(_, kind)| *kind == wanted)
+                    .map(|(sql, _)| {
+                        format!(
+                            "EXISTS (WITH g(a, b, c) AS ({}) SELECT 1 FROM g WHERE b <> '')",
+                            sql.replace("?1", "e.id").replace("?2", "1000")
+                        )
+                    })
+                    .collect();
+                related = if probes.is_empty() {
+                    " AND 0".to_owned()
+                } else {
+                    format!(" AND ({})", probes.join(" OR "))
+                };
+            }
             let mut stmt = tx.prepare(&format!(
-                "SELECT e.id {filter} AND e.id > ? ORDER BY e.id LIMIT ?"
+                "SELECT e.id {filter}{related} AND e.id > ? ORDER BY e.id LIMIT ?"
             ))?;
             stmt.query_map(rusqlite::params_from_iter(page_args.iter()), |row| {
                 row.get::<_, String>(0)

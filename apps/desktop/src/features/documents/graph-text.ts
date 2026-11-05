@@ -12,10 +12,30 @@ export const edgeLabels: Record<string, string> = {
   mention: "Mentions",
   activity: "Update mentions",
   support: "Update cites",
+  subticket: "Subticket",
+  related: "Related",
+  discovered: "Discovered",
 };
 
-/** Relationships that are weaker than a rule; drawn dashed. */
-export const dashedKinds = new Set(["mention", "activity"]);
+/**
+ * One stroke per relationship so lines differ without relying on colour: a rule
+ * (blocks) is solid and heavier, weaker links are dashed or dotted differently.
+ */
+export const edgeDashes: Record<string, string | undefined> = {
+  blocks: undefined,
+  membership: "2 4",
+  document: "8 3",
+  spec: "8 3 2 3",
+  mention: "5 5",
+  activity: "10 4",
+  support: "1 3",
+  subticket: "12 3 2 3 2 3",
+  related: "3 3",
+  discovered: "6 2 1 2",
+};
+export function edgeStrokeWidth(kind: string): number {
+  return kind === "blocks" ? 2 : 1.5;
+}
 
 export const kindNames: Record<GraphNode["kind"], string> = {
   ticket: "Ticket",
@@ -62,6 +82,12 @@ export function describeEdge(
       return `An update on ${source} mentions ${target}${quoted}`;
     case "support":
       return `An update on ${source} cites ${target}${quoted}`;
+    case "subticket":
+      return `${target} is a subticket of ${source}`;
+    case "related":
+      return `${source} is related to ${target}`;
+    case "discovered":
+      return `${target} was discovered while working on ${source}`;
   }
 }
 
@@ -75,7 +101,14 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
     markerEnd: { type: MarkerType.ArrowClosed, color: "currentColor" },
-    style: dashedKinds.has(edge.kind) ? { strokeDasharray: "5 5" } : {},
+    // Straight lines between card centres never loop around a card.
+    type: "straight",
+    style: {
+      strokeWidth: edgeStrokeWidth(edge.kind),
+      ...(edgeDashes[edge.kind]
+        ? { strokeDasharray: edgeDashes[edge.kind] }
+        : {}),
+    },
   }));
 }
 

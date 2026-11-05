@@ -1,4 +1,10 @@
-import { createContext, createElement, useContext, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -9,6 +15,7 @@ import {
   DocumentNavigation,
   PlanNavigation,
 } from "@/features/documents/navigation";
+import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -31,6 +38,32 @@ const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
 }>({ select: undefined, revision: undefined });
+
+/** Says so when a linked Document is in the Trash, as a linked ticket does. */
+function TrashedMark({
+  id,
+  revision,
+}: {
+  id: string;
+  revision: number | undefined;
+}) {
+  const [trashed, setTrashed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve(documents.show(id)).then(
+      (document) => {
+        if (active) setTrashed(document?.trashed === true);
+      },
+      () => {
+        if (active) setTrashed(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [id, revision]);
+  return trashed ? <> (Trash)</> : null;
+}
 
 function DocumentLink({
   href,
@@ -65,6 +98,7 @@ function DocumentLink({
         onClick={() => openDocument(id)}
       >
         {children}
+        <TrashedMark id={id} revision={revision} />
       </button>
     ) : (
       <>{children}</>

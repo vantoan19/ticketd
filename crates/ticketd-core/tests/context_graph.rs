@@ -304,7 +304,7 @@ fn workspace_expands_omitted_relationships_under_a_fixed_budget() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let mut tickets = Vec::new();
-    for i in 0..20 {
+    for i in 0..30 {
         tickets.push(workspace.create_ticket(&format!("Ticket {i}")).unwrap());
     }
     for i in 0..tickets.len() {
@@ -468,4 +468,161 @@ fn plan_membership_beyond_the_adjacency_limit_is_not_reported_omitted() {
     );
     let local = workspace.context_graph(&plan.id, false).unwrap();
     assert!(!local.omitted_groups.iter().any(|kind| kind == "membership"));
+}
+
+#[test]
+fn stale_expansions_and_pages_are_dropped_instead_of_failing_the_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Ticket").unwrap();
+    let page = ticketd_core::ContextGraphPage {
+        anchor: "gone".into(),
+        group: 2,
+        offset: 50,
+    };
+    let graph = workspace
+        .context_graph_with_pages(&ticket.reference, false, &["gone".into()], &[page])
+        .unwrap();
+    assert_eq!(graph.nodes.len(), 1);
+}
+
+#[test]
+fn a_continuation_page_loads_the_pages_before_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let plan = workspace.create_plan("Hub").unwrap();
+    for n in 0..99 {
+        let ticket = workspace.create_ticket(&format!("Member {n}")).unwrap();
+        workspace
+            .set_plan(&ticket.reference, Some(&plan.id), None)
+            .unwrap();
+    }
+    let first = workspace.context_graph(&plan.id, false).unwrap();
+    let group = first.continuations[0].group;
+    let page = ticketd_core::ContextGraphPage {
+        anchor: plan.id.clone(),
+        group,
+        offset: 100,
+    };
+    let graph = workspace
+        .context_graph_with_pages(&plan.id, false, &[], &[page])
+        .unwrap();
+    assert_eq!(graph.nodes.len(), 100);
+}
+
+#[test]
+fn a_verbose_document_does_not_hide_other_neighbors() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Target").unwrap();
+    let big = (0..120)
+        .map(|n| format!("{} line {n}", ticket.reference))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut docs = vec![workspace.create_document(Some("Big"), &big).unwrap()];
+    for n in 0..5 {
+        docs.push(
+            workspace
+                .create_document(Some(&format!("Small {n}")), &ticket.reference)
+                .unwrap(),
+        );
+    }
+    let graph = workspace.context_graph(&ticket.reference, false).unwrap();
+    for doc in docs {
+        assert!(graph.nodes.iter().any(|node| node.id == doc.id));
+    }
+}
+
+#[test]
+fn relationship_filter_finds_a_match_beyond_the_first_window() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for index in 0..130 {
+        workspace
+            .create_document(Some(&format!("Filler {index}")), "")
+            .unwrap();
+    }
+    let blocker = workspace.create_ticket("Blocker").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&blocker.reference, &dependent.reference, None)
+        .unwrap();
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            relationship: Some("blocks".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(graph.nodes.len(), 2);
+}
+
+#[test]
+fn graph_draws_subticket_related_and_discovered_relationships() {
+    use ticketd_core::{RelationshipKind, WorkspaceGraphRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let parent = workspace.create_ticket("Parent").unwrap();
+    let child = workspace.create_ticket("Child").unwrap();
+    let related = workspace.create_ticket("Related").unwrap();
+    let found = workspace.create_ticket("Found").unwrap();
+    workspace
+        .set_parent(&child.reference, Some(&parent.reference), None)
+        .unwrap();
+    workspace
+        .add_contextual_relationship(
+            &parent.reference,
+            &related.reference,
+            RelationshipKind::Related,
+            None,
+        )
+        .unwrap();
+    workspace
+        .add_contextual_relationship(
+            &parent.reference,
+            &found.reference,
+            RelationshipKind::Discovered,
+            None,
+        )
+        .unwrap();
+    let graph = workspace.context_graph(&child.reference, false).unwrap();
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.kind == "subticket" && e.source == parent.id && e.target == child.id)
+    );
+    let graph = workspace.context_graph(&parent.reference, false).unwrap();
+    for kind in ["subticket", "related", "discovered"] {
+        assert!(graph.edges.iter().any(|e| e.kind == kind), "{kind}");
+    }
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.kind == "discovered" && e.source == parent.id && e.target == found.id)
+    );
+    let filtered = workspace
+        .workspace_graph(&WorkspaceGraphRequest {
+            relationship: Some("related".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(filtered.nodes.len(), 2);
+}
+
+#[test]
+fn workspace_graph_leaves_out_trashed_items() {
+    use ticketd_core::WorkspaceGraphRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let kept = workspace.create_document(Some("Kept"), "x").unwrap();
+    let gone = workspace.create_document(Some("Gone"), "x").unwrap();
+    workspace.set_document_trashed(&gone.id, true).unwrap();
+    let graph = workspace
+        .workspace_graph(&WorkspaceGraphRequest::default())
+        .unwrap();
+    assert!(graph.nodes.iter().any(|n| n.id == kept.id));
+    assert!(graph.nodes.iter().all(|n| n.id != gone.id));
+    assert_eq!(graph.total, 1);
 }

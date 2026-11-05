@@ -200,6 +200,7 @@ fn context_link_markdown(reference: String) -> Result<String, String> {
 #[tauri::command]
 fn document_context_links(
     id: String,
+    offset: Option<u32>,
 ) -> Result<
     (
         Vec<ticketd_core::ContextLink>,
@@ -209,10 +210,11 @@ fn document_context_links(
 > {
     Workspace::open_default()
         .and_then(|w| {
-            let mut backlinks = w.context_backlinks(&id, 100, 0)?;
+            let offset = offset.unwrap_or(0);
+            let mut backlinks = w.context_backlinks(&id, 100, offset)?;
             // A Plan that uses this Document as its spec is a connection even though
             // no Markdown link states it.
-            for plan in w.list_plans(false)? {
+            for plan in w.list_plans(false)?.into_iter().filter(|_| offset == 0) {
                 if plan.spec_document_id.as_deref() == Some(id.as_str()) {
                     backlinks.push(ticketd_core::ContextLink {
                         activity_id: None,

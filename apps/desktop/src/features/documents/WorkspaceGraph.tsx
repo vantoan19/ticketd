@@ -81,34 +81,46 @@ export function WorkspaceGraph({
     };
   }, [request]);
   const currentGraph = useRef(graph);
+  // Bumped whenever the shown pages change, so a slower refresh can tell its
+  // snapshot of them is stale and must not overwrite newer pages.
+  const graphVersion = useRef(0);
   useEffect(() => {
     currentGraph.current = graph;
+    graphVersion.current += 1;
   }, [graph]);
   const observedRevision = useRef(revision);
   useEffect(() => {
     if (!active || revision === observedRevision.current) return;
     observedRevision.current = revision;
-    const previous = currentGraph.current;
-    if (!previous) return;
+    if (!currentGraph.current) return;
     let current = true;
-    void client
-      .workspaceGraph({
-        ...request,
-        adjacency_limit: adjacencyLimit,
-        visible_ids: previous.nodes.map((node) => node.id),
-        hydrate_only: true,
-      })
-      .then((value) => {
+    async function hydrate(attempts: number) {
+      const previous = currentGraph.current;
+      if (!previous) return;
+      const version = graphVersion.current;
+      try {
+        const value = await client.workspaceGraph({
+          ...request,
+          adjacency_limit: adjacencyLimit,
+          visible_ids: previous.nodes.map((node) => node.id),
+          hydrate_only: true,
+        });
         if (!current || currentRequest.current !== request) return;
+        if (graphVersion.current !== version) {
+          // Pages were loaded meanwhile; refresh those instead of replacing them.
+          if (attempts > 0) await hydrate(attempts - 1);
+          return;
+        }
         setGraph({
           ...value,
           next_cursor: previous.next_cursor,
           omitted: value.omitted || previous.next_cursor !== null,
         });
-      })
-      .catch((reason: unknown) => {
+      } catch (reason: unknown) {
         if (current) setError(String(reason));
-      });
+      }
+    }
+    void hydrate(2);
     return () => {
       current = false;
     };
@@ -117,7 +129,7 @@ export function WorkspaceGraph({
     () =>
       (graph?.nodes ?? []).map((node) => ({
         id: node.id,
-        label: `${kindNames[node.kind].toUpperCase()} · ${node.label}`,
+        label: `${kindNames[node.kind].toUpperCase()} · ${node.label}${node.trashed ? " (Trash)" : ""}`,
       })),
     [graph],
   );
@@ -247,6 +259,9 @@ export function WorkspaceGraph({
               "mention",
               "activity",
               "support",
+              "subticket",
+              "related",
+              "discovered",
             ].map((value) => (
               <option key={value} value={value}>
                 {edgeLabels[value]}
@@ -296,6 +311,7 @@ export function WorkspaceGraph({
               <h2>{preview.label}</h2>
               <p>
                 {preview.state}
+                {preview.trashed ? " · Trashed" : ""}
                 {graph?.node_tags[preview.id]
                   ? ` · Tag: ${graph.node_tags[preview.id]}`
                   : ""}
@@ -316,6 +332,9 @@ export function WorkspaceGraph({
       {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
         <p role="status" className="context-graph-status">
           {filtered ? "No items match these filters." : "Nothing to show yet."}{" "}
+          {kind && relationship
+            ? "A connection to an item of another type is not shown while Item type is set. "
+            : ""}
           {filtered && (
             <Button variant="outline" size="sm" onClick={clearFilters}>
               Clear filters
@@ -325,9 +344,11 @@ export function WorkspaceGraph({
       ) : (
         graph && (
           <p role="status" className="context-graph-status">
-            {relationship
-              ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
-              : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+            {relationship && graph.nodes.length === 0
+              ? "No connected items on this page"
+              : relationship
+                ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
+                : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
             · {graph.edges.length}{" "}
             {graph.edges.length === 1 ? "connection" : "connections"}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
@@ -370,6 +391,7 @@ export function WorkspaceGraph({
           <li key={node.id}>
             <button type="button" onClick={() => setSelected(node.id)}>
               {node.label}
+              {node.trashed ? " (Trash)" : ""}
             </button>
             {connectionRows(node.id, graph).map((row) => (
               <p key={row.key}>

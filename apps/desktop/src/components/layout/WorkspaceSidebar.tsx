@@ -57,7 +57,8 @@ type View =
   | "inbox"
   | "documents";
 export function WorkspaceSidebar({
-  view,
+  view: viewName,
+  workspaceGraphOpen = false,
   onCapture,
   counts,
   setView,
@@ -74,6 +75,8 @@ export function WorkspaceSidebar({
     plan: string;
   };
   view: View;
+  /** The workspace graph covers the current view; only its entry is active. */
+  workspaceGraphOpen?: boolean;
   onCapture: () => void;
   counts: SidebarCounts;
   setView: (view: View) => void;
@@ -87,6 +90,8 @@ export function WorkspaceSidebar({
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
+  // While the workspace graph is open no other entry reads as current.
+  const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
   const openGraph = useContext(ContextGraphNavigation);
   const unread = counts.unread_inbox > 0;
@@ -137,7 +142,10 @@ export function WorkspaceSidebar({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => openGraph?.("__workspace__")}>
+              <SidebarMenuButton
+                isActive={workspaceGraphOpen}
+                onClick={() => openGraph?.("__workspace__")}
+              >
                 <Network size={16} /> Workspace graph
               </SidebarMenuButton>
             </SidebarMenuItem>
