@@ -188,8 +188,9 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
   const manager = fileManagerName();
   const facts = info && [
     ["Tickets", String(info.tickets)],
+    ["Documents (including details and Trash)", String(info.documents)],
     ["Projects", String(info.projects)],
-    ["Active Efforts", String(info.active_efforts)],
+    ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],
     ["Workspace format version", String(info.format_version)],
   ];
@@ -534,6 +535,10 @@ function KeyboardShortcutsCard() {
     {
       action: "Create from the New ticket dialog",
       keys: [[modifier, "Enter"]],
+    },
+    {
+      action: "Capture a thought from anywhere",
+      keys: [[modifier, "Shift", "N"]],
     },
     { action: "Close the top surface", keys: [["Esc"]] },
     {

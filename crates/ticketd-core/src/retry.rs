@@ -1,6 +1,6 @@
 use crate::{
-    BatchOperation, Effort, Error, Evidence, EvidenceInput, Note, NotePatch, Project,
-    RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
+    Activity, ActivityPatch, BatchOperation, Document, DocumentPatch, Error, Evidence,
+    EvidenceInput, Plan, Project, RelationshipKind, Ticket, TicketChange, TicketPatch, Workspace,
 };
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,44 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    CreateTicketFromDocument {
+        id: String,
+        title: String,
+        /// Make the local person follow the new ticket, as the desktop preference asks.
+        #[serde(default)]
+        follow: bool,
+    },
+    CreateDocument {
+        title: Option<String>,
+        body: String,
+    },
+    ChangeDocument {
+        id: String,
+        patch: DocumentPatch,
+    },
+    SetDocumentPin {
+        id: String,
+        pinned: bool,
+    },
+    SetDocumentTag {
+        id: String,
+        tag: String,
+        present: bool,
+    },
+    KeepDocument {
+        id: String,
+    },
+    SetTicketDocument {
+        reference: String,
+        document_id: String,
+        present: bool,
+    },
+    TrashDocument {
+        id: String,
+    },
+    RestoreDocument {
+        id: String,
+    },
     AddEvidence {
         reference: String,
         input: EvidenceInput,
@@ -57,17 +95,24 @@ pub enum WriteRequest {
         trashed: bool,
         agent: Option<String>,
     },
-    AddNote {
+    AddActivity {
         reference: String,
-        content: String,
+        brief: String,
         agent: Option<String>,
     },
-    EditNote {
+    AddActivityWithDetails {
+        reference: String,
+        brief: String,
+        agent: Option<String>,
+        details: Option<String>,
+        existing_document_id: Option<String>,
+    },
+    EditActivity {
         reference: String,
         id: String,
-        patch: NotePatch,
+        patch: ActivityPatch,
     },
-    DeleteNote {
+    DeleteActivity {
         reference: String,
         id: String,
     },
@@ -155,17 +200,30 @@ pub enum WriteRequest {
         id: String,
         path: String,
     },
-    CreateEffort {
+    CreatePlan {
         name: String,
     },
-    ChangeEffort {
+    ChangePlan {
         id: String,
         name: Option<String>,
         archived: Option<bool>,
     },
-    SetEffort {
+    SetPlanDocument {
+        plan_id: String,
+        document_id: String,
+        present: bool,
+    },
+    SetPlanSpec {
+        plan_id: String,
+        document_id: Option<String>,
+    },
+    SetPlanPurpose {
+        id: String,
+        purpose: String,
+    },
+    SetPlan {
         reference: String,
-        effort: Option<String>,
+        plan: Option<String>,
         agent: Option<String>,
     },
 }
@@ -174,12 +232,13 @@ pub enum WriteRequest {
 // Results are owned at the public boundary; boxing tickets would complicate every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
+    Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
-    Note(Note),
+    Activity(Activity),
     Evidence(Evidence),
     Project(Project),
-    Effort(Effort),
+    Plan(Plan),
     Deleted,
 }
 
@@ -235,6 +294,37 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
+                self.create_ticket_from_document_following(&id, &title, follow)?,
+            ),
+            WriteRequest::CreateDocument { title, body } => {
+                WriteResult::Document(self.create_document(title.as_deref(), &body)?)
+            }
+            WriteRequest::ChangeDocument { id, patch } => {
+                WriteResult::Document(self.change_document(&id, patch)?)
+            }
+            WriteRequest::SetDocumentPin { id, pinned } => {
+                self.set_document_pin(&id, pinned)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetDocumentTag { id, tag, present } => {
+                self.set_document_tag(&id, &tag, present)?;
+                WriteResult::Deleted
+            }
+            WriteRequest::SetTicketDocument {
+                reference,
+                document_id,
+                present,
+            } => {
+                WriteResult::Ticket(self.set_ticket_document(&reference, &document_id, present)?)
+            }
+            WriteRequest::KeepDocument { id } => WriteResult::Document(self.keep_document(&id)?),
+            WriteRequest::TrashDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, true)?)
+            }
+            WriteRequest::RestoreDocument { id } => {
+                WriteResult::Document(self.set_document_trashed(&id, false)?)
+            }
             WriteRequest::AddEvidence { reference, input } => {
                 WriteResult::Evidence(self.add_evidence(&reference, input)?)
             }
@@ -279,18 +369,31 @@ impl Workspace {
                 trashed,
                 agent,
             } => WriteResult::Ticket(self.set_trashed(&reference, trashed, agent.as_deref())?),
-            WriteRequest::AddNote {
+            WriteRequest::AddActivity {
                 reference,
-                content,
+                brief,
                 agent,
-            } => WriteResult::Note(self.add_note(&reference, &content, agent.as_deref())?),
-            WriteRequest::EditNote {
+            } => WriteResult::Activity(self.add_activity(&reference, &brief, agent.as_deref())?),
+            WriteRequest::AddActivityWithDetails {
+                reference,
+                brief,
+                agent,
+                details,
+                existing_document_id,
+            } => WriteResult::Activity(self.add_activity_with_details(
+                &reference,
+                &brief,
+                agent.as_deref(),
+                details.as_deref(),
+                existing_document_id.as_deref(),
+            )?),
+            WriteRequest::EditActivity {
                 reference,
                 id,
                 patch,
-            } => WriteResult::Note(self.edit_note(&reference, &id, patch)?),
-            WriteRequest::DeleteNote { reference, id } => {
-                self.delete_note(&reference, &id)?;
+            } => WriteResult::Activity(self.edit_activity(&reference, &id, patch)?),
+            WriteRequest::DeleteActivity { reference, id } => {
+                self.delete_activity(&reference, &id)?;
                 WriteResult::Deleted
             }
             WriteRequest::AddTag { reference, name } => {
@@ -398,19 +501,29 @@ impl Workspace {
             WriteRequest::RemoveCheckout { id, path } => {
                 WriteResult::Project(self.remove_checkout(&id, &path)?)
             }
-            WriteRequest::CreateEffort { name } => WriteResult::Effort(self.create_effort(&name)?),
-            WriteRequest::ChangeEffort { id, name, archived } => {
-                WriteResult::Effort(self.change_effort(&id, name.as_deref(), archived)?)
+            WriteRequest::CreatePlan { name } => WriteResult::Plan(self.create_plan(&name)?),
+            WriteRequest::ChangePlan { id, name, archived } => {
+                WriteResult::Plan(self.change_plan(&id, name.as_deref(), archived)?)
             }
-            WriteRequest::SetEffort {
+            WriteRequest::SetPlanDocument {
+                plan_id,
+                document_id,
+                present,
+            } => WriteResult::Plan(self.set_plan_document(&plan_id, &document_id, present)?),
+            WriteRequest::SetPlanSpec {
+                plan_id,
+                document_id,
+            } => WriteResult::Plan(self.set_plan_spec(&plan_id, document_id.as_deref())?),
+            WriteRequest::SetPlanPurpose { id, purpose } => {
+                WriteResult::Plan(self.set_plan_purpose(&id, &purpose)?)
+            }
+            WriteRequest::SetPlan {
                 reference,
-                effort,
+                plan,
                 agent,
-            } => WriteResult::Ticket(self.set_effort(
-                &reference,
-                effort.as_deref(),
-                agent.as_deref(),
-            )?),
+            } => {
+                WriteResult::Ticket(self.set_plan(&reference, plan.as_deref(), agent.as_deref())?)
+            }
         })
     }
 }

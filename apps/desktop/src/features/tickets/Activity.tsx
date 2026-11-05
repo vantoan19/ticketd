@@ -1,33 +1,39 @@
+import { documents } from "@/features/documents/api";
+import { DocumentPicker } from "./DocumentPicker";
+import { hasVisibleText } from "./brief-text";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { DocumentNavigation } from "@/features/documents/navigation";
 import { useNow } from "@/lib/use-now";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
-import { client, type Note, type Project } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
-import { historyClient, type Entry } from "@/lib/api/history";
+import { FileText, MoreHorizontal, Plus, History } from "lucide-react";
+import {
+  client,
+  type AuthoredActivity,
+  type ActivityFeedEntry,
+  type Project,
+} from "@/lib/api/client";
+import type { Plan } from "@/lib/api/plans";
 import { historySentence } from "./history-sentence";
 import { attribution } from "./ticket-source";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
@@ -35,13 +41,96 @@ import { revealInDetail } from "./detail-scroll";
 import "./activity.css";
 
 /**
- * Unsubmitted note drafts by ticket reference. They outlive this component so
+ * Unsubmitted update drafts by ticket identity. They outlive this component so
  * switching tickets, or the detail remounting, never loses typed text.
  */
-const noteDrafts = new Map<string, string>();
+type Draft = {
+  brief: string;
+  /** Null while the update has no details section. */
+  details: string | null;
+  /** The id of an existing Document attached to the update, or "". */
+  support: string;
+};
+const drafts = new Map<string, Draft>();
+const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+// Earlier versions kept details and the attachment under their own keys.
+const legacyDetailKey = (reference: string) =>
+  `ticketd:activity-details:${reference}`;
+const legacySupportKey = (reference: string) =>
+  `ticketd:activity-support:${reference}`;
+
+function localValue(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function parseDraft(raw: string): Draft {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value === "object" && value !== null && "brief" in value) {
+      const { brief, details, support } = value as Record<string, unknown>;
+      return {
+        brief: typeof brief === "string" ? brief : "",
+        details: typeof details === "string" ? details : null,
+        support: typeof support === "string" ? support : "",
+      };
+    }
+  } catch {
+    /* A plain string is the earlier format: the brief alone. */
+  }
+  return { brief: raw, details: null, support: "" };
+}
+
+function loadDraft(reference: string): Draft {
+  const raw = localValue(draftKey(reference));
+  const base = raw !== null ? parseDraft(raw) : drafts.get(reference);
+  return {
+    brief: base?.brief ?? "",
+    details: base?.details ?? localValue(legacyDetailKey(reference)),
+    support: base?.support || (localValue(legacySupportKey(reference)) ?? ""),
+  };
+}
+
+const hasDraft = (draft: Draft) =>
+  draft.brief !== "" || draft.details !== null || draft.support !== "";
+
+/** Below this width the composer's secondary actions share one Add menu. */
+const COMPACT_WIDTH = 460;
+function useCompactComposer(element: HTMLElement | null) {
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = () => setCompact(element.clientWidth < COMPACT_WIDTH);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return compact;
+}
+
+/** The first sentence of an update, short enough to quote in a reply. */
+function quoteOf(brief: string): string {
+  const line =
+    brief
+      .split("\n")
+      .map((text) => text.replace(/^[#>\s*-]+/, "").trim())
+      .find(Boolean) ?? "";
+  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
+  const plain = sentence.replace(/\.$/, "");
+  if (plain.length <= 80) return plain;
+  // Cut at a word boundary so the quote never ends mid-word.
+  const cut = plain.slice(0, 79);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
 
 export function Activity({
   reference,
+  ticketId = reference,
   status,
   revision,
   projects,
@@ -49,7 +138,7 @@ export function Activity({
   trashed,
   select,
   target,
-  efforts = [],
+  plans = [],
   sourceName,
   latestNoteId,
   onChanged,
@@ -58,6 +147,7 @@ export function Activity({
   latestNoteId?: string | undefined;
   onChanged?: () => Promise<void>;
   reference: string;
+  ticketId?: string;
   status: string;
   revision: number;
   projects: Project[];
@@ -65,25 +155,40 @@ export function Activity({
   trashed: boolean;
   select?: (reference: string) => void;
   target?: { id: string; key: number } | null;
-  efforts?: Effort[];
+  plans?: Plan[];
 }) {
   const now = useNow();
+  const [feedback, setFeedback] = useState("");
   const [loadError, setLoadError] = useState("");
-  const [targetNote, setTargetNote] = useState<Note | null>(null);
+  const [targetMissing, setTargetMissing] = useState<string | null>(null);
+  const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
   const targetRequest = useRef<{ id: string } | null>(null);
   const targetRef = useRef<HTMLLIElement>(null);
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
   const targetId = target?.id;
   const targetKey = target?.key;
+  // The target a visit already showed is not looked up again when the ticket is
+  // selected afresh; only a newly opened target (a new key) is.
+  const leftTargetKey = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!active) return;
+    return () => {
+      leftTargetKey.current = targetKey;
+    };
+  }, [active, targetKey]);
   useEffect(() => {
     if (!active || targetId === undefined) return;
+    if (targetKey !== undefined && leftTargetKey.current === targetKey) return;
     let current = true;
     const request = { id: targetId };
     targetRequest.current = request;
     void client
-      .note(reference, targetId)
+      .activity(reference, targetId)
       .then((note) => {
-        if (current && targetRequest.current === request) setTargetNote(note);
+        if (current && targetRequest.current === request) {
+          setTargetNote(note);
+          setTargetMissing(note === null ? targetId : null);
+        }
       })
       .catch((reason: unknown) => {
         if (current && targetRequest.current === request)
@@ -93,19 +198,118 @@ export function Activity({
       current = false;
     };
   }, [active, reference, revision, targetId, targetKey]);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [history, setHistory] = useState<Entry[]>([]);
+  // Leaving the ticket ends the "no longer available" notice for good, and
+  // the confirmation of a deletion belongs to the ticket it happened on.
+  const [wasActive, setWasActive] = useState(active);
+  const [wasReference, setWasReference] = useState(reference);
+  if (wasActive !== active || wasReference !== reference) {
+    setWasActive(active);
+    setWasReference(reference);
+    if (!active || wasReference !== reference) {
+      setTargetMissing(null);
+      setFeedback("");
+    }
+  }
+  const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
+  const notes = feed.flatMap((item) =>
+    item.type === "authored" ? [item.activity] : [],
+  );
+  const history = feed.flatMap((item) =>
+    item.type === "automatic" ? [item.event] : [],
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraftValue] = useState(
-    () => noteDrafts.get(reference) ?? "",
-  );
-  const [composing, setComposing] = useState(() => noteDrafts.has(reference));
-  function setDraft(content: string) {
-    if (content) noteDrafts.set(reference, content);
-    else noteDrafts.delete(reference);
-    setDraftValue(content);
+  const [saved, setSaved] = useState<Draft>(() => loadDraft(ticketId));
+  const savedRef = useRef(saved);
+  const [composing, setComposing] = useState(() => hasDraft(saved));
+  const requestKey = `ticketd:activity-request:${ticketId}`;
+  /** Changes part of the draft and keeps the whole draft, as one object, on this device. */
+  function updateDraft(patch: Partial<Draft>) {
+    const next = { ...savedRef.current, ...patch };
+    savedRef.current = next;
+    setSaved(next);
+    try {
+      if (hasDraft(next)) {
+        drafts.set(ticketId, next);
+        localStorage.setItem(draftKey(ticketId), JSON.stringify(next));
+      } else {
+        drafts.delete(ticketId);
+        localStorage.removeItem(draftKey(ticketId));
+      }
+      localStorage.removeItem(legacyDetailKey(ticketId));
+      localStorage.removeItem(legacySupportKey(ticketId));
+      if (patch.support !== undefined) localStorage.removeItem(requestKey);
+    } catch {
+      setError("Could not save the unpublished update on this device.");
+    }
   }
+  // Write the draft once more as the page goes away, so a quick quit keeps it.
+  useEffect(() => {
+    const flush = () => {
+      try {
+        if (hasDraft(savedRef.current))
+          localStorage.setItem(
+            draftKey(ticketId),
+            JSON.stringify(savedRef.current),
+          );
+      } catch {
+        /* The draft stays in memory. */
+      }
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+    };
+  }, [ticketId]);
+  function clearDraft() {
+    updateDraft({ brief: "", details: null, support: "" });
+    try {
+      localStorage.removeItem(requestKey);
+    } catch {
+      setError("Could not clear the unpublished update on this device.");
+    }
+  }
+  const draft = saved.brief;
+  const details = saved.details ?? "";
+  const showDetails = saved.details !== null;
+  const support = saved.support;
+  const setDraft = (brief: string) => updateDraft({ brief });
+  const setDetails = (value: string) => updateDraft({ details: value });
+  const setSupport = (value: string) => updateDraft({ support: value });
+  const [supportTitle, setSupportTitle] = useState("");
+  /** What each update's details Document is called and whether it is in Trash. */
+  const [detailDocuments, setDetailDocuments] = useState<
+    Record<string, { heading: string; trashed: boolean; attached: boolean }>
+  >({});
+  const [picking, setPicking] = useState(false);
+  const attachButton = useRef<HTMLButtonElement>(null);
+  const [composer, setComposer] = useState<HTMLFormElement | null>(null);
+  const compact = useCompactComposer(composer);
+  // Bumped to put the caret in the update editor / the new Details editor.
+  const [focusUpdate, setFocusUpdate] = useState(0);
+  const [focusDetails, setFocusDetails] = useState(false);
+  const replied = useRef(false);
+  const [view, setView] = useState<"all" | "updates">("all");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const openDocument = useContext(DocumentNavigation);
+  useEffect(() => {
+    if (!active || !support) return;
+    let current = true;
+    void documents
+      .show(support)
+      .then((document) => {
+        if (current)
+          setSupportTitle(document.title || document.heading || "Document");
+      })
+      .catch((reason: unknown) => {
+        if (current) setError(String(reason));
+      });
+    return () => {
+      current = false;
+    };
+  }, [active, support]);
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
@@ -116,24 +320,23 @@ export function Activity({
   const pages = useRef(1);
   const [more, setMore] = useState(false);
   const loadNotes = useCallback(async () => {
-    const loaded: Note[] = [];
-    let page: Note[] = [];
+    const loaded: ActivityFeedEntry[] = [];
+    let page: ActivityFeedEntry[] = [];
     for (let index = 0; index < pages.current; index++) {
-      page = await client.notes(reference, index * 50);
+      page = await client.activityFeed(reference, index * 50);
       loaded.push(...page);
       if (page.length < 50) break;
     }
-    setNotes(loaded);
+    setFeed(loaded);
     setMore(page.length === 50);
   }, [reference]);
   useEffect(() => {
     if (!active) return;
     let current = true;
     void Promise.resolve()
-      .then(() => Promise.all([loadNotes(), historyClient.list(reference)]))
-      .then(([, entries]) => {
+      .then(() => loadNotes())
+      .then(() => {
         if (current) {
-          setHistory(entries);
           setLoadError("");
         }
       })
@@ -147,13 +350,25 @@ export function Activity({
       current = false;
     };
   }, [active, loadNotes, reference, revision, status]);
+  function startDetails() {
+    setDetails("");
+    setPicking(false);
+    setFocusDetails(true);
+  }
+  /** Replies start from a quote of the update, in the same composer. */
+  function reply(brief: string) {
+    const base = hasVisibleText(draft) ? `${draft.trimEnd()}\n\n` : "";
+    setComposing(true);
+    setDraft(`${base}> Re: ${quoteOf(brief)}\n\n`);
+    replied.current = true;
+  }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
       event.target !== event.currentTarget ||
       busy.current ||
       trashed ||
-      !(edit ? edit.content : draft).trim()
+      !hasVisibleText(edit ? edit.content : draft)
     )
       return;
     busy.current = true;
@@ -161,7 +376,7 @@ export function Activity({
     setError("");
     try {
       if (edit) {
-        const savedNote = await client.editNote(
+        const savedNote = await client.editActivity(
           reference,
           edit.id,
           edit.content,
@@ -171,10 +386,50 @@ export function Activity({
         setTargetNote((previous) =>
           previous?.id === savedNote.id ? savedNote : previous,
         );
-      } else await client.addNote(reference, draft);
+      } else {
+        const payload = JSON.stringify([
+          reference,
+          draft,
+          showDetails ? details : null,
+          support || null,
+        ]);
+        const previous = localValue(requestKey);
+        let requestId: string = crypto.randomUUID();
+        if (previous) {
+          try {
+            const saved: unknown = JSON.parse(previous);
+            if (
+              typeof saved === "object" &&
+              saved !== null &&
+              "payload" in saved &&
+              "id" in saved &&
+              saved.payload === payload &&
+              typeof saved.id === "string"
+            )
+              requestId = saved.id;
+          } catch {
+            /* Replace malformed local state. */
+          }
+        }
+        try {
+          localStorage.setItem(
+            requestKey,
+            JSON.stringify({ payload, id: requestId }),
+          );
+        } catch {
+          /* The retry id is best effort; a full store must not block posting. */
+        }
+        await client.addActivityWithDetails(
+          reference,
+          draft,
+          showDetails ? details : null,
+          support || null,
+          requestId,
+        );
+      }
       if (edit) setEdit(null);
       else {
-        setDraft("");
+        clearDraft();
         setComposing(false);
       }
       await loadNotes();
@@ -192,7 +447,16 @@ export function Activity({
     setPending(true);
     setError("");
     try {
-      await client.deleteNote(reference, id);
+      const hadSupport = notes.some(
+        (note) => note.id === id && note.supporting_document_id,
+      );
+      await client.deleteActivity(reference, id);
+      setConfirmDelete(null);
+      setFeedback(
+        hadSupport
+          ? "Update deleted. Its details stay in Documents."
+          : "Update deleted.",
+      );
       if (targetRequest.current?.id === id) targetRequest.current = null;
       setTargetNote((previous) => (previous?.id === id ? null : previous));
       await loadNotes();
@@ -210,9 +474,9 @@ export function Activity({
     setPending(true);
     setError("");
     try {
-      const page = await client.notes(reference, notes.length);
+      const page = await client.activityFeed(reference, feed.length);
       pages.current += 1;
-      setNotes((previous) => [...previous, ...page]);
+      setFeed((previous) => [...previous, ...page]);
       setMore(page.length === 50);
     } catch (reason) {
       setError(String(reason));
@@ -231,10 +495,37 @@ export function Activity({
     !notes.some((note) => note.id === targetId)
       ? [...notes, targetNote]
       : notes;
+  const detailIds = displayedNotes.flatMap((note) =>
+    note.supporting_document_id ? [note.supporting_document_id] : [],
+  );
+  const detailIdsKey = detailIds.join(",");
+  useEffect(() => {
+    if (!active || !detailIdsKey) return;
+    let current = true;
+    for (const id of detailIdsKey.split(","))
+      void documents
+        .show(id)
+        .then((document) => {
+          if (current)
+            setDetailDocuments((previous) => ({
+              ...previous,
+              [id]: {
+                heading: document.title || document.heading || "Document",
+                trashed: document.trashed,
+                // Generated details remember the update they came from.
+                attached: !document.origin_brief,
+              },
+            }));
+        })
+        .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [active, detailIdsKey, revision]);
   const changed =
     edit &&
     !displayedNotes.some(
-      (note) => note.id === edit.id && note.content === edit.original,
+      (note) => note.id === edit.id && note.brief === edit.original,
     );
   useLayoutEffect(() => {
     if (!active || targetId === undefined || targetKey === undefined) {
@@ -250,12 +541,18 @@ export function Activity({
     if (!element) return;
     revealInDetail(element);
     element.focus({ preventScroll: true });
+    // A brief highlight shows which update was asked for.
+    element.classList.add("activity-entry-target");
+    window.setTimeout(
+      () => element.classList.remove("activity-entry-target"),
+      2000,
+    );
     revealedTarget.current = { id: targetId, key: targetKey };
-  }, [active, targetId, targetKey, notes, targetNote]);
+  }, [active, targetId, targetKey, feed, targetNote]);
   const entries = [
     ...displayedNotes.map((note) => ({
       type: "note" as const,
-      timestamp: note.created_at,
+      timestamp: note.reported_at,
       note,
     })),
     ...history.map((entry, index) => ({
@@ -264,21 +561,61 @@ export function Activity({
       entry,
       index,
     })),
-  ].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  ]
+    .filter((item) => view === "all" || item.type === "note")
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  // The newest update still in the list, so deleting the latest one moves the label.
+  const newestNoteId = displayedNotes.reduce<AuthoredActivity | null>(
+    (best, note) =>
+      best === null || note.reported_at > best.reported_at ? note : best,
+    null,
+  )?.id;
   const lookups = {
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
-    effort: (id: string) => efforts.find((effort) => effort.id === id)?.name,
+    plan: (id: string) => plans.find((plan) => plan.id === id)?.name,
   };
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
       <div className="activity-heading">
-        <h3>Notes and history</h3>
+        <h3>Activity</h3>
+        <SegmentedControl
+          aria-label="Show activity"
+          value={view}
+          onValueChange={setView}
+          options={[
+            { value: "all", label: "All" },
+            { value: "updates", label: "Updates" },
+          ]}
+        />
         <span>
           Only in ticketd{sourceName && <> · never sent to {sourceName}</>}
         </span>
       </div>
+      {feedback && (
+        <p role="status" className="activity-muted">
+          {feedback}
+        </p>
+      )}
+      {targetMissing === targetId && targetId !== undefined && (
+        <Alert>
+          <AlertDescription>
+            This update is no longer available. Refresh updates to see the
+            current activity.
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => {
+                setTargetMissing(null);
+                void onChanged?.();
+              }}
+            >
+              Refresh updates
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {(error || loadError) && (
         <Alert variant="destructive">
           <AlertDescription>{error || loadError}</AlertDescription>
@@ -288,72 +625,254 @@ export function Activity({
         <button
           type="button"
           className="activity-compact-composer"
-          onClick={() => setComposing(true)}
+          onClick={() => {
+            setComposing(true);
+            setFocusUpdate((count) => count + 1);
+          }}
         >
-          Add a note
+          Write an update…
         </button>
       )}
       {!trashed && (composing || edit) && (
         <form
+          ref={setComposer}
           className="activity-composer"
           onSubmit={(event) => void save(event)}
         >
           <FieldGroup>
             <Field data-disabled={pending}>
-              <FieldLabel asChild>
-                <span>{edit ? "Edit note" : "New note"}</span>
+              <FieldLabel className="sr-only" asChild>
+                <span>{edit ? "Edit update" : "New update"}</span>
               </FieldLabel>
               <LazyMarkdownEditor
                 key={edit?.id ?? "new"}
-                label={edit ? "Edit note" : "New note"}
+                label={edit ? "Edit update" : "New update"}
+                placeholder="Write an update…"
                 value={draftText}
                 onChange={(content) =>
                   edit ? setEdit({ ...edit, content }) : setDraft(content)
                 }
                 readOnly={pending}
+                focusRequest={focusUpdate}
+                paragraphAfterQuote
               />
-              <FieldDescription>Markdown is supported.</FieldDescription>
             </Field>
           </FieldGroup>
-          {changed && (
-            <p role="status" className="activity-muted">
-              The saved note changed while you were editing. Your draft is
-              preserved; saving will replace the saved content.
-            </p>
-          )}
-          <div className="activity-actions">
-            <Button
-              type="submit"
-              size="sm"
-              disabled={pending || !draftText.trim()}
-            >
-              {pending ? "Saving…" : edit ? "Save note" : "Add note"}
-            </Button>
-            {edit ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={pending}
-                onClick={() => setEdit(null)}
-              >
-                Cancel edit
-              </Button>
-            ) : (
+          {!edit && showDetails && (
+            <Field>
+              <FieldLabel asChild>
+                <span>Details</span>
+              </FieldLabel>
+              <LazyMarkdownEditor
+                label="Details"
+                placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
+                value={details}
+                onChange={setDetails}
+                readOnly={pending}
+                autoFocus={focusDetails}
+              />
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 disabled={pending}
                 onClick={() => {
-                  setDraft("");
-                  setComposing(false);
+                  setFocusDetails(false);
+                  updateDraft({ details: null });
+                  try {
+                    localStorage.removeItem(requestKey);
+                  } catch {
+                    /* The retry id is best effort. */
+                  }
                 }}
               >
-                Discard draft
+                Remove details
+              </Button>
+            </Field>
+          )}
+          {!edit && support && (
+            <p className="activity-attached">
+              <FileText aria-hidden="true" />
+              <span className="truncate">
+                Attached: {supportTitle || "Document"}
+              </span>
+              <span aria-hidden="true">·</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label="Remove attached Document"
+                onClick={() => setSupport("")}
+              >
+                Remove
+              </Button>
+              <span className="activity-muted">
+                Remove it to write details instead.
+              </span>
+            </p>
+          )}
+          {!edit && picking && (
+            <div
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                setPicking(false);
+                attachButton.current?.focus();
+              }}
+            >
+              <DocumentPicker
+                onPick={(picked) => {
+                  setSupport(picked.id);
+                  setSupportTitle(picked.heading);
+                  setPicking(false);
+                }}
+              />
+            </div>
+          )}
+          {changed && (
+            <p role="status" className="activity-muted">
+              The saved update changed while you were editing. Your draft is
+              preserved; saving will replace the saved content.
+            </p>
+          )}
+          <div
+            className="activity-actions"
+            data-sticky={(!edit && showDetails) || undefined}
+          >
+            {!edit && !showDetails && compact && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Add details or a Document"
+                  >
+                    <Plus aria-hidden="true" />
+                    Add
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    disabled={!!support}
+                    onSelect={startDetails}
+                  >
+                    Add details
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!!support}
+                    onSelect={() => setPicking(true)}
+                  >
+                    Attach Document
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {!edit && !showDetails && !compact && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!!support}
+                title={
+                  support
+                    ? "Remove the attached Document to write details instead"
+                    : undefined
+                }
+                onClick={startDetails}
+              >
+                <Plus aria-hidden="true" />
+                Add details
               </Button>
             )}
+            {!edit && !showDetails && !support && !compact && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                ref={attachButton}
+                aria-expanded={picking}
+                className={picking ? "bg-accent" : undefined}
+                onClick={() => setPicking(!picking)}
+              >
+                <FileText aria-hidden="true" />
+                Attach Document
+              </Button>
+            )}
+            <span className="activity-actions-end">
+              {edit ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => setEdit(null)}
+                >
+                  Cancel edit
+                </Button>
+              ) : hasDraft(saved) ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={pending}
+                      aria-label="Draft actions"
+                    >
+                      <MoreHorizontal aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => {
+                        clearDraft();
+                        setPicking(false);
+                        setComposing(false);
+                      }}
+                    >
+                      Discard draft
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => {
+                    setPicking(false);
+                    setComposing(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                type="submit"
+                size="sm"
+                disabled={pending || !hasVisibleText(draftText)}
+                aria-describedby={
+                  !pending && !hasVisibleText(draftText)
+                    ? `post-hint-${ticketId}`
+                    : undefined
+                }
+              >
+                {pending ? "Saving…" : edit ? "Save update" : "Post update"}
+              </Button>
+            </span>
           </div>
+          {!pending && !hasVisibleText(draftText) && (
+            <p id={`post-hint-${ticketId}`} className="activity-caption">
+              {edit ? "An update needs some text." : "Write an update to post."}
+            </p>
+          )}
+          {!edit && hasDraft(saved) && (
+            <p className="activity-caption">Draft kept on this device</p>
+          )}
         </form>
       )}
       {loading && entries.length === 0 ? (
@@ -364,7 +883,7 @@ export function Activity({
         <Empty className="activity-empty">
           <EmptyHeader>
             <EmptyDescription>
-              No notes or recorded changes yet.
+              No updates or recorded changes yet.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -376,26 +895,40 @@ export function Activity({
                 key={`note-${item.note.id}`}
                 className="activity-entry"
                 ref={
-                  active && item.note.id === targetId ? targetRef : undefined
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
+                    ? targetRef
+                    : undefined
                 }
-                tabIndex={active && item.note.id === targetId ? -1 : undefined}
+                tabIndex={
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
+                    ? -1
+                    : undefined
+                }
                 aria-label={
-                  active && item.note.id === targetId
-                    ? "Selected note"
+                  active &&
+                  item.note.id === targetId &&
+                  targetNote?.id === targetId
+                    ? "Selected update"
                     : undefined
                 }
               >
                 <div className="activity-meta">
                   <strong>
-                    {item.note.id === latestNoteId ? "Latest update" : "Note"}
+                    {item.note.id === (newestNoteId ?? latestNoteId)
+                      ? "Latest update"
+                      : "Update"}
                   </strong>
                   <time
-                    dateTime={item.note.created_at}
-                    title={formatDateTime(item.note.created_at)}
+                    dateTime={item.note.reported_at}
+                    title={formatDateTime(item.note.reported_at)}
                   >
-                    {relativeDateTime(item.note.created_at, now)}
+                    {relativeDateTime(item.note.reported_at, now)}
                   </time>
-                  {item.note.updated_at !== item.note.created_at && (
+                  {item.note.updated_at !== item.note.reported_at && (
                     <span>Edited {formatDateTime(item.note.updated_at)}</span>
                   )}
                   {item.note.editing_agent && (
@@ -410,43 +943,92 @@ export function Activity({
                           size="icon-sm"
                           className="activity-menu"
                           disabled={pending}
-                          aria-label={`Actions for note from ${formatDateTime(item.note.created_at)}`}
+                          aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
                         >
                           <MoreHorizontal />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent
+                        align="end"
+                        onCloseAutoFocus={(event) => {
+                          // Focus goes to the composer, not back to the menu button.
+                          if (replied.current) {
+                            event.preventDefault();
+                            replied.current = false;
+                            setFocusUpdate((count) => count + 1);
+                          }
+                        }}
+                      >
+                        <DropdownMenuItem
+                          disabled={!!edit}
+                          onSelect={() => reply(item.note.brief)}
+                        >
+                          Reply
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() =>
                             setEdit({
                               id: item.note.id,
-                              original: item.note.content,
-                              content: item.note.content,
+                              original: item.note.brief,
+                              content: item.note.brief,
                             })
                           }
                         >
-                          Edit note
+                          Edit update
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
-                          onSelect={() => void remove(item.note.id)}
+                          onSelect={() => setConfirmDelete(item.note.id)}
                         >
-                          Delete note
+                          Delete update
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
                 </div>
-                <div className="markdown-preview activity-note">
+                {confirmDelete === item.note.id && (
+                  <p role="alertdialog" className="activity-confirm">
+                    {item.note.supporting_document_id
+                      ? "Delete update? Its details stay in Documents."
+                      : "Delete update?"}
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => void remove(item.note.id)}
+                    >
+                      Delete update
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(null)}
+                    >
+                      Keep update
+                    </Button>
+                  </p>
+                )}
+                <ClampedBrief>
                   <MarkdownDocument
-                    source={item.note.content}
+                    source={item.note.brief}
                     select={select}
                     revision={revision}
                   />
-                </div>
+                </ClampedBrief>
+                {item.note.supporting_document_id && (
+                  <DetailsLink
+                    info={detailDocuments[item.note.supporting_document_id]}
+                    open={() =>
+                      openDocument?.(item.note.supporting_document_id!)
+                    }
+                  />
+                )}
               </li>
             ) : (
               <li key={`history-${item.index}`} className="activity-history">
+                <History aria-hidden="true" className="activity-history-icon" />
                 <span>{historySentence(item.entry, lookups)}</span>
                 <time
                   dateTime={item.entry.timestamp}
@@ -470,9 +1052,80 @@ export function Activity({
           disabled={pending}
           onClick={() => void loadMore()}
         >
-          Load more notes
+          Load more activity
         </Button>
       )}
     </section>
+  );
+}
+
+/** The link from an update to its details Document, named by what it holds. */
+/** A long update stays a few lines tall until Show more is chosen. */
+function ClampedBrief({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => {
+      if (!expanded)
+        setClipped(element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded]);
+  return (
+    <>
+      <div
+        ref={box}
+        className="markdown-preview activity-note"
+        data-expanded={expanded || undefined}
+      >
+        {children}
+      </div>
+      {(clipped || expanded) && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </Button>
+      )}
+    </>
+  );
+}
+
+function DetailsLink({
+  info,
+  open,
+}: {
+  info: { heading: string; trashed: boolean; attached: boolean } | undefined;
+  open: () => void;
+}) {
+  if (!info)
+    return (
+      <Button type="button" variant="link" onClick={open}>
+        Open details
+      </Button>
+    );
+  return (
+    <Button
+      type="button"
+      variant="link"
+      className="activity-details-link"
+      onClick={open}
+    >
+      <span className="truncate">
+        {info.attached ? "Attached" : "Details"} · {info.heading}
+      </span>
+      {info.trashed && <span className="activity-muted">In Trash</span>}
+    </Button>
   );
 }

@@ -3,17 +3,33 @@ import { useState } from "react";
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
+  waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { slashChoices, slashMayOpen } from "./slash-menu";
 vi.mock("./MermaidDiagram", () => ({
   MermaidDiagram: () => <div>Diagram preview</div>,
 }));
 afterEach(cleanup);
 describe("Markdown draft editor", () => {
+  it("returns focus to the editor when a focus request is raised (D2)", async () => {
+    const onChange = vi.fn();
+    const view = render(<MarkdownEditor value="Draft" onChange={onChange} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    expect(document.activeElement).not.toBe(editable);
+    view.rerender(
+      <MarkdownEditor value="Draft" onChange={onChange} focusRequest={1} />,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(editable));
+  });
   it("retains original source without emitting on mount, focus, blur or ordinary rerender", () => {
     const source =
       "###   Keep exact opening source\n\n- [x] Done\n\n3. Third\n";
@@ -60,7 +76,7 @@ describe("Markdown draft editor", () => {
     expect(
       document.getElementById(combo.getAttribute("aria-activedescendant") ?? "")
         ?.textContent,
-    ).toBe("Paragraph");
+    ).toBe("Heading 1");
     fireEvent.compositionStart(combo);
     fireEvent.keyDown(combo, { key: "/", isComposing: true, keyCode: 229 });
     expect(screen.queryByRole("listbox", { name: "Insert block" })).toBeNull();
@@ -88,13 +104,13 @@ describe("Markdown draft editor", () => {
     fireEvent.change(language, { target: { value: "typescript" } });
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenCalledWith(
-        '```typescript\nconst message = "$& 日本語";\n```\n',
+        '```typescript\nconst message = "$& 日本語";\n```',
       ),
     );
     fireEvent.change(language, { target: { value: "my-dsl" } });
     await vi.waitFor(() =>
       expect(onChange).toHaveBeenLastCalledWith(
-        '```my-dsl\nconst message = "$& 日本語";\n```\n',
+        '```my-dsl\nconst message = "$& 日本語";\n```',
       ),
     );
     const calls = onChange.mock.calls.length;
@@ -140,6 +156,43 @@ describe("Markdown draft editor", () => {
       expect(onChange).not.toHaveBeenCalled();
     }
     Reflect.deleteProperty(document, "caretRangeFromPoint");
+  });
+  it("opens the slash menu only at the start of a block or after whitespace", () => {
+    expect(slashMayOpen("")).toBe(true);
+    expect(slashMayOpen("See ")).toBe(true);
+    expect(slashMayOpen("See https://example.com")).toBe(false);
+    expect(slashMayOpen("a")).toBe(false);
+  });
+  it("matches slash commands by title prefix only", () => {
+    expect(slashChoices("tab").map(([type]) => type)).toEqual(["table"]);
+    expect(slashChoices("ist")).toEqual([]);
+    expect(slashChoices("").length).toBeGreaterThan(5);
+  });
+  it("closes the slash menu on a non-matching key, whitespace and blur, and resets it", () => {
+    render(<MarkdownEditor value="" onChange={vi.fn()} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    editable.focus();
+    const open = () => {
+      fireEvent.keyDown(editable, { key: "/" });
+      expect(screen.getByRole("listbox")).toBeTruthy();
+    };
+    open();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "t" });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "z" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    open();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: " " });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    open();
+    fireEvent.blur(editable);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(editable, { key: "/" });
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.queryByText("No matching blocks")).toBeNull();
   });
   it("inserts a divider from the slash menu", async () => {
     const onChange = vi.fn();
@@ -210,5 +263,71 @@ describe("Markdown draft editor", () => {
     expect(
       screen.getByRole("link", { name: "Example" }).getAttribute("href"),
     ).toBe("https://example.com");
+  });
+});
+
+describe("Formatting toolbar", () => {
+  it("shows only while the editor has focus and offers an icon-only copy button", () => {
+    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
+    expect(screen.queryByText(/^Copy .* Markdown$/)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Copy Markdown document Markdown" }),
+    ).toBeTruthy();
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    fireEvent.focus(editable);
+    expect(screen.getByRole("button", { name: "Bold" })).toBeTruthy();
+    fireEvent.blur(editable);
+    expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
+  });
+  it("keeps editor focus on pointer down for the Link button", () => {
+    render(<MarkdownEditor value="" onChange={vi.fn()} />);
+    fireEvent.focus(
+      screen.getByRole("textbox", { name: "Markdown document rich text" }),
+    );
+    const down = createEvent.mouseDown(
+      screen.getByRole("button", { name: "Link" }),
+    );
+    fireEvent(screen.getByRole("button", { name: "Link" }), down);
+    expect(down.defaultPrevented).toBe(true);
+  });
+});
+
+describe("Toolbar layout and links", () => {
+  it("keeps the toolbar in layout when blurred so a first click lands", () => {
+    const { container } = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} />,
+    );
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    fireEvent.focus(editable);
+    const toolbar = container.querySelector(".rich-toolbar");
+    expect(toolbar?.getAttribute("data-visible")).toBe("true");
+    fireEvent.blur(editable);
+    expect(container.querySelector(".rich-toolbar")).toBe(toolbar);
+    expect(toolbar?.hasAttribute("hidden")).toBe(false);
+    expect(toolbar?.getAttribute("data-visible")).toBe("false");
+    expect(toolbar?.hasAttribute("inert")).toBe(true);
+  });
+  it("offers one row of essentials and keeps the rest in More", () => {
+    render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    fireEvent.focus(
+      screen.getByRole("textbox", { name: "Markdown document rich text" }),
+    );
+    const names = within(screen.getByRole("toolbar"))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+    expect(names).toEqual([
+      "Bold",
+      "Italic",
+      "Link",
+      "Bullet list",
+      "Checklist",
+      "Inline code",
+      "More formatting",
+    ]);
   });
 });

@@ -1,0 +1,164 @@
+.ticket-documents {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ticket-documents {
+  /* .rail-section aligns its children to the start, which stops them stretching. */
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.ticket-documents ul {
+  min-width: 0;
+}
+.ticket-documents ul,
+.document-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ticket-documents-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+/* The title takes the row's width; it wraps to two lines before it is cut. */
+.ticket-documents-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.3;
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+}
+.ticket-documents-source {
+  flex: 1 0 100%;
+  padding: 0 4px 4px 28px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: left;
+}
+.ticket-documents-source:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.ticket-documents-source:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ticket-documents-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: var(--secondary-foreground);
+  font-size: 12px;
+}
+.ticket-documents-unlink {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+}
+.ticket-documents-unlink:hover,
+.ticket-documents-unlink:focus-visible {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ticket-documents-unlink:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ticket-documents-unlink svg {
+  width: 14px;
+  height: 14px;
+}
+.ticket-documents-item,
+.document-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 4px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 14px;
+}
+.ticket-documents-item {
+  flex: 1 1 0;
+  width: auto;
+  overflow: hidden;
+}
+.ticket-documents-item:hover,
+.document-picker-item:hover {
+  background: var(--accent);
+}
+.ticket-documents-item:focus-visible,
+.document-picker-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ticket-documents-item svg,
+.document-picker-item svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+.ticket-documents-add {
+  align-self: flex-start;
+}
+.ticket-documents-popover {
+  width: 20rem;
+}
+.document-picker {
+  display: grid;
+  gap: 8px;
+}
+.document-picker-list {
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.document-picker-empty {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.ticket-documents-edit {
+  flex: none;
+  color: var(--muted-foreground);
+}
+.ticket-documents-edit:hover,
+.ticket-documents-edit:focus-visible {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.ticket-documents-edit:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* The heading, with where it came from on its own muted line. */
+.document-picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-block: 4px;
+}
+.document-picker-text small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}

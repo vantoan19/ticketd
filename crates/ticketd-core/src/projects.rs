@@ -26,6 +26,7 @@ impl Workspace {
     pub fn register_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
         find(&self.connection, id)?;
         let path = normalize(path)?;
+        ensure_path_free(&self.connection, &path, id)?;
         self.connection.execute(
             "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
             params![id, path],
@@ -71,6 +72,8 @@ impl Workspace {
             paths: vec![path.to_owned()],
         };
         let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        ensure_path_free(&tx, path, &project.id)?;
         tx.execute(
             "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
             params![project.id, project.name, project.path],
@@ -90,6 +93,7 @@ impl Workspace {
         let tx = self.connection.savepoint()?;
         crate::transaction_write_lock(&tx)?;
         let old = find(&tx, id)?;
+        ensure_path_free(&tx, path, id)?;
         if tx.execute(
             "UPDATE projects SET name = ?1, path = ?2 WHERE id = ?3",
             params![name, path, id],
@@ -128,6 +132,22 @@ impl Workspace {
                 Ok(project)
             })
             .collect()
+    }
+}
+
+/// Reject a checkout folder already registered to another Project. Checked in code,
+/// not by a UNIQUE index, so existing workspaces that already hold duplicates still open.
+fn ensure_path_free(connection: &Connection, path: &str, project_id: &str) -> Result<(), Error> {
+    let owner: Option<String> = connection
+        .query_row(
+            "SELECT p.name FROM project_checkouts c JOIN projects p ON p.id = c.project_id WHERE c.path = ?1 AND c.project_id <> ?2 ORDER BY p.name LIMIT 1",
+            params![path, project_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match owner {
+        Some(name) => Err(Error::CheckoutTaken(name)),
+        None => Ok(()),
     }
 }
 
@@ -170,8 +190,15 @@ fn paths(connection: &Connection, id: &str) -> Result<Vec<String>, Error> {
 }
 
 fn normalize(path: &str) -> Result<String, Error> {
-    let path = std::fs::canonicalize(path)?;
-    path.to_str()
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::NoCheckoutFolder(path.to_owned()));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    canonical
+        .to_str()
         .map(str::to_owned)
         .ok_or(Error::InvalidCheckoutPath)
 }

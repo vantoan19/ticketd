@@ -29,6 +29,8 @@
   }
 }
 .duplicate-dialog {
+  display: flex;
+  flex-direction: column;
   max-height: 85vh;
   overflow-y: auto;
 }
@@ -268,4 +270,11 @@
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
+}
+
+.detail-quiet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 16px;
 }

@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { client, type Project } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
 import { PropertyPicker } from "./TicketProperties";
 import "./create-ticket.css";
@@ -39,7 +39,7 @@ type Draft = {
   body: string;
   status: string;
   project: string;
-  effort: string;
+  plan: string;
   tags: string[];
   restored: boolean;
 };
@@ -50,7 +50,7 @@ export function CreateTicketDialog({
   navigation,
   initialStatus,
   projects,
-  efforts,
+  plans,
   create,
 }: {
   open: boolean;
@@ -58,15 +58,15 @@ export function CreateTicketDialog({
   initialStatus?: string;
   onOpenChange: (open: boolean) => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
-  navigation: { project: string; effort: string };
+  navigation: { project: string; plan: string };
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   create: (
     title: string,
     body: string,
     status: string,
     project: string | null,
-    effort: string | null,
+    plan: string | null,
     tags: string[],
     keepOpen: boolean,
   ) => Promise<string>;
@@ -110,7 +110,7 @@ export function CreateTicketDialog({
         navigation.project === "all" || navigation.project === "unlinked"
           ? ""
           : navigation.project,
-      effort: navigation.effort,
+      plan: navigation.plan,
       tags: [],
       restored: false,
     });
@@ -166,7 +166,7 @@ export function CreateTicketDialog({
         draft!.body,
         draft!.status,
         draft!.project || null,
-        draft!.effort || null,
+        draft!.plan || null,
         draft!.tags,
         createMore,
       );
@@ -188,9 +188,8 @@ export function CreateTicketDialog({
   const projectName =
     projects.find((p) => p.id === draft.project)?.name ??
     (draft.project || "Unlinked");
-  const effortName =
-    efforts.find((e) => e.id === draft.effort)?.name ??
-    (draft.effort || "No Effort");
+  const planName =
+    plans.find((e) => e.id === draft.plan)?.name ?? (draft.plan || "No Plan");
   return (
     <Dialog
       open={open}
@@ -355,19 +354,19 @@ export function CreateTicketDialog({
               />
             </div>
             <div className="create-property">
-              <span>Effort</span>
+              <span>Plan</span>
               <PropertyPicker
-                label="Effort"
+                label="Plan"
                 icon={Layers}
-                value={effortName}
+                value={planName}
                 disabled={pending}
                 choices={[
-                  { value: "", label: "No Effort" },
-                  ...efforts
+                  { value: "", label: "No Plan" },
+                  ...plans
                     .filter((e) => !e.archived)
                     .map((e) => ({ value: e.id, label: e.name })),
                 ]}
-                onChoose={(effort) => update({ effort })}
+                onChoose={(plan) => update({ plan })}
               />
             </div>
             <div className="create-property create-tags">

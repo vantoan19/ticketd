@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { formatDateTime } from "@/lib/format";
 import { reminderSummary } from "@/features/tickets/reminder-summary";
 
 // A local clock time may be skipped or occur twice during a time-zone transition.
@@ -59,6 +60,7 @@ export function Reminder({
   const options = localInstants(draft);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
   const busy = useRef(false);
   const attempt = useRef<{
     key: string;
@@ -80,7 +82,11 @@ export function Reminder({
       active = false;
     };
   }, [reference, revision]);
-  async function save(key: string, makeDue: () => string | null) {
+  async function save(
+    key: string,
+    makeDue: () => string | null,
+    closeAfter = false,
+  ) {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
@@ -105,6 +111,8 @@ export function Reminder({
       setDue(value);
       attempt.current = null;
       setError("");
+      // Dismissing is final: nothing is left to change, so the popover goes.
+      if (closeAfter) setOpen(false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -113,7 +121,7 @@ export function Reminder({
     }
   }
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
@@ -139,7 +147,14 @@ export function Reminder({
             Bring this ticket back to your inbox.
           </PopoverDescription>
         </PopoverHeader>
-        {due && <p>Scheduled: {new Date(due).toLocaleString()}</p>}
+        {due && (
+          <p>
+            {reminderSummary(due) === "Reminder due"
+              ? "Due since"
+              : "Scheduled:"}{" "}
+            {formatDateTime(due)}
+          </p>
+        )}
         <label htmlFor="reminder-time">Local reminder date and time</label>
         <Input
           id="reminder-time"
@@ -207,7 +222,7 @@ export function Reminder({
               size="sm"
               variant="outline"
               disabled={pending}
-              onClick={() => void save("dismiss", () => null)}
+              onClick={() => void save("dismiss", () => null, true)}
             >
               Dismiss reminder
             </Button>

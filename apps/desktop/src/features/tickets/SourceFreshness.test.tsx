@@ -112,7 +112,7 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   body: "Described on GitHub",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -281,9 +281,9 @@ test("the state line and the row carry the orange Source unavailable cue", () =>
       onToggle={vi.fn()}
       selectable
       scope={{
-        showEffort: false,
+        showPlan: false,
         showProject: false,
-        efforts: [],
+        plans: [],
         projects: [],
       }}
     />,
@@ -305,7 +305,7 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
       <TicketProperties
         ticket={ticket({ source: unavailableSource() })}
         projects={[]}
-        efforts={[]}
+        plans={[]}
         onSaved={() => {}}
         refresh={async () => {}}
       />,
@@ -329,7 +329,7 @@ test("the rail shows the unavailable warning and keeps Refresh; a running refres
       <TicketProperties
         ticket={ticket()}
         projects={[]}
-        efforts={[]}
+        plans={[]}
         onSaved={() => {}}
         refresh={async () => {}}
       />,
@@ -507,7 +507,7 @@ test("discovery provenance follows the core's match flag and links to its settin
       <TicketProperties
         ticket={ticket({ source: source({ discovery_matches: false }) })}
         projects={[]}
-        efforts={[]}
+        plans={[]}
         onSaved={vi.fn()}
         refresh={async () => {}}
       />,

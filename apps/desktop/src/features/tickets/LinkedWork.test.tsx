@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { addableKinds } from "@/features/tickets/linked-work";
 import {
   cleanup,
   fireEvent,
@@ -9,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
@@ -29,7 +31,7 @@ const base: Ticket = {
   trashed: false,
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Blocked",
   parent: null,
   children: [],
@@ -147,7 +149,34 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
     screen.getByRole("heading", { name: "Relationships" }).textContent,
   ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
+});
+
+test("a ticket with no links still offers its Context graph", async () => {
+  bridge();
+  const open = vi.fn();
+  render(
+    <ContextGraphNavigation.Provider value={open}>
+      <Section ticket={base} refresh={vi.fn()} onOpenGraph={vi.fn()} />
+    </ContextGraphNavigation.Provider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Context graph" }));
+  expect(open).toHaveBeenCalledWith("T-1");
+});
+
+test("a trashed ticket still shows its relationships, without actions to change them", async () => {
+  bridge({
+    prerequisites: [
+      { reference: "T-2", title: "Blocker", status: "In progress" },
+    ],
+  });
+  renderSection({ ...base, trashed: true });
+  await screen.findByText("Blocker");
+  expect(screen.getByText("In progress · not done")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add relationship" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /Remove relationship/ }),
+  ).toBeNull();
 });
 
 test("loading and a failed read are distinct from having no links", async () => {
@@ -221,11 +250,11 @@ test("shows n+ and loads the next page when more links exist", async () => {
   expect(screen.getByRole("button", { name: "Show more links" })).toBeTruthy();
 });
 
-test("the Graph action opens the dependency graph", async () => {
+test("the Dependencies action opens the dependency graph", async () => {
   bridge({ prerequisites: [{ reference: "T-2", title: "Blocker" }] });
   const onOpenGraph = vi.fn();
   renderSection(base, undefined, onOpenGraph);
-  fireEvent.click(await screen.findByRole("button", { name: "Graph" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Dependencies" }));
   expect(onOpenGraph).toHaveBeenCalled();
 });
 
@@ -287,13 +316,21 @@ async function chooseTarget() {
   fireEvent.click(within(matches).getByRole("button", { name: /T-5/ }));
 }
 
+async function chooseRelationship(kind: string) {
+  Element.prototype.scrollIntoView = vi.fn();
+  const phrase =
+    addableKinds.find((item) => item.kind === kind)?.phrase ?? kind;
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Relationship" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: phrase }));
+}
+
 test("Link ticket adds a relationship in the chosen direction", async () => {
   bridge();
   const refresh = renderSection(base);
   await chooseTarget();
-  fireEvent.change(screen.getByLabelText("Relationship"), {
-    target: { value: "blocks" },
-  });
+  await chooseRelationship("blocks");
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Link ticket",
@@ -313,6 +350,7 @@ test("a refused link shows the reason inline and keeps the dialog open", async (
   bridge({ fail: { add_dependency: "dependency would create a cycle" } });
   renderSection(base);
   await chooseTarget();
+  await chooseRelationship("blocked_by");
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Link ticket",
@@ -331,9 +369,7 @@ test("choosing a new parent says it replaces the current one", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
-  fireEvent.change(within(dialog).getByLabelText("Relationship"), {
-    target: { value: "parent" },
-  });
+  await chooseRelationship("parent");
   expect(within(dialog).getByRole("status").textContent).toBe(
     "This replaces the current parent T-3.",
   );
@@ -360,16 +396,18 @@ test("subtickets read under the description with local progress, not in the rail
   );
 });
 
-test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
+test("Link subticket opens the link dialog already saying this ticket is the parent", async () => {
   bridge({
     children: [{ reference: "T-8", title: "Part", status: "Todo" }],
   });
   renderSection(base);
-  fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Link subticket" }),
+  );
   const dialog = await screen.findByRole("dialog");
   expect(
-    (within(dialog).getByLabelText("Relationship") as HTMLSelectElement).value,
-  ).toBe("subticket");
+    within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
+  ).toContain("parent of");
 });
 
 test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {

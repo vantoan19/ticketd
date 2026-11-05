@@ -46,7 +46,7 @@
   --recessed: #f2f2f2;
   --foreground: #171717;
   --muted-foreground: #4d4d4d;
-  --disabled-foreground: #8f8f8f;
+  --disabled-foreground: #6b6b6b;
   --primary: #171717;
   --primary-foreground: #fff;
   --primary-hover: #4d4d4d;
@@ -125,7 +125,7 @@
   --recessed: #1a1a1a;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
-  --disabled-foreground: #737373;
+  --disabled-foreground: #8a8a8a;
   --primary: #ededed;
   --primary-foreground: #171717;
   --primary-hover: #d4d4d4;
@@ -499,7 +499,14 @@
 .sidebar-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  /* Edge shadows appear only while there is more to scroll to. */
+  background:
+    linear-gradient(var(--sidebar) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--sidebar) 70%) bottom / 100% 24px local,
+    linear-gradient(var(--border), transparent) top / 100% 8px scroll,
+    linear-gradient(transparent, var(--border)) bottom / 100% 8px scroll;
+  background-repeat: no-repeat;
 }
 .sidebar-footer {
   flex: none;
@@ -607,9 +614,12 @@
   background: var(--accent);
   color: var(--foreground);
 }
+/* The whole body (top entries and lists) scrolls above the fixed footer. */
+.sidebar-body > * {
+  flex-shrink: 0;
+}
 .sidebar-scroll {
-  flex: 1;
-  overflow-y: auto;
+  flex: none;
 }
 .sidebar-heading {
   color: var(--foreground);
@@ -1087,6 +1097,26 @@
   padding-left: 20px;
   list-style: revert;
 }
+.markdown-document li.task-list-item {
+  list-style: none;
+  margin-left: -20px;
+}
+.markdown-document .context-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: inherit;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--interactive);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+.markdown-document .context-link:hover {
+  color: var(--interactive);
+}
 .markdown-document li + li {
   margin-top: 4px;
 }
@@ -1183,12 +1213,13 @@
   padding: 16px;
 }
 .mermaid-canvas {
-  width: max-content;
+  width: 100%;
   min-width: 1px;
 }
 .mermaid-canvas > svg {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
 }
 .mermaid-expanded {
@@ -1350,4 +1381,10 @@
 }
 .list-header h1 {
   order: -2;
+}
+
+/* A tooltip only labels; its positioning wrapper must not cover the controls
+   beside the trigger (it hid "Clear filters" after the search popover closed). */
+[data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
+  pointer-events: none;
 }

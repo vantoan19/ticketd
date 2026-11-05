@@ -5,14 +5,67 @@ import remarkGfm from "remark-gfm";
 import { TextApi, type Descendant, type TElement, type Value } from "platejs";
 import type { Root, RootContent, PhrasingContent } from "mdast";
 
+const stringifyOptions = {
+  bullet: "-",
+  fences: true,
+  listItemIndent: "one",
+} as const;
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkStringify, stringifyOptions);
+
+/**
+ * remark escapes punctuation (`*`, `[`, `_`, `.`) that is only sometimes syntax. Each escape is
+ * dropped when the text still parses back as the same plain text, so stored text stays as typed.
+ * `relaxed` records that an escape was dropped.
+ */
+let relaxed = false;
+const lenient = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
   .use(remarkStringify, {
-    bullet: "-",
-    fences: true,
-    listItemIndent: "one",
+    ...stringifyOptions,
+    handlers: {
+      text(node, _parent, state, info) {
+        let text = state.safe(node.value, info);
+        // Table cells, HTML, entities and code need their escapes wherever they appear.
+        if (/[\n|<>&`]/.test(node.value) || node.value !== node.value.trim())
+          return text;
+        for (let index = 0; index < text.length - 1;) {
+          if (
+            text[index] === "\\" &&
+            /[!-/:-@[-`{-~]/.test(text[index + 1] ?? "")
+          ) {
+            const candidate = text.slice(0, index) + text.slice(index + 1);
+            // A typed URL reads back as an autolink, so `https\://` is noise, not protection.
+            const urlColon =
+              text[index + 1] === ":" &&
+              text.startsWith("//", index + 2) &&
+              /\b(?:https?|ftp)$/i.test(text.slice(0, index));
+            if (urlColon || isPlainText(candidate, node.value)) {
+              text = candidate;
+              relaxed = true;
+              continue;
+            }
+            index += 2;
+          } else index += 1;
+        }
+        return text;
+      },
+    },
   });
+
+function isPlainText(source: string, value: string): boolean {
+  const [paragraph, ...rest] = processor.parse(source).children;
+  const only = paragraph?.type === "paragraph" ? paragraph.children : [];
+  return (
+    rest.length === 0 &&
+    only.length === 1 &&
+    only[0]?.type === "text" &&
+    only[0].value === value
+  );
+}
 const supported = new Set([
   "root",
   "paragraph",
@@ -222,6 +275,28 @@ function phrasing(nodes: Descendant[]): PhrasingContent[] {
   });
 }
 
+/** Leading and trailing spaces in a line are not Markdown content; remark would store them as `&#x20;`. */
+function trimEdges(nodes: PhrasingContent[]): PhrasingContent[] {
+  const result = [...nodes];
+  const first = result[0];
+  if (first?.type === "text") {
+    const value = first.value.replace(/^[ \t]+/, "");
+    if (value) result[0] = { ...first, value };
+    else result.shift();
+  }
+  const last = result[result.length - 1];
+  if (last?.type === "text") {
+    const value = last.value.replace(/[ \t]+$/, "");
+    if (value) result[result.length - 1] = { ...last, value };
+    else result.pop();
+  }
+  return result;
+}
+
+const isBlank = (node: TElement) =>
+  node.type === "p" &&
+  node.children.every((child) => TextApi.isText(child) && !child.text.trim());
+
 function block(node: TElement, diagrams: string[]): RootContent {
   const children = () =>
     node.children
@@ -231,7 +306,7 @@ function block(node: TElement, diagrams: string[]): RootContent {
     return {
       type: "heading",
       depth: Number(node.type[1]) as 1 | 2 | 3 | 4 | 5 | 6,
-      children: phrasing(node.children),
+      children: trimEdges(phrasing(node.children)),
     };
   switch (node.type) {
     case "blockquote":
@@ -297,7 +372,10 @@ function block(node: TElement, diagrams: string[]): RootContent {
           })),
       };
     default:
-      return { type: "paragraph", children: phrasing(node.children) };
+      return {
+        type: "paragraph",
+        children: trimEdges(phrasing(node.children)),
+      };
   }
 }
 
@@ -306,9 +384,23 @@ export function writeMarkdown(value: Value): string {
   const diagrams: string[] = [];
   const tree: Root = {
     type: "root",
-    children: value.map((node) => block(node, diagrams)),
+    // Empty paragraphs (Enter pressed twice) are spacing, not content.
+    children: value
+      .filter((node) => !isBlank(node))
+      .map((node) => block(node, diagrams)),
   };
-  let result = processor.stringify(tree);
+  relaxed = false;
+  let result = lenient.stringify(tree);
+  if (relaxed) {
+    // Unescaped neighbours can combine into syntax (`a*` before emphasis); keep the
+    // standard output unless both spellings mean the same thing.
+    const standard = processor.stringify(tree);
+    if (
+      JSON.stringify(meaning(processor.parse(result))) !==
+      JSON.stringify(meaning(processor.parse(standard)))
+    )
+      result = standard;
+  }
   diagrams.forEach((source, index) => {
     const longest = Math.max(
       2,
@@ -320,7 +412,8 @@ export function writeMarkdown(value: Value): string {
       () => `${fence}mermaid\n${source}\n${fence}`,
     );
   });
-  return result;
+  // Stringification ends every document with a newline; stored text does not.
+  return result.replace(/\n$/, "");
 }
 
 export function readMarkdown(source: string) {

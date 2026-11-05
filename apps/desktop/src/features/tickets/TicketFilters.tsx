@@ -29,8 +29,8 @@ type Props = {
   part?: "controls" | "chips";
   query: string;
   setQuery: (value: string) => void;
-  effort: string;
-  setEffort: (value: string) => void;
+  plan: string;
+  setPlan: (value: string) => void;
   status: string;
   setStatus: (value: string) => void;
   tags: string;
@@ -39,12 +39,12 @@ type Props = {
   setAvailability: (value: string) => void;
   family: string;
   setFamily: (value: string) => void;
-  efforts: { id: string; name: string; archived: boolean }[];
+  plans: { id: string; name: string; archived: boolean }[];
   setOffset: (value: number) => void;
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
-    effort: string;
+    plan: string;
   };
   clearFilters: () => void;
 };
@@ -55,10 +55,14 @@ export function TicketFilters(p: Props) {
     p.setOffset(0);
   };
   const chips = [
-    !p.navigation.effort &&
-      p.effort && {
-        label: `Effort: ${p.efforts.find((item) => item.id === p.effort)?.name ?? p.effort}`,
-        clear: () => update(p.setEffort, ""),
+    p.query.trim() && {
+      label: `Search: ${p.query.trim()}`,
+      clear: () => update(p.setQuery, ""),
+    },
+    !p.navigation.plan &&
+      p.plan && {
+        label: `Plan: ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
+        clear: () => update(p.setPlan, ""),
       },
     p.navigation.kind !== "progress" &&
       p.status && {
@@ -89,6 +93,7 @@ export function TicketFilters(p: Props) {
   ].filter((chip): chip is { label: string; clear: () => void } =>
     Boolean(chip),
   );
+  const filterCount = chips.length - (p.query.trim() ? 1 : 0);
   return (
     <>
       {p.part !== "chips" && (
@@ -120,15 +125,15 @@ export function TicketFilters(p: Props) {
             <PopoverTrigger asChild>
               <IconButton
                 label={
-                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                  filterCount ? `Filters, ${filterCount} active` : "Filters"
                 }
                 aria-label={
-                  chips.length ? `Filters, ${chips.length} active` : "Filters"
+                  filterCount ? `Filters, ${filterCount} active` : "Filters"
                 }
               >
                 <SlidersHorizontal />
-                {chips.length > 0 && (
-                  <span className="filter-count">{chips.length}</span>
+                {filterCount > 0 && (
+                  <span className="filter-count">{filterCount}</span>
                 )}
               </IconButton>
             </PopoverTrigger>
@@ -140,13 +145,13 @@ export function TicketFilters(p: Props) {
               <FieldSet>
                 <FieldLegend>Filters</FieldLegend>
                 <FieldGroup>
-                  {!p.navigation.effort && (
+                  {!p.navigation.plan && (
                     <FilterSelect
-                      label="Effort"
-                      value={p.effort}
-                      onChange={(value) => update(p.setEffort, value)}
-                      all="All Efforts"
-                      options={p.efforts.map((item) => ({
+                      label="Plan"
+                      value={p.plan}
+                      onChange={(value) => update(p.setPlan, value)}
+                      all="All Plans"
+                      options={p.plans.map((item) => ({
                         value: item.id,
                         label: `${item.name}${item.archived ? " (archived)" : ""}`,
                       }))}
@@ -190,7 +195,7 @@ export function TicketFilters(p: Props) {
                   )}
                   <Field>
                     <FieldLabel htmlFor="filter-family">
-                      Parent family reference
+                      Parent ticket
                     </FieldLabel>
                     <Input
                       id="filter-family"

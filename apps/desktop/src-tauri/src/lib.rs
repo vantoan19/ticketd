@@ -2,10 +2,12 @@
 mod cli_status;
 
 use ticketd_core::{
-    BackupInspection, BackupRecord, BatchOperation, DependencyGraph, Effort, EffortView, Evidence,
-    EvidenceInput, HistoryEntry, InboxEntry, Note, NotePatch, Project, SafetyBackup, SidebarCounts,
-    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
-    WorkspaceInfo, WriteRequest, WriteResult,
+    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
+    ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
+    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, Plan,
+    PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange,
+    TicketFilter, TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo,
+    WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -56,9 +58,224 @@ impl From<ticketd_core::Error> for BridgeFailure {
     }
 }
 
+/// Opens the workspace as the person using the desktop: their own changes do not notify them.
+fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
+    let mut workspace = Workspace::open_default()?;
+    workspace.act_as_local_person()?;
+    Ok(workspace)
+}
+
+#[tauri::command]
+fn recent_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
+    open_workspace()
+        .and_then(|w| w.recent_documents_including_support(50, offset, include_support))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn pinned_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
+    open_workspace()
+        .and_then(|w| w.pinned_documents(50, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn search_documents(
+    query: String,
+    tag: Option<String>,
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSearchResult>, String> {
+    open_workspace()
+        .and_then(|w| {
+            w.search_documents_including_support(
+                &query,
+                tag.as_deref(),
+                50,
+                offset,
+                include_support,
+            )
+        })
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn keep_document(id: String, request_id: String) -> Result<Document, String> {
+    match open_workspace()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::KeepDocument { id }))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Document(document) => Ok(document),
+        _ => Err("Unexpected document result".into()),
+    }
+}
+#[tauri::command]
+fn set_document_pin(id: String, pinned: bool) -> Result<(), String> {
+    open_workspace()
+        .and_then(|mut w| w.set_document_pin(&id, pinned))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn document_tags(id: String) -> Result<Vec<String>, String> {
+    open_workspace()
+        .and_then(|w| w.document_tags(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String> {
+    open_workspace()
+        .and_then(|mut w| w.set_document_tag(&id, &tag, present))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn all_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.all_documents_page(50, offset, include_support))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
+    open_workspace()
+        .and_then(|w| w.trashed_documents_page(50, offset))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_document_trashed(id: String, trashed: bool, request_id: String) -> Result<Document, String> {
+    let request = if trashed {
+        WriteRequest::TrashDocument { id }
+    } else {
+        WriteRequest::RestoreDocument { id }
+    };
+    match open_workspace()
+        .and_then(|mut w| w.write(Some(&request_id), request))
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Document(document) => Ok(document),
+        _ => Err("Unexpected document result".into()),
+    }
+}
+#[tauri::command]
+fn show_document(id: String) -> Result<Document, String> {
+    open_workspace()
+        .and_then(|w| w.show_document(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn document_version(id: String) -> Result<(String, bool), String> {
+    open_workspace()
+        .and_then(|w| w.document_version(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn open_document(id: String) -> Result<Document, String> {
+    open_workspace()
+        .and_then(|mut w| w.open_document(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn save_document(
+    id: Option<String>,
+    title: Option<String>,
+    body: Option<String>,
+    title_changed: bool,
+    expected_updated_at: Option<String>,
+    request_id: String,
+) -> Result<Document, String> {
+    // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
+    // replay record that would otherwise keep a full copy of every autosaved body forever.
+    // Creating still uses the request ID, because a repeated create would duplicate.
+    let Some(id) = id else {
+        let request = WriteRequest::CreateDocument {
+            title,
+            body: body.unwrap_or_default(),
+        };
+        return match open_workspace()
+            .and_then(|mut w| w.write(Some(&request_id), request))
+            .map_err(|e| e.to_string())?
+        {
+            WriteResult::Document(document) => Ok(document),
+            _ => Err("Unexpected save result".into()),
+        };
+    };
+    let patch = DocumentPatch {
+        title: title_changed.then_some(title),
+        body,
+        expected_updated_at,
+    };
+    open_workspace()
+        .and_then(|mut w| w.change_document(&id, patch))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn context_link_markdown(reference: String) -> Result<String, String> {
+    open_workspace()
+        .and_then(|w| w.context_link_markdown(&reference))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn document_context_links(
+    id: String,
+    offset: Option<u32>,
+) -> Result<
+    (
+        Vec<ticketd_core::ContextLink>,
+        Vec<ticketd_core::ContextLink>,
+    ),
+    String,
+> {
+    open_workspace()
+        .and_then(|w| {
+            let offset = offset.unwrap_or(0);
+            let mut backlinks = w.context_backlinks(&id, 100, offset)?;
+            // A Plan that uses this Document as its spec is a connection even though
+            // no Markdown link states it.
+            for plan in w.list_plans(false)?.into_iter().filter(|_| offset == 0) {
+                if plan.spec_document_id.as_deref() == Some(id.as_str()) {
+                    backlinks.push(ticketd_core::ContextLink {
+                        activity_id: None,
+                        source_id: plan.id,
+                        target_id: id.clone(),
+                        source_kind: "plan".into(),
+                        target_kind: "document".into(),
+                        passage: String::new(),
+                        source_label: plan.name,
+                        target_label: String::new(),
+                        source_trashed: false,
+                        target_trashed: false,
+                        explicit: false,
+                    });
+                }
+            }
+            Ok((w.context_links(&id, 100, 0)?, backlinks))
+        })
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn ticket_from_document(
+    id: String,
+    title: String,
+    request_id: String,
+    follow: Option<bool>,
+) -> Result<ticketd_core::Ticket, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::CreateTicketFromDocument {
+                    id,
+                    title,
+                    follow: follow.unwrap_or(false),
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket result".into()),
+    }
+}
+
 #[tauri::command]
 fn reminder(reference: String) -> Result<Option<String>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.reminder(&reference))
         .map_err(|e| e.to_string())
 }
@@ -68,7 +285,7 @@ fn set_reminder(
     due_at: Option<String>,
     request_id: String,
 ) -> Result<(), String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
@@ -84,25 +301,31 @@ fn inbox(
     limit: Option<u32>,
     unread_only: Option<bool>,
 ) -> Result<Vec<InboxEntry>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.inbox_page(limit.unwrap_or(100), offset, unread_only.unwrap_or(false)))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn sidebar_counts() -> Result<SidebarCounts, String> {
+fn workspace_change_token() -> Result<i64, String> {
     Workspace::open_default()
+        .and_then(|w| w.change_token())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn sidebar_counts() -> Result<SidebarCounts, String> {
+    open_workspace()
         .and_then(|w| w.sidebar_counts())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn is_following(reference: String) -> Result<bool, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.is_following(&reference))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn set_following(reference: String, following: bool, request_id: String) -> Result<(), String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
@@ -117,7 +340,7 @@ fn set_following(reference: String, following: bool, request_id: String) -> Resu
 }
 #[tauri::command]
 fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), WriteRequest::SetInboxRead { ids, read }))
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -127,34 +350,68 @@ fn set_inbox_read(ids: Vec<i64>, read: bool, request_id: String) -> Result<(), S
 // of a large workspace file does not freeze the window.
 #[tauri::command(async)]
 fn export_workspace(path: String) -> Result<(), String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| workspace.export_file(path))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn list_projects() -> Result<Vec<Project>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.list_projects())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn create_project(name: String, path: String) -> Result<Project, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.create_project(&name, &path))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn edit_project(id: String, name: String, path: String) -> Result<Project, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.edit_project(&id, &name, &path))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+fn context_graph(reference: String, include_details: bool) -> Result<ContextGraph, String> {
+    open_workspace()
+        .and_then(|w| w.context_graph(&reference, include_details))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn workspace_graph(request: WorkspaceGraphRequest) -> Result<WorkspaceGraph, String> {
+    open_workspace()
+        .and_then(|w| w.workspace_graph(&request))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn context_graph_expanded(
+    reference: String,
+    include_details: bool,
+    expanded_ids: Vec<String>,
+    pages: Vec<ContextGraphPage>,
+) -> Result<ContextGraph, String> {
+    open_workspace()
+        .and_then(|w| {
+            w.context_graph_with_pages(&reference, include_details, &expanded_ids, &pages)
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn dependency_graph(reference: String) -> Result<DependencyGraph, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.dependency_graph(&reference))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn plan_dependency_graph(id: String) -> Result<DependencyGraph, String> {
+    open_workspace()
+        .and_then(|w| w.plan_dependency_graph(&id))
         .map_err(|e| e.to_string())
 }
 
@@ -164,7 +421,7 @@ fn ticket_backlinks(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<ticketd_core::Backlink>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| workspace.backlinks(&reference, limit, offset))
         .map_err(|e| e.to_string())
 }
@@ -174,34 +431,36 @@ fn ticket_backlinks(
 fn source_conversation(
     reference: String,
 ) -> Result<Vec<ticketd_core::source::ConversationEntry>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.source_conversation(&reference))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn show_ticket(reference: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.show_ticket(&reference))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn find_tickets(filter: TicketFilter) -> Result<Vec<Ticket>, String> {
-    Workspace::open_default()
-        .and_then(|w| w.find_tickets(&filter))
+fn find_tickets_with_updates(
+    filter: TicketFilter,
+) -> Result<Vec<ticketd_core::TicketWithUpdate>, String> {
+    open_workspace()
+        .and_then(|w| w.find_tickets_with_updates(&filter))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn count_tickets(filter: TicketFilter) -> Result<StatusCounts, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.count_tickets(&filter))
         .map_err(|e| e.to_string())
 }
 /// How many tickets each source filter (All, a provider, Local) would show.
 #[tauri::command]
 fn count_by_source(filter: TicketFilter) -> Result<ticketd_core::source::SourceCounts, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.count_by_source(&filter))
         .map_err(|e| e.to_string())
 }
@@ -213,32 +472,32 @@ fn search_tickets(
     limit: u32,
     offset: u32,
 ) -> Result<Vec<Ticket>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.search_tickets(&query, project.as_deref(), unlinked, limit, offset))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn list_trash() -> Result<Vec<Ticket>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.list_trash())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn set_trashed(reference: String, trashed: bool) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.set_trashed(&reference, trashed, None))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn register_checkout(id: String, path: String) -> Result<Project, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.register_checkout(&id, &path))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn remove_checkout(id: String, path: String) -> Result<Project, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.remove_checkout(&id, &path))
         .map_err(|e| e.to_string())
 }
@@ -249,11 +508,11 @@ fn create_ticket(
     body: String,
     status: Status,
     project_id: Option<String>,
-    effort_id: Option<String>,
+    plan_id: Option<String>,
     tags: Vec<String>,
     follow: bool,
 ) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| {
             // `follow` is the desktop's "Follow tickets I create" preference; creating and
             // following commit together.
@@ -270,7 +529,7 @@ fn create_ticket(
                             patch: TicketPatch {
                                 body: Some(body),
                                 status: Some(status),
-                                effort_id: effort_id.map(Some),
+                                plan_id: plan_id.map(Some),
                                 ..Default::default()
                             },
                             add_tags: tags,
@@ -300,7 +559,7 @@ fn bulk_change(
             change: Box::new(change.clone()),
         })
         .collect();
-    match Workspace::open_default()
+    match open_workspace()
         .and_then(|mut workspace| {
             workspace.write(Some(&request_id), WriteRequest::Batch { operations })
         })
@@ -330,7 +589,7 @@ fn bulk_status(
             }),
         })
         .collect();
-    match Workspace::open_default()
+    match open_workspace()
         .and_then(|mut workspace| {
             workspace.write(Some(&request_id), WriteRequest::Batch { operations })
         })
@@ -343,21 +602,21 @@ fn bulk_status(
 
 #[tauri::command]
 fn change_ticket(reference: String, patch: TicketPatch) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.change_ticket(&reference, patch))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| workspace.ticket_history(&reference))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn list_evidence(reference: String, offset: u32) -> Result<Vec<Evidence>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.evidence(&reference, 50, offset))
         .map_err(|e| e.to_string())
 }
@@ -367,7 +626,7 @@ fn add_evidence(
     input: EvidenceInput,
     request_id: String,
 ) -> Result<Evidence, String> {
-    match Workspace::open_default()
+    match open_workspace()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
@@ -387,7 +646,7 @@ fn edit_evidence(
     input: EvidenceInput,
     request_id: String,
 ) -> Result<Evidence, String> {
-    match Workspace::open_default()
+    match open_workspace()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
@@ -406,7 +665,7 @@ fn edit_evidence(
 }
 #[tauri::command]
 fn delete_evidence(reference: String, id: String, request_id: String) -> Result<(), String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| {
             w.write(
                 Some(&request_id),
@@ -417,57 +676,103 @@ fn delete_evidence(reference: String, id: String, request_id: String) -> Result<
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn list_notes(reference: String, limit: u32, offset: u32) -> Result<Vec<Note>, String> {
-    Workspace::open_default()
-        .and_then(|workspace| workspace.notes(&reference, limit, offset))
+fn latest_update(reference: String) -> Result<Option<LatestUpdate>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.latest_update(&reference))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn activity_feed(
+    reference: String,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::ActivityFeedEntry>, String> {
+    open_workspace()
+        .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn get_note(reference: String, id: String) -> Result<Option<Note>, String> {
-    Workspace::open_default()
-        .and_then(|workspace| match workspace.note(&reference, &id) {
+fn get_activity(reference: String, id: String) -> Result<Option<Activity>, String> {
+    open_workspace()
+        .and_then(|workspace| match workspace.activity(&reference, &id) {
             Ok(note) => Ok(Some(note)),
-            Err(ticketd_core::Error::NoteNotFound(_)) => Ok(None),
+            Err(ticketd_core::Error::ActivityNotFound(_)) => Ok(None),
             Err(error) => Err(error),
         })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn add_note(reference: String, content: String) -> Result<Note, String> {
-    Workspace::open_default()
-        .and_then(|mut workspace| workspace.add_note(&reference, &content, None))
+fn add_activity(reference: String, brief: String) -> Result<Activity, String> {
+    open_workspace()
+        .and_then(|mut workspace| {
+            let activity = workspace.add_activity(&reference, &brief, None)?;
+            workspace.discard_inbox_for_own_update(&activity.id)?;
+            Ok(activity)
+        })
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn edit_note(reference: String, id: String, patch: NotePatch) -> Result<Note, String> {
-    Workspace::open_default()
-        .and_then(|mut workspace| workspace.edit_note(&reference, &id, patch))
+fn add_activity_with_details(
+    reference: String,
+    brief: String,
+    details: Option<String>,
+    existing_document_id: Option<String>,
+    request_id: String,
+) -> Result<Activity, String> {
+    let request = WriteRequest::AddActivityWithDetails {
+        reference,
+        brief,
+        agent: None,
+        details,
+        existing_document_id,
+    };
+    let mut workspace = open_workspace().map_err(|error| error.to_string())?;
+    match workspace
+        .write(Some(&request_id), request)
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Activity(activity) => {
+            // The person who wrote it is not notified of their own update.
+            workspace
+                .discard_inbox_for_own_update(&activity.id)
+                .map_err(|error| error.to_string())?;
+            Ok(activity)
+        }
+        _ => Err("Unexpected activity result".into()),
+    }
+}
+
+#[tauri::command]
+fn edit_activity(reference: String, id: String, patch: ActivityPatch) -> Result<Activity, String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.edit_activity(&reference, &id, patch))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn delete_note(reference: String, id: String) -> Result<(), String> {
-    Workspace::open_default()
-        .and_then(|mut workspace| workspace.delete_note(&reference, &id))
+fn delete_activity(reference: String, id: String) -> Result<(), String> {
+    open_workspace()
+        .and_then(|mut workspace| workspace.delete_activity(&reference, &id))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn search_tags(query: String) -> Result<Vec<String>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| workspace.search_tags(&query, 50))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn add_tag(reference: String, tag: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.add_tag(&reference, &tag))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn remove_tag(reference: String, tag: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.remove_tag(&reference, &tag))
         .map_err(|error| error.to_string())
 }
@@ -478,7 +783,7 @@ fn preview_duplicate_dependencies(
     canonical: String,
     separate: Option<bool>,
 ) -> Result<ticketd_core::DuplicateDependencyPreview, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| {
             if separate.unwrap_or(false) {
                 workspace.preview_dependency_move(&source, &canonical)
@@ -502,7 +807,7 @@ fn evaluate_dependency_review(
     } else {
         ticketd_core::ReviewMode::Duplicate
     };
-    Workspace::open_default()
+    open_workspace()
         .and_then(|workspace| {
             workspace.evaluate_dependency_review(&source, &canonical, mode, &decisions)
         })
@@ -517,7 +822,7 @@ fn mark_duplicate_reviewed(
     decisions: Vec<ticketd_core::DependencyDecision>,
     request_id: String,
 ) -> Result<Ticket, BridgeFailure> {
-    let result = Workspace::open_default()
+    let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
                 Some(&request_id),
@@ -545,7 +850,7 @@ fn edit_dependencies_reviewed(
     decisions: Vec<ticketd_core::DependencyDecision>,
     request_id: String,
 ) -> Result<Ticket, BridgeFailure> {
-    let result = Workspace::open_default()
+    let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
                 Some(&request_id),
@@ -567,7 +872,7 @@ fn edit_dependencies_reviewed(
 
 #[tauri::command]
 fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String> {
-    let result = Workspace::open_default()
+    let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
                 Some(&request_id),
@@ -586,7 +891,7 @@ fn remove_duplicate(source: String, request_id: String) -> Result<Ticket, String
 
 #[tauri::command]
 fn take_ownership(reference: String, request_id: String) -> Result<Ticket, String> {
-    let result = Workspace::open_default()
+    let result = open_workspace()
         .and_then(|mut workspace| {
             workspace.write(
                 Some(&request_id),
@@ -608,7 +913,7 @@ fn contextual_relationships(
     reference: String,
     offset: u32,
 ) -> Result<ticketd_core::TicketContext, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| {
             w.ticket_context(
                 &reference,
@@ -645,7 +950,7 @@ fn change_contextual_relationship(
             agent: None,
         }
     };
-    match Workspace::open_default()
+    match open_workspace()
         .and_then(|mut w| w.write(Some(&request_id), request))
         .map_err(|e| e.to_string())?
     {
@@ -656,82 +961,157 @@ fn change_contextual_relationship(
 
 #[tauri::command]
 fn add_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.add_dependency(&blocker, &dependent, None))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn remove_dependency(blocker: String, dependent: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.remove_dependency(&blocker, &dependent, None))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn detach_child(parent: String, child: String) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut w| w.detach_child(&parent, &child, None))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn set_parent(reference: String, parent: Option<String>) -> Result<Ticket, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|mut workspace| workspace.set_parent(&reference, parent.as_deref(), None))
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn list_efforts() -> Result<Vec<Effort>, String> {
-    Workspace::open_default()
-        .and_then(|w| w.list_efforts(true))
+fn list_plans() -> Result<Vec<Plan>, String> {
+    open_workspace()
+        .and_then(|w| w.list_plans(true))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn show_effort(id: String) -> Result<EffortView, String> {
-    Workspace::open_default()
-        .and_then(|w| w.show_effort(&id))
+fn set_plan_document(
+    plan_id: String,
+    document_id: String,
+    present: bool,
+    request_id: String,
+) -> Result<Plan, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetPlanDocument {
+                    plan_id,
+                    document_id,
+                    present,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Plan(plan) => Ok(plan),
+        _ => Err("Unexpected Plan result".into()),
+    }
+}
+
+#[tauri::command]
+fn set_ticket_document(
+    reference: String,
+    document_id: String,
+    present: bool,
+    request_id: String,
+) -> Result<Ticket, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetTicketDocument {
+                    reference,
+                    document_id,
+                    present,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket result".into()),
+    }
+}
+
+#[tauri::command]
+fn set_plan_spec(
+    plan_id: String,
+    document_id: Option<String>,
+    request_id: String,
+) -> Result<Plan, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::SetPlanSpec {
+                    plan_id,
+                    document_id,
+                },
+            )
+        })
+        .map_err(|e| e.to_string())?
+    {
+        WriteResult::Plan(plan) => Ok(plan),
+        _ => Err("Unexpected Plan result".into()),
+    }
+}
+
+#[tauri::command]
+fn show_plan(id: String) -> Result<PlanView, String> {
+    open_workspace()
+        .and_then(|w| w.show_plan(&id))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn create_effort(name: String) -> Result<Effort, String> {
-    Workspace::open_default()
-        .and_then(|mut w| w.create_effort(&name))
+fn create_plan(name: String) -> Result<Plan, String> {
+    open_workspace()
+        .and_then(|mut w| w.create_plan(&name))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn change_effort(
-    id: String,
-    name: Option<String>,
-    archived: Option<bool>,
-) -> Result<Effort, String> {
-    Workspace::open_default()
-        .and_then(|mut w| w.change_effort(&id, name.as_deref(), archived))
+fn change_plan(id: String, name: Option<String>, archived: Option<bool>) -> Result<Plan, String> {
+    open_workspace()
+        .and_then(|mut w| w.change_plan(&id, name.as_deref(), archived))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn set_effort(reference: String, effort: Option<String>) -> Result<Ticket, String> {
-    Workspace::open_default()
-        .and_then(|mut w| w.set_effort(&reference, effort.as_deref(), None))
+fn set_plan_purpose(id: String, purpose: String) -> Result<Plan, String> {
+    open_workspace()
+        .and_then(|mut w| w.set_plan_purpose(&id, &purpose))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, String> {
+    open_workspace()
+        .and_then(|mut w| w.set_plan(&reference, plan.as_deref(), None))
         .map_err(|e| e.to_string())
 }
 
 /// Saves a backup. Returns whether it was also recorded as the last backup.
 #[tauri::command(async)]
 fn backup_workspace(path: String) -> Result<bool, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.backup(&path))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn last_backup() -> Result<Option<BackupRecord>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.last_backup())
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn workspace_info() -> Result<WorkspaceInfo, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.workspace_info())
         .map_err(|e| e.to_string())
 }
@@ -743,13 +1123,13 @@ fn restore_workspace(path: String) -> Result<String, String> {
 }
 #[tauri::command(async)]
 fn inspect_backup(path: String) -> Result<BackupInspection, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.inspect_backup(path))
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn safety_backups() -> Result<Vec<SafetyBackup>, String> {
-    Workspace::open_default()
+    open_workspace()
         .and_then(|w| w.safety_backups())
         .map_err(|e| e.to_string())
 }
@@ -801,7 +1181,7 @@ struct SourceEntry {
 /// off the UI thread; none holds a database handle while it waits.
 #[tauri::command(async)]
 fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
-    let workspace = Workspace::open_default()?;
+    let workspace = open_workspace()?;
     let engine = ticketd_core::source::Engine::builtin();
     engine
         .connectors()
@@ -833,7 +1213,7 @@ fn source_preview(
     provider: String,
     config: ticketd_core::source::ConfigValues,
 ) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
-    Ok(Workspace::open_default()?.preview_source(
+    Ok(open_workspace()?.preview_source(
         &ticketd_core::source::Engine::builtin(),
         &provider,
         &config,
@@ -844,17 +1224,13 @@ fn save_source(
     provider: String,
     config: ticketd_core::source::ConfigValues,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
-    let mut workspace = Workspace::open_default()?;
+    let mut workspace = open_workspace()?;
     Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
 }
 
 /// The one refresh coordinator of this process: the startup and periodic runs and
 /// every explicit refresh go through it, so they never overlap or retry in a tight loop.
 struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
-
-fn open_workspace() -> Result<Workspace, ticketd_core::Error> {
-    Workspace::open_default()
-}
 
 /// Imports matching issues and refreshes every externally owned ticket (or just `ticket`).
 /// Provider calls finish before the workspace is written; per-ticket failures come back
@@ -879,7 +1255,7 @@ fn preview_publication(
     provider: String,
     destination: Option<String>,
 ) -> Result<ticketd_core::source::PublicationPreview, SourceFailure> {
-    let workspace = Workspace::open_default()?;
+    let workspace = open_workspace()?;
     Ok(workspace.preview_publication(
         &ticketd_core::source::Engine::builtin(),
         &reference,
@@ -898,7 +1274,7 @@ fn publish_ticket(
     destination: Option<String>,
     expected_fingerprint: Option<String>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
-    let mut workspace = Workspace::open_default()?;
+    let mut workspace = open_workspace()?;
     Ok(workspace.publish_ticket(
         &ticketd_core::source::Engine::builtin(),
         &reference,
@@ -920,7 +1296,7 @@ fn review_publication(
     reference: String,
     search: bool,
 ) -> Result<ticketd_core::source::PublicationReview, SourceFailure> {
-    let workspace = Workspace::open_default()?;
+    let workspace = open_workspace()?;
     Ok(workspace.review_publication(
         &ticketd_core::source::Engine::builtin(),
         &reference,
@@ -936,7 +1312,7 @@ fn resolve_publication(
     resolution: ticketd_core::source::Resolution,
     accept_different_content: Option<bool>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
-    let mut workspace = Workspace::open_default()?;
+    let mut workspace = open_workspace()?;
     Ok(workspace.resolve_publication(
         &ticketd_core::source::Engine::builtin(),
         &reference,
@@ -962,7 +1338,7 @@ struct SourceHealth {
 /// whether a refresh is running. It does no network I/O.
 #[tauri::command]
 fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth, SourceFailure> {
-    let sources = Workspace::open_default()?.source_statuses()?;
+    let sources = open_workspace()?.source_statuses()?;
     Ok(SourceHealth {
         refreshing: refresher.0.is_refreshing(),
         sources,
@@ -1016,6 +1392,23 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            context_link_markdown,
+            document_context_links,
+            ticket_from_document,
+            recent_documents,
+            keep_document,
+            pinned_documents,
+            search_documents,
+            set_document_pin,
+            document_tags,
+            set_document_tag,
+            all_documents,
+            trashed_documents,
+            set_document_trashed,
+            show_document,
+            document_version,
+            open_document,
+            save_document,
             backup_workspace,
             list_sources,
             refresh_sources,
@@ -1036,11 +1429,15 @@ pub fn run() -> Result<(), tauri::Error> {
             inspect_backup,
             safety_backups,
             export_workspace,
-            list_efforts,
-            show_effort,
-            create_effort,
-            change_effort,
-            set_effort,
+            list_plans,
+            show_plan,
+            set_plan_document,
+            set_ticket_document,
+            set_plan_spec,
+            create_plan,
+            change_plan,
+            set_plan_purpose,
+            set_plan,
             cli_status::check_cli,
             list_projects,
             register_checkout,
@@ -1049,9 +1446,13 @@ pub fn run() -> Result<(), tauri::Error> {
             edit_project,
             show_ticket,
             search_tickets,
-            find_tickets,
+            find_tickets_with_updates,
             count_tickets,
+            context_graph,
+            workspace_graph,
+            context_graph_expanded,
             dependency_graph,
+            plan_dependency_graph,
             list_trash,
             set_trashed,
             create_ticket,
@@ -1066,17 +1467,20 @@ pub fn run() -> Result<(), tauri::Error> {
             set_following,
             set_inbox_read,
             sidebar_counts,
+            workspace_change_token,
             list_evidence,
             add_evidence,
             edit_evidence,
             delete_evidence,
             ticket_backlinks,
             source_conversation,
-            list_notes,
-            get_note,
-            add_note,
-            edit_note,
-            delete_note,
+            latest_update,
+            activity_feed,
+            get_activity,
+            add_activity,
+            add_activity_with_details,
+            edit_activity,
+            delete_activity,
             search_tags,
             add_tag,
             remove_tag,

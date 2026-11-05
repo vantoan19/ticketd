@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
 import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
 type NoteTarget = { id: string; key: number };
 
@@ -29,7 +29,7 @@ export function TicketDetails({
   setSelected,
   details,
   projects,
-  efforts,
+  plans,
   revision,
   refresh,
   updateTicket,
@@ -52,7 +52,7 @@ export function TicketDetails({
   setSelected: (value: string | null, mention?: MentionTarget) => void;
   details: Record<string, Ticket>;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   revision: number;
   refresh: () => Promise<void>;
   updateTicket: (ticket: Ticket) => void;
@@ -108,7 +108,7 @@ export function TicketDetails({
             reference={selected}
             revision={revision}
             projects={projects}
-            efforts={efforts}
+            plans={plans}
             onBack={closeGraph}
             onOpen={(reference) => {
               closeGraph();
@@ -148,7 +148,7 @@ export function TicketDetails({
             ticket={item}
             active={item.reference === selected}
             projects={projects}
-            efforts={efforts}
+            plans={plans}
             revision={revision}
             refresh={refresh}
             updateTicket={updateTicket}

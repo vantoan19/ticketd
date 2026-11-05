@@ -116,10 +116,12 @@
 }
 .linked-work-remove {
   opacity: 0;
+  pointer-events: none;
 }
 .linked-work-row:hover .linked-work-remove,
 .linked-work-row:focus-within .linked-work-remove {
   opacity: 1;
+  pointer-events: auto;
 }
 /* Narrow: the kind becomes a small heading over its group of rows. */
 @container (max-width: 520px) {
@@ -196,7 +198,10 @@
   .linked-work-status {
     display: none;
   }
-  .linked-work-status[data-qualified] {
+  .linked-work-status[data-qualified],
+  /* Blocks and Blocked by always say where the other ticket stands. */
+  .linked-work-row[data-kind="blocked_by"] .linked-work-status,
+  .linked-work-row[data-kind="blocks"] .linked-work-status {
     display: block;
     grid-column: 2 / -1;
     white-space: normal;
@@ -208,6 +213,7 @@
 @media (hover: none), (max-width: 767px) {
   .linked-work-remove {
     opacity: 1;
+    pointer-events: auto;
   }
   @container (max-width: 260px) {
     .linked-work-title {
@@ -225,16 +231,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-.link-ticket-sentence select {
-  min-width: 0;
-  max-width: 100%;
-  height: 32px;
-  padding: 0 8px;
-  color: var(--foreground);
-  background: var(--surface);
-  border-radius: 6px;
-  box-shadow: var(--shadow-border-base);
 }
 .link-ticket-results {
   margin-top: 4px;

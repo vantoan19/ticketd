@@ -17,6 +17,7 @@ const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   document
     .querySelectorAll("[data-test-workspace]")
@@ -35,7 +36,7 @@ const initial: Ticket = {
   trashed: false,
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   prerequisites: [],
   parent: null,
@@ -70,7 +71,7 @@ test("an untouched ticket reports no save state until something is saved", async
   });
   expect(screen.getByRole("status").textContent).toBe("Pending save");
   await autosave();
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect(screen.getByRole("status").textContent).toBe("Title saved");
 });
 
 test("a title-only save should not overwrite an externally updated body", async () => {
@@ -91,7 +92,7 @@ test("a title-only save should not overwrite an externally updated body", async 
   expect(stored.body).toBe("External agent body");
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
     reference: "T-1",
-    patch: { title: "Renamed" },
+    patch: { title: "Renamed", expected_title: "First" },
   });
 });
 
@@ -144,7 +145,7 @@ test("reading, selection, focus and editor mode changes preserve source without 
 
 test("keeps a failed Unicode rich draft visible and retries only the description patch", async () => {
   vi.useFakeTimers();
-  const ticket = { ...initial, body: "# Xin chào\n\n- [ ] Second line 🌿\n" };
+  const ticket = { ...initial, body: "# Xin chào\n\n- [ ] Second line 🌿" };
   bridge.invoke.mockRejectedValueOnce(new Error("Disk full"));
   const onSaved = vi.fn();
   const { rerender } = render(
@@ -171,15 +172,18 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   bridge.invoke.mockResolvedValueOnce({
     ...ticket,
     title: "External title",
-    body: "# Xin chào\n\n- [x] Second line 🌿\n",
+    body: "# Xin chào\n\n- [x] Second line 🌿",
   });
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenLastCalledWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "# Xin chào\n\n- [x] Second line 🌿\n" },
+    patch: {
+      body: "# Xin chào\n\n- [x] Second line 🌿",
+      expected_body: "# Xin chào\n\n- [ ] Second line 🌿",
+    },
   });
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect(screen.getByRole("status").textContent).toBe("Description saved");
 });
 
 test("external description changes pause a rich draft until reload or overwrite is chosen", async () => {
@@ -201,7 +205,9 @@ test("external description changes pause a rich draft until reload or overwrite 
   expect(
     screen.getByRole("checkbox", { name: "Checklist item" }),
   ).toHaveProperty("checked", true);
-  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use saved text" }));
+  // A draft with text is only discarded after a confirmation.
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -220,13 +226,16 @@ test("external description changes pause a rich draft until reload or overwrite 
   );
   bridge.invoke.mockResolvedValueOnce({
     ...external,
-    body: "- [x] External content\n",
+    body: "- [x] External content",
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
   await autosave();
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "- [x] External content\n" },
+    patch: {
+      body: "- [x] External content",
+      expected_body: "Another external edit",
+    },
   });
 });
 
@@ -486,4 +495,151 @@ test("an empty description has one add affordance and keeps focus when editing e
       screen.getByRole("button", { name: "Add a description…" }),
     ),
   );
+});
+
+test("a save the core refuses as stale keeps the draft and offers the choice", async () => {
+  vi.useFakeTimers();
+  const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_ticket")
+      throw "ticket 'T-1' was changed elsewhere since it was loaded";
+    return agent;
+  });
+  render(<Harness />);
+  await editDescription();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30);
+  });
+  const editor = screen.getByRole("textbox", {
+    name: "Description rich text",
+  });
+  await act(async () => {
+    editor.focus();
+    document.execCommand?.("insertText", false, " mine");
+  });
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "My title" },
+  });
+  await autosave();
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "change_ticket",
+    expect.objectContaining({
+      patch: { title: "My title", expected_title: "First" },
+    }),
+  );
+  expect(
+    screen.getByText(/changed elsewhere.*while you were editing/),
+  ).toBeTruthy();
+  expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
+    "My title",
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  // The notice holds autosave: nothing more is written until the person chooses.
+  bridge.invoke.mockClear();
+  await autosave();
+  expect(bridge.invoke).not.toHaveBeenCalled();
+});
+
+test("a clean editor adopts an external change without a notice", async () => {
+  const onSaved = vi.fn();
+  const { rerender } = render(
+    <TicketEditor ticket={initial} onSaved={onSaved} />,
+  );
+  rerender(
+    <TicketEditor
+      ticket={{ ...initial, body: "Agent body" }}
+      onSaved={onSaved}
+    />,
+  );
+  expect(screen.getByText("Agent body")).toBeTruthy();
+  expect(
+    screen.queryByText(/changed elsewhere.*while you were editing/),
+  ).toBeNull();
+});
+
+test("a conflict shows the saved text as the description and the draft as labelled", () => {
+  const onSaved = vi.fn();
+  localStorage.setItem(
+    "ticketd:ticket-draft:1",
+    JSON.stringify({
+      title: "First",
+      body: "My unsaved words",
+      baseTitle: "First",
+      baseBody: "Old",
+    }),
+  );
+  render(
+    <TicketEditor
+      ticket={{ ...initial, body: "Agent saved text" }}
+      onSaved={onSaved}
+    />,
+  );
+  const notice = screen.getByText(/saved description changed/);
+  const body = document.querySelector(".editor-body");
+  expect(body?.contains(notice)).toBe(true);
+  expect(screen.getByText("Agent saved text")).toBeTruthy();
+  expect(screen.getByText("Your unsaved draft")).toBeTruthy();
+  expect(screen.getByText("My unsaved words")).toBeTruthy();
+  expect(bridge.invoke).not.toHaveBeenCalled();
+});
+
+test("an empty draft takes the saved text without a confirmation", () => {
+  localStorage.setItem(
+    "ticketd:ticket-draft:1",
+    JSON.stringify({
+      title: "First",
+      body: "",
+      baseTitle: "First",
+      baseBody: "Old",
+    }),
+  );
+  render(
+    <TicketEditor
+      ticket={{ ...initial, body: "Agent saved text" }}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Use saved text" }));
+  expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
+  expect(screen.queryByText("Your unsaved draft")).toBeNull();
+  expect(localStorage.getItem("ticketd:ticket-draft:1")).toBeNull();
+});
+
+test("unsaved text survives a reload and is checked against the stored text", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(() => new Promise(() => {}));
+  const first = render(<TicketEditor ticket={initial} onSaved={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "My title" },
+  });
+  expect(
+    JSON.parse(localStorage.getItem("ticketd:ticket-draft:1") ?? ""),
+  ).toEqual({
+    title: "My title",
+    body: "Old",
+    baseTitle: "First",
+    baseBody: "Old",
+  });
+  first.unmount();
+  // Reload: the stored ticket is unchanged, so the draft simply returns.
+  render(<TicketEditor ticket={initial} onSaved={vi.fn()} />);
+  expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
+    "My title",
+  );
+  expect(
+    screen.queryByText(/changed elsewhere.*while you were editing/),
+  ).toBeNull();
+  cleanup();
+  // Reload after an agent changed the title: the conflict is raised.
+  render(
+    <TicketEditor
+      ticket={{ ...initial, title: "Agent title" }}
+      onSaved={vi.fn()}
+    />,
+  );
+  expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
+    "My title",
+  );
+  expect(screen.getByText(/saved title changed/)).toBeTruthy();
+  expect(screen.getByText("Agent title")).toBeTruthy();
 });

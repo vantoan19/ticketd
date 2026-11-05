@@ -77,11 +77,11 @@ fn cli_status_change_appears_in_followed_inbox() {
     run(
         &["write", "-", "--request-id", "note"],
         Some(
-            r#"{"operation":"add_note","reference":"T-1","content":"CLI finding","agent":"runner"}"#,
+            r#"{"operation":"add_activity","reference":"T-1","brief":"CLI finding","agent":"runner"}"#,
         ),
     );
     let inbox: serde_json::Value = serde_json::from_str(&run(&["inbox"], None)).unwrap();
-    assert_eq!(inbox[0]["kind"], "note");
+    assert_eq!(inbox[0]["kind"], "activity");
     assert_eq!(inbox[0]["to_value"], "CLI finding");
     assert_eq!(inbox[0]["editing_agent"], "runner");
 }
@@ -487,4 +487,402 @@ fn cli_requires_a_canonical_ticket_to_choose_duplicate() {
     let shown = run(&["show", "T-1"]);
     let ticket: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(ticket["status"], "Todo");
+}
+
+#[test]
+fn cli_creates_ticket_in_plan_and_edits_purpose() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let invoke = |args: &[&str]| {
+        let result = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    let plan = invoke(&["plan", "create", "Launch"]);
+    let id = plan["id"].as_str().unwrap();
+    invoke(&["plan", "purpose", id, "Ship safely"]);
+    let ticket = invoke(&["create", "Work", "--plan", id]);
+    assert_eq!(ticket["plan_id"], id);
+    let view = invoke(&["plan", "show", id]);
+    assert_eq!(view["plan"]["purpose"], "Ship safely");
+    assert_eq!(view["counts"]["todo"], 1);
+}
+
+#[test]
+fn plan_graph_cli_displays_boundary_blockers() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let plan_id;
+    {
+        let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+        plan_id = workspace.create_plan("Launch").unwrap().id;
+        let blocker = workspace.create_ticket("Outside").unwrap();
+        let member = workspace.create_ticket("Member").unwrap();
+        workspace
+            .set_plan(&member.reference, Some(&plan_id), None)
+            .unwrap();
+        workspace
+            .add_dependency(&blocker.reference, &member.reference, None)
+            .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["graph", "--plan", &plan_id])
+        .env("TICKETD_TEST_WORKSPACE", path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(graph["nodes"][0]["reference"], "T-2");
+    assert_eq!(graph["nodes"][1]["boundary"], true);
+    assert_eq!(graph["edges"][0]["blocker"], "T-1");
+}
+
+#[test]
+fn graph_cli_reports_relationships_and_limits() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    {
+        let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+        let a = workspace.create_ticket("A").unwrap();
+        let b = workspace.create_ticket("B").unwrap();
+        workspace
+            .add_dependency(&a.reference, &b.reference, None)
+            .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["graph", "T-1"])
+        .env("TICKETD_TEST_WORKSPACE", path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(graph["edges"][0]["blocker"], "T-1");
+    assert_eq!(graph["edges"][0]["dependent"], "T-2");
+    assert_eq!(graph["omitted_neighbors"], false);
+    assert_eq!(graph["omitted_edges"], false);
+    assert_eq!(graph["max_edges"], 300);
+}
+
+#[test]
+fn activity_cli_posts_stdin_and_reads_a_bounded_feed_and_exact_update() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str], input: Option<&str>| -> serde_json::Value {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        if let Some(input) = input {
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    run(&["create", "Outcome"], None);
+    assert!(run(&["context", "T-1", "--latest-update"], None)["latest_update"].is_null());
+    run(&["change", "T-1", "--status", "In progress"], None);
+    let posted = run(
+        &["activity", "add", "T-1", "--file", "-", "--agent", "runner"],
+        Some("A **brief**"),
+    );
+    assert_eq!(posted["brief"], "A **brief**");
+    let request = r#"{"operation":"ticket_change","reference":"T-1","change":{"status":"In review","activities":["Ready for review"],"editing_agent":"runner"}}"#;
+    let first = run(&["write", "-", "--request-id", "progress-1"], Some(request));
+    assert_eq!(
+        run(&["write", "-", "--request-id", "progress-1"], Some(request)),
+        first
+    );
+    let latest = run(&["context", "T-1", "--latest-update"], None);
+    assert_eq!(latest["latest_update"]["brief"]["text"], "Ready for review");
+    let feed = run(&["activity", "list", "T-1"], None);
+    assert_eq!(
+        feed.as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["activity"]["brief"] == "Ready for review")
+            .count(),
+        1
+    );
+    let id = posted["id"].as_str().unwrap();
+    let omitted = run(&["context", "T-1"], None);
+    assert!(omitted.get("latest_update").is_none());
+    let context = run(&["context", "T-1", "--latest-update"], None);
+    assert_eq!(
+        context["latest_update"]["brief"]["text"],
+        "Ready for review"
+    );
+    let list = run(&["list", "--latest-update"], None);
+    assert_eq!(
+        list[0]["latest_update"]["brief"]["text"],
+        "Ready for review"
+    );
+    assert_eq!(run(&["activity", "show", "T-1", id], None), posted);
+    let feed = run(&["activity", "list", "T-1", "--limit", "1"], None);
+    assert_eq!(feed.as_array().unwrap().len(), 1);
+    assert_eq!(feed[0]["activity"]["brief"], "Ready for review");
+}
+
+#[test]
+fn cli_plan_context_shows_associated_document_and_opt_in_body() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let plan = run(&["plan", "create", "Release"]);
+    let document = run(&[
+        "document",
+        "create",
+        "--title",
+        "Spec",
+        "--body",
+        "# Details",
+    ]);
+    let plan_id = plan["id"].as_str().unwrap();
+    let doc_id = document["id"].as_str().unwrap();
+    run(&["plan", "document", plan_id, doc_id]);
+    run(&["plan", "spec", plan_id, doc_id]);
+    let context = run(&["plan", "context", plan_id]);
+    assert_eq!(context["plan"]["spec_document_id"], doc_id);
+    assert!(context["documents"][0]["body"].is_null());
+    let with_bodies = run(&["plan", "context", plan_id, "--bodies"]);
+    assert_eq!(with_bodies["documents"][0]["body"], "# Details");
+}
+
+#[test]
+fn context_graph_cli_reads_new_connections() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "First"]);
+    run(&["create", "Second"]);
+    run(&["create", "Third"]);
+    run(&["change", "T-2", "--body", "See T-3"]);
+    run(&["change", "T-1", "--body", "See T-2"]);
+    let graph = run(&["graph", "T-2", "--context"]);
+    assert!(
+        graph["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["label"].as_str().unwrap().contains("First"))
+    );
+    assert!(
+        graph["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "mention")
+    );
+    let center = run(&["graph", "T-1", "--context"]);
+    let second = center["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["label"].as_str().unwrap().contains("Second"))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let expanded = run(&["graph", "T-1", "--context", "--expand", second]);
+    assert!(
+        expanded["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["label"].as_str().unwrap().contains("Third"))
+    );
+}
+
+#[test]
+fn workspace_context_graph_cli_filters_indexed_search() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    run(&["create", "Unique search word"]);
+    run(&["create", "Another ticket"]);
+    let graph = run(&["graph", "--context", "--workspace", "--search", "Unique"]);
+    assert_eq!(graph["nodes"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn activity_and_document_commands_replay_by_request_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| -> serde_json::Value {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    run(&["create", "Outcome"]);
+    let add = [
+        "activity",
+        "add",
+        "T-1",
+        "--brief",
+        "Once",
+        "--request-id",
+        "a-1",
+    ];
+    let first = run(&add);
+    assert_eq!(run(&add), first);
+    assert_eq!(first["brief"], "Once");
+    let feed = run(&["activity", "list", "T-1"]);
+    assert_eq!(
+        feed.as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["type"] == "authored")
+            .count(),
+        1
+    );
+    let id = first["id"].as_str().unwrap();
+    let edit = [
+        "activity",
+        "edit",
+        "T-1",
+        id,
+        "--brief",
+        "Twice",
+        "--request-id",
+        "e-1",
+    ];
+    assert_eq!(run(&edit), run(&edit));
+    let create = [
+        "document",
+        "create",
+        "--body",
+        "Body",
+        "--request-id",
+        "d-1",
+    ];
+    let document = run(&create);
+    assert_eq!(run(&create), document);
+    assert_eq!(document["body"], "Body");
+}
+
+#[test]
+fn cli_document_keep_trash_restore_print_the_bare_document() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let document = run(&["document", "create", "--body", "Hello"]);
+    let id = document["id"].as_str().unwrap();
+    for command in ["keep", "trash", "restore"] {
+        let printed = run(&["document", command, id]);
+        assert_eq!(printed["id"], id, "{command}");
+        assert!(printed.get("value").is_none(), "{command}");
+    }
+    run(&["create", "Task"]);
+    let references = run(&["document", "references", "T-1"]);
+    assert!(references.as_array().unwrap().is_empty());
 }

@@ -16,9 +16,9 @@ const command = (args, input) =>
   execFileSync(cli, args, { cwd: checkout, encoding: "utf8", input });
 const run = (...args) => JSON.parse(command(args));
 const project = run("project", "create", "ticketd", checkout);
-const effort = run("effort", "create", "Validate native workflow");
+const plan = run("plan", "create", "Validate native workflow");
 // This plan describes the real repository change that adds this workflow harness.
-const plan = [
+const batch = [
   {
     operation: "create",
     name: "outcome",
@@ -52,10 +52,10 @@ const plan = [
     change: { parent: "$outcome", add_blockers: ["$harness"] },
   },
 ];
-const results = JSON.parse(command(["batch", "-"], JSON.stringify(plan)));
+const results = JSON.parse(command(["batch", "-"], JSON.stringify(batch)));
 const [outcome, harness, evidence] = results;
-run("effort", "add", effort.id, harness.reference);
-run("effort", "add", effort.id, evidence.reference);
+run("plan", "add", plan.id, harness.reference);
+run("plan", "add", plan.id, evidence.reference);
 assert.equal(run("show", evidence.reference).availability, "Blocked");
 assert(
   run("list", "--availability", "ready").some(
@@ -66,13 +66,13 @@ const context = run(
   "context",
   harness.reference,
   "--project",
-  "--effort",
+  "--plan",
   "--relationships",
-  "--notes",
+  "--activities",
 );
 assert.equal(context.relationships.parent.reference, outcome.reference);
 assert.equal(context.project.id, project.id);
-assert.equal(context.effort.id, effort.id);
+assert.equal(context.plan.id, plan.id);
 console.log(
   `Bounded context: ${Buffer.byteLength(JSON.stringify(context))} bytes in one CLI call`,
 );
@@ -148,10 +148,10 @@ try {
     () => run("show", harness.reference).body.includes("Reviewed in desktop."),
     { timeout: 10000, timeoutMsg: "Markdown edit did not save" },
   );
-  await (await (await detail()).$("button=Add a note")).click();
+  await (await (await detail()).$("button=Add update")).click();
   const noteEditor = await (
     await detail()
-  ).$('[role="textbox"][aria-label="New note rich text"]');
+  ).$('[role="textbox"][aria-label="New update rich text"]');
   await noteEditor.click();
   const sentence = "Reviewed rich notes in the installed desktop.";
   // The WebKit driver may drop a keystroke. Retype a bounded number of times,
@@ -169,7 +169,7 @@ try {
         await browser.execute(
           () =>
             document.querySelector(
-              '[role="textbox"][aria-label="New note rich text"]',
+              '[role="textbox"][aria-label="New update rich text"]',
             )?.textContent,
         ),
       )}`,
@@ -178,12 +178,18 @@ try {
     await browser.keys(["Backspace"]);
   }
   assert.equal((await noteEditor.getText()).trim(), sentence);
-  assert.equal(run("note", "list", harness.reference).length, 0);
-  await (await (await detail()).$("button=Add note")).click();
+  assert.equal(
+    run("activity", "list", harness.reference).filter(
+      (entry) => entry.type === "authored",
+    ).length,
+    0,
+  );
+  await (await (await detail()).$("button=Post update")).click();
   await browser.waitUntil(
     () =>
-      run("note", "list", harness.reference).some((note) =>
-        note.content.includes(sentence),
+      run("activity", "list", harness.reference).some(
+        (entry) =>
+          entry.type === "authored" && entry.activity.brief.includes(sentence),
       ),
     { timeout: 10000, timeoutMsg: "Explicit desktop note did not save" },
   );
@@ -243,10 +249,10 @@ try {
     "workflow-validation",
   );
   run(
-    "note",
+    "activity",
     "add",
     harness.reference,
-    "--content",
+    "--brief",
     "Implemented the installed desktop workflow harness and exercised shared workspace operations.",
     "--agent",
     "workflow-validation",

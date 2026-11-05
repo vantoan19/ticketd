@@ -48,9 +48,11 @@ pub struct WorkspaceInfo {
     pub path: String,
     /// Tickets outside Trash.
     pub tickets: u64,
+    /// All Documents, including supporting details and Trash.
+    pub documents: u64,
     pub projects: u64,
-    /// Efforts that are not archived.
-    pub active_efforts: u64,
+    /// Plans that are not archived.
+    pub active_plans: u64,
     pub size_bytes: u64,
     /// The workspace format (schema) version.
     pub format_version: u32,
@@ -73,8 +75,9 @@ impl Workspace {
         Ok(WorkspaceInfo {
             size_bytes: std::fs::metadata(&path)?.len(),
             tickets: count("SELECT COUNT(*) FROM tickets WHERE trashed = 0")?,
+            documents: count("SELECT COUNT(*) FROM documents")?,
             projects: count("SELECT COUNT(*) FROM projects")?,
-            active_efforts: count("SELECT COUNT(*) FROM efforts WHERE archived = 0")?,
+            active_plans: count("SELECT COUNT(*) FROM plans WHERE archived = 0")?,
             path,
             format_version,
         })

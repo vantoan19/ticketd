@@ -1,10 +1,21 @@
-import { createContext, createElement, useContext, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
   type ExtraProps,
 } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
+import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -19,7 +30,30 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
-const remarkPlugins = [remarkGfm, references];
+type MdNode = { type: string; value?: string; children?: MdNode[] };
+/**
+ * Raw HTML is never rendered, but it is not dropped either: `<tag>` written in a brief
+ * or Document reads as the literal text the person typed.
+ */
+function htmlAsText() {
+  const walk = (parent: MdNode) => {
+    if (!parent.children) return;
+    parent.children = parent.children.map((child) => {
+      if (child.type !== "html") {
+        walk(child);
+        return child;
+      }
+      const text: MdNode = { type: "text", value: child.value ?? "" };
+      return parent.type === "paragraph" ||
+        parent.type === "heading" ||
+        parent.type === "tableCell"
+        ? text
+        : { type: "paragraph", children: [text] };
+    });
+  };
+  return (tree: MdNode) => walk(tree);
+}
+const remarkPlugins = [remarkGfm, references, htmlAsText];
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
@@ -27,6 +61,32 @@ const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
 }>({ select: undefined, revision: undefined });
+
+/** Says so when a linked Document is in the Trash, as a linked ticket does. */
+function TrashedMark({
+  id,
+  revision,
+}: {
+  id: string;
+  revision: number | undefined;
+}) {
+  const [trashed, setTrashed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve(documents.show(id)).then(
+      (document) => {
+        if (active) setTrashed(document?.trashed === true);
+      },
+      () => {
+        if (active) setTrashed(false);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [id, revision]);
+  return trashed ? <> (Trash)</> : null;
+}
 
 function DocumentLink({
   href,
@@ -36,6 +96,47 @@ function DocumentLink({
   children?: React.ReactNode;
 }) {
   const { select, revision } = useContext(TicketNavigation);
+  const openDocument = useContext(DocumentNavigation);
+  const openPlan = useContext(PlanNavigation);
+  if (href?.startsWith("ticketd://plan/")) {
+    const id = href.slice("ticketd://plan/".length);
+    return openPlan ? (
+      <button
+        type="button"
+        className="context-link"
+        onClick={() => openPlan(id)}
+      >
+        {children}
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
+  if (href?.startsWith("ticketd://document/")) {
+    const id = href.slice("ticketd://document/".length);
+    return openDocument ? (
+      <button
+        type="button"
+        className="context-link"
+        onClick={() => openDocument(id)}
+      >
+        {children}
+        <TrashedMark id={id} revision={revision} />
+      </button>
+    ) : (
+      <>{children}</>
+    );
+  }
+  if (href?.startsWith("ticketd://ticket/"))
+    return select ? (
+      <TicketReference
+        reference={href.slice("ticketd://ticket/".length)}
+        select={select}
+        revision={revision}
+      />
+    ) : (
+      <>{children}</>
+    );
   if (href?.startsWith("ticketd:"))
     return select ? (
       <TicketReference
@@ -207,7 +308,6 @@ export function MarkdownDocument({
               urlTransform={(url) =>
                 url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
               }
-              skipHtml
               components={components}
             >
               {source}

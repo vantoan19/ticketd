@@ -27,8 +27,23 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => bridge);
+const bridge = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  // Moves on every poll, so each tick looks like a change made elsewhere.
+  token: { next: (): number => 0 },
+}));
+let tokenCalls = 0;
+bridge.token.next = () => ++tokenCalls;
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args: unknown) => {
+    if (command === "find_tickets_with_updates") {
+      const tickets: unknown[] = await bridge.invoke("find_tickets", args);
+      return tickets.map((ticket) => ({ ticket, latest_update: null }));
+    }
+    if (command === "workspace_change_token") return bridge.token.next();
+    return bridge.invoke(command, args);
+  },
+}));
 vi.mock("@/features/tickets/DependencyGraph", () => ({ default: () => null }));
 
 vi.mock("@uiw/react-codemirror", () => ({
@@ -63,6 +78,19 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
+async function openNewTicket(
+  trigger = screen.getByRole("button", { name: "New" }),
+) {
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "New ticket" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
   vi.useFakeTimers();
   let saved = {
@@ -74,7 +102,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
     status: "Todo",
     tags: [],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -82,8 +110,8 @@ test("refreshes clean content and preserves a draft when saved content changes",
   };
   bridge.invoke.mockImplementation(
     async (command: string, args?: { patch?: { title?: string } }) => {
-      if (command === "list_projects" || command === "list_efforts") return [];
-      if (command === "list_notes") return [];
+      if (command === "list_projects" || command === "list_plans") return [];
+      if (command === "activity_feed") return [];
       if (command === "find_tickets") return [saved];
       if (command === "count_tickets") return bridgeDefault(command);
       if (command === "show_ticket") return saved;
@@ -134,8 +162,9 @@ test("refreshes clean content and preserves a draft when saved content changes",
     "value",
     "My draft",
   );
-  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  expect(screen.getByText(/saved title changed/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Use saved text" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Another change",
@@ -150,7 +179,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(500);
   });
@@ -171,7 +200,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     trashed: false,
     tags: [],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -187,8 +216,8 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     async (command: string, args?: { reference?: string }) => {
       if (
         command === "list_projects" ||
-        command === "list_efforts" ||
-        command === "list_notes" ||
+        command === "list_plans" ||
+        command === "activity_feed" ||
         command === "ticket_history"
       )
         return [];
@@ -260,13 +289,13 @@ test("opens a related ticket outside the filtered list and preserves drafts when
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   await act(async () => {
     await vi.dynamicImportSettled();
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "New note source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "New update source" }), {
     target: { value: "Unfinished note" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Second" }));
@@ -282,7 +311,7 @@ test("opens a related ticket outside the filtered list and preserves drafts when
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("textbox", { name: "New note source" }),
+    screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", "Unfinished note");
 });
 
@@ -290,8 +319,8 @@ test("retains project drafts and clears filters when navigating scopes", async (
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
-      if (command === "list_efforts")
-        return [{ id: "e1", name: "Old effort", archived: true }];
+      if (command === "list_plans")
+        return [{ id: "e1", name: "Old plan", archived: true }];
       if (command === "list_projects" || command === "find_tickets") return [];
       return bridgeDefault(command, args);
     },
@@ -300,7 +329,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.queryByRole("button", { name: "Old effort" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
@@ -343,6 +372,35 @@ test("retains project drafts and clears filters when navigating scopes", async (
   expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
 });
 
+test("an idle workspace costs one token poll per tick and refetches only when the token moves", async () => {
+  vi.useFakeTimers();
+  let token = 1;
+  bridge.token.next = () => token;
+  const calls: string[] = [];
+  bridge.invoke.mockImplementation(async (command: string) => {
+    calls.push(command);
+    return command === "count_tickets" ? bridgeDefault(command) : [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const loaded = calls.length;
+  const listed = () => calls.filter((c) => c === "find_tickets").length;
+  expect(listed()).toBe(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  // Ten idle seconds: no view fetched anything, only the token was polled.
+  expect(calls.length).toBe(loaded);
+  token = 2;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(listed()).toBe(2);
+  bridge.token.next = () => ++tokenCalls;
+});
+
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string) =>
@@ -353,9 +411,12 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     await vi.advanceTimersByTimeAsync(0);
   });
   for (const name of ["New ticket", "Create your first ticket"]) {
-    const trigger = screen.getByRole("button", { name });
+    const trigger = screen.getByRole("button", {
+      name: name === "New ticket" ? "New" : name,
+    });
     trigger.focus();
-    fireEvent.click(trigger);
+    if (name === "New ticket") await openNewTicket(trigger);
+    else fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
     expect(document.activeElement).toBe(
       screen.getByRole("textbox", { name: "Title" }),
@@ -382,7 +443,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
       trashed: false,
       tags: [],
       project_id: null,
-      effort_id: null,
+      plan_id: null,
       availability: "Ready",
       prerequisites: [],
       parent: null,
@@ -397,7 +458,7 @@ test("moves focus between ticket rows without opening them until Enter, and reta
       trashed: false,
       tags: [],
       project_id: null,
-      effort_id: null,
+      plan_id: null,
       availability: null,
       prerequisites: [],
       parent: null,
@@ -409,8 +470,8 @@ test("moves focus between ticket rows without opening them until Enter, and reta
       if (
         [
           "list_projects",
-          "list_efforts",
-          "list_notes",
+          "list_plans",
+          "activity_feed",
           "ticket_history",
         ].includes(command)
       )
@@ -451,11 +512,11 @@ test("moves focus between ticket rows without opening them until Enter, and reta
   expect(screen.queryByRole("heading", { name: "Todo" })).toBeNull();
 });
 
-test("clears additional filters while preserving the selected Effort", async () => {
+test("clears additional filters while preserving the selected Plan", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
-      if (command === "list_efforts")
+      if (command === "list_plans")
         return [{ id: "e1", name: "Launch", archived: false }];
       if (command === "list_projects" || command === "find_tickets") return [];
       return bridgeDefault(command, args);
@@ -484,7 +545,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
-      if (command === "list_efforts" || command === "list_projects") return [];
+      if (command === "list_plans" || command === "list_projects") return [];
       if (command === "find_tickets") return [];
       return bridgeDefault(command, args);
     },
@@ -529,7 +590,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
             paths: ["/workspace"],
           },
         ];
-      if (["list_efforts", "find_tickets", "search_tags"].includes(command))
+      if (["list_plans", "find_tickets", "search_tags"].includes(command))
         return [];
       if (command === "create_ticket") throw new Error("Creation failed");
       return bridgeDefault(command, args);
@@ -540,7 +601,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Desktop app" }));
-  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  await openNewTicket();
   fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "Draft ticket" },
   });
@@ -561,12 +622,12 @@ test("preserves a creation draft when submission fails and the dialog is reopene
       body: "Draft body",
       status: "Todo",
       projectId: "p",
-      effortId: null,
+      planId: null,
       tags: [],
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
-  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  await openNewTicket();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
     screen.getByRole("textbox", { name: "Description source" }),
@@ -584,7 +645,7 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
     trashed: false,
     tags: ["bug"],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -634,7 +695,7 @@ test("moves focus to the visible pane when expanding and returning", async () =>
     trashed: false,
     tags: [],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -675,7 +736,7 @@ test("moves focus into the ticket on narrow screens and back to the row", async 
     trashed: false,
     tags: [],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -711,7 +772,7 @@ const bulkTicket = (index: number, overrides = {}) => ({
   trashed: false,
   tags: [] as string[],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   prerequisites: [],
   parent: null,
@@ -782,19 +843,14 @@ test("shows the bulk bar only while tickets are selected and applies one status 
   expect(screen.queryByRole("button", { name: "Clear selection" })).toBeNull();
 });
 
-test("names the ticket that blocked a bulk change, keeps the selection, and retries with the same request ID", async () => {
+test("keeps the selection and retries a failed bulk change with the same request ID", async () => {
   const requests: string[] = [];
   let fail = true;
   await renderBulk({
     find_tickets: () => [bulkTicket(1), bulkTicket(2)],
     bulk_status: (args: { requestId: string }) => {
       requests.push(args.requestId);
-      if (fail)
-        throw {
-          code: "batch_operation",
-          index: 1,
-          message: "ticket is trashed",
-        };
+      if (fail) throw { code: "failed", message: "storage is busy" };
       return [];
     },
   });
@@ -808,8 +864,7 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
     screen.getByRole("button", { name: "Retry" }),
   );
   expect(alert).toContain("Nothing changed");
-  expect(alert).toContain("T-2");
-  expect(alert).toContain("ticket is trashed");
+  expect(alert).toContain("storage is busy");
   expect(screen.getByText("2 selected")).toBeTruthy();
   fail = false;
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -822,6 +877,31 @@ test("names the ticket that blocked a bulk change, keeps the selection, and retr
   expect(document.activeElement).toBe(
     document.getElementById("tickets-heading"),
   );
+});
+
+test("names the ticket the core rejected and offers no Retry that cannot succeed", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    bulk_status: () => {
+      throw {
+        code: "batch_operation",
+        index: 1,
+        message: "invalid batch: T-2 is trashed",
+      };
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Status of selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
+  await act(async () => {});
+  const alert = screen.getByRole("alert");
+  expect(alert.querySelector(".bulk-error-text")?.textContent).toBe(
+    "T-2 is trashed. Nothing changed.",
+  );
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  expect(document.activeElement).toBe(alert);
+  expect(screen.getByText("2 selected")).toBeTruthy();
 });
 
 test("moves selected tickets to a project from the Organize menu", async () => {
@@ -845,15 +925,15 @@ test("moves selected tickets to a project from the Organize menu", async () => {
   expect(changes).toEqual([{ project_id: "p1" }]);
 });
 
-test("sets an Effort in one request and shows how many selected tickets already have each", async () => {
+test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
   const changes: unknown[] = [];
   await renderBulk({
     find_tickets: () => [
-      bulkTicket(1, { effort_id: "e1" }),
+      bulkTicket(1, { plan_id: "e1" }),
       bulkTicket(2),
       bulkTicket(3),
     ],
-    list_efforts: () => [
+    list_plans: () => [
       { id: "e1", name: "Launch", archived: false },
       { id: "e2", name: "Polish", archived: false },
       { id: "e3", name: "Old", archived: true },
@@ -866,19 +946,19 @@ test("sets an Effort in one request and shows how many selected tickets already 
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   fireEvent.click(screen.getByRole("button", { name: "Select all 3" }));
   openMenu("Organize selected tickets");
-  openSubmenu("Set Effort");
+  openSubmenu("Set Plan");
   expect(screen.getByRole("menuitem", { name: "Launch 1 of 3" })).toBeTruthy();
   expect(screen.getByRole("menuitem", { name: "Polish 0 of 3" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: /Old/ })).toBeNull();
   fireEvent.click(screen.getByRole("menuitem", { name: "Polish 0 of 3" }));
   await act(async () => {});
-  expect(changes).toEqual([{ effort_id: "e2" }]);
+  expect(changes).toEqual([{ plan_id: "e2" }]);
 });
 
-test("removes an Effort and adds or removes a tag from the Organize menu", async () => {
+test("removes an Plan and adds or removes a tag from the Organize menu", async () => {
   const changes: unknown[] = [];
   await renderBulk({
-    find_tickets: () => [bulkTicket(1, { effort_id: "e1", tags: ["old"] })],
+    find_tickets: () => [bulkTicket(1, { plan_id: "e1", tags: ["old"] })],
     bulk_change: (args: { change: unknown }) => {
       changes.push(args.change);
       return [];
@@ -886,8 +966,8 @@ test("removes an Effort and adds or removes a tag from the Organize menu", async
   });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   openMenu("Organize selected tickets");
-  openSubmenu("Set Effort");
-  fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Effort" }));
+  openSubmenu("Set Plan");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove from Plan" }));
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   openMenu("Organize selected tickets");
@@ -896,14 +976,14 @@ test("removes an Effort and adds or removes a tag from the Organize menu", async
   );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
-    name: "Add or remove tag",
+    name: "Add or remove tags",
   });
   fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
-  expect(changes).toEqual([{ effort_id: null }, { remove_tags: ["old"] }]);
+  expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
 });
 
 test("shows attention for a reminder while another view is active and after reopening", async () => {
@@ -915,7 +995,7 @@ test("shows attention for a reminder while another view is active and after reop
         return { unread_inbox: unread, ready: 4, in_progress: 2 };
       if (
         command === "list_projects" ||
-        command === "list_efforts" ||
+        command === "list_plans" ||
         command === "find_tickets"
       )
         return [];
@@ -963,7 +1043,7 @@ test("opens a ticket from the list at full width when Open tickets says so", asy
     trashed: false,
     tags: [],
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: "Ready",
     prerequisites: [],
     parent: null,
@@ -1016,14 +1096,15 @@ test("Settings reads fresh data on every visit, checks the CLI only once opened,
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
       calls.push(command);
-      if (command === "list_projects" || command === "list_efforts") return [];
+      if (command === "list_projects" || command === "list_plans") return [];
       if (command === "find_tickets") return [];
       if (command === "workspace_info")
         return {
           path: "/data/ticketd.sqlite3",
           tickets,
+          documents: 0,
           projects: 0,
-          active_efforts: 0,
+          active_plans: 0,
           size_bytes: 4096,
           format_version: 20,
         };
@@ -1520,4 +1601,175 @@ test("a later page that empties moves back to the last page that exists", async 
   expect(offsets.at(-1)).toBe(0);
   expect(screen.getByText("50 tickets")).toBeTruthy();
   expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
+});
+
+test.each(["ticket", "document", "plan"] as const)(
+  "returns to workspace graph filters after opening a %s",
+  async (kind) => {
+    const ticket = bulkTicket(1);
+    await renderBulk({
+      find_tickets: () => [ticket],
+      show_ticket: () => ticket,
+      workspace_graph: () => ({
+        node_tags: {},
+        total: 1,
+        nodes: [
+          {
+            id: "1",
+            kind,
+            label: "T-1 · First",
+            ticket_reference: kind === "ticket" ? "T-1" : null,
+            state: "Todo",
+            trashed: false,
+            activity_detail: false,
+          },
+        ],
+        edges: [],
+        next_cursor: null,
+        omitted: false,
+        omitted_groups: [],
+      }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "First" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to workspace graph" }),
+    );
+    expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
+      "First",
+    );
+  },
+);
+
+test("a sidebar view leaves an open workspace graph", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      total: 0,
+      nodes: [],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("region", { name: "Workspace graph" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
+  expect(screen.queryByRole("region", { name: "Workspace graph" })).toBeNull();
+  expect(screen.queryByText("Back to workspace graph")).toBeNull();
+});
+
+test("opening the workspace graph from Plans does not stack the Plans list", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      total: 0,
+      nodes: [],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Manage Plans" }));
+  expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("region", { name: "Workspace graph" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Plans" })).toBeNull();
+});
+
+test("returns to local graph state after opening an item", async () => {
+  const ticket = bulkTicket(1);
+  const node = {
+    id: "1",
+    kind: "ticket",
+    label: "T-1 · First",
+    ticket_reference: "T-1",
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  };
+  await renderBulk({
+    find_tickets: () => [ticket],
+    show_ticket: () => ticket,
+    workspace_graph: () => ({
+      node_tags: {},
+      total: 1,
+      nodes: [node],
+      edges: [],
+      next_cursor: null,
+      omitted: false,
+      omitted_groups: [],
+    }),
+    context_graph_expanded: () => ({
+      center: "1",
+      nodes: [node],
+      edges: [],
+      omitted: false,
+      omitted_groups: [],
+      continuations: [],
+      hidden_details: false,
+      max_nodes: 100,
+      max_edges: 300,
+      max_work: 1000,
+    }),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Include update details" }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Back to context graph" }),
+  );
+  expect(
+    (
+      screen.getByRole("checkbox", {
+        name: "Include update details",
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
+});
+
+test("opens Capture from anywhere with the global shortcut", async () => {
+  bridge.invoke.mockImplementation(async (command: string) =>
+    bridgeDefault(command),
+  );
+  render(<App />);
+  fireEvent.keyDown(window, { key: "N", shiftKey: true, ctrlKey: true });
+  expect(await screen.findByRole("dialog")).toBeTruthy();
 });

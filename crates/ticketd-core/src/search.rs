@@ -1,3 +1,9 @@
+#[derive(Debug, Serialize)]
+pub struct TicketWithUpdate {
+    pub ticket: crate::Ticket,
+    pub latest_update: Option<crate::LatestUpdate>,
+}
+
 use crate::{Error, Ticket, Workspace, hierarchy, relationships, tags, ticket_from_row};
 use crate::{Status, StatusCounts};
 use rusqlite::{params, params_from_iter, types::Value};
@@ -26,7 +32,7 @@ pub struct TicketFilter {
     pub query: String,
     pub project: Option<String>,
     pub unlinked: bool,
-    pub effort: Option<String>,
+    pub plan: Option<String>,
     pub status: Option<Status>,
     pub tags: Vec<String>,
     pub availability: Option<Availability>,
@@ -43,7 +49,7 @@ impl Default for TicketFilter {
             query: String::new(),
             project: None,
             unlinked: false,
-            effort: None,
+            plan: None,
             status: None,
             tags: vec![],
             availability: None,
@@ -67,8 +73,8 @@ impl Workspace {
         if let Some(project) = &filter.project {
             self.show_project(project)?;
         }
-        if let Some(effort) = &filter.effort {
-            self.show_effort(effort)?;
+        if let Some(plan) = &filter.plan {
+            crate::plans::get(&self.connection, plan)?;
         }
         let family = filter
             .family
@@ -78,7 +84,7 @@ impl Workspace {
         let mut sql = String::new();
         let mut values: Vec<Value> = Vec::new();
         if !filter.query.is_empty() {
-            sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM notes n WHERE n.ticket_id = t.id AND instr(lower(n.content), lower(?)) > 0))");
+            sql.push_str(" AND (instr(lower(t.title), lower(?)) > 0 OR instr(lower(t.body), lower(?)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?)) > 0))");
             for _ in 0..3 {
                 values.push(filter.query.clone().into());
             }
@@ -90,9 +96,9 @@ impl Workspace {
         if filter.unlinked {
             sql.push_str(" AND t.project_id IS NULL");
         }
-        if let Some(effort) = &filter.effort {
-            sql.push_str(" AND t.effort_id = ?");
-            values.push(effort.clone().into());
+        if let Some(plan) = &filter.plan {
+            sql.push_str(" AND t.plan_id = ?");
+            values.push(plan.clone().into());
         }
         if let Some(status) = filter.status {
             sql.push_str(" AND t.status = ?");
@@ -142,7 +148,7 @@ impl Workspace {
     pub fn find_tickets(&self, filter: &TicketFilter) -> Result<Vec<Ticket>, Error> {
         let (conditions, mut values) = self.filter_conditions(filter)?;
         let mut sql = format!(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.effort_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
+            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0{conditions}"
         );
         match filter.order {
             TicketOrder::Newest => sql.push_str(" ORDER BY t.number DESC"),
@@ -164,9 +170,30 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
-            crate::notes::populate_update(&self.connection, ticket)?;
+            crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
+    }
+
+    /// Return the same filtered ticket page with bounded authored progress.
+    pub fn find_tickets_with_updates(
+        &self,
+        filter: &TicketFilter,
+    ) -> Result<Vec<TicketWithUpdate>, Error> {
+        let tx = self.connection.unchecked_transaction()?;
+        let tickets = self.find_tickets(filter)?;
+        let result = tickets
+            .into_iter()
+            .map(|ticket| {
+                let latest_update = crate::activities::latest(&tx, &ticket.id)?;
+                Ok(TicketWithUpdate {
+                    ticket,
+                    latest_update,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        tx.commit()?;
+        Ok(result)
     }
 
     /// Count the tickets of the whole filtered result set by status, ignoring its paging.
@@ -213,7 +240,7 @@ impl Workspace {
             self.show_project(id)?;
         }
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.effort_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM notes n WHERE n.ticket_id = t.id AND instr(lower(n.content), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
+            "SELECT t.id, t.number, t.title, t.status, t.body, t.project_id, t.plan_id, t.trashed FROM tickets t WHERE t.trashed = 0 AND (?2 IS NULL OR t.project_id = ?2) AND (?3 = 0 OR t.project_id IS NULL) AND (instr(lower(t.title), lower(?1)) > 0 OR instr(lower(t.body), lower(?1)) > 0 OR EXISTS (SELECT 1 FROM activities n WHERE n.ticket_id = t.id AND instr(lower(n.brief), lower(?1)) > 0)) ORDER BY t.number DESC LIMIT ?4 OFFSET ?5"
         )?;
         let mut tickets = statement
             .query_map(
@@ -227,7 +254,7 @@ impl Workspace {
             hierarchy::populate(&self.connection, ticket)?;
             crate::duplicates::populate(&self.connection, ticket)?;
             crate::source::populate(&self.connection, ticket)?;
-            crate::notes::populate_update(&self.connection, ticket)?;
+            crate::activities::populate_update(&self.connection, ticket)?;
         }
         Ok(tickets)
     }

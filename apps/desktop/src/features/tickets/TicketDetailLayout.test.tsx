@@ -65,7 +65,7 @@ const ticket: Ticket = {
   trashed: false,
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -82,7 +82,7 @@ function renderDetails(item: Ticket = ticket) {
       setSelected={vi.fn()}
       details={{ [item.reference]: item }}
       projects={[]}
-      efforts={[]}
+      plans={[]}
       revision={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}
@@ -92,8 +92,8 @@ function renderDetails(item: Ticket = ticket) {
   );
 }
 
-test("the property rail holds Status, Source, Project, Effort, Tags, Relationships, and Attention in order", async () => {
-  renderDetails();
+test("the property rail holds Status, Source, Project, Plan, Tags, Relationships, and Attention in order", async () => {
+  renderDetails({ ...ticket, status: "In progress" });
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
   });
@@ -104,10 +104,12 @@ test("the property rail holds Status, Source, Project, Effort, Tags, Relationshi
       .map((heading) => heading.textContent),
   ).toEqual([
     "Status",
+    "Latest update",
     "Source",
     "Project",
-    "Effort",
+    "Plan",
     "Tags",
+    "Documents",
     "Relationships",
     "Attention",
   ]);
@@ -116,7 +118,7 @@ test("the property rail holds Status, Source, Project, Effort, Tags, Relationshi
   expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
   expect(screen.getByText("Local ticket")).toBeTruthy();
   expect(
-    within(rail).getByRole("combobox", { name: "Status: Todo" }),
+    within(rail).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
     within(rail).getByRole("button", { name: "Project: Unlinked" }),
@@ -195,16 +197,37 @@ test("the header shows the list position with Previous and Next", async () => {
   ).toBe(false);
 });
 
+test("Latest update appears only for In progress and In review tickets", async () => {
+  renderDetails();
+  const rail = await screen.findByRole("complementary", {
+    name: "Ticket properties",
+  });
+  await within(rail).findByRole("button", { name: "Add relationship" });
+  expect(
+    within(rail).queryByRole("heading", { name: "Latest update" }),
+  ).toBeNull();
+});
+
 test("Latest update jumps to its note and tags appear as separate chips", async () => {
   const note = {
     id: "latest",
-    content: "Reported progress",
-    created_at: new Date().toISOString(),
+    ticket_id: "ticket",
+    brief: "Reported progress",
+    reported_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     editing_agent: "agent",
   };
   bridge.invoke.mockImplementation(async (command: string, args?: object) => {
-    if (command === "get_note") return note;
+    if (command === "get_activity") return note;
+    if (command === "latest_update")
+      return {
+        activity_id: note.id,
+        brief: { text: note.brief, truncated: false },
+        reported_at: note.reported_at,
+        updated_at: note.updated_at,
+        editing_agent: note.editing_agent,
+        supporting_document_id: null,
+      };
     return bridgeDefault(command, args as { reference?: string });
   });
   renderDetails({
@@ -212,15 +235,19 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
     status: "In progress",
     tags: ["frontend", "urgent"],
     latest_update: {
-      note_id: note.id,
-      reported_at: note.created_at,
+      activity_id: note.id,
+      reported_at: note.reported_at,
       editing_agent: "agent",
     },
   });
   const heading = screen.getByRole("heading", { name: "Latest update" });
   fireEvent.click(
-    within(heading.closest("section")!).getByRole("button", { name: /agent/ }),
+    await within(heading.closest("section")!).findByRole("button", {
+      name: "Open update",
+    }),
   );
-  expect(await screen.findByText("Reported progress")).toBeTruthy();
+  expect(
+    (await screen.findByLabelText("Selected update")).textContent,
+  ).toContain("Reported progress");
   expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
 });

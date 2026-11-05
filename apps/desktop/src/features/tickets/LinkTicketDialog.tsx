@@ -15,6 +15,13 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
 import { useTicketSearch } from "./useTicketSearch";
@@ -39,7 +46,7 @@ export function LinkTicketDialog({
   onOpenChange: (open: boolean) => void;
   onLinked: () => Promise<void>;
 }) {
-  const [kind, setKind] = useState<AddableKind>("blocked_by");
+  const [kind, setKind] = useState<AddableKind>("related");
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
   const [error, setError] = useState("");
@@ -48,7 +55,7 @@ export function LinkTicketDialog({
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setKind(initialKind ?? "blocked_by");
+    if (open) setKind(initialKind ?? "related");
   }
 
   // A ticket has one parent, so a link that gives it a new parent moves it.
@@ -66,15 +73,24 @@ export function LinkTicketDialog({
   );
   const { results } = search;
 
+  // Escape and clicking outside only close the dialog: what was typed or chosen
+  // is still there when it reopens. Cancel and a finished link discard it.
+  function discard() {
+    setQuery("");
+    search.reset();
+    setChosen(null);
+    setError("");
+    attempt.current = null;
+  }
   function change(next: boolean) {
-    if (!next) {
-      setQuery("");
-      search.reset();
-      setChosen(null);
-      setError("");
-      attempt.current = null;
-    }
     onOpenChange(next);
+  }
+  const [draftFor, setDraftFor] = useState(ticket.reference);
+  if (draftFor !== ticket.reference) {
+    setDraftFor(ticket.reference);
+    setQuery("");
+    setChosen(null);
+    setError("");
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,6 +103,7 @@ export function LinkTicketDialog({
     setError("");
     try {
       await addLink(ticket.reference, kind, chosen.reference, id);
+      discard();
       change(false);
       await onLinked();
     } catch (reason) {
@@ -113,24 +130,27 @@ export function LinkTicketDialog({
               </FieldLabel>
               <div className="link-ticket-sentence">
                 <span>{ticket.reference}</span>
-                <select
-                  id={`link-kind-${ticket.id}`}
+                <Select
                   value={kind}
-                  onChange={(event) => {
+                  onValueChange={(value) => {
                     setKind(
-                      addableKinds.find(
-                        (item) => item.kind === event.target.value,
-                      )?.kind ?? kind,
+                      addableKinds.find((item) => item.kind === value)?.kind ??
+                        kind,
                     );
                     setError("");
                   }}
                 >
-                  {addableKinds.map((item) => (
-                    <option key={item.kind} value={item.kind}>
-                      {item.phrase}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id={`link-kind-${ticket.id}`} size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {addableKinds.map((item) => (
+                      <SelectItem key={item.kind} value={item.kind}>
+                        {item.phrase}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </Field>
             <Field data-invalid={!!(error || search.error)}>
@@ -200,7 +220,14 @@ export function LinkTicketDialog({
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => change(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                discard();
+                change(false);
+              }}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={!chosen || pending}>

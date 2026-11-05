@@ -1,3 +1,4 @@
+import { latestUpdateSchema } from "./progress";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { structured } from "@/lib/api/bridge-failure";
@@ -85,16 +86,17 @@ const ticketSchema = z.object({
   status: z.string(),
   body: z.string(),
   updated_at: z.string().nullish(),
+  progress_summary: latestUpdateSchema.nullable().optional(),
   latest_update: z
     .object({
-      note_id: z.string(),
+      activity_id: z.string(),
       reported_at: z.string(),
       editing_agent: z.string().nullable(),
     })
     .nullish(),
   tags: z.array(z.string()),
   project_id: z.string().nullable(),
-  effort_id: z.string().nullable(),
+  plan_id: z.string().nullable(),
   availability: z.string().nullable(),
   /** This duplicate's canonical ticket became a Duplicate itself; the ticket that is now the original. */
   duplicate_redirect: z.string().nullish(),
@@ -152,7 +154,79 @@ const relationshipsSchema = z.object({
 export type Relationships = z.infer<typeof relationshipsSchema>;
 export type RelatedTicket = z.infer<typeof relatedSchema>;
 
-const graphSchema = z.object({
+export const contextGraphSchema = z.object({
+  center: z.string(),
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      kind: z.enum(["ticket", "document", "plan"]),
+      label: z.string(),
+      state: z.string().nullable(),
+      trashed: z.boolean(),
+      activity_detail: z.boolean(),
+      ticket_reference: z.string().nullable().optional(),
+    }),
+  ),
+  edges: z.array(
+    z.object({
+      source: z.string(),
+      target: z.string(),
+      kind: z.enum([
+        "blocks",
+        "membership",
+        "document",
+        "spec",
+        "mention",
+        "attached",
+        "activity",
+        "support",
+        "subticket",
+        "related",
+        "discovered",
+      ]),
+      explanation: z.string().nullable(),
+    }),
+  ),
+  omitted: z.boolean(),
+  omitted_groups: z.array(z.string()),
+  continuations: z.array(
+    z.object({
+      anchor: z.string(),
+      group: z.number(),
+      kind: z.string(),
+      next_offset: z.number().nullable(),
+    }),
+  ),
+  hidden_details: z.boolean(),
+  max_nodes: z.number(),
+  max_edges: z.number(),
+  max_work: z.number(),
+});
+export type ContextGraph = z.infer<typeof contextGraphSchema>;
+export const workspaceGraphSchema = contextGraphSchema
+  .pick({ nodes: true, edges: true, omitted: true })
+  .extend({
+    next_cursor: z.string().nullable(),
+    total: z.number(),
+    omitted_groups: z.array(z.string()),
+    node_tags: z.record(z.string(), z.string()),
+    /** Every connection an item has in the workspace, shown or not. */
+    connection_counts: z.record(z.string(), z.number()).optional(),
+  });
+export type WorkspaceGraph = z.infer<typeof workspaceGraphSchema>;
+export type WorkspaceGraphRequest = {
+  cursor: string | null;
+  search: string | null;
+  kind: string | null;
+  tag: string | null;
+  relationship: string | null;
+  include_details: boolean;
+  adjacency_limit: number;
+  visible_ids: string[];
+  hydrate_only: boolean;
+};
+
+export const graphSchema = z.object({
   nodes: z.array(
     z.object({
       id: z.string(),
@@ -161,12 +235,20 @@ const graphSchema = z.object({
       title: z.string(),
       status: z.string(),
       availability: z.string().nullable(),
+      boundary: z.boolean().optional(),
+      project_id: z.string().nullable().optional(),
     }),
   ),
   edges: z.array(z.object({ blocker: z.string(), dependent: z.string() })),
   max_nodes: z.number(),
   max_depth: z.number(),
+  max_edges: z.number(),
+  max_work: z.number(),
+  omitted_neighbors: z.boolean(),
+  omitted_edges: z.boolean(),
   truncated: z.boolean(),
+  total_members: z.number().nullable().optional(),
+  outside_total: z.number().nullable().optional(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);
@@ -226,13 +308,29 @@ const projectSchema = z.object({
   paths: z.array(z.string()),
 });
 export type Project = z.infer<typeof projectSchema>;
-const noteSchema = z.object({
+const activitySchema = z.object({
   id: z.string(),
-  content: z.string(),
-  created_at: z.string(),
+  ticket_id: z.string(),
+  brief: z.string(),
+  reported_at: z.string(),
   updated_at: z.string(),
   editing_agent: z.string().nullable(),
+  supporting_document_id: z.string().nullable().optional(),
 });
+const activityFeedSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("authored"), activity: activitySchema }),
+  z.object({
+    type: z.literal("automatic"),
+    id: z.number(),
+    event: z.object({
+      kind: z.string(),
+      from_value: z.string(),
+      to_value: z.string(),
+      timestamp: z.string(),
+      editing_agent: z.string().nullable(),
+    }),
+  }),
+]);
 const evidenceSchema = z.object({
   id: z.string(),
   kind: z.enum([
@@ -253,13 +351,14 @@ export type EvidenceInput = Pick<
   Evidence,
   "kind" | "name" | "value" | "editing_agent"
 >;
-export type Note = z.infer<typeof noteSchema>;
+export type AuthoredActivity = z.infer<typeof activitySchema>;
+export type ActivityFeedEntry = z.infer<typeof activityFeedSchema>;
 export type Ticket = z.infer<typeof ticketSchema>;
 export type FindFilter = {
   query: string;
   project: string | null;
   unlinked: boolean;
-  effort: string | null;
+  plan: string | null;
   status: string | null;
   tags: string[];
   availability: string | null;
@@ -313,11 +412,36 @@ export type SourceCounts = z.infer<typeof sourceCountsSchema>;
 export type StatusCounts = z.infer<typeof statusCountsSchema>;
 export type BulkChange = {
   project_id?: string | null;
-  effort_id?: string | null;
+  plan_id?: string | null;
   add_tags?: string[];
   remove_tags?: string[];
 };
 export const client = {
+  async workspaceGraph(request: WorkspaceGraphRequest) {
+    return workspaceGraphSchema.parse(
+      await invoke("workspace_graph", { request }),
+    );
+  },
+  async contextGraphExpanded(
+    reference: string,
+    includeDetails: boolean,
+    expandedIds: string[],
+    pages: { anchor: string; group: number; offset: number }[],
+  ) {
+    return contextGraphSchema.parse(
+      await invoke("context_graph_expanded", {
+        reference,
+        includeDetails,
+        expandedIds,
+        pages,
+      }),
+    );
+  },
+  async contextGraph(reference: string, includeDetails: boolean) {
+    return contextGraphSchema.parse(
+      await invoke("context_graph", { reference, includeDetails }),
+    );
+  },
   async bulkChange(
     references: string[],
     change: BulkChange,
@@ -458,10 +582,8 @@ export const client = {
   ) {
     return ticketSchema.parse(await invoke(command, { reference, tag }));
   },
-  async setEffort(reference: string, effort: string | null) {
-    return ticketSchema.parse(
-      await invoke("set_effort", { reference, effort }),
-    );
+  async setPlan(reference: string, plan: string | null) {
+    return ticketSchema.parse(await invoke("set_plan", { reference, plan }));
   },
   async setParent(reference: string, parent: string | null) {
     await invoke("set_parent", { reference, parent });
@@ -482,12 +604,17 @@ export const client = {
   async dependencyGraph(reference: string) {
     return graphSchema.parse(await invoke("dependency_graph", { reference }));
   },
-  async listEfforts() {
+  async listPlans() {
     return z
       .array(
-        z.object({ id: z.string(), name: z.string(), archived: z.boolean() }),
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          archived: z.boolean(),
+          purpose: z.string().default(""),
+        }),
       )
-      .parse(await invoke("list_efforts"));
+      .parse(await invoke("list_plans"));
   },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
@@ -533,7 +660,7 @@ export const client = {
         z.object({
           source_reference: z.string(),
           source_title: z.string(),
-          note_id: z.string().nullable(),
+          activity_id: z.string().nullable(),
           passage: z.string(),
           mention_start: z.number().int().nonnegative(),
           mention_end: z.number().int().nonnegative(),
@@ -543,34 +670,62 @@ export const client = {
         await invoke("ticket_backlinks", { reference, limit: 20, offset }),
       );
   },
-  async notes(reference: string, offset: number) {
+  async activityFeed(reference: string, offset: number) {
     return z
-      .array(noteSchema)
-      .parse(await invoke("list_notes", { reference, limit: 50, offset }));
+      .array(activityFeedSchema)
+      .parse(await invoke("activity_feed", { reference, limit: 50, offset }));
   },
-  async note(reference: string, id: string) {
-    return noteSchema
+  async activity(reference: string, id: string) {
+    return activitySchema
       .nullable()
-      .parse(await invoke("get_note", { reference, id }));
+      .parse(await invoke("get_activity", { reference, id }));
   },
-  async addNote(reference: string, content: string) {
-    return noteSchema.parse(await invoke("add_note", { reference, content }));
-  },
-  async editNote(reference: string, id: string, content: string) {
-    return noteSchema.parse(
-      await invoke("edit_note", { reference, id, patch: { content } }),
+  async addActivity(reference: string, brief: string) {
+    return activitySchema.parse(
+      await invoke("add_activity", { reference, brief }),
     );
   },
-  async deleteNote(reference: string, id: string) {
-    await invoke("delete_note", { reference, id });
+  async addActivityWithDetails(
+    reference: string,
+    brief: string,
+    details: string | null,
+    existingDocumentId: string | null,
+    requestId: string,
+  ) {
+    return activitySchema.parse(
+      await invoke("add_activity_with_details", {
+        reference,
+        brief,
+        details,
+        existingDocumentId,
+        requestId,
+      }),
+    );
+  },
+  async editActivity(reference: string, id: string, brief: string) {
+    return activitySchema.parse(
+      await invoke("edit_activity", { reference, id, patch: { brief } }),
+    );
+  },
+  async deleteActivity(reference: string, id: string) {
+    await invoke("delete_activity", { reference, id });
   },
   async showTicket(reference: string) {
     return ticketSchema.parse(await invoke("show_ticket", { reference }));
   },
   async findTickets(filter: FindFilter) {
-    return z
-      .array(ticketSchema)
-      .parse(await invoke("find_tickets", { filter }));
+    const page = z
+      .array(
+        z.object({
+          ticket: ticketSchema,
+          latest_update: latestUpdateSchema.nullable(),
+        }),
+      )
+      .parse(await invoke("find_tickets_with_updates", { filter }));
+    return page.map(({ ticket, latest_update }) => ({
+      ...ticket,
+      progress_summary: latest_update,
+    }));
   },
   /** Counts the whole filtered result by status, ignoring its paging. */
   async countTickets(filter: FindFilter) {
@@ -618,7 +773,7 @@ export const client = {
     body: string,
     status: string,
     projectId: string | null,
-    effortId: string | null,
+    planId: string | null,
     tags: string[],
     follow: boolean,
   ) {
@@ -628,7 +783,7 @@ export const client = {
         body,
         status,
         projectId,
-        effortId,
+        planId,
         tags,
         follow,
       }),
@@ -639,6 +794,9 @@ export const client = {
     patch: {
       title?: string;
       body?: string;
+      /** The title/body last loaded or saved; the core rejects a stale change. */
+      expected_title?: string;
+      expected_body?: string;
       project_id?: string | null;
       status?: string;
     },

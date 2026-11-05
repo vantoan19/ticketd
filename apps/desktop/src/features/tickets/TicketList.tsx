@@ -10,11 +10,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
+import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
   readinessLabel,
+  readinessShortLabel,
   rowContext,
   type RowScope,
 } from "./ticket-row";
@@ -50,7 +52,8 @@ export function TicketList({
    */
   grouping?: {
     counts: StatusCounts;
-    onAdd: (status: string, trigger: HTMLButtonElement) => void;
+    /** Omit to hide the per-group Add action (a read-only scope). */
+    onAdd?: (status: string, trigger: HTMLButtonElement) => void;
   };
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
@@ -88,17 +91,19 @@ export function TicketList({
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
                 </span>
-                <IconButton
-                  className="ticket-group-add"
-                  // Every group offers the same action; the Duplicate group's
-                  // opens the review that names the canonical ticket.
-                  label={`Add ${status} ticket`}
-                  onClick={(event) =>
-                    grouping?.onAdd(status, event.currentTarget)
-                  }
-                >
-                  <Plus aria-hidden="true" />
-                </IconButton>
+                {grouping?.onAdd && (
+                  <IconButton
+                    className="ticket-group-add"
+                    // Every group offers the same action; the Duplicate group's
+                    // opens the review that names the canonical ticket.
+                    label={`Add ${status} ticket`}
+                    onClick={(event) =>
+                      grouping.onAdd?.(status, event.currentTarget)
+                    }
+                  >
+                    <Plus aria-hidden="true" />
+                  </IconButton>
+                )}
               </li>
             );
           }
@@ -110,6 +115,7 @@ export function TicketList({
                 <label className="ticket-select">
                   <input
                     type="checkbox"
+                    tabIndex={-1}
                     aria-label={`Select ${ticket.reference}`}
                     checked={bulkSelection.includes(ticket.reference)}
                     disabled={selectionDisabled}
@@ -138,8 +144,22 @@ export function TicketList({
                   } else if (event.key === "Enter") {
                     event.preventDefault();
                     onOpen(ticket.reference);
+                  } else if (
+                    event.key === " " &&
+                    selectable &&
+                    !selectionDisabled
+                  ) {
+                    // Space selects for bulk actions; Enter opens.
+                    event.preventDefault();
+                    onToggle(ticket.reference);
                   }
                 }}
+                onKeyUp={(event) => {
+                  // Stop the native Space-click that would open the ticket.
+                  if (event.key === " " && selectable && !selectionDisabled)
+                    event.preventDefault();
+                }}
+                aria-keyshortcuts={selectable ? "Space Enter" : undefined}
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -202,8 +222,14 @@ function RowDetails({
   const state = readiness(ticket);
   const context = rowContext(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
+  const active =
+    ticket.status === "In progress" || ticket.status === "In review";
   return (
-    <span className="ticket-row-meta">
+    <span
+      className={
+        active ? "ticket-row-meta ticket-row-meta-active" : "ticket-row-meta"
+      }
+    >
       <span className="ticket-row-contextual">
         {/* A group header already names the status. */}
         {unavailable ? (
@@ -222,12 +248,35 @@ function RowDetails({
               {state.kind !== "status" && (
                 <StatusDot tone={state.kind} size={10} />
               )}
-              {readinessLabel(state)}
+              <span
+                className="ticket-row-state-label"
+                title={readinessLabel(state)}
+              >
+                {readinessShortLabel(state) === readinessLabel(state) ? (
+                  readinessLabel(state)
+                ) : (
+                  <>
+                    <span aria-hidden="true">{readinessShortLabel(state)}</span>
+                    <span className="sr-only">{readinessLabel(state)}</span>
+                  </>
+                )}
+              </span>
             </span>
           )
         )}
-        {context && <span className="ticket-row-context">{context}</span>}
-        {ticket.tags.length > 0 && (
+        {active && ticket.progress_summary && (
+          <span
+            className="ticket-row-brief"
+            title={ticket.progress_summary.brief.text}
+          >
+            {progressBrief(ticket.progress_summary.brief.text)}
+            {ticket.progress_summary.brief.truncated ? "…" : ""}
+          </span>
+        )}
+        {!active && context && (
+          <span className="ticket-row-context">{context}</span>
+        )}
+        {!active && ticket.tags.length > 0 && (
           <span className="ticket-row-tags">
             {ticket.tags.map((tag) => (
               <span key={tag} className="ticket-tag">
@@ -238,27 +287,28 @@ function RowDetails({
         )}
       </span>
       <span className="ticket-row-time">
-        {ticket.status === "In progress" || ticket.status === "In review" ? (
-          ticket.latest_update ? (
+        {active && !ticket.trashed ? (
+          ticket.progress_summary ? (
             <>
               <time
-                dateTime={ticket.latest_update.reported_at}
-                title={formatDateTime(ticket.latest_update.reported_at)}
+                dateTime={ticket.progress_summary.reported_at}
+                title={formatDateTime(ticket.progress_summary.reported_at)}
               >
-                Reported {ago(ticket.latest_update.reported_at, now)}
+                Reported {ago(ticket.progress_summary.reported_at, now)}
               </time>
-              {ticket.latest_update.editing_agent &&
-                ` · ${ticket.latest_update.editing_agent}`}
             </>
-          ) : (
+          ) : ticket.progress_summary === null ? (
             "No update reported"
+          ) : (
+            "Update unavailable"
           )
         ) : ticket.updated_at ? (
           <time
             dateTime={ticket.updated_at}
             title={formatDateTime(ticket.updated_at)}
           >
-            Updated {ago(ticket.updated_at, now)}
+            {ticket.trashed ? "Trashed" : "Updated"}{" "}
+            {ago(ticket.updated_at, now)}
           </time>
         ) : (
           "Update time unknown"

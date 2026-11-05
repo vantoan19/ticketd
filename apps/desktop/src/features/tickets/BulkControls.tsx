@@ -30,22 +30,25 @@ export function BulkControls({
   bulk,
   visible,
   projects,
-  efforts,
+  plans,
 }: {
   bulk: BulkEdit;
-  /** Tickets currently listed, for Select all and Effort membership counts. */
+  /** Tickets currently listed, for Select all and Plan membership counts. */
   visible: Ticket[];
   projects: TicketWorkspace["projects"];
-  efforts: TicketWorkspace["efforts"];
+  plans: TicketWorkspace["plans"];
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [detailsFor, setDetailsFor] = useState<unknown>(null);
   const retry = useRef<HTMLButtonElement>(null);
+  const failureNote = useRef<HTMLDivElement>(null);
   const { pending, failure, notice, selection } = bulk;
+  const showDetails = failure !== null && detailsFor === failure;
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
   // success (its confirmation is already in the live region below).
   useEffect(() => {
-    if (failure) retry.current?.focus();
+    if (failure) (retry.current ?? failureNote.current)?.focus();
   }, [failure]);
   useEffect(() => {
     if (notice) document.getElementById("tickets-heading")?.focus();
@@ -54,9 +57,9 @@ export function BulkControls({
   const selectedTickets = visible.filter((ticket) =>
     selection.includes(ticket.reference),
   );
-  const activeEfforts = efforts.filter((item) => !item.archived);
-  const inEffort = (id: string) =>
-    selectedTickets.filter((ticket) => ticket.effort_id === id).length;
+  const activePlans = plans.filter((item) => !item.archived);
+  const inPlan = (id: string) =>
+    selectedTickets.filter((ticket) => ticket.plan_id === id).length;
   const canSelectMore = visible.some(
     (ticket) => !selection.includes(ticket.reference),
   );
@@ -162,34 +165,34 @@ export function BulkControls({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Set Effort</DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger>Set Plan</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
-                  {activeEfforts.map((item) => (
+                  {activePlans.map((item) => (
                     <DropdownMenuItem
                       key={item.id}
                       onSelect={() =>
                         organize(
-                          { effort_id: item.id },
+                          { plan_id: item.id },
                           `Added ${tickets(count)} to ${item.name}`,
                         )
                       }
                     >
                       {item.name}{" "}
                       <span className="bulk-menu-count">
-                        {inEffort(item.id)} of {count}
+                        {inPlan(item.id)} of {count}
                       </span>
                     </DropdownMenuItem>
                   ))}
-                  {activeEfforts.length > 0 && <DropdownMenuSeparator />}
+                  {activePlans.length > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem
                     onSelect={() =>
                       organize(
-                        { effort_id: null },
-                        `Removed ${tickets(count)} from their Effort`,
+                        { plan_id: null },
+                        `Removed ${tickets(count)} from their Plan`,
                       )
                     }
                   >
-                    Remove from Effort
+                    Remove from Plan
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -214,17 +217,38 @@ export function BulkControls({
         </p>
       )}
       {failure && (
-        <div className="bulk-message bulk-error" role="alert">
-          <span>{failure.message}</span>
-          <Button
-            ref={retry}
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={() => void bulk.retry()}
+        <div
+          ref={failureNote}
+          tabIndex={-1}
+          className="bulk-message bulk-error"
+          role="alert"
+        >
+          <span
+            className="bulk-error-text"
+            data-open={showDetails || undefined}
+            title={showDetails ? undefined : failure.message}
           >
-            Retry
+            {failure.message}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={showDetails}
+            onClick={() => setDetailsFor(showDetails ? null : failure)}
+          >
+            Details
           </Button>
+          {failure.retryable && (
+            <Button
+              ref={retry}
+              variant="outline"
+              size="sm"
+              disabled={pending}
+              onClick={() => void bulk.retry()}
+            >
+              Retry
+            </Button>
+          )}
         </div>
       )}
       {notice && (

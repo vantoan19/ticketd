@@ -15,7 +15,7 @@ test("relationship navigation replaces the reference and focuses it outside the 
     onReturn: vi.fn(),
     setSelected: vi.fn(),
     projects: [],
-    efforts: [],
+    plans: [],
     revision: 0,
     refresh: vi.fn(async () => {}),
     updateTicket: vi.fn(),
@@ -40,7 +40,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
     trashed: true,
     body: "# Archived context\n\n[Reference](https://example.com)\n\n- [ ] Preserved",
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: null,
     tags: [],
     parent: null,
@@ -57,7 +57,7 @@ test("trashed ticket descriptions remain readable without editing controls", () 
       setSelected={vi.fn()}
       details={{ "T-2": ticket }}
       projects={[]}
-      efforts={[]}
+      plans={[]}
       revision={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}
@@ -83,7 +83,7 @@ test("the full-width view marks the reading column and drops the repeated headin
     trashed: false,
     body: "Readable",
     project_id: null,
-    effort_id: null,
+    plan_id: null,
     availability: null,
     tags: [],
     parent: null,
@@ -100,7 +100,7 @@ test("the full-width view marks the reading column and drops the repeated headin
       setSelected={vi.fn()}
       details={{ "T-3": ticket }}
       projects={[]}
-      efforts={[]}
+      plans={[]}
       revision={0}
       refresh={vi.fn(async () => {})}
       updateTicket={vi.fn()}

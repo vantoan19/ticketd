@@ -22,6 +22,7 @@ export function FormDialog({
   submitLabel,
   pending,
   error,
+  errorId,
   onSubmit,
   onCancel,
   children,
@@ -33,6 +34,8 @@ export function FormDialog({
   submitLabel: string;
   pending: boolean;
   error: string;
+  /** The id the field that failed points to with aria-describedby. */
+  errorId?: string;
   onSubmit: () => void;
   onCancel: () => void;
   children: ReactNode;
@@ -50,7 +53,7 @@ export function FormDialog({
         </DialogHeader>
         <form className="project-form" onSubmit={submit} noValidate>
           {children}
-          {error && <FieldError>{error}</FieldError>}
+          {error && <FieldError id={errorId}>{error}</FieldError>}
           <DialogFooter>
             <Button
               type="button"

@@ -1294,6 +1294,7 @@ fn apply_issue(
                 params![id, title, status.to_string(), issue.body],
             )?;
             let number = connection.last_insert_rowid();
+            crate::document_links::index_body(connection, &id, &issue.body)?;
             link(connection, &id, issue, Origin::Imported, now)?;
             history::record(
                 connection,
@@ -1343,6 +1344,7 @@ fn apply_issue(
                     "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
                     params![id, title, issue.body],
                 )?;
+                crate::document_links::index_body(connection, &id, &issue.body)?;
                 changed = true;
             }
             if next != status {

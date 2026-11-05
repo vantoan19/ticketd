@@ -12,6 +12,8 @@ export type BulkFailure = {
   /** The ticket that prevented the batch, when the core named one. */
   reference: string | null;
   message: string;
+  /** False when the core rejected the batch itself; sending it again fails the same way. */
+  retryable: boolean;
 };
 
 /**
@@ -113,11 +115,17 @@ function describeFailure(reason: unknown, selection: string[]): BulkFailure {
     failure.code === "batch_operation" && failure.index !== null
       ? (selection[failure.index] ?? null)
       : null;
-  const detail = failure.message.trim().replace(/\.$/, "");
+  const detail = failure.message
+    .trim()
+    .replace(/^invalid batch:\s*/i, "")
+    .replace(/\.$/, "");
   return {
+    retryable: failure.code !== "batch_operation",
     reference,
-    message: reference
-      ? `Nothing changed. ${reference} could not be updated: ${detail}.`
-      : `Nothing changed. ${detail}.`,
+    // The reason leads; the reassurance follows.
+    message:
+      reference && !detail.includes(reference)
+        ? `${reference}: ${detail}. Nothing changed.`
+        : `${detail}. Nothing changed.`,
   };
 }

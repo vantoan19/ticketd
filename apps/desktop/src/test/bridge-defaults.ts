@@ -14,10 +14,14 @@ export function bridgeDefault(
   args?: { id?: string; reference?: string },
 ): unknown {
   switch (command) {
+    case "latest_update":
+      return null;
+    case "document_context_links":
+      return [[], []];
     case "list_projects":
-    case "list_efforts":
+    case "list_plans":
     case "find_tickets":
-    case "list_notes":
+    case "activity_feed":
     case "ticket_history":
     case "list_evidence":
     case "ticket_backlinks":
@@ -71,7 +75,8 @@ export function bridgeDefault(
         path: "/data/ticketd/workspace.sqlite3",
         tickets: 0,
         projects: 0,
-        active_efforts: 0,
+        documents: 0,
+        active_plans: 0,
         size_bytes: 4096,
         format_version: 26,
       };
@@ -88,9 +93,9 @@ export function bridgeDefault(
         app_workspace_path: null,
         suggested_directory: "~/.local/bin",
       };
-    case "show_effort":
+    case "show_plan":
       return {
-        effort: { id: args?.id ?? "", name: "Effort", archived: false },
+        plan: { id: args?.id ?? "", name: "Plan", archived: false },
         members: [],
         counts: {
           todo: 0,

@@ -14,6 +14,7 @@ import { useBulkEdit } from "./useBulkEdit";
 import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault } from "@/test/bridge-defaults";
+import { TickingChanges } from "@/test/ticking-changes";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -45,6 +46,7 @@ afterEach(() => {
   Element.prototype.scrollIntoView = scrollIntoView;
   vi.unstubAllGlobals();
   bridge.invoke.mockReset();
+  listStamp = 0;
 });
 
 const ticket = (reference: string, body: string, trashed = false): Ticket => ({
@@ -55,7 +57,7 @@ const ticket = (reference: string, body: string, trashed = false): Ticket => ({
   trashed,
   body,
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: null,
   tags: [],
   parent: null,
@@ -75,6 +77,7 @@ const span = {
 type Api = { select: (reference: string) => void };
 const api: Api = { select: () => {} };
 let show: (reference: string) => Promise<Ticket>;
+let listStamp = 0;
 function Harness() {
   const workspace = useTicketWorkspace(vi.fn(), vi.fn());
   const bulk = useBulkEdit(workspace.refresh);
@@ -113,9 +116,19 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
                 {
                   source_reference: "T-2",
                   source_title: "Source",
-                  note_id: null,
+                  activity_id: null,
                   passage: "Blocked on T-1 today.",
                   ...span,
+                },
+              ]
+            : [];
+        case "find_tickets_with_updates":
+          // Something else changed in the workspace, as a real edit would show.
+          return listStamp > 0
+            ? [
+                {
+                  ticket: ticket("T-9", String(listStamp)),
+                  latest_update: null,
                 },
               ]
             : [];
@@ -137,7 +150,11 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
 }
 const marked = () => document.querySelector("[data-mention-target]");
 async function followBacklink() {
-  render(<Harness />);
+  render(
+    <TickingChanges>
+      <Harness />
+    </TickingChanges>,
+  );
   // Cache T-2 with its old body, then look at T-1, whose backlinks list T-2.
   act(() => api.select("T-2"));
   await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
@@ -155,7 +172,11 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
     await gate;
     return ticket("T-2", STORED);
   });
-  render(<Harness />);
+  render(
+    <TickingChanges>
+      <Harness />
+    </TickingChanges>,
+  );
   act(() => api.select("T-2"));
   await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
   act(() => api.select("T-1"));
@@ -184,8 +205,10 @@ test("trashing and restoring the revealed ticket does not reveal it again", asyn
   const scroller = document.querySelector<HTMLElement>(".detail-scroll")!;
   scroller.scrollTop = 33;
   current = ticket("T-2", STORED, true);
+  listStamp = 1;
   await waitFor(() => expect(marked()).toBeNull(), { timeout: 4000 });
   current = ticket("T-2", STORED, false);
+  listStamp = 2;
   await waitFor(
     () =>
       expect(

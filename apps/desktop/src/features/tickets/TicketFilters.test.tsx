@@ -10,8 +10,8 @@ test("Search and Filters start as named icon buttons and search opens on demand"
     <TicketFilters
       query=""
       setQuery={setQuery}
-      effort=""
-      setEffort={vi.fn()}
+      plan=""
+      setPlan={vi.fn()}
       status=""
       setStatus={vi.fn()}
       tags=""
@@ -20,9 +20,9 @@ test("Search and Filters start as named icon buttons and search opens on demand"
       setAvailability={vi.fn()}
       family=""
       setFamily={vi.fn()}
-      efforts={[]}
+      plans={[]}
       setOffset={vi.fn()}
-      navigation={{ kind: "all", project: "all", effort: "" }}
+      navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
     />,
   );
@@ -34,4 +34,34 @@ test("Search and Filters start as named icon buttons and search opens on demand"
   });
   expect(setQuery).toHaveBeenCalledWith("cache");
   expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
+test("an active search shows as a removable chip", () => {
+  const setQuery = vi.fn();
+  render(
+    <TicketFilters
+      part="chips"
+      query="capture"
+      setQuery={setQuery}
+      plan=""
+      setPlan={vi.fn()}
+      status=""
+      setStatus={vi.fn()}
+      tags=""
+      setTags={vi.fn()}
+      availability=""
+      setAvailability={vi.fn()}
+      family=""
+      setFamily={vi.fn()}
+      plans={[]}
+      setOffset={vi.fn()}
+      navigation={{ kind: "all", project: "all", plan: "" }}
+      clearFilters={vi.fn()}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove Search: capture" }),
+  );
+  expect(setQuery).toHaveBeenCalledWith("");
+  expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
 });

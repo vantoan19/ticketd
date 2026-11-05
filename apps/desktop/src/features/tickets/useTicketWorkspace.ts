@@ -14,9 +14,13 @@ import {
   type SourceHealth,
 } from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
+import {
+  useOnWorkspaceChange,
+  useWorkspaceChange,
+} from "@/lib/workspace-change";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
-type View = "tickets" | "projects" | "efforts" | "settings" | "inbox";
+type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
 /**
  * A mention being followed. It is not `ready` until the selected ticket has been
  * fetched after the selection, so it is judged against the stored text rather than
@@ -37,19 +41,23 @@ export function useTicketWorkspace(
   setCreating: (value: boolean) => void,
 ) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [efforts, setEfforts] = useState<
-    { id: string; name: string; archived: boolean }[]
+  const [plans, setPlans] = useState<
+    { id: string; name: string; archived: boolean; purpose: string }[]
   >([]);
   const [filter, setFilter] = useState("all");
   const [navigation, setNavigation] = useState<{
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
-    effort: string;
-  }>({ kind: "all", project: "all", effort: "" });
+    plan: string;
+  }>({ kind: "all", project: "all", plan: "" });
   const [queryError, setQueryError] = useState(false);
+  // A failed refresh after a list was shown keeps that list rather than blanking it.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const listLoaded = useRef(false);
+  const lastSnapshot = useRef("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
-  const [effort, setEffort] = useState("");
+  const [plan, setPlan] = useState("");
   const [status, setStatus] = useState("");
   const [tags, setTags] = useState("");
   const [availability, setAvailability] = useState("");
@@ -101,7 +109,13 @@ export function useTicketWorkspace(
   const [details, setDetails] = useState<Record<string, Ticket>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [revision, setRevision] = useState(0);
+  const [listRevision, setRevision] = useState(0);
+  // The list only changes when a listed ticket does, but a Document, Activity or
+  // another ticket can change what the open ticket's page shows. Pages key their
+  // reads on this revision, so it also moves with every workspace change.
+  const revision = listRevision + useWorkspaceChange();
+  // Advances on every successful poll, changed data or not, for views that poll their own sources.
+  const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
   const detailGeneration = useRef(0);
   const refresh = useCallback(async () => {
@@ -114,7 +128,7 @@ export function useTicketWorkspace(
         query,
         project: filter === "all" || filter === "unlinked" ? null : filter,
         unlinked: filter === "unlinked",
-        effort: effort || null,
+        plan: plan || null,
         status: status || null,
         tags: tags
           .split(",")
@@ -136,7 +150,7 @@ export function useTicketWorkspace(
         Promise.all([
           trash ? client.listTrash() : client.findTickets(filterArgs),
           client.listProjects(),
-          client.listEfforts(),
+          client.listPlans(),
           trash ? Promise.resolve(null) : client.countTickets(filterArgs),
           // Source counts only decorate the filter, so they never fail the list.
           trash
@@ -163,21 +177,32 @@ export function useTicketWorkspace(
         );
         return;
       }
+      listLoaded.current = true;
+      setPollTick((value) => value + 1);
       setQueryError(false);
+      setRefreshFailed(false);
+      setError("");
+      // The same data again changes nothing, so views are not told to reload.
+      const snapshot = JSON.stringify([trash, offset, result]);
+      if (snapshot === lastSnapshot.current) return;
+      lastSnapshot.current = snapshot;
       setTickets(result[0]);
       setLoadedOffset(offset);
       setCounts(result[3]);
       setSourceCounts(result[4]);
       setProjects(result[1]);
-      setEfforts(result[2]);
+      setPlans(result[2]);
       setRevision((value) => value + 1);
-      setError("");
     } catch (reason) {
       if (request !== generation.current) return;
-      setQueryError(true);
-      setError(
-        `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
-      );
+      lastSnapshot.current = "";
+      if (listLoaded.current) setRefreshFailed(true);
+      else {
+        setQueryError(true);
+        setError(
+          `Refresh failed: ${String(reason)}. Displayed information may be stale.`,
+        );
+      }
     } finally {
       window.clearTimeout(timeout);
       if (request === generation.current) setLoading(false);
@@ -187,7 +212,7 @@ export function useTicketWorkspace(
     query,
     filter,
     offset,
-    effort,
+    plan,
     status,
     tags,
     availability,
@@ -205,7 +230,7 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [revision]);
+  }, [pollTick]);
   useEffect(() => {
     let active = true;
     void sourcesClient.health().then(
@@ -217,20 +242,21 @@ export function useTicketWorkspace(
     return () => {
       active = false;
     };
-  }, [revision]);
+  }, [pollTick]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => {
       setLoading(true);
       void refresh();
     }, 0);
-    const interval = window.setInterval(() => void refresh(), 2000);
     return () => {
       window.clearTimeout(timer);
-      window.clearInterval(interval);
       generationRef.current++;
     };
   }, [refresh]);
+  // Changes from anywhere (the CLI, an agent, another window) refetch the list
+  // quietly; an unchanged workspace costs nothing here.
+  useOnWorkspaceChange(() => void refresh());
   // Previous or Next at the edge of a page moves to the neighboring page and
   // opens the ticket at its near edge once that page has loaded.
   if (pendingEdge && loadedOffset === offset) {
@@ -303,7 +329,7 @@ export function useTicketWorkspace(
     body: string,
     status: string,
     project: string | null,
-    effortId: string | null,
+    planId: string | null,
     tags: string[],
     keepOpen = false,
   ) {
@@ -312,7 +338,7 @@ export function useTicketWorkspace(
       body,
       status,
       project,
-      effortId,
+      planId,
       tags,
       loadPreferences().followCreated,
     );
@@ -329,7 +355,16 @@ export function useTicketWorkspace(
     detailGeneration.current++;
     setDetails((items) => ({ ...items, [updated.reference]: updated }));
     setTickets((items) =>
-      items.map((item) => (item.id === updated.id ? updated : item)),
+      items.map((item) => {
+        if (item.id !== updated.id) return item;
+        // Detail mutations return a Ticket without the page-only summary.
+        // Retain it while it still identifies the same latest Activity.
+        return item.progress_summary !== undefined &&
+          item.progress_summary?.activity_id ===
+            updated.latest_update?.activity_id
+          ? { ...updated, progress_summary: item.progress_summary }
+          : updated;
+      }),
     );
   }, []);
   const total = counts ? counts.total : tickets.length;
@@ -366,9 +401,8 @@ export function useTicketWorkspace(
         : navigation.project !== "all"
           ? (projects.find((p) => p.id === navigation.project)?.name ??
             "Project")
-          : navigation.effort
-            ? (efforts.find((e) => e.id === navigation.effort)?.name ??
-              "Effort")
+          : navigation.plan
+            ? (plans.find((e) => e.id === navigation.plan)?.name ?? "Plan")
             : navigation.kind === "ready"
               ? "Ready"
               : navigation.kind === "progress"
@@ -376,7 +410,7 @@ export function useTicketWorkspace(
                 : "All tickets";
   function clearFilters() {
     setQuery("");
-    setEffort(navigation.effort);
+    setPlan(navigation.plan);
     setStatus(navigation.kind === "progress" ? "In progress" : "");
     setAvailability(navigation.kind === "ready" ? "Ready" : "");
     setTags("");
@@ -387,13 +421,19 @@ export function useTicketWorkspace(
   function scope(
     next: "all" | "ready" | "progress" | "trash",
     project = "all",
-    effortId = "",
+    planId = "",
   ) {
-    setNavigation({ kind: next, project, effort: effortId });
+    // Trash lists only trashed tickets; an open ticket from another scope would
+    // sit beside it as "outside the current results", so entering or leaving
+    // Trash starts without a selection.
+    if ((next === "trash") !== trash) selectTicket(null);
+    // Another Plan opens on its own list, not on the previous Plan's open ticket.
+    if (planId && planId !== navigation.plan) setSelected(null);
+    setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");
     setFilter(project);
-    setEffort(effortId);
+    setPlan(planId);
     setStatus(next === "progress" ? "In progress" : "");
     setAvailability(next === "ready" ? "Ready" : "");
     setTags("");
@@ -412,15 +452,15 @@ export function useTicketWorkspace(
     sourceHealth,
     refreshSources,
     projects,
-    efforts,
+    plans,
     filter,
     setFilter,
     query,
     setQuery,
     offset,
     setOffset,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,
@@ -455,5 +495,6 @@ export function useTicketWorkspace(
     navigation,
     clearFilters,
     queryError,
+    refreshFailed,
   };
 }

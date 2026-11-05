@@ -1,0 +1,366 @@
+.plan-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 20px 12px;
+}
+/* The name and actions share the first line; the context line runs the full
+   width beneath them instead of wrapping in the space the actions leave. */
+.plan-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name actions"
+    "context context";
+  align-items: center;
+  gap: 4px 16px;
+}
+.plan-title {
+  display: contents;
+}
+.plan-name-row {
+  grid-area: name;
+}
+.plan-title p {
+  grid-area: context;
+}
+.plan-actions {
+  grid-area: actions;
+}
+@container (max-width: 440px) {
+  .plan-title-row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "context"
+      "actions";
+  }
+}
+.plan-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.plan-header h1,
+.plan-index h1 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+  overflow-wrap: anywhere;
+}
+.plan-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-title p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.plan-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 4px 0 0;
+}
+.plan-counts > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-counts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+}
+.plan-counts dd {
+  margin: 0;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.plan-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-rename,
+.plan-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.plan-rename [data-slot="field"],
+.plan-create [data-slot="field"] {
+  flex: 1 1 200px;
+  max-width: 360px;
+}
+/* Matches the other management pages: one centered column. */
+.plan-index {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 768px;
+  margin-inline: auto;
+  padding: 32px 24px 48px;
+  overflow-y: auto;
+}
+.plan-index > h1 + .plan-note {
+  margin-top: -12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.plan-index-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-index-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  border-radius: 6px;
+}
+.plan-index-list li:hover {
+  background: var(--recessed);
+}
+.plan-index-list li > button:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  text-align: left;
+  border-radius: 6px;
+  background: transparent;
+}
+.plan-index-list li > button:first-child:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.plan-add-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+.plan-add-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.plan-add-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 0;
+}
+.plan-add-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-add-title small {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-add-error {
+  margin: 0;
+  color: var(--destructive);
+}
+.plan-documents p,
+.plan-documents summary {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.plan-documents ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plan-document-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.plan-document-row > button:first-child {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.plan-dependencies {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 24px 24px;
+}
+.plan-dependencies-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.plan-dependencies-header h2 {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+.plan-graph-canvas {
+  height: 440px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-border-base);
+  overflow: hidden;
+}
+.plan-callout {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-callout button {
+  text-decoration: underline;
+}
+.plan-dependency-rows,
+.plan-blockers ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.plan-dependency-row,
+.plan-blocker-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+.plan-dependency-title,
+.plan-blocker-main > button {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 22px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--recessed);
+}
+.plan-blocker-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.plan-blocker-form [data-slot="field"] {
+  width: 100%;
+}
+.plan-document-row {
+  gap: 4px 8px;
+}
+.plan-document-row > button:first-of-type {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.plan-document-row > button + button {
+  flex: none;
+}
+.plan-document-choices li {
+  min-width: 0;
+}
+.plan-document-choices li > button {
+  max-width: 100%;
+  justify-content: flex-start;
+}
+.plan-document-choices li > button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-purpose {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+.plan-rename {
+  align-items: flex-start;
+}
+.plan-rename-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 22px;
+}
+.plan-blocker-form {
+  margin-top: 4px;
+}
+.plan-view-switch {
+  padding: 0 20px;
+}
+.plan-undo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 20px;
+  font-size: 13px;
+}
+.plan-empty-actions {
+  display: flex;
+  gap: 8px;
+}
+.plan-add-done {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+/* A Document row reads title (left, truncating) then its actions on one line. */
+.plan-document-row {
+  flex-wrap: nowrap;
+}
+.plan-document-row > button:first-of-type {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}

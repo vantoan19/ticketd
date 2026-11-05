@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import {
   ResizableHandle,
@@ -13,6 +19,20 @@ import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
 
 const NARROW_QUERY = "(max-width: 1071px)";
+
+function subscribeNarrow(callback: () => void) {
+  const media = window.matchMedia(NARROW_QUERY);
+  media.addEventListener("change", callback);
+  return () => media.removeEventListener("change", callback);
+}
+
+function useNarrow() {
+  return useSyncExternalStore(
+    subscribeNarrow,
+    () => window.matchMedia(NARROW_QUERY).matches,
+    () => false,
+  );
+}
 
 /**
  * Arranges the list and detail panes and the split, expanded, and narrow
@@ -40,10 +60,34 @@ export function TicketWorkspaceView({
   const { openTickets } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
+  const listRef = useRef<HTMLElement>(null);
+  // Plan dependencies take the detail pane. Each Plan opens on its list.
+  const [planMode, setPlanModeState] = useState<"list" | "dependencies">(
+    "list",
+  );
+  const planScope = workspace.trash ? "" : workspace.navigation.plan;
+  const [shownPlan, setShownPlan] = useState(planScope);
+  if (shownPlan !== planScope) {
+    setShownPlan(planScope);
+    setPlanModeState("list");
+  }
+  useEffect(() => {
+    // A new Plan opens with its title in view, not where the last one scrolled.
+    for (
+      let node: HTMLElement | null = listRef.current;
+      node && !node.classList.contains("ticket-workspace");
+      node = node.parentElement
+    )
+      node.scrollTop = 0;
+  }, [planScope]);
+  const setPlanMode = (mode: "list" | "dependencies") => {
+    setPlanModeState(mode);
+    if (mode === "dependencies") setNarrowDetail(true);
+    else setNarrowDetail(selected !== null);
+  };
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "ticketd.workspace",
   });
-  const listRef = useRef<HTMLElement>(null);
   const focusPane = useRef<"detail" | "list" | null>(null);
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
@@ -56,6 +100,7 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
+  const narrow = useNarrow();
   useEffect(() => {
     const media = window.matchMedia(NARROW_QUERY);
     const showSelected = (event: MediaQueryListEvent) => {
@@ -70,9 +115,21 @@ export function TicketWorkspaceView({
     setNarrowDetail(selected !== null);
     if (!selected) setExpanded(false);
   }
+  // Choosing a sidebar scope while a ticket is open shows that scope's list, even
+  // where the panes are stacked and the ticket would otherwise keep the screen.
+  const [previousNavigation, setPreviousNavigation] = useState(
+    workspace.navigation,
+  );
+  if (previousNavigation !== workspace.navigation) {
+    setPreviousNavigation(workspace.navigation);
+    setNarrowDetail(false);
+  }
   return (
     <ResizablePanelGroup
       orientation="horizontal"
+      // The split handle is hidden here; left enabled, the panel library still
+      // claims presses nearby, which stopped the sidebar's New menu from opening.
+      disabled={narrow}
       className={cn(
         "ticket-workspace",
         expanded && "expanded",
@@ -92,8 +149,11 @@ export function TicketWorkspaceView({
           workspace={workspace}
           bulk={bulk}
           listRef={listRef}
+          planMode={planMode}
+          setPlanMode={setPlanMode}
           onCreate={onCreate}
           onOpen={(reference) => {
+            setPlanModeState("list");
             setSelected(reference);
             setNarrowDetail(true);
             const narrow = window.matchMedia(NARROW_QUERY).matches;
@@ -115,6 +175,8 @@ export function TicketWorkspaceView({
         <TicketDetailPane
           workspace={workspace}
           expanded={expanded}
+          planMode={planMode}
+          closePlanMode={() => setPlanMode("list")}
           inboxTarget={inboxTarget}
           onExpand={() => {
             setExpanded(true);

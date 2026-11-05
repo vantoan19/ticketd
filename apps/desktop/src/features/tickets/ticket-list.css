@@ -69,10 +69,17 @@
 }
 .ticket-row-state {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+.ticket-row-state-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ticket-row-context {
   flex: 0 1 auto;
@@ -159,9 +166,9 @@
   align-items: center;
   gap: 8px;
   width: fit-content;
-  max-width: calc(100% - 32px);
+  max-width: calc(100% - 16px);
   margin: 0 auto 16px;
-  padding: 6px 8px;
+  padding: 6px 4px;
   border-radius: 12px;
   color: var(--popover-foreground);
   background: var(--popover);
@@ -169,13 +176,17 @@
 }
 .bulk-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
+}
+/* One row at the narrowest list width: the bar sits over the list, so a second
+   row would cover another ticket. */
+.bulk-bar .ui-button {
+  padding-inline: 8px;
 }
 .bulk-count {
-  padding-inline: 8px;
+  padding-inline: 6px;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -192,7 +203,21 @@
   line-height: 16px;
 }
 .bulk-error {
+  flex-wrap: nowrap;
+  max-width: 100%;
   color: var(--error-foreground);
+}
+/* One line; Details shows the whole message. */
+.bulk-error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-error-text[data-open] {
+  max-height: 6rem;
+  overflow: auto;
+  white-space: normal;
 }
 .bulk-menu-count {
   margin-left: auto;
@@ -387,4 +412,22 @@
 }
 .ticket-row-meta:has(.ticket-row-time) {
   flex-wrap: nowrap;
+}
+
+.ticket-row-brief {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Active rows use the full second line for the source warning and report. */
+.ticket-row-meta-active {
+  grid-column: 1 / -1;
+}
+.refresh-failed {
+  margin: 0;
+  padding: 4px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }

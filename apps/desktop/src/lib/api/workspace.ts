@@ -6,8 +6,9 @@ import { z } from "zod";
 const workspaceInfoSchema = z.object({
   path: z.string(),
   tickets: z.number(),
+  documents: z.number(),
   projects: z.number(),
-  active_efforts: z.number(),
+  active_plans: z.number(),
   size_bytes: z.number(),
   format_version: z.number(),
 });
@@ -21,10 +22,11 @@ export type BackupRecord = NonNullable<z.infer<typeof lastBackupSchema>>;
 const workspaceSummarySchema = z.object({
   last_change: z.string().nullable(),
   tickets: z.number(),
-  notes: z.number(),
+  documents: z.number(),
+  activities: z.number(),
   evidence: z.number(),
   projects: z.number(),
-  efforts: z.number(),
+  plans: z.number(),
 });
 export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
 

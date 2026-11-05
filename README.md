@@ -76,15 +76,15 @@ standard input. A create names a ticket for later operations using `$name`:
       "parent": "$parent",
       "add_blockers": ["$parent"],
       "add_tags": ["feature"],
-      "notes": ["Plan agreed"]
+      "activities": ["Plan agreed"]
     }
   }
 ]
 ```
 
 Changes also accept `title`, `body`, `status`, `editing_agent`, `project_id`,
-`effort_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
-`effort_id` to null to clear it; omit a field to leave it unchanged. Results are
+`plan_id`, `remove_tags`, and `remove_blockers`. Set `parent`, `project_id`, or
+`plan_id` to null to clear it; omit a field to leave it unchanged. Results are
 JSON ticket snapshots in operation order. Failures identify the zero-based
 operation index and roll back the entire request. Requests are limited to 1 MiB,
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
@@ -93,23 +93,23 @@ between operations.
 ### Bounded ticket context
 
 `ticketd context T-1` returns JSON with the ticket, derived availability, and
-its tags. Add `--project`, `--effort`, `--relationships`, or `--notes` to
+its tags. Add `--project`, `--plan`, `--relationships`, or `--activities` to
 select those scopes. An omitted scope is absent; a selected but unlinked project,
-Effort, or parent is `null`. Related tickets include status and `trashed`; only
+Plan, or parent is `null`. Related tickets include status and `trashed`; only
 Done satisfies a prerequisite. A missing root or a missing linked project or
-Effort produces an error on stderr and a nonzero exit code, with no JSON on
+Plan produces an error on stderr and a nonzero exit code, with no JSON on
 stdout.
 
-Each list is ordered by ticket reference number, tag name, or note insertion
+Each list is ordered by ticket reference number, tag name, or Activity insertion
 order, and contains at most 20 items. A non-null `next_offset` means to repeat
 the command with `--offset` set to that value; the offset applies independently
 to every list in the response. Each call reads one snapshot, but later pages can
 reflect intervening changes. Text objects contain `text` and `truncated`:
-ticket and note bodies are limited to 4096 Unicode characters, other user text
-to 256. Use `ticketd show T-1` for full ticket content and `ticketd note list
-T-1` for full notes. The bounded body must not be used as an editable draft.
+ticket bodies and Activity briefs are limited to 4096 Unicode characters, other user text
+to 256. Use `ticketd show T-1` for full ticket content and `ticketd activity list
+T-1` for the full activity feed. The bounded body must not be used as an editable draft.
 
-Search saved titles, bodies, and notes with `ticketd search QUERY`. The query is a
+Search saved titles, bodies, and Activity briefs with `ticketd search QUERY`. The query is a
 literal substring (ASCII letters match without case); an empty query returns no
 matches. Results exclude trash and are ordered by descending ticket reference.
 Use `--limit` (1–100, default 50) and `--offset` for pages, and `--project ID`
@@ -117,10 +117,10 @@ or `--unlinked` to restrict results. The desktop search uses the same matching
 and pages through 50 results at a time.
 
 `ticketd backlinks T-1` lists incoming references as JSON. Each entry has
-`source_reference`, `source_title`, `note_id` (null for a description),
+`source_reference`, `source_title`, `activity_id` (null for a description),
 `passage` (the source line, trimmed to 512 characters around the reference), and
 `mention_start` and `mention_end`, which locate the mention in the source ticket
-description or note. They count Unicode scalar values (characters, as `passage`
+description or authored Activity. They count Unicode scalar values (characters, as `passage`
 is), not bytes or UTF-16 units, and do not count a leading U+FEFF byte order
 mark, so a Python agent can slice `body[mention_start:mention_end]` after
 dropping that mark. The span is the reference itself unless its source uses
@@ -135,3 +135,46 @@ returns bounded pages of related tickets, discoveries, and their sources.
 The JSON export includes `contextual_relationships` records. Backups retain
 these links and retry outcomes; personal preferences remain scoped to
 `local-person`, independently of editing-agent attribution.
+
+### Reporting progress
+
+Post an authored Activity when beginning work, reaching a meaningful result,
+changing direction, requesting input, pausing, or handing off for review or
+completion. Keep the brief readable; optional session context can go in its prose.
+Activities do not change status or dependency readiness.
+
+```sh
+ticketd activity add T-1 --file update.md --agent agent-name
+printf '%s\n' 'Investigating the failure' | ticketd activity add T-1 --file - --agent agent-name
+```
+
+For safe retries, put the following JSON in `report.json` (or pass `-` and pipe
+it on stdin), then run `ticketd write report.json --request-id checkpoint-1`.
+Use the same request ID and identical request for a retry; use a new ID for a
+new checkpoint. A status change may be included atomically:
+
+```json
+{
+  "operation": "ticket_change",
+  "reference": "T-1",
+  "change": {
+    "status": "In progress",
+    "activities": ["Investigating the failure"],
+    "editing_agent": "agent-name"
+  }
+}
+```
+
+Read one latest report with `ticketd context T-1 --latest-update`; the field is
+absent unless selected and null when no authored Activity exists. Use `ticketd
+list --latest-update` or `ticketd search QUERY --latest-update` for filtered,
+paginated ticket summaries. Briefs are limited to 1024 Unicode characters and
+carry a `truncated` flag. Fetch the complete brief with `ticketd activity show
+T-1 ACTIVITY_ID`. Supporting Document references and detail fetching depend on
+supporting-document functionality when available.
+
+Record optional execution evidence using `ticketd evidence add T-1 --kind
+branch --name branch --value feature/example`; kinds also include `worktree`,
+`pull-request`, `commit`, and `verification`. For example, use `--kind
+verification --name checks --value './scripts/check passed'`. Read evidence
+with `ticketd evidence list T-1` or select it with `ticketd context T-1 --evidence`.

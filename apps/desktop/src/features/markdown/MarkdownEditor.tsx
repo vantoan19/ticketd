@@ -7,8 +7,9 @@ import {
   type MouseEvent,
 } from "react";
 import CodeMirror from "@uiw/react-codemirror";
+import { Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { TextApi, type Value } from "platejs";
 import {
   Plate,
@@ -52,7 +53,6 @@ import {
   unindentListItems,
   BulletedListRules,
   OrderedListRules,
-  TaskListRules,
 } from "@platejs/list-classic";
 import { TablePlugin } from "@platejs/table/react";
 import {
@@ -62,9 +62,11 @@ import {
   deleteRow,
   deleteColumn,
 } from "@platejs/table";
+import { documents } from "@/features/documents/api";
+import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
-import { toggleCodeBlock, CodeBlockRules } from "@platejs/code-block";
+import { toggleCodeBlock } from "@platejs/code-block";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,23 +82,54 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowDown,
-  ArrowUp,
-  GripVertical,
-  Plus,
-  Undo2,
-  Redo2,
+  Bold as BoldIcon,
+  Code,
+  Italic as ItalicIcon,
   Link,
+  List,
+  ListChecks,
+  MoreHorizontal,
+  FileCode2,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
+import {
+  checklistRule,
+  closeCodeFence,
+  markdownLinkRule,
+  openFenceRule,
+} from "./input-rules";
+import { linkPluginOptions } from "./link-options";
+import { insertions, slashChoices, slashMayOpen } from "./slash-menu";
+import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
 
-const sourceExtensions = [markdown(), EditorView.lineWrapping];
+// Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
+// doubled and a closing fence never inherits indentation.
+const sourceExtensions = [
+  markdown({ addKeymap: false }),
+  EditorView.lineWrapping,
+  Prec.highest(
+    keymap.of([
+      {
+        key: "Enter",
+        run: (view) => {
+          view.dispatch(view.state.replaceSelection("\n"), {
+            scrollIntoView: true,
+            userEvent: "input",
+          });
+          return true;
+        },
+      },
+    ]),
+  ),
+];
 
 function Leaf(props: PlateLeafProps) {
   let children = props.children;
@@ -194,9 +227,22 @@ function CodeFence(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
   const languageId = useId();
+  // The language field is an editing tool: it shows only while the caret is in this block.
+  const editing = useEditorSelector(
+    (current) => {
+      const at = current.selection?.anchor.path[0];
+      const path = current.api.findPath(props.element);
+      return at !== undefined && path !== undefined && path[0] === at;
+    },
+    [props.element],
+  );
   return (
     <PlateElement {...props} as="div">
-      <FieldGroup contentEditable={false}>
+      <FieldGroup
+        contentEditable={false}
+        className="code-language"
+        data-editing={editing}
+      >
         <Field orientation="horizontal">
           <FieldLabel htmlFor={languageId}>Code language</FieldLabel>
           <Input
@@ -278,20 +324,15 @@ function moveBlock(editor: PlateEditor, direction: number) {
   editor.tf.focus();
 }
 
-const insertions = [
-  ["p", "Paragraph"],
-  ["h1", "Heading 1"],
-  ["h2", "Heading 2"],
-  ["h3", "Heading 3"],
-  ["ul", "Bullet list"],
-  ["ol", "Numbered list"],
-  ["task", "Checklist"],
-  ["blockquote", "Quote"],
-  ["code_block", "Code fence"],
-  ["hr", "Divider"],
-  ["table", "Table"],
-  ["mermaid", "Mermaid diagram"],
-] as const;
+function textBeforeCaret(editor: PlateEditor) {
+  const selection = editor.selection;
+  if (!selection) return "";
+  if (!editor.api.isCollapsed()) return null;
+  const block = editor.api.block();
+  if (!block) return "";
+  const anchor = editor.api.start(block[1]);
+  return anchor ? editor.api.string({ anchor, focus: selection.anchor }) : "";
+}
 
 function insert(editor: PlateEditor, type: string) {
   editor.tf.focus();
@@ -339,7 +380,7 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({ editorId }: { editorId: string }) {
+function Toolbar({ visible }: { visible: boolean }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -347,21 +388,195 @@ function Toolbar({ editorId }: { editorId: string }) {
   );
   const [url, setUrl] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
+  const keepFocus = (event: MouseEvent) => event.preventDefault();
+  const essentials = [
+    [
+      "Bold",
+      <BoldIcon key="b" />,
+      () => {
+        editor.tf.toggleMark("bold");
+        editor.tf.focus();
+      },
+    ],
+    [
+      "Italic",
+      <ItalicIcon key="i" />,
+      () => {
+        editor.tf.toggleMark("italic");
+        editor.tf.focus();
+      },
+    ],
+  ] as const;
+  const listButtons = [
+    ["Bullet list", <List key="l" />, "ul"],
+    ["Checklist", <ListChecks key="c" />, "task"],
+  ] as const;
   return (
+    // Never `hidden`: a collapsed toolbar would move everything below it, so a first click
+    // on Post/Done/Retry (which blurs the editor) would land on the wrong element.
     <div
       className="rich-toolbar"
+      data-visible={visible}
+      aria-hidden={!visible}
+      inert={!visible}
       role="toolbar"
       aria-label={selected ? "Selection formatting" : "Document formatting"}
     >
+      {essentials.map(([title, icon, run]) => (
+        <Button
+          key={title}
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={title}
+          title={title}
+          onMouseDown={keepFocus}
+          onClick={run}
+        >
+          {icon}
+        </Button>
+      ))}
+      <Popover
+        open={linkOpen}
+        onOpenChange={(open) => {
+          setLinkOpen(open);
+          if (open) setUrl("");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Link"
+            title="Link"
+            onMouseDown={keepFocus}
+          >
+            <Link />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" sideOffset={6} collisionPadding={12}>
+          <p className="mb-2 text-xs text-muted-foreground">Link a Document</p>
+          <DocumentPicker
+            autoFocus
+            onPick={(picked) => {
+              const collapsed = !editor.selection || editor.api.isCollapsed();
+              upsertLink(editor, {
+                url: `ticketd://document/${picked.id}`,
+                ...(collapsed ? { text: picked.heading } : {}),
+              });
+              setLinkOpen(false);
+              editor.tf.focus();
+            }}
+          />
+          <form
+            className="mt-3 flex flex-col gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const target = url.trim();
+              if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
+                const collapsed = !editor.selection || editor.api.isCollapsed();
+                const documentId = /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(
+                  target,
+                )?.[1];
+                // A typed Document link reads as the Document's heading, not its raw URL.
+                void (async () => {
+                  let text: string | undefined;
+                  if (collapsed && documentId)
+                    text = await documents
+                      .show(documentId)
+                      .then((doc) => doc.heading)
+                      .catch(() => undefined);
+                  upsertLink(editor, {
+                    url: target,
+                    ...(text ? { text } : {}),
+                  });
+                  setUrl("");
+                  setLinkOpen(false);
+                  editor.tf.focus();
+                })();
+              }
+            }}
+          >
+            <label htmlFor="rich-link-url">Link URL</label>
+            <Input
+              id="rich-link-url"
+              placeholder="https://… or ticketd://…"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+            />
+            <Button type="submit">Apply link</Button>
+          </form>
+        </PopoverContent>
+      </Popover>
+      {listButtons.map(([title, icon, type]) => (
+        <Button
+          key={type}
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={title}
+          title={title}
+          onMouseDown={keepFocus}
+          onClick={() => insert(editor, type)}
+        >
+          {icon}
+        </Button>
+      ))}
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Inline code"
+        title="Inline code"
+        onMouseDown={keepFocus}
+        onClick={() => {
+          editor.tf.toggleMark("code");
+          editor.tf.focus();
+        }}
+      >
+        <Code />
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm">
-            <Plus data-icon="inline-start" />
-            Insert
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="More formatting"
+            title="More formatting"
+            onMouseDown={keepFocus}
+          >
+            <MoreHorizontal />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
+        <DropdownMenuContent align="start" className="max-h-80">
           <DropdownMenuGroup>
+            <DropdownMenuItem
+              onSelect={() => {
+                editor.tf.toggleMark("strikethrough");
+                editor.tf.focus();
+              }}
+            >
+              Strikethrough
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => editor.undo()}>
+              Undo
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => editor.redo()}>
+              Redo
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, -1)}>
+              Move block up
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => moveBlock(editor, 1)}>
+              Move block down
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Insert</DropdownMenuLabel>
             {insertions.map(([type, title]) => (
               <DropdownMenuItem
                 key={type}
@@ -371,125 +586,9 @@ function Toolbar({ editorId }: { editorId: string }) {
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {(
-        [
-          ["bold", "Bold"],
-          ["italic", "Italic"],
-          ["strikethrough", "Strikethrough"],
-          ["code", "Inline code"],
-        ] as const
-      ).map(([key, title]) => (
-        <Button
-          key={key}
-          type="button"
-          size="sm"
-          variant="ghost"
-          aria-label={title}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            editor.tf.toggleMark(key);
-            editor.tf.focus();
-          }}
-        >
-          {title}
-        </Button>
-      ))}
-      <Popover open={linkOpen} onOpenChange={setLinkOpen}>
-        <PopoverTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" aria-label="Link">
-            <Link />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent>
-          <form
-            className="flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (/^(https?:|mailto:|\/|#)/i.test(url)) {
-                upsertLink(editor, { url });
-                setLinkOpen(false);
-                editor.tf.focus();
-              }
-            }}
-          >
-            <label htmlFor="rich-link-url">Link URL</label>
-            <Input
-              id="rich-link-url"
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-            />
-            <Button type="submit">Apply link</Button>
-          </form>
-        </PopoverContent>
-      </Popover>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Undo"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => editor.undo()}
-      >
-        <Undo2 />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Redo"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => editor.redo()}
-      >
-        <Redo2 />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Move block up"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => moveBlock(editor, -1)}
-      >
-        <ArrowUp />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Move block down"
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => moveBlock(editor, 1)}
-      >
-        <ArrowDown />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Drag selected block"
-        draggable
-        onDragStart={(event) => {
-          const index = editor.selection?.anchor.path[0];
-          if (index !== undefined)
-            event.dataTransfer.setData(
-              "application/x-ticketd-block",
-              JSON.stringify({ editorId, index }),
-            );
-        }}
-      >
-        <GripVertical />
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm">
-            Table
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
+          <DropdownMenuSeparator />
           <DropdownMenuGroup>
+            <DropdownMenuLabel>Table</DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => insertTableRow(editor)}>
               Add row
             </DropdownMenuItem>
@@ -509,12 +608,65 @@ function Toolbar({ editorId }: { editorId: string }) {
   );
 }
 
+const richPlugins = [
+  ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
+    (plugin) => plugin.configure({ inputRules: [HeadingRules.markdown()] }),
+  ),
+  BlockquotePlugin.configure({ inputRules: [BlockquoteRules.markdown()] }),
+  HorizontalRulePlugin,
+  BoldPlugin.configure({
+    inputRules: [BoldRules.markdown(), BoldRules.markdown({ variant: "_" })],
+  }),
+  ItalicPlugin.configure({
+    inputRules: [
+      ItalicRules.markdown(),
+      ItalicRules.markdown({ variant: "_" }),
+    ],
+  }),
+  CodePlugin.configure({ inputRules: [CodeRules.markdown()] }),
+  StrikethroughPlugin.configure({
+    inputRules: [StrikethroughRules.markdown()],
+  }),
+  ListPlugin.configure({
+    inputRules: [
+      BulletedListRules.markdown(),
+      BulletedListRules.markdown({ variant: "*" }),
+      OrderedListRules.markdown(),
+      checklistRule,
+    ],
+  }),
+  TablePlugin.configure({ options: { disableMerge: true } }),
+  LinkPlugin.configure({
+    options: linkPluginOptions,
+    inputRules: [markdownLinkRule],
+  }),
+  CodeBlockPlugin.configure({
+    inputRules: [openFenceRule],
+  }),
+  createPlatePlugin({
+    key: "mermaid",
+    node: { isElement: true, isVoid: true, component: Diagram },
+  }),
+  createPlatePlugin({
+    key: "br",
+    node: { isElement: true, isInline: true, isVoid: true },
+  }),
+];
+
 export interface MarkdownEditorProps {
   value: string;
   onChange: (markdown: string) => void;
   readOnly?: boolean;
   label?: string;
   autoFocus?: boolean;
+  /** Shown while the rich editor is empty, e.g. "Write a thought…". */
+  placeholder?: string;
+  /** Bump to return focus to the editor at its last caret (e.g. after a conflict action). */
+  focusRequest?: number;
+  /** With a focus request, put the caret after the first link whose URL contains this text. */
+  focusLink?: string;
+  /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
+  paragraphAfterQuote?: boolean;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -524,7 +676,14 @@ export function MarkdownEditor({
   readOnly = false,
   label = "Markdown document",
   autoFocus = false,
+  placeholder,
+  focusRequest = 0,
+  focusLink,
+  paragraphAfterQuote = false,
 }: MarkdownEditorProps) {
+  // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
+  // so it stays keyboard reachable) and while one of its menus holds focus.
+  const [active, setActive] = useState(false);
   const [assessed, setAssessed] = useState<{
     source: string;
     document: Pick<ReturnType<typeof readMarkdown>, "value" | "reasons">;
@@ -541,57 +700,15 @@ export function MarkdownEditor({
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashQuery, setSlashQuery] = useState("");
   const source = sourceMode || document.reasons.length > 0;
+  // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
+  const inlineMode = !source && !readOnly;
   const container = useRef<HTMLElement>(null);
   const emitted = useRef(value);
   const synchronizing = useRef(false);
   const [initialMarkdown] = useState(() => writeMarkdown(document.value));
   const previousMarkdown = useRef(initialMarkdown);
   const editor = usePlateEditor({
-    plugins: [
-      ...[H1Plugin, H2Plugin, H3Plugin, H4Plugin, H5Plugin, H6Plugin].map(
-        (plugin) => plugin.configure({ inputRules: [HeadingRules.markdown()] }),
-      ),
-      BlockquotePlugin.configure({ inputRules: [BlockquoteRules.markdown()] }),
-      HorizontalRulePlugin,
-      BoldPlugin.configure({
-        inputRules: [
-          BoldRules.markdown(),
-          BoldRules.markdown({ variant: "_" }),
-        ],
-      }),
-      ItalicPlugin.configure({
-        inputRules: [
-          ItalicRules.markdown(),
-          ItalicRules.markdown({ variant: "_" }),
-        ],
-      }),
-      CodePlugin.configure({ inputRules: [CodeRules.markdown()] }),
-      StrikethroughPlugin.configure({
-        inputRules: [StrikethroughRules.markdown()],
-      }),
-      ListPlugin.configure({
-        inputRules: [
-          BulletedListRules.markdown(),
-          BulletedListRules.markdown({ variant: "*" }),
-          OrderedListRules.markdown(),
-          TaskListRules.markdown(),
-          TaskListRules.markdown({ checked: true }),
-        ],
-      }),
-      TablePlugin.configure({ options: { disableMerge: true } }),
-      LinkPlugin,
-      CodeBlockPlugin.configure({
-        inputRules: [CodeBlockRules.markdown({ on: "break" })],
-      }),
-      createPlatePlugin({
-        key: "mermaid",
-        node: { isElement: true, isVoid: true, component: Diagram },
-      }),
-      createPlatePlugin({
-        key: "br",
-        node: { isElement: true, isInline: true, isVoid: true },
-      }),
-    ],
+    plugins: richPlugins,
     components: {
       p: Element,
       h1: Element,
@@ -636,18 +753,55 @@ export function MarkdownEditor({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [autoFocus, readOnly, source, editor]);
+  // Slate drops its selection when focus leaves, so remember the last caret for outside changes.
+  const lastSelection = useRef<PlateEditor["selection"]>(null);
+  useEffect(() => {
+    if (!focusRequest || readOnly) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (source) {
+        container.current?.querySelector<HTMLElement>(".cm-content")?.focus();
+        return;
+      }
+      const last = editor.children.at(-1);
+      if (paragraphAfterQuote && last && last.type === "blockquote") {
+        // Markdown drops a trailing blank paragraph, so the reply caret needs one made here.
+        editor.tf.insertNodes(
+          { type: "p", children: [{ text: "" }] },
+          { at: [editor.children.length] },
+        );
+        editor.tf.select(editor.api.end([]) ?? [editor.children.length - 1]);
+      } else if (focusLink) {
+        const found = editor.api.node({
+          at: [],
+          match: (node) =>
+            "type" in node &&
+            node.type === "a" &&
+            String((node as { url?: unknown }).url ?? "").includes(focusLink),
+        });
+        const end = found && editor.api.end(found[1]);
+        if (end) editor.tf.select(end);
+      } else if (!editor.selection && lastSelection.current)
+        editor.tf.select(lastSelection.current);
+      editor.tf.focus();
+      container.current?.querySelector<HTMLElement>(".rich-document")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusRequest, focusLink, readOnly, source, editor, paragraphAfterQuote]);
   useEffect(() => {
     if (value === emitted.current) return;
     synchronizing.current = true;
     emitted.current = value;
     const next = document.value;
     previousMarkdown.current = writeMarkdown(next);
-    editor.tf.setValue(next);
+    applyExternalValue(editor, next, lastSelection.current);
     synchronizing.current = false;
   }, [value, document, editor]);
-  const choices = insertions.filter(([, title]) =>
-    title.toLowerCase().includes(slashQuery.toLowerCase()),
-  );
+  const choices = slashChoices(slashQuery);
+  function closeSlash() {
+    setSlash(false);
+    setSlashQuery("");
+    setSlashIndex(0);
+  }
   function choose(type: string) {
     // Slash text stays in the document until an insertion is explicitly accepted.
     editor.tf.delete({
@@ -656,8 +810,7 @@ export function MarkdownEditor({
       reverse: true,
     });
     insert(editor, type);
-    setSlash(false);
-    setSlashQuery("");
+    closeSlash();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || readOnly)
@@ -671,6 +824,11 @@ export function MarkdownEditor({
       moveBlock(editor, event.key === "ArrowUp" ? -1 : 1);
       return;
     }
+    if (event.key === "Enter" && !event.shiftKey && closeCodeFence(editor)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (event.key === "Tab" && editor.api.some({ match: { type: "li" } })) {
       event.preventDefault();
       event.stopPropagation();
@@ -680,11 +838,17 @@ export function MarkdownEditor({
     }
     if (
       event.key === "/" &&
+      !slash &&
+      !event.metaKey &&
+      !event.ctrlKey &&
       !editor.api.some({ match: { type: "code_block" } })
     ) {
-      setSlash(true);
-      setSlashIndex(0);
-      setSlashQuery("");
+      const before = textBeforeCaret(editor);
+      if (before !== null && slashMayOpen(before)) {
+        setSlash(true);
+        setSlashIndex(0);
+        setSlashQuery("");
+      }
       return;
     }
     if (!slash) return;
@@ -710,36 +874,77 @@ export function MarkdownEditor({
       event.stopPropagation();
       choose(choices[slashIndex][0]);
     } else if (event.key === "Backspace") {
-      if (!slashQuery) setSlash(false);
+      if (!slashQuery) closeSlash();
       else {
         setSlashQuery((current) => current.slice(0, -1));
         setSlashIndex(0);
       }
     } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-      setSlashQuery((current) => current + event.key);
-      setSlashIndex(0);
-    }
+      const next = slashQuery + event.key;
+      if (/\s/.test(event.key) || slashChoices(next).length === 0) closeSlash();
+      else {
+        setSlashQuery(next);
+        setSlashIndex(0);
+      }
+    } else if (
+      ["ArrowLeft", "ArrowRight", "Home", "End", "Enter", "Tab"].includes(
+        event.key,
+      )
+    )
+      closeSlash();
   }
   return (
-    <section ref={container} className="markdown-editor" aria-label={label}>
-      <div className="editor-mode">
-        <CopySourceButton source={value} label={`Copy ${label} Markdown`} />
+    <section
+      ref={container}
+      className="markdown-editor"
+      aria-label={label}
+      onFocus={() => setActive(true)}
+      onBlur={(event) => {
+        closeSlash();
+        const next = event.relatedTarget;
+        if (
+          next instanceof Element &&
+          (event.currentTarget.contains(next) ||
+            next.closest(
+              "[data-slot=popover-content], [data-slot=dropdown-menu-content]",
+            ))
+        )
+          return;
+        setActive(false);
+      }}
+    >
+      <div className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}>
+        <CopySourceButton
+          compact
+          source={value}
+          label={`Copy ${label} Markdown`}
+        />
         <Button
           disabled={document.reasons.length > 0}
           type="button"
           variant="ghost"
-          size="sm"
+          size={inlineMode ? "icon-sm" : "sm"}
           aria-pressed={source}
+          {...(inlineMode
+            ? {
+                "aria-label": "Edit Markdown source",
+                title: "Edit Markdown source",
+              }
+            : {})}
           onClick={() => {
             setSourceMode((current) => !current);
-            setSlash(false);
+            closeSlash();
           }}
         >
-          {document.reasons.length > 0
-            ? "Markdown source required"
-            : source
-              ? "Use rich editor"
-              : "Edit Markdown source"}
+          {document.reasons.length > 0 ? (
+            "Markdown source required"
+          ) : source ? (
+            "Use rich editor"
+          ) : inlineMode ? (
+            <FileCode2 />
+          ) : (
+            "Edit Markdown source"
+          )}
         </Button>
       </div>
       {document.reasons.length > 0 && (
@@ -773,6 +978,9 @@ export function MarkdownEditor({
         <Plate
           editor={editor}
           readOnly={readOnly}
+          onSelectionChange={({ selection }) => {
+            if (selection) lastSelection.current = selection;
+          }}
           onValueChange={({ value: next }: { value: Value }) => {
             if (readOnly || synchronizing.current) return;
             // Selection, focus and initialization never emit a write.
@@ -796,9 +1004,10 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar editorId={editorId} />}
+          {!readOnly && <Toolbar visible={active} />}
           <PlateContent
             readOnly={readOnly}
+            {...(placeholder ? { placeholder } : {})}
             aria-label={`${label} rich text`}
             role={slash ? "combobox" : "textbox"}
             aria-autocomplete={slash ? "list" : undefined}
@@ -810,7 +1019,8 @@ export function MarkdownEditor({
                 ? `${slashMenuId}-${choices[slashIndex][0]}`
                 : undefined
             }
-            onCompositionStart={() => setSlash(false)}
+            onCompositionStart={closeSlash}
+            onMouseDown={closeSlash}
             className="rich-document"
             onKeyDown={keyDown}
             onPaste={(event) => {

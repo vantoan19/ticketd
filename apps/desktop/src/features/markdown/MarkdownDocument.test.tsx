@@ -7,6 +7,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import {
+  DocumentNavigation,
+  PlanNavigation,
+} from "@/features/documents/navigation";
 import { MarkdownDocument } from "./MarkdownDocument";
 
 vi.mock("mermaid", () => ({
@@ -23,6 +27,8 @@ Object.defineProperty(window, "matchMedia", {
     removeEventListener: vi.fn(),
   }),
 });
+const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => bridge);
 afterEach(cleanup);
 
 test("renders GFM while keeping executable links and raw HTML inert", () => {
@@ -84,4 +90,58 @@ test("highlights known code languages while preserving literal HTML as code", ()
   expect(container.querySelector("pre code")?.textContent).toBe(code + "\n");
   expect(container.querySelector("pre code span")?.textContent).toBe("const");
   expect(container.querySelector("img")).toBeNull();
+});
+
+test("opens a Document link from Markdown", () => {
+  const open = vi.fn();
+  render(
+    <DocumentNavigation.Provider value={open}>
+      <MarkdownDocument source="[Context](ticketd://document/doc-1)" />
+    </DocumentNavigation.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Context" }));
+  expect(open).toHaveBeenCalledWith("doc-1");
+});
+
+test("opens a Plan link from Markdown", () => {
+  const open = vi.fn();
+  render(
+    <PlanNavigation.Provider value={open}>
+      <MarkdownDocument source="[Plan](ticketd://plan/plan-1)" />
+    </PlanNavigation.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+  expect(open).toHaveBeenCalledWith("plan-1");
+});
+
+test("marks a linked Document that is in the Trash", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "show_document")
+      return {
+        id: "doc",
+        title: "Old",
+        body: "",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        trashed: true,
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(
+    <DocumentNavigation.Provider value={vi.fn()}>
+      <MarkdownDocument source="See [Old](ticketd://document/doc)" />
+    </DocumentNavigation.Provider>,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Old (Trash)" }),
+  ).toBeTruthy();
+});
+
+test("shows a typed <tag> as literal text instead of dropping it", () => {
+  const { container } = render(
+    <MarkdownDocument source={"Use the <config> value\n\n<div>block</div>"} />,
+  );
+  expect(container.textContent).toContain("Use the <config> value");
+  expect(container.textContent).toContain("<div>block</div>");
+  expect(container.querySelector("config, .markdown-document div")).toBeNull();
 });

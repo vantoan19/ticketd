@@ -154,3 +154,7 @@
   width: 16px;
   height: 16px;
 }
+
+.inbox-header [data-slot="segmented-control"] [role="radio"] {
+  min-height: 32px;
+}

@@ -1,4 +1,4 @@
-import { useNow } from "@/lib/use-now";
+import { LatestUpdate } from "./LatestUpdate";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Command,
@@ -8,13 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Folder,
-  Layers,
-  MessageSquare,
-  Tag,
-  type LucideIcon,
-} from "lucide-react";
+import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -48,10 +42,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ago } from "./ticket-source";
-import { formatDateTime } from "@/lib/format";
 import { client, type Project, type Ticket } from "@/lib/api/client";
-import type { Effort } from "@/lib/api/efforts";
+import type { Plan } from "@/lib/api/plans";
 import "./properties.css";
 
 type Choice = { value: string; label: string };
@@ -153,16 +145,20 @@ export function PropertyPicker({
 export function TicketProperties({
   ticket,
   projects,
-  efforts,
+  plans,
   onSaved,
   refresh,
   onOpenTicket,
   onOpenNote,
   children,
+  active = true,
+  revision = 0,
 }: {
+  active?: boolean;
+  revision?: number;
   ticket: Ticket;
   projects: Project[];
-  efforts: Effort[];
+  plans: Plan[];
   onSaved: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
   /** Sections that follow Tags in the rail, such as Relationships and Attention. */
@@ -171,10 +167,11 @@ export function TicketProperties({
   /** Opens another ticket, such as the canonical ticket of a duplicate. */
   onOpenTicket?: (reference: string) => void;
 }) {
-  const now = useNow();
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  // Leaving Duplicate drops its link, so the chosen status waits for a yes.
+  const [leaving, setLeaving] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [vocabularyError, setVocabularyError] = useState("");
@@ -257,10 +254,10 @@ export function TicketProperties({
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "Unlinked");
-  const effort = efforts.find((e) => e.id === ticket.effort_id);
-  const effortName = effort
-    ? `${effort.name}${effort.archived ? " (archived)" : ""}`
-    : ticket.effort_id || "No Effort";
+  const plan = plans.find((e) => e.id === ticket.plan_id);
+  const planName = plan
+    ? `${plan.name}${plan.archived ? " (archived)" : ""}`
+    : ticket.plan_id || "No Plan";
   function property(label: string, control: ReactNode) {
     return (
       <RailSection label={label}>
@@ -288,6 +285,10 @@ export function TicketProperties({
               // Duplicate needs a canonical ticket, so it opens the review.
               if (status === "Duplicate") {
                 setDuplicateOpen(true);
+                return;
+              }
+              if (ticket.status === "Duplicate" && ticket.duplicate_of) {
+                setLeaving(status);
                 return;
               }
               void save("Status", () =>
@@ -401,24 +402,58 @@ export function TicketProperties({
         </>,
       )}
       {(ticket.status === "In progress" || ticket.status === "In review") && (
-        <RailSection label="Latest update">
-          {ticket.latest_update ? (
+        <LatestUpdate
+          reference={ticket.reference}
+          active={active}
+          revision={revision}
+          onOpen={onOpenNote}
+        />
+      )}
+      <Dialog
+        open={leaving !== null}
+        onOpenChange={(open) => {
+          if (!open) setLeaving(null);
+        }}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            statusTrigger.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Remove the duplicate link?</DialogTitle>
+            <DialogDescription>
+              This removes the duplicate link to {ticket.duplicate_of}.
+              Continue?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="settings-actions">
             <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                const status = leaving;
+                setLeaving(null);
+                if (status)
+                  void save("Status", () =>
+                    client.changeTicket(ticket.reference, { status }),
+                  );
+              }}
+            >
+              Change status
+            </Button>
+            <Button
+              type="button"
               variant="ghost"
               size="sm"
-              title={formatDateTime(ticket.latest_update.reported_at)}
-              onClick={() => onOpenNote?.(ticket.latest_update!.note_id)}
+              onClick={() => setLeaving(null)}
             >
-              <MessageSquare data-icon="inline-start" />
-              {ago(ticket.latest_update.reported_at, now)}
-              {ticket.latest_update.editing_agent &&
-                ` · ${ticket.latest_update.editing_agent}`}
+              Keep duplicate
             </Button>
-          ) : (
-            <small className="rail-note">No update reported</small>
-          )}
-        </RailSection>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent
           className="duplicate-dialog"
@@ -469,24 +504,24 @@ export function TicketProperties({
         />,
       )}
       {property(
-        "Effort",
+        "Plan",
         <PropertyPicker
           compact
           align="end"
           readOnly={ticket.trashed}
           icon={Layers}
-          label="Effort"
-          value={effortName}
+          label="Plan"
+          value={planName}
           disabled={disabled}
           choices={[
-            { value: "", label: "No Effort" },
-            ...efforts
+            { value: "", label: "No Plan" },
+            ...plans
               .filter((e) => !e.archived)
               .map((e) => ({ value: e.id, label: e.name })),
           ]}
           onChoose={(value) =>
-            void save("Effort", () =>
-              client.setEffort(ticket.reference, value || null),
+            void save("Plan", () =>
+              client.setPlan(ticket.reference, value || null),
             )
           }
         />,

@@ -17,12 +17,12 @@ const QUICK_REFERENCE = [
     command: "ticketd list --project PROJECT_ID --availability ready",
   },
   {
-    label: "Read a ticket with relationships, notes, and evidence",
-    command: "ticketd context TICKET --relationships --notes --evidence",
+    label: "Read a ticket with relationships, activities, and evidence",
+    command: "ticketd context TICKET --relationships --activities --evidence",
   },
   {
-    label: "Add a note from a file, attributed to an agent",
-    command: "ticketd note add TICKET --file note.md --agent AGENT",
+    label: "Post an update to a ticket from a file, as an agent",
+    command: "ticketd activity add TICKET --file brief.md --agent AGENT",
   },
 ] as const;
 
@@ -185,7 +185,7 @@ export function CommandLineCard() {
       </div>
       <h3 className="cli-reference-heading">Quick reference for agents</h3>
       <p className="settings-hint">
-        Replace the capitalized parts (PROJECT_ID, TICKET, AGENT) with your own
+        Copy a command, then replace PROJECT_ID, TICKET, and AGENT with your own
         values.
       </p>
       <ul className="cli-reference">

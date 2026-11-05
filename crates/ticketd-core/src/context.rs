@@ -10,12 +10,17 @@ const LABEL: usize = 256;
 #[derive(Debug, Default, Deserialize)]
 pub struct ContextOptions {
     pub project: bool,
-    pub effort: bool,
+    pub plan: bool,
     pub relationships: bool,
-    pub notes: bool,
+    pub activities: bool,
+    #[serde(default)]
+    pub latest_update: bool,
     #[serde(default)]
     pub evidence: bool,
     pub backlinks: bool,
+    /// The Documents the ticket attaches, mentions in its text or mentions in an update.
+    #[serde(default)]
+    pub documents: bool,
     /// The source's comments and events for an externally sourced ticket.
     #[serde(default)]
     pub conversation: bool,
@@ -79,12 +84,29 @@ pub struct ContextRelationships {
     pub duplicates: ContextPage<ContextRelated>,
 }
 #[derive(Debug, Serialize)]
-pub struct ContextNote {
+pub struct ContextActivity {
     pub id: String,
-    pub content: BoundedText,
-    pub created_at: String,
+    pub supporting_document_id: Option<String>,
+    pub fetch_details: Option<String>,
+    /// The command that reads the whole brief; present only when `brief` was cut short.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetch_brief: Option<String>,
+    pub brief: BoundedText,
+    pub reported_at: String,
     pub updated_at: String,
     pub editing_agent: Option<BoundedText>,
+}
+/// A Document the ticket relates to, with how it got there.
+#[derive(Debug, Serialize)]
+pub struct ContextDocument {
+    pub id: String,
+    /// `explicit` (attached), `description` (mentioned in the ticket text) or
+    /// `update` (mentioned in an update; `activity_id` names it).
+    pub source: String,
+    pub activity_id: Option<String>,
+    pub heading: BoundedText,
+    pub trashed: bool,
+    pub fetch: String,
 }
 #[derive(Debug, Serialize)]
 pub struct ContextEvidence {
@@ -123,15 +145,19 @@ pub struct TicketContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<Option<ContextLink>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub effort: Option<Option<ContextLink>>,
+    pub plan: Option<Option<ContextLink>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relationships: Option<ContextRelationships>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub notes: Option<ContextPage<ContextNote>>,
+    pub activities: Option<ContextPage<ContextActivity>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_update: Option<Option<crate::LatestUpdate>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<ContextPage<ContextEvidence>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backlinks: Option<ContextPage<crate::Backlink>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documents: Option<ContextPage<ContextDocument>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_conversation: Option<ContextPage<ContextSourceEntry>>,
 }
@@ -190,7 +216,7 @@ impl Workspace {
     ) -> Result<TicketContext, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let id = relationships::id(&tx, reference)?;
-        let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, effort_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
+        let ticket = tx.query_row("SELECT id, number, title, status, body, project_id, plan_id, trashed FROM tickets WHERE id = ?1", [&id], ticket_from_row)?;
         let availability = crate::history::availability(&tx, &id, ticket.status, ticket.trashed)?;
         let tags = {
             let mut stmt = tx.prepare("SELECT tag_name FROM ticket_tags WHERE ticket_id = ?1 ORDER BY tag_name LIMIT ?2 OFFSET ?3")?;
@@ -219,11 +245,11 @@ impl Workspace {
         } else {
             None
         };
-        let effort = if options.effort {
-            Some(match ticket.effort_id {
+        let plan = if options.plan {
+            Some(match ticket.plan_id {
                 Some(id) => Some(
                     tx.query_row(
-                        "SELECT id, name, archived FROM efforts WHERE id = ?1",
+                        "SELECT id, name, archived FROM plans WHERE id = ?1",
                         [&id],
                         |r| {
                             Ok(ContextLink {
@@ -234,7 +260,7 @@ impl Workspace {
                         },
                     )
                     .optional()?
-                    .ok_or(Error::EffortNotFound(id))?,
+                    .ok_or(Error::PlanNotFound(id))?,
                 ),
                 None => None,
             })
@@ -285,14 +311,24 @@ impl Workspace {
         } else {
             None
         };
-        let notes = if options.notes {
-            let mut stmt = tx.prepare("SELECT id,content,created_at,updated_at,editing_agent FROM notes WHERE ticket_id=?1 ORDER BY number LIMIT ?2 OFFSET ?3")?;
+        let activities = if options.activities {
+            let mut stmt = tx.prepare("SELECT id,brief,reported_at,updated_at,editing_agent,supporting_document_id FROM activities WHERE ticket_id=?1 ORDER BY number DESC LIMIT ?2 OFFSET ?3")?;
             let rows = stmt
                 .query_map(params![id, PAGE as u32 + 1, options.offset], |r| {
-                    Ok(ContextNote {
-                        id: r.get(0)?,
-                        content: text(r.get(1)?, TEXT),
-                        created_at: r.get(2)?,
+                    let supporting_document_id: Option<String> = r.get(5)?;
+                    let activity_id: String = r.get(0)?;
+                    let brief = text(r.get(1)?, TEXT);
+                    Ok(ContextActivity {
+                        fetch_brief: brief
+                            .truncated
+                            .then(|| format!("ticketd activity show {reference} {activity_id}")),
+                        id: activity_id,
+                        fetch_details: supporting_document_id
+                            .as_ref()
+                            .map(|id| format!("ticketd document read {id}")),
+                        supporting_document_id,
+                        brief,
+                        reported_at: r.get(2)?,
                         updated_at: r.get(3)?,
                         editing_agent: r.get::<_, Option<String>>(4)?.map(|v| text(v, LABEL)),
                     })
@@ -326,6 +362,37 @@ impl Workspace {
                 crate::backlinks::query(&tx, reference, PAGE as u32 + 1, options.offset)?,
                 options.offset,
             ))
+        } else {
+            None
+        };
+        let documents = if options.documents {
+            // One row per Document, by the strongest source: attached, then
+            // mentioned in the description, then mentioned in an update.
+            let mut stmt = tx.prepare(&format!("SELECT d.id, {}, d.trashed, x.source, x.activity_id FROM (SELECT document_id AS did, 'explicit' AS source, NULL AS activity_id, 0 AS rank, rowid AS position FROM ticket_documents WHERE ticket_id = ?1 UNION ALL SELECT target_id, 'description', NULL, 1, rowid FROM context_mentions WHERE source_id = ?1 UNION ALL SELECT m.target_id, 'update', m.activity_id, 2, m.rowid FROM activity_mentions m JOIN activities a ON a.id = m.activity_id WHERE a.ticket_id = ?1) x JOIN documents d ON d.id = x.did ORDER BY x.rank, x.position", crate::documents::HEADING))?;
+            let mut seen = std::collections::HashSet::new();
+            let mut rows = Vec::new();
+            for row in stmt.query_map(params![id], |r| {
+                let document_id: String = r.get(0)?;
+                Ok(ContextDocument {
+                    fetch: format!("ticketd document read {document_id}"),
+                    id: document_id,
+                    heading: text(r.get(1)?, LABEL),
+                    trashed: r.get(2)?,
+                    source: r.get(3)?,
+                    activity_id: r.get(4)?,
+                })
+            })? {
+                let row = row?;
+                if seen.insert(row.id.clone()) {
+                    rows.push(row);
+                }
+            }
+            let rows = rows
+                .into_iter()
+                .skip(options.offset as usize)
+                .take(PAGE + 1)
+                .collect::<Vec<_>>();
+            Some(page(rows, options.offset))
         } else {
             None
         };
@@ -369,6 +436,11 @@ impl Workspace {
         } else {
             None
         };
+        let latest_update = if options.latest_update {
+            Some(crate::activities::latest(&tx, &id)?)
+        } else {
+            None
+        };
         tx.commit()?;
         Ok(TicketContext {
             ticket: ContextTicket {
@@ -382,11 +454,13 @@ impl Workspace {
                 tags,
             },
             project,
-            effort,
+            plan,
             relationships,
-            notes,
+            activities,
+            latest_update,
             evidence,
             backlinks,
+            documents,
             source_conversation,
         })
     }

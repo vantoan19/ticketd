@@ -30,7 +30,7 @@ const ticket: Ticket = {
   status: "Todo",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   trashed: false,
   availability: null,
   parent: null,
@@ -103,7 +103,7 @@ test("copies the reference from the header and the context command from the menu
   await chooseAction("Copy context command");
   await waitFor(() =>
     expect(writeText).toHaveBeenLastCalledWith(
-      "ticketd context T-1 --relationships --notes --evidence",
+      "ticketd context T-1 --relationships --activities --evidence",
     ),
   );
 });

@@ -58,7 +58,7 @@ beforeEach(() => {
       id: 2,
       reference: "T-2",
       title: "Finding",
-      kind: "note",
+      kind: "activity",
       from_value: "note-id",
       to_value: "Original note",
       editing_agent: "agent",
@@ -67,14 +67,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test("opens an entry without marking it read and explicitly marks shown entries", async () => {
+test("opening an entry marks it read and shown entries can be marked together", async () => {
   const select = vi.fn();
   render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-1.*First/ }));
   expect(select).toHaveBeenCalledWith("T-1");
-  expect(store.every((e) => !e.read)).toBe(true);
+  await waitFor(() => expect(store[0]?.read).toBe(true));
   const unreadState = { selector: ".sr-only" };
-  expect(screen.getAllByText("Unread", unreadState)).toHaveLength(2);
+  await waitFor(() =>
+    expect(screen.getAllByText("Unread", unreadState)).toHaveLength(1),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Mark shown as read" }));
   await waitFor(() =>
     expect(screen.queryByText("Unread", unreadState)).toBeNull(),
@@ -87,7 +89,7 @@ test("opens the note identified by an inbox entry and shows its text", async () 
   render(<Inbox revision={0} select={select} />);
   fireEvent.click(await screen.findByRole("button", { name: /T-2.*Finding/ }));
   expect(select).toHaveBeenCalledWith("T-2", "note-id");
-  expect(screen.getByText(/New note: Original note · agent/)).toBeTruthy();
+  expect(screen.getByText(/New update: Original note · agent/)).toBeTruthy();
 });
 
 test("groups entries by local day and never shows internal event keys", async () => {
@@ -152,7 +154,7 @@ test("row actions are real buttons reachable by keyboard focus and mark one entr
   expect(store.find((e) => e.id === 2)?.read).toBe(false);
 });
 
-test("snoozing a due reminder reschedules it and marks the entry read", async () => {
+test("snoozing a due reminder reschedules it without marking the entry read", async () => {
   store = [
     entry({
       id: 7,
@@ -177,11 +179,29 @@ test("snoozing a due reminder reschedules it and marks the entry read", async ()
   expect(call.args.reference).toBe("T-7");
   const due = new Date(call.args.dueAt as string).getTime();
   expect(due).toBeGreaterThanOrEqual(before + 3600000 - 1000);
-  await waitFor(() => expect(store[0]!.read).toBe(true));
+  expect(store[0]!.read).toBe(false);
 });
 
 test("only reminders offer Snooze", async () => {
   render(<Inbox revision={0} select={vi.fn()} />);
   await screen.findByText("First");
   expect(screen.queryByRole("button", { name: /Snooze/ })).toBeNull();
+});
+
+test("a deleted update reads as deleted and opens the ticket with its id", async () => {
+  store = [
+    entry({
+      id: 9,
+      title: "Gone",
+      kind: "activity",
+      from_value: "note-id",
+      to_value: "Old",
+      deleted: true,
+    }),
+  ];
+  const select = vi.fn();
+  render(<Inbox revision={0} select={select} />);
+  expect(await screen.findByText("Update deleted")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Gone/ }));
+  expect(select).toHaveBeenCalledWith("T-9", "note-id");
 });

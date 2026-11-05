@@ -10,6 +10,8 @@ import {
   Folder,
   Layers,
   Archive,
+  FileText,
+  Network,
 } from "lucide-react";
 import {
   Sidebar,
@@ -22,16 +24,18 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import type { RefObject } from "react";
+import { useContext, useRef, type RefObject } from "react";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
@@ -48,16 +52,19 @@ function SidebarCount({ value }: { value: number }) {
 type View =
   | "tickets"
   | "projects"
-  | "efforts"
-  | "archived-efforts"
+  | "plans"
+  | "archived-plans"
   | "settings"
-  | "inbox";
+  | "inbox"
+  | "documents";
 export function WorkspaceSidebar({
-  view,
+  view: viewName,
+  workspaceGraphOpen = false,
+  onCapture,
   counts,
   setView,
   projects,
-  efforts,
+  plans,
   scope,
   setCreating,
   createTriggerRef,
@@ -66,24 +73,33 @@ export function WorkspaceSidebar({
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
     project: string;
-    effort: string;
+    plan: string;
   };
   view: View;
-  counts: SidebarCounts;
+  /** The workspace graph covers the current view; only its entry is active. */
+  workspaceGraphOpen?: boolean;
+  onCapture: (from: HTMLElement | null) => void;
+  counts: SidebarCounts | null;
   setView: (view: View) => void;
   projects: Project[];
-  efforts: { id: string; name: string; archived: boolean }[];
+  plans: { id: string; name: string; archived: boolean }[];
   scope: (
     next: "all" | "ready" | "progress" | "trash",
     project?: string,
-    effortId?: string,
+    planId?: string,
   ) => void;
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
+  // While the workspace graph is open no other entry reads as current.
+  const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
-  const unread = counts.unread_inbox > 0;
-  const archivedEfforts = efforts.filter((e) => e.archived).length;
+  const newTrigger = useRef<HTMLButtonElement>(null);
+  // Choosing an item moves focus on its own; dismissing the menu returns it to New.
+  const chose = useRef(false);
+  const openGraph = useContext(ContextGraphNavigation);
+  const unread = (counts?.unread_inbox ?? 0) > 0;
+  const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
@@ -93,24 +109,47 @@ export function WorkspaceSidebar({
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <strong>ticketd</strong>
-          <Tooltip>
-            <TooltipTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
+                ref={newTrigger}
                 className="new-ticket"
                 variant="ghost"
-                size="icon-sm"
-                aria-label="New ticket"
-                onClick={(event) => {
-                  createTriggerRef.current = event.currentTarget;
+                size="sm"
+                aria-label="New"
+              >
+                <Plus aria-hidden="true" />
+                New
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(event) => {
+                if (chose.current) event.preventDefault();
+                chose.current = false;
+              }}
+            >
+              <DropdownMenuItem
+                onSelect={() => {
+                  chose.current = true;
+                  createTriggerRef.current = newTrigger.current;
                   setView("tickets");
-                  setCreating(true);
+                  // After the menu has closed, so it cannot take focus back.
+                  window.setTimeout(() => setCreating(true), 0);
                 }}
               >
-                <Plus />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>New ticket</TooltipContent>
-          </Tooltip>
+                New ticket
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  chose.current = true;
+                  onCapture(newTrigger.current);
+                }}
+              >
+                Capture a thought
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
@@ -120,7 +159,7 @@ export function WorkspaceSidebar({
               <SidebarMenuButton
                 isActive={view === "inbox"}
                 aria-label={
-                  unread ? `Inbox, ${counts.unread_inbox} unread` : "Inbox"
+                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
                 }
                 onClick={() => setView("inbox")}
               >
@@ -128,7 +167,7 @@ export function WorkspaceSidebar({
                 {unread && (
                   <span className="sidebar-count" aria-hidden="true">
                     <StatusDot tone="unread" />
-                    {counts.unread_inbox}
+                    {counts?.unread_inbox}
                   </span>
                 )}
               </SidebarMenuButton>
@@ -138,13 +177,13 @@ export function WorkspaceSidebar({
                 isActive={
                   navigation.kind === "all" &&
                   navigation.project === "all" &&
-                  !navigation.effort &&
+                  !navigation.plan &&
                   view === "tickets"
                 }
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
-                {counts.total !== undefined && (
+                {counts?.total !== undefined && (
                   <SidebarCount value={counts.total} />
                 )}
               </SidebarMenuButton>
@@ -155,7 +194,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("ready")}
               >
                 <CirclePlay size={16} /> Ready
-                <SidebarCount value={counts.ready} />
+                {counts && <SidebarCount value={counts.ready} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -164,7 +203,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
-                <SidebarCount value={counts.in_progress} />
+                {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -203,7 +242,7 @@ export function WorkspaceSidebar({
                       }
                       onClick={() => scope("all", p.id)}
                     >
-                      <Folder size={16} /> <span>{p.name}</span>
+                      <Folder size={16} /> <span title={p.name}>{p.name}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -211,39 +250,60 @@ export function WorkspaceSidebar({
             </nav>
           </SidebarGroup>
           <SidebarGroup className="sidebar-group">
+            <div className="sidebar-heading">Context</div>
+            <nav aria-label="Context" className="sidebar-nav">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={view === "documents"}
+                    onClick={() => setView("documents")}
+                  >
+                    <FileText size={16} /> Documents
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={workspaceGraphOpen}
+                    onClick={() => openGraph?.("__workspace__")}
+                  >
+                    <Network size={16} /> Workspace graph
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </nav>
+          </SidebarGroup>
+          <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
-              Efforts{" "}
-              <IconButton
-                label="Manage Efforts"
-                onClick={() => setView("efforts")}
-              >
+              Plans{" "}
+              <IconButton label="Manage Plans" onClick={() => setView("plans")}>
                 <Settings2 size={16} />
               </IconButton>
             </div>
-            <nav aria-label="Effort scopes" className="sidebar-nav">
+            <nav aria-label="Plan scopes" className="sidebar-nav">
               <SidebarMenu>
-                {efforts
+                {plans
                   .filter((e) => !e.archived)
                   .map((e) => (
                     <SidebarMenuItem key={e.id}>
                       <SidebarMenuButton
                         isActive={
-                          navigation.effort === e.id && view === "tickets"
+                          navigation.plan === e.id && view === "tickets"
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >
-                        <Layers size={16} /> <span>{e.name}</span>
+                        <Layers size={16} />{" "}
+                        <span title={e.name}>{e.name}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    isActive={view === "archived-efforts"}
-                    onClick={() => setView("archived-efforts")}
+                    isActive={view === "archived-plans"}
+                    onClick={() => setView("archived-plans")}
                   >
-                    <Archive size={16} /> Archived Efforts
-                    {archivedEfforts > 0 && (
-                      <SidebarCount value={archivedEfforts} />
+                    <Archive size={16} /> Archived Plans
+                    {archivedPlans > 0 && (
+                      <SidebarCount value={archivedPlans} />
                     )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>

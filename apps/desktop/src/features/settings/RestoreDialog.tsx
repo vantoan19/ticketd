@@ -56,10 +56,16 @@ function splitPath(path: string) {
 
 const COUNTS = [
   ["tickets", "Tickets", "ticket", "tickets"],
-  ["notes", "Notes", "note", "notes"],
+  [
+    "documents",
+    "Documents (including details and Trash)",
+    "Document",
+    "Documents",
+  ],
+  ["activities", "Activities", "activity", "activities"],
   ["evidence", "Implementation evidence", "evidence item", "evidence items"],
   ["projects", "Projects", "project", "projects"],
-  ["efforts", "Efforts", "Effort", "Efforts"],
+  ["plans", "Plans", "Plan", "Plans"],
 ] as const;
 
 /** "The backup has 7 fewer tickets and 19 fewer notes." or a statement that counts match. */
@@ -126,7 +132,8 @@ function Comparison({
   return (
     <table className="restore-compare">
       <caption className="sr-only">
-        This workspace compared with the backup
+        This workspace compared with the backup. Document counts include
+        supporting details and Trash.
       </caption>
       <thead>
         <tr>
@@ -141,9 +148,9 @@ function Comparison({
         <tr>
           <th
             scope="row"
-            title="The latest ticket history, note, or evidence change. Edits to titles, descriptions, tags, follows and reminders are not dated."
+            title="The latest ticket history, Activity, Document, or evidence change. Some other edits are not dated."
           >
-            Last recorded activity
+            Last recorded change
           </th>
           <td>{formatWhen(current.last_change)}</td>
           <td>{formatWhen(backup.last_change)}</td>
@@ -358,7 +365,7 @@ export function RestoreDialog({
                   <strong>Pause ticketd CLI commands.</strong>{" "}
                   <span className="restore-muted">
                     Stop other ticketd commands, such as an agent recording
-                    notes, until the restore finishes.
+                    activities, until the restore finishes.
                   </span>
                 </p>
               </div>
@@ -375,7 +382,7 @@ export function RestoreDialog({
                     <span className="restore-muted">
                       You're now working from the backup:{" "}
                       {phase.inspection.check.summary.tickets} tickets,{" "}
-                      {phase.inspection.check.summary.notes} notes.
+                      {phase.inspection.check.summary.activities} activities.
                     </span>
                   </span>
                 </p>

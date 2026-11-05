@@ -1,0 +1,14 @@
+import { createContext } from "react";
+
+/** `backLabel` names where the reader's Back goes when the caller knows (a Plan). */
+export const DocumentNavigation = createContext<
+  ((id: string, backLabel?: string) => void) | null
+>(null);
+
+export const PlanNavigation = createContext<((id: string) => void) | null>(
+  null,
+);
+
+export const ContextGraphNavigation = createContext<
+  ((id: string) => void) | null
+>(null);

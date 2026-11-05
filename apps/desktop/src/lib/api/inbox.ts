@@ -10,6 +10,7 @@ const entrySchema = z.object({
   to_value: z.string(),
   timestamp: z.string(),
   read: z.boolean(),
+  deleted: z.boolean().optional(),
   editing_agent: z
     .string()
     .nullish()

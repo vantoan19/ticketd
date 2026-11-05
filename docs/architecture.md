@@ -35,7 +35,7 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `a
 
 | Module        | Responsibility                                                                                                                           |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop UI    | Lists, ticket details, Efforts, graph presentation, Markdown editing, unsaved drafts, and save feedback                                  |
+| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                    |
 | Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                         |
 | CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and map errors to exit codes |
 | Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly            |
@@ -48,16 +48,16 @@ Rich document editing uses Plate, with Markdown remaining canonical across stora
 
 ## Interface direction
 
-| Caller intent           | Core behavior                                                                                 |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket |
-| Change a ticket         | Apply supplied fields, explicit relationship changes, and optional notes as one atomic change |
-| Apply a batch           | Compose the same operations atomically, with local names for new tickets                      |
-| Find tickets            | Apply search, filters, ordering, and output limits                                            |
-| Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                |
-| View a dependency graph | Return bounded graph data for presentation                                                    |
+| Caller intent           | Core behavior                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Create a ticket         | Validate initial content and links, assign identity/reference, persist, and return the ticket               |
+| Change a ticket         | Apply supplied fields, explicit relationship changes, and optional authored Activities as one atomic change |
+| Apply a batch           | Compose the same operations atomically, with local names for new tickets                                    |
+| Find tickets            | Apply search, filters, ordering, and output limits                                                          |
+| Open ticket context     | Assemble the ticket and requested related context from one consistent snapshot                              |
+| View a dependency graph | Return bounded graph data for presentation                                                                  |
 
-Projects, Efforts, notes, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
+Projects, Plans, Activities, tags, and trash/restore also need focused operations; their exact signatures remain to be designed. The table describes the main ticket workflows, not a complete method inventory. Few methods alone do not make an interface simple: each operation must hide the coordination its callers would otherwise repeat.
 
 ## Writes and concurrent editing
 
@@ -69,13 +69,13 @@ Request IDs prevent repeated execution after a lost response; they do not preven
 
 ## Workspace and persistence
 
-One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Efforts, notes, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
+One default workspace lives in the operating system's application-data directory, outside project checkouts. The database holds tickets, project registrations, Plans, Activities, tags, relationships, ticket history, and successful request outcomes. Project checkout paths locate repositories; they do not select a different database. Multiple selectable workspaces are outside the MVP.
 
 The core owns migrations, export, backup/restore, and data access. Domain validation and persistence must remain atomic across processes, including cycle checks and hierarchy rules. Validate lock handling, concurrent writes, migration coordination, and active-database backup behavior before finalizing the process model.
 
 ## External changes
 
-The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Effort counts. The notification or polling mechanism remains to be chosen; unsaved editor drafts remain owned by the UI.
+The desktop must detect writes committed by CLI processes and refresh affected views through the core's read interface. It must also refresh dependent information, such as readiness and Plan counts. The notification or polling mechanism remains to be chosen; unsaved editor drafts remain owned by the UI.
 
 ## Verification and future evolution
 
@@ -178,7 +178,7 @@ Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
 while a ticket reads _Source unavailable_. It flips `external_ownership` to
 `local`, clears the failure columns of `source_sync` and records an `ownership`
-history entry; the identity, content, status, relationships and notes are
+history entry; the identity, content, status, relationships and authored Activities are
 untouched. Because every refresh path re-reads authority inside its own write,
 rediscovery, restored access and a refresh already in flight neither resume
 synchronization nor import a second ticket, and nothing turns a local row back
@@ -258,9 +258,24 @@ local time and UTC. The retryable `set_reminder` write takes `reference` and
 `due_at` (or null to dismiss). Reading the inbox atomically delivers due
 occurrences; reopening the inbox catches up after downtime without a daemon.
 
-Inbox entries for new notes retain the note ID and its original content in
-`from_value` and `to_value`; this snapshot remains meaningful after the note is
+Inbox entries for new Activities retain the Activity ID and its original brief in
+`from_value` and `to_value`; this snapshot remains meaningful after the Activity is
 edited or deleted. `editing_agent` is descriptive attribution. Relationship
 history kinds `parent`, `dependency`, and those prefixed `relationship:` also
 produce inbox entries for followed tickets, in the same transaction as the
 change. New relationship types use that prefix to participate.
+
+## Context-management extension
+
+The confirmed target model adds Documents, Activities, and Plans; see [product behavior](mvp-spec.md#16-context-management) and
+[ADR 0007](adr/0007-context-storage-and-graph-queries.md). Earlier implementation
+names and command examples in this architecture describe the current runtime,
+not compatibility requirements for the extension. No migration of development
+data or legacy command aliases is required.
+
+The core owns atomic Activity/supporting-Document creation, origin cleanup,
+Document search and mention indexing, Plan associations, and bounded context and
+graph queries. The desktop owns capture/editing state and graph presentation;
+the CLI exposes the same operations without coordinating their transactions.
+Explicit relationship tables remain authoritative. Shared entity identities
+support cross-type references while concrete records retain domain invariants.

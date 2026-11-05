@@ -322,12 +322,12 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     let mut f = Fixture::new();
     f.publish(issue(1, "Original"), true);
     f.refresh();
-    let effort = f.workspace.create_effort("Launch").unwrap();
+    let plan = f.workspace.create_plan("Launch").unwrap();
     f.workspace
         .change_ticket(
             "T-1",
             TicketPatch {
-                effort_id: Some(Some(effort.id.clone())),
+                plan_id: Some(Some(plan.id.clone())),
                 status: Some(Status::InProgress),
                 ..TicketPatch::default()
             },
@@ -335,7 +335,7 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
         .unwrap();
     f.workspace.add_tag("T-1", "backend").unwrap();
     f.workspace
-        .add_note("T-1", "local observation", None)
+        .add_activity("T-1", "local observation", None)
         .unwrap();
     let blocker = f.workspace.create_ticket("Prerequisite").unwrap();
     f.workspace
@@ -355,11 +355,11 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     assert_eq!(ticket.title, "Retitled");
     assert_eq!(ticket.body, "Body of Retitled");
     assert_eq!(ticket.status, Status::InProgress);
-    assert_eq!(ticket.effort_id.as_deref(), Some(effort.id.as_str()));
+    assert_eq!(ticket.plan_id.as_deref(), Some(plan.id.as_str()));
     assert_eq!(ticket.tags, vec!["backend".to_owned()]);
     assert_eq!(ticket.prerequisites.len(), 1);
     assert_eq!(ticket.children.len(), 1);
-    assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
     // Local progress is never sent anywhere: the fake has no write path, and the
     // remote issue is still open.
     assert_eq!(
@@ -552,7 +552,7 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
         .unwrap();
     // Local organization stays editable on closed tickets too.
     f.workspace.add_tag("T-2", "later").unwrap();
-    f.workspace.add_note("T-2", "still mine", None).unwrap();
+    f.workspace.add_activity("T-2", "still mine", None).unwrap();
     // A local ticket is unaffected.
     f.workspace
         .change_ticket(&local.reference, progress(Status::Done))
@@ -1092,9 +1092,9 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     );
     f.refresh();
     f.workspace
-        .add_note("T-1", "my own thought", Some("agent-x"))
+        .add_activity("T-1", "my own thought", Some("agent-x"))
         .unwrap();
-    assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
     assert_eq!(f.conversation(1).len(), 1);
 
     // The source stops answering about comments: what was retrieved stays.
@@ -1117,7 +1117,7 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     f.refresh();
     f.workspace.take_ownership("T-1", None).unwrap();
     assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
-    assert_eq!(f.workspace.notes("T-1", 10, 0).unwrap().len(), 1);
+    assert_eq!(f.workspace.activities("T-1", 10, 0).unwrap().len(), 1);
 }
 
 #[test]
@@ -1181,14 +1181,14 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     );
     f.refresh();
     f.workspace
-        .add_note("T-1", "note", Some("agent-x"))
+        .add_activity("T-1", "note", Some("agent-x"))
         .unwrap();
     let context = f
         .workspace
         .ticket_context(
             "T-1",
             ContextOptions {
-                notes: true,
+                activities: true,
                 conversation: true,
                 ..ContextOptions::default()
             },
@@ -1200,7 +1200,7 @@ fn agent_context_carries_the_conversation_labelled_as_source_authored() {
     assert_eq!(item["body"]["text"], "please do X");
     assert!(item.get("editing_agent").is_none());
     assert_eq!(
-        value["notes"]["items"][0]["editing_agent"]["text"],
+        value["activities"]["items"][0]["editing_agent"]["text"],
         "agent-x"
     );
     let without = f
@@ -1501,6 +1501,7 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
             [],
         )
         .unwrap();
+    legacy.execute_batch("ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes;").unwrap();
     legacy.pragma_update(None, "user_version", 27).unwrap();
     drop(legacy);
     let migrated = Workspace::open(path).unwrap();

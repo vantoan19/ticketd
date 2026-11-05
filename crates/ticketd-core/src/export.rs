@@ -10,18 +10,31 @@ impl Workspace {
     pub fn export(&self) -> Result<Value, Error> {
         let tx = self.connection.unchecked_transaction()?;
         let mut result = Map::new();
-        result.insert("format_version".into(), Value::from(1));
+        result.insert("format_version".into(), Value::from(2));
         for (table, columns) in [
+            ("entities", "id, kind"),
+            (
+                "documents",
+                "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
+            ),
+            ("context_mentions", "source_id, target_id, passage"),
+            ("numeric_mentions", "source_id, activity, number, passage"),
+            ("activity_mentions", "activity_id, target_id, passage"),
+            ("document_opens", "sequence, document_id"),
+            ("document_pins", "document_id"),
+            ("document_tags", "document_id, tag_name"),
             ("projects", "id, name, path"),
             ("project_checkouts", "project_id, path"),
-            ("efforts", "id, name, archived"),
+            ("plans", "id, name, archived, purpose, spec_document_id"),
+            ("plan_documents", "plan_id, document_id"),
+            ("ticket_documents", "ticket_id, document_id"),
             (
                 "tickets",
-                "number, id, title, status, body, project_id, effort_id, trashed, updated_at",
+                "number, id, title, status, body, project_id, plan_id, trashed, updated_at",
             ),
             (
-                "notes",
-                "number, id, ticket_id, content, created_at, updated_at, editing_agent",
+                "activities",
+                "number, id, ticket_id, brief, reported_at, updated_at, editing_agent, supporting_document_id",
             ),
             (
                 "ticket_history",

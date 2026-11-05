@@ -5,10 +5,11 @@ import {
   render,
   screen,
   within,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import DependencyGraph from "./DependencyGraph";
+import DependencyGraph, { SelectionPanel } from "./DependencyGraph";
 import type { DependencyGraph as Graph } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -47,6 +48,10 @@ beforeEach(() => {
     ],
     max_nodes: 50,
     max_depth: 5,
+    max_edges: 300,
+    max_work: 3000,
+    omitted_neighbors: false,
+    omitted_edges: false,
     truncated: false,
   };
   vi.mocked(invoke).mockImplementation(async (command: string) => {
@@ -57,7 +62,7 @@ beforeEach(() => {
         body: "",
         tags: [],
         project_id: "p1",
-        effort_id: null,
+        plan_id: null,
         parent: null,
         children: [],
         // Links beyond the drawn graph still show in the panel.
@@ -119,7 +124,7 @@ function renderGraph(onBack = vi.fn(), onOpen = vi.fn()) {
       reference="T-2"
       revision={0}
       projects={[{ id: "p1", name: "Core", path: "/core", paths: [] }]}
-      efforts={[]}
+      plans={[]}
       onBack={onBack}
       onOpen={onOpen}
     />,
@@ -161,4 +166,42 @@ test("marks the origin ticket and says when the graph is limited", async () => {
   expect(
     screen.getByText(/up to 5 links from T-2 and at most 50 tickets/),
   ).toBeTruthy();
+});
+
+test("re-centers the graph on the selected ticket", async () => {
+  renderGraph();
+  fireEvent.click(await screen.findByRole("button", { name: /^T-3\b/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Center graph on T-3" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("dependency_graph", {
+      reference: "T-3",
+    }),
+  );
+});
+
+test("the selection panel reloads its lists when the graph changes", async () => {
+  const ticket = graph.nodes[2]!;
+  const view = render(
+    <SelectionPanel
+      ticket={ticket}
+      origin=""
+      projects={[]}
+      version={graph}
+      onOpen={() => {}}
+    />,
+  );
+  await screen.findByText("Offscreen");
+  const shows = () =>
+    vi.mocked(invoke).mock.calls.filter(([c]) => c === "show_ticket").length;
+  const before = shows();
+  view.rerender(
+    <SelectionPanel
+      ticket={ticket}
+      origin=""
+      projects={[]}
+      version={{ ...graph }}
+      onOpen={() => {}}
+    />,
+  );
+  await waitFor(() => expect(shows()).toBe(before + 1));
 });

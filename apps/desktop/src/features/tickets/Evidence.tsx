@@ -2,6 +2,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { MoreHorizontal, Plus } from "lucide-react";
 import {
   Dialog,
@@ -16,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { workspaceClient } from "@/lib/api/workspace";
 import { formatDateTime } from "@/lib/format";
 import { useCopy } from "@/components/ui/use-copy";
 import "./evidence.css";
@@ -63,17 +71,35 @@ export function Evidence({
   revision,
   trashed,
   refresh,
+  quiet = false,
+  onEmptyChange,
+  composeKey = 0,
 }: {
   reference: string;
   revision: number;
   trashed: boolean;
   refresh: () => Promise<void>;
+  /** With no evidence, show nothing; the page offers Add evidence in a shared row. */
+  quiet?: boolean;
+  /** Reports whether a finished read found no evidence at all. */
+  onEmptyChange?: (empty: boolean) => void;
+  /** Changing this opens the add form, for the page's shared Add evidence action. */
+  composeKey?: number;
 }) {
   const [composing, setComposing] = useState(false);
   const [items, setItems] = useState<EvidenceRecord[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [seenComposeKey, setSeenComposeKey] = useState(composeKey);
+  if (seenComposeKey !== composeKey) {
+    setSeenComposeKey(composeKey);
+    setComposing(true);
+  }
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<EvidenceRecord | null>(
+    null,
+  );
   const [pending, setPending] = useState(false);
   const { copied, copy: copyText } = useCopy();
   const request = useRef<{ key: string; id: string } | null>(null);
@@ -96,8 +122,13 @@ export function Evidence({
       if (page.length < 50) break;
     }
     setItems(all);
+    setLoaded(true);
     setMore(page.length === 50);
   }, [reference]);
+  const empty = loaded && items.length === 0;
+  useEffect(() => {
+    onEmptyChange?.(empty);
+  }, [empty, onEmptyChange]);
   useEffect(() => {
     void Promise.resolve()
       .then(load)
@@ -122,7 +153,7 @@ export function Evidence({
       await load();
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      setError(String(reason).replace(/^invalid evidence: /, ""));
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -136,6 +167,7 @@ export function Evidence({
     try {
       await client.deleteEvidence(reference, id, writeId);
       request.current = null;
+      setConfirmDelete(null);
       setError("");
       await load();
       await refresh();
@@ -169,6 +201,7 @@ export function Evidence({
     }
     setComposing(true);
   }
+  if (quiet && !items.length && !composing && !editing && !error) return null;
   return (
     <section aria-label="Implementation evidence" className="evidence-section">
       <div className="evidence-heading">
@@ -189,6 +222,28 @@ export function Evidence({
         </p>
       )}
       {error && !composing && <p role="alert">{error}</p>}
+      {confirmDelete && (
+        <p role="alertdialog" className="evidence-confirm">
+          Delete evidence “{confirmDelete.name}”?
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={pending}
+            onClick={() => void remove(confirmDelete.id)}
+          >
+            Delete evidence
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirmDelete(null)}
+          >
+            Keep evidence
+          </Button>
+        </p>
+      )}
       <ol className="evidence-list">
         {items.map((item) => (
           <li key={item.id} className="evidence-item">
@@ -201,6 +256,23 @@ export function Evidence({
                 </span>
               </span>
               <span className="evidence-item-actions">
+                {/^https:\/\/\S+$/.test(item.value) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    aria-label={`Open ${item.name}`}
+                    onClick={() =>
+                      void workspaceClient
+                        .openLink(item.value)
+                        .catch(() =>
+                          setError("Could not open the link. Copy it instead."),
+                        )
+                    }
+                  >
+                    Open
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -249,7 +321,7 @@ export function Evidence({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
-                        onSelect={() => void remove(item.id)}
+                        onSelect={() => setConfirmDelete(item)}
                       >
                         Delete
                       </DropdownMenuItem>
@@ -307,31 +379,36 @@ export function Evidence({
             <fieldset disabled={pending}>
               <FieldGroup>
                 <Field>
-                  <label className="evidence-label">
+                  <span className="evidence-label" id="evidence-type-label">
                     Type
-                    <select
-                      value={draft.kind}
-                      onChange={(event) => {
-                        const kind = Object.keys(labels).find(
-                          (key) => key === event.target.value,
-                        );
-                        if (
-                          kind === "pull_request" ||
-                          kind === "commit" ||
-                          kind === "branch" ||
-                          kind === "worktree" ||
-                          kind === "verification"
-                        )
-                          setDraft({ ...draft, kind });
-                      }}
+                  </span>
+                  <Select
+                    value={draft.kind}
+                    onValueChange={(value) => {
+                      if (
+                        value === "pull_request" ||
+                        value === "commit" ||
+                        value === "branch" ||
+                        value === "worktree" ||
+                        value === "verification"
+                      )
+                        setDraft({ ...draft, kind: value });
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-labelledby="evidence-type-label"
                     >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
                       {Object.entries(labels).map(([key, label]) => (
-                        <option key={key} value={key}>
+                        <SelectItem key={key} value={key}>
                           {label}
-                        </option>
+                        </SelectItem>
                       ))}
-                    </select>
-                  </label>
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field>
                   <label className="evidence-label">

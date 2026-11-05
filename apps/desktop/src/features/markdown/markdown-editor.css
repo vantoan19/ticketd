@@ -14,9 +14,41 @@
 .rich-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
-  padding: 4px;
+  min-height: 40px;
+  padding: 4px 76px 4px 4px;
   background: var(--background);
+}
+/* Hidden by visibility, never removed: controls below must not move when the editor loses focus. */
+.rich-toolbar[data-visible="false"] {
+  visibility: hidden;
+}
+.editor-mode--inline {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  align-items: center;
+  padding: 0;
+}
+/* Copy/source controls appear with the toolbar, not as a stray pair of icons on an idle editor. */
+/* visibility, not just opacity: hidden controls must not be clickable or focusable. */
+.editor-mode--inline {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 120ms,
+    visibility 0s 120ms;
+}
+.markdown-editor:hover .editor-mode--inline,
+.markdown-editor:focus-within .editor-mode--inline {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.rich-document .code-language[data-editing="false"]:not(:focus-within) {
+  display: none;
 }
 .rich-document {
   padding: 16px;
@@ -55,6 +87,14 @@
 .rich-document ol {
   list-style-type: decimal;
   padding-left: 20px;
+}
+.rich-document li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -20px;
+}
+.rich-document [data-slate-placeholder] {
+  color: var(--muted-foreground);
+  opacity: 1 !important;
 }
 .rich-document li > input {
   margin-right: 8px;

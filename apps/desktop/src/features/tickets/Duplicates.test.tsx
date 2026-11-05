@@ -27,7 +27,7 @@ const ticket: Ticket = {
   trashed: false,
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],

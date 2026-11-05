@@ -16,7 +16,7 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   body: "",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: "Ready",
   parent: null,
   children: [],
@@ -26,9 +26,9 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   ...overrides,
 });
 const scope: RowScope = {
-  showEffort: true,
+  showPlan: true,
   showProject: true,
-  efforts: [{ id: "e1", name: "Launch" }],
+  plans: [{ id: "e1", name: "Launch" }],
   projects: [{ id: "p1", name: "Website" }],
 };
 function renderList(tickets: Ticket[], props = {}) {
@@ -98,10 +98,10 @@ test("shows one context item and tags as pills", () => {
   renderList([
     ticket({
       parent: { reference: "T-7", title: "Parent", trashed: false },
-      effort_id: "e1",
+      plan_id: "e1",
       tags: ["ui", "bug"],
     }),
-    ticket({ id: "2", reference: "T-2", effort_id: "e1", project_id: "p1" }),
+    ticket({ id: "2", reference: "T-2", plan_id: "e1", project_id: "p1" }),
   ]);
   expect(screen.getByText("Subticket of T-7")).toBeTruthy();
   expect(screen.getAllByText("Launch")).toHaveLength(1);
@@ -216,16 +216,53 @@ test("rows show core update times and authored progress instead of an empty seco
       reference: "T-2",
       status: "In progress",
       latest_update: {
-        note_id: "n1",
+        activity_id: "n1",
         reported_at: when,
         editing_agent: "agent",
       },
+      progress_summary: {
+        activity_id: "n1",
+        brief: { text: "Verified the fix", truncated: false },
+        reported_at: when,
+        updated_at: when,
+        editing_agent: "agent",
+        supporting_document_id: null,
+      },
     }),
-    ticket({ id: "unreported", reference: "T-3", status: "In review" }),
+    ticket({
+      id: "unreported",
+      reference: "T-3",
+      status: "In review",
+      progress_summary: null,
+    }),
   ]);
   expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
-  expect(
-    screen.getByText(/Reported 3 h ago/).parentElement?.textContent,
-  ).toContain("agent");
+  expect(screen.getByText(/Reported 3 h ago/)).toBeTruthy();
+  expect(screen.getByText("Verified the fix")).toBeTruthy();
   expect(screen.getByText("No update reported")).toBeTruthy();
+});
+
+test("distinguishes unavailable progress and marks bounded briefs", () => {
+  const when = new Date().toISOString();
+  renderList([
+    ticket({ id: "1", reference: "T-1", status: "In progress" }),
+    ticket({
+      id: "2",
+      reference: "T-2",
+      status: "In review",
+      progress_summary: {
+        activity_id: "a",
+        brief: {
+          text: "**Long** [checkpoint](https://example.com)",
+          truncated: true,
+        },
+        reported_at: when,
+        updated_at: when,
+        editing_agent: null,
+        supporting_document_id: null,
+      },
+    }),
+  ]);
+  expect(screen.getByText("Update unavailable")).toBeTruthy();
+  expect(screen.getByText("Long checkpoint…")).toBeTruthy();
 });

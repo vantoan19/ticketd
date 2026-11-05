@@ -27,6 +27,7 @@ import {
   type Entry,
   type SnoozeChoice,
 } from "./inboxModel";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
 
 const PAGE_SIZE = 50;
@@ -55,7 +56,7 @@ async function fetchEntries(
 
 function EntryIcon({ entry }: { entry: Entry }) {
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
-  if (entry.kind === "note") return <MessageSquare aria-hidden="true" />;
+  if (entry.kind === "activity") return <MessageSquare aria-hidden="true" />;
   if (entry.kind === "status")
     return <StatusIcon status={entry.to_value} decorative />;
   return entry.kind.startsWith("relationship:") ||
@@ -119,6 +120,7 @@ export function Inbox({
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
+  const changeVersion = useWorkspaceChange();
   const reload = () => setTick((value) => value + 1);
   useEffect(() => {
     let active = true;
@@ -136,11 +138,7 @@ export function Inbox({
     return () => {
       active = false;
     };
-  }, [filter, pages, revision, tick]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((value) => value + 1), 2000);
-    return () => window.clearInterval(timer);
-  }, []);
+  }, [filter, pages, revision, tick, changeVersion]);
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)
@@ -156,7 +154,6 @@ export function Inbox({
         entry.reference,
         snoozeInstant(choice, new Date()),
       );
-      await inboxClient.setRead([entry.id], true);
       reload();
     } catch (e) {
       setError(String(e));
@@ -222,11 +219,13 @@ export function Inbox({
                   </span>
                   <button
                     className="inbox-ticket"
-                    onClick={() =>
-                      e.kind === "note"
-                        ? select(e.reference, e.from_value)
-                        : select(e.reference)
-                    }
+                    onClick={() => {
+                      if (!e.read) void mark([e.id], true);
+                      // A deleted update still opens with its id, so the ticket says it is gone.
+                      if (e.kind === "activity")
+                        select(e.reference, e.from_value);
+                      else select(e.reference);
+                    }}
                   >
                     <span className="inbox-title-line">
                       <span className="inbox-reference">{e.reference}</span>

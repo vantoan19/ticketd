@@ -5,6 +5,7 @@ import {
   linkRows,
   mergePage,
   nextOffset,
+  addLink,
   removeLink,
   type AddableKind,
   type LinkRow,
@@ -35,6 +36,8 @@ export function useLinkedWork(
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  /** The link just removed, so it can be put back. */
+  const [removed, setRemoved] = useState<LinkRow | null>(null);
   const attempts = useRef(new Map<string, string>());
   const reference = ticket.reference;
 
@@ -74,12 +77,40 @@ export function useLinkedWork(
     try {
       await removeLink(reference, row.kind, row.reference, id);
       attempts.current.delete(key);
+      setRemoved(
+        row.kind === "duplicate_of" || row.kind === "duplicates" ? null : row,
+      );
       setReload((value) => value + 1);
       await refresh();
     } catch (reason) {
       setError(
         `Could not remove ${linkLabel(row.kind)} ${row.reference}: ${String(reason)}`,
       );
+    } finally {
+      setPending(false);
+    }
+  }
+  async function undoRemove() {
+    if (
+      !removed ||
+      removed.kind === "duplicate_of" ||
+      removed.kind === "duplicates"
+    )
+      return;
+    setPending(true);
+    setError("");
+    try {
+      await addLink(
+        reference,
+        removed.kind,
+        removed.reference,
+        crypto.randomUUID(),
+      );
+      setRemoved(null);
+      setReload((value) => value + 1);
+      await refresh();
+    } catch (reason) {
+      setError(`Could not put the link back: ${String(reason)}`);
     } finally {
       setPending(false);
     }
@@ -106,11 +137,13 @@ export function useLinkedWork(
     error,
     pending,
     remove,
+    removed,
+    undoRemove,
     showMore,
     retry,
     refresh,
     linking,
-    openLink: (kind: AddableKind = "blocked_by") => setLinking(kind),
+    openLink: (kind: AddableKind = "related") => setLinking(kind),
     closeLink: () => setLinking(null),
     reviewing,
     setReviewing,

@@ -66,3 +66,86 @@ describe("canonical Markdown rich-edit boundary", () => {
     }
   });
 });
+
+describe("Markdown writing keeps text as typed", () => {
+  const rich = (text: string) => [{ type: "p", children: [{ text }] }];
+  it("does not escape punctuation that is not syntax and adds no trailing newline", () => {
+    for (const text of [
+      "2*3 [brackets] and a_b",
+      "snake_case_name and v1.2",
+      "Done. See step 2.",
+    ])
+      expect(writeMarkdown(rich(text))).toBe(text);
+  });
+  it("keeps only the escape that prevents emphasis", () => {
+    expect(writeMarkdown(rich("2*3*4 [x]"))).toBe("2*3\\*4 [x]");
+  });
+  it("still escapes text that would otherwise change meaning", () => {
+    for (const text of ["*not emphasis*", "1. not a list", "# not a heading"]) {
+      const written = writeMarkdown(rich(text));
+      expect(written).not.toBe(text);
+      expect(readMarkdown(written).value).toEqual(rich(text));
+    }
+  });
+  it("round trips a brief without rewriting it", () => {
+    const brief = "Fixed 3. items and [x] later";
+    expect(writeMarkdown(readMarkdown(brief).value)).toBe(brief);
+  });
+});
+
+describe("typed text is stored as typed", () => {
+  const p = (...texts: string[]) =>
+    texts.map((text) => ({ type: "p", children: [{ text }] }));
+  const cases: Array<[string, string[], string]> = [
+    [
+      "mid-line number and period",
+      ["Fixed 5. first line"],
+      "Fixed 5. first line",
+    ],
+    [
+      "intraword underscores",
+      ["_under_score_ and a_b_c"],
+      "_under_score\\_ and a_b_c",
+    ],
+    ["intraword underscores only", ["snake_case_name"], "snake_case_name"],
+    [
+      "angle brackets that are not HTML",
+      ["a < b and 3 > 2"],
+      "a < b and 3 > 2",
+    ],
+    ["checkbox-like brackets", ["done [x] later"], "done [x] later"],
+    // CommonMark reads 2*3*4 as emphasis, so the single backslash is the minimum that round-trips.
+    ["star between digits", ["2*3*4"], "2*3\\*4"],
+    ["leading spaces in a paragraph", ["  hello"], "hello"],
+    ["leading space after heading marker", ["DRAFT"], "DRAFT"],
+    [
+      "Enter twice makes no extra blank lines",
+      ["one", "", "two"],
+      "one\n\ntwo",
+    ],
+    ["trailing empty paragraph", ["one", ""], "one"],
+  ];
+  for (const [name, texts, expected] of cases)
+    it(name, () => {
+      const value = p(...texts);
+      const stored = writeMarkdown(value);
+      expect(stored).toBe(expected);
+      expect(stored).not.toContain("&#x20;");
+      expect(writeMarkdown(readMarkdown(stored).value)).toBe(stored);
+    });
+  it("heading with leading space does not store an entity", () => {
+    const stored = writeMarkdown([
+      { type: "h1", children: [{ text: " DRAFT" }] },
+    ]);
+    expect(stored).toBe("# DRAFT");
+  });
+  it("literal asterisk emphasis characters stay literal when they round trip", () => {
+    const stored = writeMarkdown(p("*line*"));
+    expect(readMarkdown(stored).value).toEqual(p("*line*"));
+  });
+  it("does not escape the colon of a typed URL", () => {
+    expect(writeMarkdown(p("See https://example.org/x now"))).toBe(
+      "See https://example.org/x now",
+    );
+  });
+});

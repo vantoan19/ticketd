@@ -26,10 +26,19 @@ import {
   type WaitingOutcome,
 } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import { useTicketSearch } from "./useTicketSearch";
+import "./linked-work.css";
 import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
 /** Why the preview can no longer be applied: its review changed, or it is for the other kind of review. */
+/**
+ * The canonical ticket typed so far for each ticket. Escape closes the dialog
+ * without losing it; Cancel and a finished review discard it.
+ */
+const canonicalDrafts = new Map<string, string>();
+
 type Stale = "" | "changed" | "mode";
 
 function staleKind(code: string): Stale {
@@ -85,7 +94,13 @@ export function Duplicates({
   onCancel?: () => void;
 }) {
   const canonicalInput = useRef<HTMLInputElement>(null);
-  const [canonical, setCanonical] = useState(initialCanonical);
+  const [canonical, setCanonicalText] = useState(
+    initialCanonical || canonicalDrafts.get(ticket.reference) || "",
+  );
+  function setCanonical(value: string) {
+    setCanonicalText(value);
+    canonicalDrafts.set(ticket.reference, value);
+  }
   const [preview, setPreview] = useState<DuplicatePreview | null>(null);
   const [canonicalTicket, setCanonicalTicket] = useState<Ticket | null>(null);
   const [choices, setChoices] = useState<Unchosen[]>([]);
@@ -109,6 +124,15 @@ export function Duplicates({
     canonicalInput.current?.focus();
   }, []);
   const target = canonical.trim();
+  const search = useTicketSearch(
+    canonical,
+    !preview,
+    (item) =>
+      item.reference !== ticket.reference &&
+      !item.trashed &&
+      (separate || item.status !== "Duplicate"),
+  );
+  const matches = canonical.trim() ? search.results : [];
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
   // The preview's normalized form of the source, which its edges refer to; the typed
   // text (T-01) only until a preview is loaded.
@@ -144,21 +168,47 @@ export function Duplicates({
         const kind = staleKind(failure.code);
         if (kind) setStale(kind);
         // Never leave the previous choice's lines beside the error.
-        setAnswer({ key: answerKey, outcomes: [], failure: failure.message });
+        // A stale review has its own notice with a Refresh action.
+        setAnswer({
+          key: answerKey,
+          outcomes: [],
+          failure: kind ? "" : failure.message,
+        });
       });
     return () => {
       current = false;
     };
   }, [preview, choices, canonicalArg, separate, answerKey]);
 
-  async function loadPreview() {
+  // Dependencies can change under an open review (from the CLI, another
+  // window). Compare the shown preview with a fresh one and ask for a refresh
+  // rather than leaving rows that no longer match.
+  useOnWorkspaceChange(() => {
+    if (!preview || stale || pending) return;
+    const shown = JSON.stringify([preview.canonical, preview.edges]);
+    void client
+      .previewDuplicate(
+        separate ? target : ticket.reference,
+        canonicalArg,
+        separate,
+      )
+      .then((latest) => {
+        if (JSON.stringify([latest.canonical, latest.edges]) !== shown)
+          setStale("changed");
+      })
+      .catch(() => {});
+  });
+
+  async function loadPreview(chosen?: string) {
+    const picked = chosen ?? target;
+    const pickedArg = separate ? ticket.reference : picked;
     setPending(true);
     setError("");
     setStale("");
     try {
       const result = await client.previewDuplicate(
-        separate ? target : ticket.reference,
-        canonicalArg,
+        separate ? picked : ticket.reference,
+        pickedArg,
         separate,
       );
       const resolved = separate
@@ -219,6 +269,7 @@ export function Duplicates({
         );
       setAttempt(null);
       await refresh();
+      canonicalDrafts.delete(ticket.reference);
       onDone?.();
     } catch (reason) {
       const failure = toFailure(reason);
@@ -242,133 +293,141 @@ export function Duplicates({
       )}
       {preview && (canonicalTicket || separate) ? (
         <>
-          {separate && (
-            <p className="duplicate-note">
-              Replace {target} with {ticket.reference} in each dependency below.
-            </p>
-          )}
-          {canonicalTicket && (
-            <div className="duplicate-tickets">
-              <TicketSummary
-                label="Duplicate"
-                ticket={ticket}
-                icon="Duplicate"
-                note={`${ticket.status} → Duplicate · Duplicate of ${preview.canonical}`}
-              />
-              <TicketSummary
-                label="Canonical ticket"
-                ticket={canonicalTicket}
-                note={`${canonicalTicket.status} · unchanged`}
-              />
-            </div>
-          )}
-          <div>
-            <Button
-              type="button"
-              variant="link"
-              className="duplicate-change"
-              disabled={pending}
-              onClick={() => changeCanonical()}
-            >
-              {separate
-                ? "Change existing endpoint"
-                : "Change canonical ticket"}
-            </Button>
-            {!separate && preview.canonical !== target && (
+          <div className="duplicate-scroll">
+            {separate && (
               <p className="duplicate-note">
-                {target} is itself a duplicate, so {ticket.reference} points to{" "}
-                {preview.canonical}.
+                Replace {target} with {ticket.reference} in each dependency
+                below.
               </p>
             )}
-          </div>
-          {preview.edges.length > 0 ? (
-            <section
-              aria-label="Affected dependencies"
-              className="dependencies"
-            >
-              <h3>Affected dependencies</h3>
-              <p className="duplicate-note">
+            {canonicalTicket && (
+              <div className="duplicate-tickets">
+                <TicketSummary
+                  label="Duplicate"
+                  ticket={ticket}
+                  icon="Duplicate"
+                  note={`${ticket.status} → Duplicate · Duplicate of ${preview.canonical}`}
+                />
+                <TicketSummary
+                  label="Canonical ticket"
+                  ticket={canonicalTicket}
+                  note={`${canonicalTicket.status} · unchanged`}
+                />
+              </div>
+            )}
+            <div>
+              <Button
+                type="button"
+                variant="link"
+                className="duplicate-change"
+                disabled={pending}
+                onClick={() => changeCanonical()}
+              >
                 {separate
-                  ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
-                  : "A duplicate ticket never satisfies a blocking dependency, so each of these needs a decision."}
-              </p>
-              <ul>
-                {preview.edges.map((edge, index) => {
-                  const issue = preview.replacement_issues[index] ?? null;
-                  const reason = issue
-                    ? `Replace unavailable: ${replacementIssueReason(edge, issue)}`
-                    : "";
-                  const name = `${edge.blocker} blocks ${edge.dependent}`;
-                  const choice = choices[index] ?? "";
-                  return (
-                    <li key={name} className="dependency-edge">
-                      <div className="dependency-edges">
-                        <span>
-                          <span className="dependency-edge-label">Current</span>{" "}
-                          {name}
-                        </span>
-                        <span>
-                          <span className="dependency-edge-label">
-                            Proposed
-                          </span>{" "}
-                          {edge.replacement_blocker} blocks{" "}
-                          {edge.replacement_dependent}
-                        </span>
-                      </div>
-                      <SegmentedControl<Unchosen>
-                        aria-label={`Choice for ${name}`}
-                        value={choice}
-                        onValueChange={(next) =>
-                          setChoices((current) =>
-                            current.map((value, i) =>
-                              i === index ? next : value,
-                            ),
-                          )
-                        }
-                        options={(["replace", "remove", "retain"] as const).map(
-                          (value) => ({
+                  ? "Change existing endpoint"
+                  : "Change canonical ticket"}
+              </Button>
+              {!separate && preview.canonical !== target && (
+                <p className="duplicate-note">
+                  {target} is itself a duplicate, so {ticket.reference} points
+                  to {preview.canonical}.
+                </p>
+              )}
+            </div>
+            {preview.edges.length > 0 ? (
+              <section
+                aria-label="Affected dependencies"
+                className="dependencies"
+              >
+                <h3>Affected dependencies</h3>
+                <p className="duplicate-note">
+                  {separate
+                    ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
+                    : "A duplicate ticket never satisfies a blocking dependency, so each of these needs a decision."}
+                </p>
+                <ul>
+                  {preview.edges.map((edge, index) => {
+                    const issue = preview.replacement_issues[index] ?? null;
+                    const reason = issue
+                      ? `Replace unavailable: ${replacementIssueReason(edge, issue)}`
+                      : "";
+                    const name = `${edge.blocker} blocks ${edge.dependent}`;
+                    const choice = choices[index] ?? "";
+                    return (
+                      <li key={name} className="dependency-edge">
+                        <div className="dependency-edges">
+                          <span>
+                            <span className="dependency-edge-label">
+                              Current
+                            </span>{" "}
+                            {name}
+                          </span>
+                          <span>
+                            <span className="dependency-edge-label">
+                              Proposed
+                            </span>{" "}
+                            {edge.replacement_blocker} blocks{" "}
+                            {edge.replacement_dependent}
+                          </span>
+                        </div>
+                        <SegmentedControl<Unchosen>
+                          aria-label={`Choice for ${name}`}
+                          value={choice}
+                          onValueChange={(next) =>
+                            setChoices((current) =>
+                              current.map((value, i) =>
+                                i === index ? next : value,
+                              ),
+                            )
+                          }
+                          options={(
+                            ["replace", "remove", "retain"] as const
+                          ).map((value) => ({
                             value,
                             label: choiceLabels[value],
-                            disabled: value === "replace" && !!issue,
+                            disabled:
+                              !!stale || (value === "replace" && !!issue),
                             ...(value === "replace" && reason
                               ? { title: reason }
                               : {}),
-                          }),
+                          }))}
+                        />
+                        {reason && (
+                          <p className="dependency-reason">{reason}.</p>
                         )}
-                      />
-                      {reason && <p className="dependency-reason">{reason}.</p>}
-                      <p className="dependency-consequence">
-                        {choice
-                          ? consequence(
-                              sourceRef,
-                              edge,
-                              choice,
-                              outcomes,
-                              separate,
-                            )
-                          : "Choose what happens to this dependency."}
-                      </p>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : (
-            <p className="duplicate-note">
-              {sourceRef} has no dependencies to review.
+                        <p className="dependency-consequence">
+                          {choice
+                            ? consequence(
+                                sourceRef,
+                                edge,
+                                choice,
+                                outcomes,
+                                separate,
+                              )
+                            : "Choose what happens to this dependency."}
+                        </p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ) : (
+              <p className="duplicate-note">
+                {sourceRef} has no dependencies to review.
+              </p>
+            )}
+            <p className="duplicate-summary">
+              {separate
+                ? "All of the chosen changes are applied together or not at all."
+                : summarize(ticket.reference, preview.canonical, choices)}
             </p>
-          )}
-          <p className="duplicate-summary">
-            {separate
-              ? "All of the chosen changes are applied together or not at all."
-              : summarize(ticket.reference, preview.canonical, choices)}
-          </p>
-          {!separate && (
-            <p className="duplicate-note">
-              Removing the duplicate link later restores the earlier status.
-              Dependency changes are reviewed separately then.
-            </p>
-          )}
+            {!separate && (
+              <p className="duplicate-note">
+                Removing the duplicate link later restores the earlier status.
+                Any dependency changes you apply now stay as they are.
+              </p>
+            )}
+          </div>
           {stale && (
             <div role="alert" className="duplicate-stale">
               <p>
@@ -393,7 +452,14 @@ export function Duplicates({
             </p>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                canonicalDrafts.delete(ticket.reference);
+                onCancel?.();
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -419,7 +485,8 @@ export function Duplicates({
                   id={`canonical-${ticket.id}`}
                   value={canonical}
                   onChange={(event) => setCanonical(event.target.value)}
-                  placeholder="T-1"
+                  placeholder="Search by title or T-number"
+                  autoComplete="off"
                   required
                   aria-invalid={!!error}
                 />
@@ -428,6 +495,28 @@ export function Duplicates({
                 </Button>
               </div>
               <FieldError>{error}</FieldError>
+              {matches.length > 0 && (
+                <ul className="link-ticket-results" aria-label="Matches">
+                  {matches.map((item) => (
+                    <li key={item.reference}>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          setCanonical(item.reference);
+                          void loadPreview(item.reference);
+                        }}
+                      >
+                        <StatusIcon status={item.status} size={14} decorative />
+                        <span className="link-ticket-reference">
+                          {item.reference}
+                        </span>
+                        <span>{item.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Field>
           </FieldGroup>
           <Button

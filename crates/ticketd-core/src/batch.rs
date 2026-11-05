@@ -12,7 +12,7 @@ pub struct TicketChange {
     #[serde(flatten)]
     pub patch: TicketPatch,
     #[serde(default)]
-    pub notes: Vec<String>,
+    pub activities: Vec<String>,
     #[serde(default)]
     pub add_tags: Vec<String>,
     #[serde(default)]
@@ -73,7 +73,7 @@ impl Workspace {
             .map(|operation| match operation {
                 BatchOperation::Create { .. } => 1,
                 BatchOperation::Change { change, .. } => {
-                    1 + change.notes.len()
+                    1 + change.activities.len()
                         + change.add_tags.len()
                         + change.remove_tags.len()
                         + change.add_blockers.len()
@@ -145,6 +145,22 @@ impl Workspace {
                     }
                     BatchOperation::Change { ticket, change } => {
                         let reference = resolve(&names, &ticket)?;
+                        if let Some(status) = change.patch.status {
+                            // Leaving Duplicate would silently drop which ticket it
+                            // duplicates; that is a deliberate act on one ticket.
+                            let current = self.show_ticket(&reference)?;
+                            if current.status == crate::Status::Duplicate
+                                && status != current.status
+                            {
+                                return Err(Error::InvalidBatch(format!(
+                                    "{reference} is a duplicate{}; open it and remove the duplicate link before changing its status",
+                                    current
+                                        .duplicate_of
+                                        .map(|of| format!(" of {of}"))
+                                        .unwrap_or_default()
+                                )));
+                            }
+                        }
                         self.apply_change_inner(&reference, *change, &names, started)
                     }
                 }
@@ -185,11 +201,11 @@ impl Workspace {
     ) -> Result<Ticket, Error> {
         let agent = change.patch.editing_agent.clone();
         self.change_ticket(reference, change.patch)?;
-        for note in change.notes {
+        for note in change.activities {
             if started.elapsed() > Duration::from_secs(10) {
                 return Err(Error::InvalidBatch("time limit exceeded".into()));
             }
-            self.add_note(reference, &note, agent.as_deref())?;
+            self.add_activity(reference, &note, agent.as_deref())?;
         }
         for tag in change.add_tags {
             if started.elapsed() > Duration::from_secs(10) {

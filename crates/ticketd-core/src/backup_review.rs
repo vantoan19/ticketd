@@ -11,16 +11,18 @@ use crate::{
 /// What a workspace holds, for comparing it with a backup before a restore.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceSummary {
-    /// Latest recorded activity (ticket history, note or evidence edit), as an
+    /// Latest recorded activity (ticket history, Activity, Document or evidence edit), as an
     /// RFC 3339 timestamp, or `None` when there is none yet. Edits that carry no
     /// timestamp, such as title, tags, follows and reminders, are not counted.
     pub last_change: Option<String>,
     /// Tickets outside Trash.
     pub tickets: u64,
-    pub notes: u64,
+    pub activities: u64,
+    /// All Documents, including supporting details and Trash.
+    pub documents: u64,
     pub evidence: u64,
     pub projects: u64,
-    pub efforts: u64,
+    pub plans: u64,
 }
 
 /// The result of checking a backup file.
@@ -101,11 +103,17 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     } else {
         count(connection, "tickets")?
     };
+    let activity_table = if table_exists(connection, "activities")? {
+        "activities"
+    } else {
+        "notes"
+    };
     let mut latest: Option<String> = None;
     for (table, column) in [
         ("ticket_history", "timestamp"),
-        ("notes", "updated_at"),
+        (activity_table, "updated_at"),
         ("evidence", "updated_at"),
+        ("documents", "updated_at"),
     ] {
         if !table_exists(connection, table)? {
             continue;
@@ -121,10 +129,11 @@ fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     Ok(WorkspaceSummary {
         last_change: latest,
         tickets,
-        notes: count(connection, "notes")?,
+        activities: count(connection, activity_table)?,
+        documents: count(connection, "documents")?,
         evidence: count(connection, "evidence")?,
         projects: count(connection, "projects")?,
-        efforts: count(connection, "efforts")?,
+        plans: count(connection, "plans")?,
     })
 }
 

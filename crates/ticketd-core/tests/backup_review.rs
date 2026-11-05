@@ -13,10 +13,10 @@ fn populated(path: &std::path::Path) -> Workspace {
     workspace.create_ticket("Trashed").unwrap();
     workspace.set_trashed("T-3", true, None).unwrap();
     workspace
-        .add_note(&first.reference, "A note", None)
+        .add_activity(&first.reference, "A note", None)
         .unwrap();
     workspace
-        .add_note(&second.reference, "Another", None)
+        .add_activity(&second.reference, "Another", None)
         .unwrap();
     workspace
         .add_evidence(
@@ -30,8 +30,8 @@ fn populated(path: &std::path::Path) -> Workspace {
         )
         .unwrap();
     workspace.create_project("App", "/tmp/app").unwrap();
-    workspace.create_effort("Release").unwrap();
-    workspace.create_effort("Cleanup").unwrap();
+    workspace.create_plan("Release").unwrap();
+    workspace.create_plan("Cleanup").unwrap();
     workspace
 }
 
@@ -56,10 +56,10 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     assert_eq!(
         (
             summary.tickets,
-            summary.notes,
+            summary.activities,
             summary.evidence,
             summary.projects,
-            summary.efforts
+            summary.plans
         ),
         (2, 2, 1, 1, 2)
     );
@@ -68,6 +68,44 @@ fn a_valid_backup_is_summarized_beside_the_workspace_without_changing_either() {
     assert_eq!(inspection.path, backup.display().to_string());
     assert_eq!(std::fs::read(&backup).unwrap(), before);
     assert_eq!(workspace.list_tickets().unwrap().len(), 3);
+}
+
+#[test]
+fn document_counts_and_changes_are_visible_in_backup_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .create_document(Some("Before"), "Context")
+        .unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    workspace
+        .create_document(Some("After"), "More context")
+        .unwrap();
+    let inspection = workspace.inspect_backup(&backup).unwrap();
+    let BackupCheck::Valid { summary, .. } = inspection.check else {
+        panic!("valid backup")
+    };
+    assert_eq!(summary.documents, 1);
+    assert_eq!(inspection.current.documents, 2);
+    assert!(summary.last_change.is_some());
+    assert_eq!(workspace.workspace_info().unwrap().documents, 2);
+}
+
+#[test]
+fn a_pre_document_backup_reports_zero_documents() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("old.sqlite3");
+    Connection::open(&backup)
+        .unwrap()
+        .execute_batch("CREATE TABLE tickets (id TEXT PRIMARY KEY); PRAGMA user_version = 1;")
+        .unwrap();
+    let BackupCheck::Valid { summary, .. } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("expected a valid old backup")
+    };
+    assert_eq!(summary.documents, 0);
 }
 
 #[test]
@@ -81,10 +119,11 @@ fn an_empty_workspace_has_no_last_change() {
     let expected = WorkspaceSummary {
         last_change: None,
         tickets: 0,
-        notes: 0,
+        activities: 0,
+        documents: 0,
         evidence: 0,
         projects: 0,
-        efforts: 0,
+        plans: 0,
     };
     assert_eq!(inspection.current, expected);
     assert_eq!(
@@ -261,4 +300,116 @@ fn restore_accepts_what_inspection_calls_valid_and_refuses_the_rest() {
     drop(workspace);
     let error = Workspace::restore(&path, &unrelated).unwrap_err();
     assert!(error.to_string().contains("not a ticketd"), "{error}");
+}
+
+#[test]
+fn backup_inspection_rejects_missing_context_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let connection = Connection::open(&backup).unwrap();
+    connection
+        .execute_batch("DROP TABLE context_mentions")
+        .unwrap();
+    drop(connection);
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("expected missing tables")
+    };
+    assert!(tables.contains(&"context_mentions".to_owned()));
+}
+
+#[test]
+fn incomplete_context_schema_cannot_replace_healthy_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for table in [
+        "document_tags",
+        "document_pins",
+        "activity_mentions",
+        "document_fts",
+        "ticket_graph_fts",
+        "plan_graph_fts",
+    ] {
+        let backup = dir.path().join(format!("{table}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TABLE {table}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("missing {table} accepted")
+        };
+        assert!(tables.contains(&table.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
+
+#[test]
+fn backup_missing_search_maintenance_trigger_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    Connection::open(&backup)
+        .unwrap()
+        .execute_batch("DROP TRIGGER document_fts_update")
+        .unwrap();
+    let BackupCheck::MissingTables { tables } = workspace.inspect_backup(&backup).unwrap().check
+    else {
+        panic!("missing trigger accepted")
+    };
+    assert!(tables.contains(&"document_fts_update".to_owned()));
+}
+
+#[test]
+fn missing_context_maintenance_triggers_cannot_replace_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = populated(&path);
+    for trigger in [
+        "ticket_entity_insert",
+        "plan_entity_insert",
+        "numeric_mentions_activity_delete",
+        "activity_graph_numbers_insert",
+        "activity_graph_numbers_delete",
+        "activity_graph_targets_insert",
+        "activity_graph_targets_delete",
+        "document_heading_insert",
+        "document_heading_update",
+    ] {
+        let backup = dir.path().join(format!("{trigger}.sqlite3"));
+        workspace.backup(&backup).unwrap();
+        Connection::open(&backup)
+            .unwrap()
+            .execute_batch(&format!("DROP TRIGGER {trigger}"))
+            .unwrap();
+        let BackupCheck::MissingTables { tables } =
+            workspace.inspect_backup(&backup).unwrap().check
+        else {
+            panic!("missing {trigger} accepted")
+        };
+        assert!(tables.contains(&trigger.to_owned()));
+        assert!(Workspace::restore(&path, &backup).is_err());
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
+
+#[test]
+fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    populated(&source).backup(&backup).unwrap();
+    let target = dir.path().join("new-computer.sqlite3");
+    let missing = dir.path().join("nope.sqlite3");
+    let error = Workspace::restore(&target, &missing).unwrap_err();
+    assert!(error.to_string().contains("nope.sqlite3"), "{error}");
+    Workspace::restore(&target, &backup).unwrap();
+    assert!(Workspace::open(&target).unwrap().show_ticket("T-1").is_ok());
 }

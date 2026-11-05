@@ -41,7 +41,7 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket => ({
   body: "Cache entries never expire.",
   tags: [],
   project_id: null,
-  effort_id: null,
+  plan_id: null,
   availability: null,
   parent: null,
   children: [],
@@ -119,7 +119,7 @@ function rail(value: Ticket, refresh = vi.fn(async () => {})) {
     <TicketProperties
       ticket={value}
       projects={[]}
-      efforts={[]}
+      plans={[]}
       onSaved={() => {}}
       refresh={refresh}
     />,
@@ -625,7 +625,7 @@ test("connecting the source in Settings makes a local ticket publishable without
       <TicketProperties
         ticket={ticket()}
         projects={[]}
-        efforts={[]}
+        plans={[]}
         onSaved={() => {}}
         refresh={async () => {}}
       />

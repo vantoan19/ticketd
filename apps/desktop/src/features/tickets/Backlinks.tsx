@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { DocumentNavigation } from "@/features/documents/navigation";
+import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
 import { client } from "@/lib/api/client";
+import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
 import "./backlinks.css";
@@ -22,13 +25,19 @@ export type MentionTarget = {
 
 export function Backlinks({
   reference,
+  ticketId,
   revision,
   select,
 }: {
   reference: string;
+  ticketId?: string;
   revision: number;
   select: (target: MentionTarget) => void;
 }) {
+  const openDocument = useContext(DocumentNavigation);
+  const [documentLinks, setDocumentLinks] = useState<
+    Awaited<ReturnType<typeof documents.links>>[1]
+  >([]);
   const [links, setLinks] = useState<Link[]>([]);
   const [noteDates, setNoteDates] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
@@ -44,11 +53,13 @@ export function Backlinks({
         // The mention itself carries no date, so read each note's.
         const dated = await Promise.all(
           result.flatMap((link) =>
-            link.note_id
+            link.activity_id
               ? [
                   client
-                    .note(link.source_reference, link.note_id)
-                    .then((note) => [link.note_id, note?.created_at] as const)
+                    .activity(link.source_reference, link.activity_id)
+                    .then(
+                      (note) => [link.activity_id, note?.reported_at] as const,
+                    )
                     .catch(() => null),
                 ]
               : [],
@@ -70,20 +81,68 @@ export function Backlinks({
       active = false;
     };
   }, [reference, revision, offset]);
-  if (!error && links.length === 0 && offset === 0) return null;
+  useEffect(() => {
+    let active = true;
+    if (!ticketId)
+      return () => {
+        active = false;
+      };
+    // Incoming links mix tickets, Plans and Documents; page through them so
+    // Document mentions past the first 100 links are not lost.
+    void (async () => {
+      const found: typeof documentLinks = [];
+      for (let page = 0; page < 5; page += 1) {
+        const [, incoming] = await documents.links(ticketId, page * 100);
+        found.push(
+          ...incoming.filter((link) => link.source_kind === "document"),
+        );
+        if (incoming.length < 100) break;
+      }
+      if (active) setDocumentLinks(found);
+    })().catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [ticketId, revision]);
+  if (
+    !error &&
+    links.length === 0 &&
+    documentLinks.length === 0 &&
+    offset === 0
+  )
+    return null;
   return (
     <section className="backlinks" aria-label="Mentioned in">
       <h3>
         Mentioned in{" "}
         <span className="text-muted-foreground">
-          {offset === 0 ? (links.length < 20 ? links.length : "20+") : ""}
+          {offset === 0
+            ? links.length < 20
+              ? links.length + documentLinks.length
+              : "20+"
+            : ""}
         </span>
       </h3>
       {error && <p role="alert">{error}</p>}
       <ul className="backlink-list">
+        {documentLinks.map((link) => (
+          <li key={`${link.source_id}-${link.passage}`}>
+            <button
+              type="button"
+              className="backlink-source"
+              onClick={() => openDocument?.(link.source_id)}
+            >
+              <strong>
+                {link.source_label}
+                {link.source_trashed ? " (Trash)" : ""}
+              </strong>
+              <span>{plainPassage(link.passage)}</span>
+            </button>
+          </li>
+        ))}
         {links.map((link, index) => (
           <li
-            key={`${link.source_reference}-${link.note_id ?? "description"}-${index}`}
+            key={`${link.source_reference}-${link.activity_id ?? "description"}-${index}`}
           >
             <button
               type="button"
@@ -92,7 +151,7 @@ export function Backlinks({
                 select({
                   reference: link.source_reference,
                   mentioned: reference,
-                  noteId: link.note_id,
+                  noteId: link.activity_id,
                   passage: link.passage,
                   start: link.mention_start,
                   end: link.mention_end,
@@ -104,12 +163,15 @@ export function Backlinks({
                 <span>{link.source_title}</span>
               </span>
               <span className="backlink-where">
-                {link.note_id
-                  ? `Note${noteDates[link.note_id] ? ` · ${formatDateTime(noteDates[link.note_id] ?? "")}` : ""}`
+                {link.activity_id
+                  ? `Update${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
                   : "Description"}
               </span>
               <span className="mention-passage">
-                <EmphasizedPassage text={link.passage} reference={reference} />
+                <EmphasizedPassage
+                  text={plainPassage(link.passage)}
+                  reference={reference}
+                />
               </span>
             </button>
           </li>

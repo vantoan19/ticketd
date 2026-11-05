@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { EffortHeader } from "@/features/efforts/EffortHeader";
-import { useEffortView } from "@/features/efforts/useEffortView";
-import { effortsClient } from "@/lib/api/efforts";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { PlanHeader } from "@/features/plans/PlanHeader";
+import { usePlanView } from "@/features/plans/usePlanView";
+import { plansClient } from "@/lib/api/plans";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -23,25 +24,29 @@ export function TicketListPane({
   workspace,
   bulk,
   listRef,
+  planMode,
+  setPlanMode,
   onOpen,
   onCreate,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
+  planMode: "list" | "dependencies";
+  setPlanMode: (mode: "list" | "dependencies") => void;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
   const {
     projects,
-    efforts,
+    plans,
     filter,
     query,
     setQuery,
     offset,
     setOffset,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,
@@ -68,15 +73,30 @@ export function TicketListPane({
     navigation,
     clearFilters,
     queryError,
+    refreshFailed,
     revision,
   } = workspace;
-  // An Effort scope shows the Effort's own header instead of a plain title.
+  // An Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
-  const effortScope = !trash && navigation.effort ? navigation.effort : "";
-  const scopedEffort = efforts.find((item) => item.id === effortScope);
-  const effortState = useEffortView(effortScope, revision, refresh);
+  const [removed, setRemoved] = useState<{
+    reference: string;
+    plan: string;
+    name: string;
+  } | null>(null);
+  // The Undo offer is short-lived: it must not linger after the ticket is re-added.
+  useEffect(() => {
+    if (!removed) return;
+    const timer = window.setTimeout(() => setRemoved(null), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [removed]);
+  const planScope = !trash && navigation.plan ? navigation.plan : "";
+  const scopedPlan = plans.find((item) => item.id === planScope);
+  // An archived Plan is read-only: no new tickets into it, no removing from it.
+  const planWritable = scopedPlan !== undefined && !scopedPlan.archived;
+  const addDisabled = scopedPlan?.archived === true;
+  const planState = usePlanView(planScope, revision, refresh);
   const filtered =
-    navigation.effort !== effort ||
+    navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family) ||
@@ -95,7 +115,7 @@ export function TicketListPane({
     offset,
     filter,
     query,
-    effort,
+    plan,
     status,
     tags,
     availability,
@@ -135,8 +155,8 @@ export function TicketListPane({
   const filterProps = {
     query,
     setQuery,
-    effort,
-    setEffort,
+    plan,
+    setPlan,
     status,
     setStatus,
     tags,
@@ -145,7 +165,7 @@ export function TicketListPane({
     setAvailability,
     family,
     setFamily,
-    efforts,
+    plans,
     setOffset,
     navigation,
     clearFilters,
@@ -157,15 +177,16 @@ export function TicketListPane({
       tabIndex={-1}
       aria-labelledby="tickets-heading"
     >
-      {scopedEffort ? (
-        <EffortHeader
-          effort={scopedEffort}
-          efforts={efforts}
+      {scopedPlan ? (
+        <PlanHeader
+          key={scopedPlan.id}
+          plan={scopedPlan}
+          plans={plans}
           projects={projects}
-          state={effortState}
+          state={planState}
         >
           <TicketFilters part="controls" {...filterProps} />
-        </EffortHeader>
+        </PlanHeader>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
@@ -194,177 +215,246 @@ export function TicketListPane({
           )}
         </div>
       )}
-      {!trash && (configuredSources.length > 0 || source !== "all") && (
-        <>
-          <SourceFilter
-            value={source}
-            onChange={setSource}
-            counts={sourceCounts}
-            providers={configuredSources}
+      {scopedPlan && (
+        <div className="plan-view-switch">
+          <SegmentedControl
+            aria-label="Plan view"
+            value={planMode}
+            onValueChange={setPlanMode}
+            options={[
+              { value: "list", label: "List" },
+              { value: "dependencies", label: "Dependencies" },
+            ]}
           />
-        </>
-      )}
-      {!trash && <TicketFilters part="chips" {...filterProps} />}
-
-      {queryError ? (
-        <div className="empty-state" role="alert">
-          <strong>Could not load tickets</strong>
-          <p>Try refreshing the current view.</p>
-          <Button variant="outline" onClick={() => void refresh()}>
-            Retry
-          </Button>
         </div>
-      ) : loading && tickets.length === 0 ? (
-        <TicketRowsSkeleton />
-      ) : tickets.length === 0 ? (
-        <div className="empty-state">
-          {trash ? (
-            <p>No tickets in trash.</p>
-          ) : filtered ? (
+      )}
+      {removed && removed.plan === planScope && (
+        <p className="plan-undo" role="status">
+          Removed {removed.reference} from {removed.name}.{" "}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={planState.pending}
+            onClick={() =>
+              void planState
+                .run(() =>
+                  plansClient.setMember(removed.reference, removed.plan),
+                )
+                .then(() => setRemoved(null))
+            }
+          >
+            Undo
+          </Button>
+        </p>
+      )}
+      {
+        <>
+          {!trash && (configuredSources.length > 0 || source !== "all") && (
             <>
-              <strong>No matching tickets</strong>
-              {query ? (
-                <p>
-                  Nothing matches <q>{query}</q>
-                  {tags || status || availability || family || effort
-                    ? " with the current filters"
-                    : ""}
-                  .
-                </p>
+              <SourceFilter
+                value={source}
+                onChange={setSource}
+                counts={sourceCounts}
+                providers={configuredSources}
+              />
+            </>
+          )}
+          {!trash && <TicketFilters part="chips" {...filterProps} />}
+
+          {refreshFailed && !queryError && (
+            <p role="status" className="refresh-failed">
+              Can’t refresh. Showing the last list.{" "}
+              <Button variant="link" size="sm" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </p>
+          )}
+          {queryError ? (
+            <div className="empty-state" role="alert">
+              <strong>Could not load tickets</strong>
+              <p>Try refreshing the current view.</p>
+              <Button variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </div>
+          ) : loading && tickets.length === 0 ? (
+            <TicketRowsSkeleton />
+          ) : tickets.length === 0 ? (
+            <div className="empty-state">
+              {trash ? (
+                <p>No tickets in trash.</p>
+              ) : filtered ? (
+                <>
+                  <strong>No matching tickets</strong>
+                  {query ? (
+                    <p>
+                      Nothing matches <q>{query}</q>
+                      {tags || status || availability || family || plan
+                        ? " with the current filters"
+                        : ""}
+                      .
+                    </p>
+                  ) : (
+                    <p>Nothing matches the current filters.</p>
+                  )}
+                  <Button variant="outline" onClick={clearFilters}>
+                    {query &&
+                    !tags &&
+                    !status &&
+                    !availability &&
+                    !family &&
+                    !plan
+                      ? "Clear search"
+                      : "Clear filters"}
+                  </Button>
+                </>
+              ) : planScope ? (
+                <>
+                  <strong>No tickets in this Plan</strong>
+                  <p>Start with a new ticket, or bring in existing ones.</p>
+                  <div className="plan-empty-actions">
+                    <Button onClick={(event) => onCreate(event.currentTarget)}>
+                      <Plus data-icon="inline-start" /> Create ticket
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => planState.setAdding(true)}
+                    >
+                      Add existing tickets
+                    </Button>
+                  </div>
+                </>
+              ) : navigation.project !== "all" ||
+                navigation.plan ||
+                navigation.kind !== "all" ? (
+                <>
+                  <strong>No tickets in this scope</strong>
+                  <p>Create a ticket or choose another view.</p>
+                  <Button
+                    variant="outline"
+                    onClick={(event) => onCreate(event.currentTarget)}
+                  >
+                    Create ticket
+                  </Button>
+                </>
               ) : (
-                <p>Nothing matches the current filters.</p>
+                <>
+                  <strong>Your workspace is ready</strong>
+                  <p>
+                    Create your first ticket to start keeping track of work.
+                  </p>
+                  <Button onClick={(event) => onCreate(event.currentTarget)}>
+                    <Plus data-icon="inline-start" /> Create your first ticket
+                  </Button>
+                </>
               )}
-              <Button variant="outline" onClick={clearFilters}>
-                {query &&
-                !tags &&
-                !status &&
-                !availability &&
-                !family &&
-                !effort
-                  ? "Clear search"
-                  : "Clear filters"}
-              </Button>
-            </>
-          ) : effortScope ? (
-            <>
-              <strong>No tickets in this Effort</strong>
-              <p>Use Add tickets to bring existing tickets into it.</p>
-            </>
-          ) : navigation.project !== "all" ||
-            navigation.effort ||
-            navigation.kind !== "all" ? (
-            <>
-              <strong>No tickets in this scope</strong>
-              <p>Create a ticket or choose another view.</p>
-              <Button
-                variant="outline"
-                onClick={(event) => onCreate(event.currentTarget)}
-              >
-                Create ticket
-              </Button>
-            </>
+            </div>
           ) : (
             <>
-              <strong>Your workspace is ready</strong>
-              <p>Create your first ticket to start keeping track of work.</p>
-              <Button onClick={(event) => onCreate(event.currentTarget)}>
-                <Plus data-icon="inline-start" /> Create your first ticket
-              </Button>
+              {showBulk && bulk.selection.length > 0 && (
+                // The bar is last in the page but is the next thing to reach.
+                <a
+                  className="skip-link"
+                  href="#bulk-controls"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    document.getElementById("bulk-controls")?.focus();
+                  }}
+                >
+                  Skip to selection actions
+                </a>
+              )}
+              <TicketList
+                tickets={visibleTickets}
+                scope={{
+                  showPlan: !navigation.plan,
+                  showProject: navigation.project === "all",
+                  plans,
+                  projects,
+                }}
+                selected={selected}
+                {...(grouped &&
+                  counts && {
+                    grouping: {
+                      counts,
+                      ...(!addDisabled && {
+                        onAdd: (status: string, trigger: HTMLButtonElement) => {
+                          if (status === "Duplicate") setMarkingDuplicate(true);
+                          else onCreate(trigger, status);
+                        },
+                      }),
+                    },
+                  })}
+                selectable={!trash}
+                selectionDisabled={bulk.pending}
+                bulkSelection={bulk.selection}
+                onToggle={bulk.toggle}
+                onOpen={onOpen}
+                {...(scopedPlan &&
+                  planWritable && {
+                    rowAction: (ticket: Ticket) => (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={planState.pending}
+                        aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                        title="Remove from Plan"
+                        onClick={() =>
+                          void planState
+                            .run(() =>
+                              plansClient.setMember(ticket.reference, null),
+                            )
+                            .then((done) => {
+                              if (done)
+                                setRemoved({
+                                  reference: ticket.reference,
+                                  plan: scopedPlan.id,
+                                  name: scopedPlan.name,
+                                });
+                            })
+                        }
+                      >
+                        <X />
+                      </Button>
+                    ),
+                  })}
+              />
             </>
           )}
-        </div>
-      ) : (
-        <>
-          {showBulk && bulk.selection.length > 0 && (
-            // The bar is last in the page but is the next thing to reach.
-            <a
-              className="skip-link"
-              href="#bulk-controls"
-              onClick={(event) => {
-                event.preventDefault();
-                document.getElementById("bulk-controls")?.focus();
-              }}
-            >
-              Skip to selection actions
-            </a>
+          {!trash && (offset > 0 || total > PAGE_SIZE) && (
+            <div className="pagination">
+              <Button
+                variant="ghost"
+                size="sm"
+                ref={previousButton}
+                disabled={offset === 0}
+                onClick={() => {
+                  paged.current = "previous";
+                  setOffset(Math.max(0, offset - PAGE_SIZE));
+                }}
+              >
+                Previous
+              </Button>
+              <span>
+                {" "}
+                Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                ref={nextButton}
+                disabled={offset + tickets.length >= total}
+                onClick={() => {
+                  paged.current = "next";
+                  setOffset(offset + PAGE_SIZE);
+                }}
+              >
+                Next
+              </Button>
+            </div>
           )}
-          <TicketList
-            tickets={visibleTickets}
-            scope={{
-              showEffort: !navigation.effort,
-              showProject: navigation.project === "all",
-              efforts,
-              projects,
-            }}
-            selected={selected}
-            {...(grouped &&
-              counts && {
-                grouping: {
-                  counts,
-                  onAdd: (status: string, trigger: HTMLButtonElement) => {
-                    if (status === "Duplicate") setMarkingDuplicate(true);
-                    else onCreate(trigger, status);
-                  },
-                },
-              })}
-            selectable={!trash}
-            selectionDisabled={bulk.pending}
-            bulkSelection={bulk.selection}
-            onToggle={bulk.toggle}
-            onOpen={onOpen}
-            {...(scopedEffort && {
-              rowAction: (ticket: Ticket) => (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={effortState.pending}
-                  aria-label={`Remove ${ticket.reference} from ${scopedEffort.name}`}
-                  title="Remove from Effort"
-                  onClick={() =>
-                    void effortState.run(() =>
-                      effortsClient.setMember(ticket.reference, null),
-                    )
-                  }
-                >
-                  <X />
-                </Button>
-              ),
-            })}
-          />
         </>
-      )}
-      {!trash && (offset > 0 || total > PAGE_SIZE) && (
-        <div className="pagination">
-          <Button
-            variant="ghost"
-            size="sm"
-            ref={previousButton}
-            disabled={offset === 0}
-            onClick={() => {
-              paged.current = "previous";
-              setOffset(Math.max(0, offset - PAGE_SIZE));
-            }}
-          >
-            Previous
-          </Button>
-          <span>
-            {" "}
-            Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            ref={nextButton}
-            disabled={offset + tickets.length >= total}
-            onClick={() => {
-              paged.current = "next";
-              setOffset(offset + PAGE_SIZE);
-            }}
-          >
-            Next
-          </Button>
-        </div>
-      )}
+      }
       <MarkDuplicateDialog
         open={markingDuplicate}
         onOpenChange={setMarkingDuplicate}
@@ -375,7 +465,7 @@ export function TicketListPane({
           bulk={bulk}
           visible={visibleTickets}
           projects={projects}
-          efforts={efforts}
+          plans={plans}
         />
       )}
     </section>

@@ -1,8 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
-    Availability, BatchOperation, ContextOptions, EvidenceInput, EvidenceKind, NotePatch, Status,
-    TicketFilter, TicketPatch, Workspace, WriteRequest,
+    ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
+    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
 #[derive(Parser)]
@@ -14,14 +14,167 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum ReminderCommand {
+    /// Show when a ticket's reminder is due
     Show { reference: String },
+    /// Set a reminder (due time must be RFC 3339 with an offset)
     Set { reference: String, due_at: String },
+    /// Move a reminder to a later time
     Snooze { reference: String, due_at: String },
+    /// Remove a ticket's reminder
     Dismiss { reference: String },
 }
 
 #[derive(Subcommand)]
+enum DocumentCommand {
+    /// List what an item (Document, ticket or Plan ID) links to: its outgoing references
+    References {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// List everything that links to an item, of any kind (ticket, Plan or Document)
+    Incoming {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Print the Markdown link text for a ticket, Plan or Document, to paste into a body
+    Link { target: String },
+    /// Attach a Document to a ticket's context without editing its description
+    LinkTicket {
+        id: String,
+        ticket: String,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Remove a Document attached with link-ticket (mentions in the description stay)
+    UnlinkTicket {
+        id: String,
+        ticket: String,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Create a ticket from a Document and link them
+    CreateTicket { id: String, title: String },
+    /// List only tickets that mention a Document, with passages
+    Backlinks {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Create a Document (JSON result includes its id)
+    Create {
+        /// Optional title; without one the first line of the body is its heading
+        #[arg(long)]
+        title: Option<String>,
+        /// The Markdown body
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Read the Markdown body from a file (- reads stdin)
+        #[arg(long)]
+        body_file: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Show a Document with its full body
+    Show { id: String },
+    /// Show a Document and record that it was opened
+    Open { id: String },
+    /// Keep an activity-details Document so it appears in the default Documents list
+    Keep { id: String },
+    /// List recently opened or changed Documents
+    Recent {
+        #[arg(long)]
+        include_support: bool,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Search Document titles and bodies
+    Search {
+        query: String,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        include_support: bool,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// List pinned Documents
+    Pins {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Pin a Document (or unpin with --remove)
+    Pin {
+        id: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// List a Document's tags
+    Tags { id: String },
+    /// Add a tag to a Document (or remove with --remove)
+    Tag {
+        id: String,
+        tag: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Read a bounded page of Document body text (character offsets)
+    Read {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+        #[arg(long, default_value_t = 4096)]
+        limit: usize,
+    },
+    /// List trashed Documents
+    TrashList {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Move a Document to trash
+    Trash { id: String },
+    /// Restore a Document from trash
+    Restore { id: String },
+    /// Change a Document's title or body (supply only what changes)
+    Change {
+        id: String,
+        /// Set the title
+        #[arg(long, conflicts_with = "clear_title")]
+        title: Option<String>,
+        /// Remove the title so the heading comes from the body
+        #[arg(long)]
+        clear_title: bool,
+        /// Replace the Markdown body
+        #[arg(long, conflicts_with = "body_file")]
+        body: Option<String>,
+        /// Replace the body with a file's contents (- reads stdin)
+        #[arg(long)]
+        body_file: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// Capture and read Documents
+    Document {
+        #[command(subcommand)]
+        command: DocumentCommand,
+    },
     /// Manage a personal ticket reminder (times require an RFC 3339 offset)
     Reminder {
         #[command(subcommand)]
@@ -43,7 +196,7 @@ enum Command {
         #[arg(long)]
         file: Option<String>,
     },
-    /// Execute a JSON write request from a file or stdin; retain its result for safe retries
+    /// Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior
     Write {
         file: String,
         #[arg(long)]
@@ -61,6 +214,8 @@ enum Command {
         title: String,
         #[arg(long)]
         project: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
     },
     /// Patch ticket content; use --body-file - to read stdin
     Change {
@@ -101,10 +256,10 @@ enum Command {
         #[command(subcommand)]
         command: EvidenceCommand,
     },
-    /// Manage ticket notes
-    Note {
+    /// Manage ticket activities
+    Activity {
         #[command(subcommand)]
-        command: NoteCommand,
+        command: ActivityCommand,
     },
     /// Add a tag (trimmed and lowercased; duplicates are ignored)
     AddTag { reference: String, tag: String },
@@ -169,15 +324,17 @@ enum Command {
         #[arg(long)]
         agent: Option<String>,
     },
-    /// Manage Efforts
-    Effort {
+    /// Manage Plans
+    Plan {
         #[command(subcommand)]
-        command: EffortCommand,
+        command: PlanCommand,
     },
     /// List tickets with combined filters
     List {
         #[command(flatten)]
         filters: FindArgs,
+        #[arg(long)]
+        latest_update: bool,
     },
     /// List incoming ticket references with passage context
     Backlinks {
@@ -193,15 +350,20 @@ enum Command {
         #[arg(long)]
         project: bool,
         #[arg(long)]
-        effort: bool,
+        plan: bool,
         #[arg(long)]
         relationships: bool,
         #[arg(long)]
-        notes: bool,
+        activities: bool,
+        #[arg(long)]
+        latest_update: bool,
         #[arg(long)]
         evidence: bool,
         #[arg(long)]
         backlinks: bool,
+        /// The Documents attached to the ticket with `document link-ticket`
+        #[arg(long)]
+        documents: bool,
         /// The source's comments and events (read-only; authors are the source's, not editing agents)
         #[arg(long)]
         conversation: bool,
@@ -213,9 +375,43 @@ enum Command {
         query: String,
         #[command(flatten)]
         filters: FindArgs,
+        #[arg(long)]
+        latest_update: bool,
     },
     /// View a bounded dependency graph around a ticket
-    Graph { reference: String },
+    Graph {
+        #[arg(required_unless_present_any = ["plan", "workspace"], conflicts_with_all = ["plan", "workspace"])]
+        reference: Option<String>,
+        #[arg(long)]
+        plan: Option<String>,
+        /// Browse a bounded page of workspace context
+        #[arg(long, requires = "context", conflicts_with = "plan")]
+        workspace: bool,
+        #[arg(long, requires = "workspace")]
+        search: Option<String>,
+        #[arg(long, requires = "workspace")]
+        kind: Option<String>,
+        #[arg(long, requires = "workspace")]
+        tag: Option<String>,
+        #[arg(long, requires = "workspace")]
+        relationship: Option<String>,
+        #[arg(long, requires = "workspace")]
+        cursor: Option<String>,
+        #[arg(long, requires = "workspace", default_value_t = 3)]
+        adjacency_limit: usize,
+        /// Show contextual connections rather than dependencies
+        #[arg(long, conflicts_with = "plan")]
+        context: bool,
+        /// Include generated Activity details
+        #[arg(long, requires = "context")]
+        include_details: bool,
+        /// Expand connections around a previously visible item (repeatable)
+        #[arg(long, requires = "context")]
+        expand: Vec<String>,
+        /// Continue a group using its JSON page request (repeatable)
+        #[arg(long, requires = "context")]
+        page: Vec<String>,
+    },
     /// Print the workspace path and format versions as JSON, without creating or migrating it
     Workspace,
     /// Show a ticket by its reference
@@ -346,7 +542,7 @@ struct FindArgs {
     #[arg(long)]
     unlinked: bool,
     #[arg(long)]
-    effort: Option<String>,
+    plan: Option<String>,
     #[arg(long)]
     status: Option<Status>,
     /// Require every supplied tag (AND); repeat --tag for multiple tags
@@ -386,7 +582,7 @@ impl FindArgs {
             query,
             project: self.project,
             unlinked: self.unlinked,
-            effort: self.effort,
+            plan: self.plan,
             status: self.status,
             tags: self.tag,
             availability: self.availability.map(|a| match a {
@@ -409,33 +605,50 @@ impl FindArgs {
 }
 
 #[derive(Subcommand)]
-enum EffortCommand {
-    Create {
-        name: String,
+enum PlanCommand {
+    /// Show a Plan's spec and supporting Documents (add --bodies for their text)
+    Context {
+        id: String,
+        #[arg(long)]
+        bodies: bool,
     },
+    /// Add a supporting Document to a Plan (or remove with --remove)
+    Document {
+        id: String,
+        document_id: String,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Designate a Plan's primary spec Document, or clear it by omitting the ID
+    Spec {
+        id: String,
+        document_id: Option<String>,
+    },
+    /// Create a Plan
+    Create { name: String },
+    /// List Plans (--all includes archived ones)
     List {
         #[arg(long)]
         all: bool,
     },
-    Show {
-        id: String,
-    },
-    Rename {
-        id: String,
-        name: String,
-    },
-    Archive {
-        id: String,
-    },
-    Reactivate {
-        id: String,
-    },
+    /// Show a Plan with its tickets
+    Show { id: String },
+    /// Rename a Plan
+    Rename { id: String, name: String },
+    /// Set a Plan's purpose text
+    Purpose { id: String, purpose: String },
+    /// Archive a Plan
+    Archive { id: String },
+    /// Make an archived Plan active again
+    Reactivate { id: String },
+    /// Add a ticket to a Plan
     Add {
         id: String,
         reference: String,
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Remove a ticket from its Plan
     Remove {
         reference: String,
         #[arg(long)]
@@ -444,27 +657,22 @@ enum EffortCommand {
 }
 #[derive(Subcommand)]
 enum ProjectCommand {
-    Create {
-        name: String,
-        path: String,
-    },
+    /// Create a project for a repository path
+    Create { name: String, path: String },
+    /// Change a project's name and path
     Edit {
         id: String,
         name: String,
         path: String,
     },
-    Show {
-        id: String,
-    },
+    /// Show a project
+    Show { id: String },
+    /// List projects
     List,
-    Register {
-        id: String,
-        path: String,
-    },
-    Unregister {
-        id: String,
-        path: String,
-    },
+    /// Register another checkout path for a project
+    Register { id: String, path: String },
+    /// Remove a registered checkout path from a project
+    Unregister { id: String, path: String },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -509,21 +717,22 @@ impl From<EvidenceFields> for EvidenceInput {
 }
 #[derive(Subcommand)]
 enum EvidenceCommand {
+    /// Record evidence (PR, commit, branch, worktree or verification) on a ticket
     Add {
         reference: String,
         #[command(flatten)]
         fields: EvidenceFields,
     },
+    /// Replace an evidence item's fields
     Edit {
         reference: String,
         id: String,
         #[command(flatten)]
         fields: EvidenceFields,
     },
-    Delete {
-        reference: String,
-        id: String,
-    },
+    /// Delete an evidence item
+    Delete { reference: String, id: String },
+    /// List a ticket's evidence
     List {
         reference: String,
         #[arg(long, default_value_t = 50)]
@@ -533,31 +742,51 @@ enum EvidenceCommand {
     },
 }
 #[derive(Subcommand)]
-enum NoteCommand {
-    /// Append a note, reading --file - from stdin
+enum ActivityCommand {
+    /// Append an activity, reading --file - from stdin
     Add {
         reference: String,
+        /// The brief: a short update that reads on its own. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
         #[arg(long, conflicts_with = "file")]
-        content: Option<String>,
-        #[arg(long)]
+        brief: Option<String>,
+        /// Read the brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
+        #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
+        /// Name of the agent posting this activity, shown beside it
         #[arg(long)]
         agent: Option<String>,
+        /// A file holding the activity details; they are saved as a new Document linked to the activity (- reads stdin)
+        #[arg(long, conflicts_with = "document")]
+        details_file: Option<String>,
+        /// The ID of an existing Document to attach as the activity's details
+        #[arg(long)]
+        document: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
-    /// Edit supplied fields of a note
+    /// Edit supplied fields of an activity
     Edit {
         reference: String,
         id: String,
+        /// The new brief text; it replaces the stored brief. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
         #[arg(long, conflicts_with = "file")]
-        content: Option<String>,
-        #[arg(long)]
+        brief: Option<String>,
+        /// Read the new brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
+        #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
+        /// Name of the agent making this edit, shown beside the activity
         #[arg(long)]
         agent: Option<String>,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
     },
-    /// Delete a note
+    /// Delete an activity
     Delete { reference: String, id: String },
-    /// Read notes in insertion order
+    /// Read an exact authored activity
+    Show { reference: String, id: String },
+    /// Read the activity feed, newest first
     List {
         reference: String,
         #[arg(long, default_value_t = 50)]
@@ -565,6 +794,14 @@ enum NoteCommand {
         #[arg(long, default_value_t = 0)]
         offset: u32,
     },
+}
+/// The value of a write result without its `{"kind","value"}` wrapper, so a
+/// retried command prints the same object as the first run.
+fn bare(result: WriteResult) -> Result<String, Box<dyn std::error::Error>> {
+    let wrapped = serde_json::to_value(&result)?;
+    Ok(wrapped
+        .get("value")
+        .map_or_else(|| wrapped.to_string(), ToString::to_string))
 }
 fn read_content(
     content: Option<String>,
@@ -581,8 +818,96 @@ fn read_content(
     })
 }
 
+/// Help for arguments that share a meaning everywhere; `parents` is the command
+/// path so an `id` reads as a Document, Plan, project or activity ID.
+fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
+    let group = parents.get(1).map(String::as_str).unwrap_or("");
+    Some(match id {
+        "id" => match group {
+            "document" => "The Document ID (see `document recent` or `document search`)",
+            "plan" => "The Plan ID (see `plan list`)",
+            "project" => "The project ID (see `project list`)",
+            "activity" => "The activity ID (see `activity list`)",
+            "evidence" => "The evidence ID (see `evidence list`)",
+            _ => "The ID",
+        },
+        "reference" => "The ticket reference, for example T-12",
+        "ticket" => "The ticket reference, for example T-12",
+        "agent" => "Name of the agent making this change, recorded in history and the feed",
+        "offset" => "Skip this many results (for paging)",
+        "limit" => "Return at most this many results",
+        "title" => "The title",
+        "name" => "The name",
+        "path" => "A path",
+        "target" => "The ticket, Plan or Document to link to",
+        "query" => "Text to search for",
+        "tag" => "A tag name",
+        "remove" => "Remove instead of add",
+        "project" => "Restrict to a project ID",
+        "plan" => "Restrict to a Plan ID",
+        "kind" => "The kind",
+        "document_id" => "The Document ID",
+        "include_support" => "Include activity-details Documents that were not kept",
+        "canonical" => "The canonical (original) ticket reference",
+        "blocker" => "The ticket that blocks",
+        "dependent" => "The ticket that waits",
+        "status" => "A ticket status",
+        "parent" => "The parent ticket reference",
+        "purpose" => "The Plan's purpose text",
+        "due_at" => "RFC 3339 time with an offset, for example 2026-01-31T09:00:00-05:00",
+        "file" => "A JSON file (- reads stdin)",
+        "request_id" => {
+            "Makes retries safe: repeating this ID with the same input returns the first result instead of writing again"
+        }
+        "body" => "The Markdown description",
+        "body_file" => "Read the description from a file (- reads stdin)",
+        "clear_project" => "Unlink the ticket from its project",
+        "value" => "The URL, reference, path or verification result",
+        "source" => "The ticket that is the source of the change, for example T-12",
+        "bodies" => "Include the Documents' text, not only their titles",
+        "all" => "Include archived Plans",
+        "unlinked" => "Only tickets without a project",
+        "availability" => "Only ready or blocked tickets",
+        "latest_update" => "Include each ticket's latest update (bounded)",
+        "relationships" => "Include relationships",
+        "activities" => "Include activities",
+        "evidence" => "Include evidence",
+        "backlinks" => "Include incoming references",
+        "provider" => "The source provider, for example github",
+        "field" => "The setting to suggest values for",
+        "search" => "Only items whose title or text contains this",
+        "relationship" => "Only this kind of relationship",
+        "cursor" => "Continue a previous page using its cursor",
+        "adjacency_limit" => "Most neighbors to show around each item",
+        "context" => "Show contextual connections rather than dependencies",
+        "include_details" => "Include generated Activity details",
+        "expand" => "Expand connections around a previously visible item (repeatable)",
+        "page" => "Continue a group using its JSON page request (repeatable)",
+        "workspace" => "Browse the whole workspace rather than one ticket or Plan",
+        _ => return None,
+    })
+}
+fn describe(command: clap::Command, parents: &[String]) -> clap::Command {
+    let mut path = parents.to_vec();
+    path.push(command.get_name().to_owned());
+    let named = path.clone();
+    command
+        .mut_args(move |arg| {
+            if arg.get_help().is_none()
+                && !matches!(arg.get_id().as_str(), "help" | "version")
+                && let Some(text) = argument_help(&named, arg.get_id().as_str())
+            {
+                return arg.help(text);
+            }
+            arg
+        })
+        .mut_subcommands(move |child| describe(child, &path))
+}
+
 fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
-    let args = Arguments::parse();
+    use clap::{CommandFactory, FromArgMatches};
+    let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
+        .unwrap_or_else(|error| error.exit());
     if let Command::RestoreWorkspace { path } = &args.command {
         let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
             Some(workspace) => Workspace::restore(workspace, path)?,
@@ -620,6 +945,147 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         None => Workspace::open_default()?,
     };
     let text = match args.command {
+        Command::Document { command } => match command {
+            DocumentCommand::References { id, offset } => {
+                serde_json::to_string(&workspace.context_links(&id, 100, offset)?)?
+            }
+            DocumentCommand::Incoming { id, offset } => {
+                serde_json::to_string(&workspace.context_backlinks(&id, 100, offset)?)?
+            }
+            DocumentCommand::Link { target } => workspace.context_link_markdown(&target)?,
+            DocumentCommand::LinkTicket {
+                id,
+                ticket,
+                request_id,
+            } => bare(workspace.write(
+                request_id.as_deref(),
+                WriteRequest::SetTicketDocument {
+                    reference: ticket,
+                    document_id: id,
+                    present: true,
+                },
+            )?)?,
+            DocumentCommand::UnlinkTicket {
+                id,
+                ticket,
+                request_id,
+            } => bare(workspace.write(
+                request_id.as_deref(),
+                WriteRequest::SetTicketDocument {
+                    reference: ticket,
+                    document_id: id,
+                    present: false,
+                },
+            )?)?,
+            DocumentCommand::CreateTicket { id, title } => {
+                serde_json::to_string(&workspace.create_ticket_from_document(&id, &title)?)?
+            }
+            DocumentCommand::Backlinks { id, offset } => {
+                serde_json::to_string(&workspace.document_backlinks(&id, 100, offset)?)?
+            }
+            DocumentCommand::Create {
+                title,
+                body,
+                body_file,
+                request_id,
+            } => {
+                let body = read_content(body, body_file)?.unwrap_or_default();
+                match request_id {
+                    None => {
+                        serde_json::to_string(&workspace.create_document(title.as_deref(), &body)?)?
+                    }
+                    Some(id) => bare(
+                        workspace.write(Some(&id), WriteRequest::CreateDocument { title, body })?,
+                    )?,
+                }
+            }
+            DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
+            DocumentCommand::Open { id } => serde_json::to_string(&workspace.open_document(&id)?)?,
+            DocumentCommand::Keep { id } => {
+                bare(workspace.write(None, WriteRequest::KeepDocument { id })?)?
+            }
+            DocumentCommand::Recent {
+                limit,
+                offset,
+                include_support,
+            } => serde_json::to_string(&workspace.recent_documents_including_support(
+                limit,
+                offset,
+                include_support,
+            )?)?,
+            DocumentCommand::Search {
+                query,
+                tag,
+                include_support,
+                limit,
+                offset,
+            } => serde_json::to_string(&workspace.search_documents_including_support(
+                &query,
+                tag.as_deref(),
+                limit,
+                offset,
+                include_support,
+            )?)?,
+            DocumentCommand::Pins { limit, offset } => {
+                serde_json::to_string(&workspace.pinned_documents(limit, offset)?)?
+            }
+            DocumentCommand::Pin { id, remove } => {
+                workspace.set_document_pin(&id, !remove)?;
+                "ok".into()
+            }
+            DocumentCommand::Tags { id } => serde_json::to_string(&workspace.document_tags(&id)?)?,
+            DocumentCommand::Tag { id, tag, remove } => {
+                workspace.set_document_tag(&id, &tag, !remove)?;
+                "ok".into()
+            }
+            DocumentCommand::Read { id, offset, limit } => {
+                let document = workspace.show_document(&id)?;
+                let limit = limit.clamp(1, 65536);
+                let mut chars = document.body.chars().skip(offset);
+                let body: String = chars.by_ref().take(limit).collect();
+                let next_offset = chars.next().map(|_| offset + body.chars().count());
+                let fetch = next_offset.map(|next| {
+                    format!("ticketd document read {id} --offset {next} --limit {limit}")
+                });
+                serde_json::to_string(
+                    &serde_json::json!({"id": document.id, "title": document.title, "created_at": document.created_at, "updated_at": document.updated_at, "trashed": document.trashed, "body": body, "offset": offset, "next_offset": next_offset, "truncated": next_offset.is_some(), "fetch": fetch}),
+                )?
+            }
+            DocumentCommand::TrashList { limit, offset } => {
+                serde_json::to_string(&workspace.trashed_documents_page(limit, offset)?)?
+            }
+            DocumentCommand::Trash { id } => {
+                bare(workspace.write(None, WriteRequest::TrashDocument { id })?)?
+            }
+            DocumentCommand::Restore { id } => {
+                bare(workspace.write(None, WriteRequest::RestoreDocument { id })?)?
+            }
+            DocumentCommand::Change {
+                id,
+                title,
+                clear_title,
+                body,
+                body_file,
+                request_id,
+            } => {
+                let patch = DocumentPatch {
+                    title: if clear_title {
+                        Some(None)
+                    } else {
+                        title.map(Some)
+                    },
+                    body: read_content(body, body_file)?,
+                    expected_updated_at: None,
+                };
+                match request_id {
+                    None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,
+                    Some(request) => bare(
+                        workspace
+                            .write(Some(&request), WriteRequest::ChangeDocument { id, patch })?,
+                    )?,
+                }
+            }
+        },
         Command::Reminder { command } => match command {
             ReminderCommand::Show { reference } => match workspace.reminder(&reference)? {
                 Some(value) => {
@@ -694,7 +1160,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             }
             ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
         },
-        Command::Create { title, project } => {
+        Command::Create {
+            title,
+            project,
+            plan,
+        } => {
             let inferred = if project.is_none() {
                 workspace.resolve_project(&std::env::current_dir()?)?
             } else {
@@ -703,7 +1173,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             let project = project
                 .as_deref()
                 .or_else(|| inferred.as_ref().map(|p| p.id.as_str()));
-            serde_json::to_string(&workspace.create_ticket_in_project(&title, project)?)?
+            serde_json::to_string(&workspace.create_ticket_in_context(
+                &title,
+                project,
+                plan.as_deref(),
+            )?)?
         }
         Command::Change {
             reference,
@@ -731,12 +1205,14 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                     body,
                     status,
                     editing_agent: agent,
-                    effort_id: None,
+                    plan_id: None,
                     project_id: if clear_project {
                         Some(None)
                     } else {
                         project.map(Some)
                     },
+                    // The CLI never guards on a base revision: its change always applies.
+                    ..TicketPatch::default()
                 },
             )?)?
         }
@@ -761,43 +1237,79 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 offset,
             } => serde_json::to_string(&workspace.evidence(&reference, limit, offset)?)?,
         },
-        Command::Note { command } => match command {
-            NoteCommand::Add {
+        Command::Activity { command } => match command {
+            ActivityCommand::Add {
                 reference,
-                content,
+                brief,
                 file,
                 agent,
+                details_file,
+                document,
+                request_id,
             } => {
-                let content = read_content(content, file)?.ok_or("provide --content or --file")?;
-                serde_json::to_string(&workspace.add_note(
-                    &reference,
-                    &content,
-                    agent.as_deref(),
-                )?)?
+                if file.as_deref() == Some("-") && details_file.as_deref() == Some("-") {
+                    return Err("brief and details cannot both read from stdin".into());
+                }
+                let brief = read_content(brief, file)?.ok_or("provide --brief or --file")?;
+                let details = read_content(None, details_file)?;
+                if request_id.is_some() {
+                    bare(workspace.write(
+                        request_id.as_deref(),
+                        WriteRequest::AddActivityWithDetails {
+                            reference,
+                            brief,
+                            agent,
+                            details,
+                            existing_document_id: document,
+                        },
+                    )?)?
+                } else {
+                    serde_json::to_string(&workspace.add_activity_with_details(
+                        &reference,
+                        &brief,
+                        agent.as_deref(),
+                        details.as_deref(),
+                        document.as_deref(),
+                    )?)?
+                }
             }
-            NoteCommand::Edit {
+            ActivityCommand::Edit {
                 reference,
                 id,
-                content,
+                brief,
                 file,
                 agent,
-            } => serde_json::to_string(&workspace.edit_note(
-                &reference,
-                &id,
-                NotePatch {
-                    content: read_content(content, file)?,
+                request_id,
+            } => {
+                let patch = ActivityPatch {
+                    brief: read_content(brief, file)?,
                     editing_agent: agent,
-                },
-            )?)?,
-            NoteCommand::Delete { reference, id } => {
-                workspace.delete_note(&reference, &id)?;
+                };
+                if request_id.is_some() {
+                    bare(workspace.write(
+                        request_id.as_deref(),
+                        WriteRequest::EditActivity {
+                            reference,
+                            id,
+                            patch,
+                        },
+                    )?)?
+                } else {
+                    serde_json::to_string(&workspace.edit_activity(&reference, &id, patch)?)?
+                }
+            }
+            ActivityCommand::Delete { reference, id } => {
+                workspace.delete_activity(&reference, &id)?;
                 "null".into()
             }
-            NoteCommand::List {
+            ActivityCommand::Show { reference, id } => {
+                serde_json::to_string(&workspace.activity(&reference, &id)?)?
+            }
+            ActivityCommand::List {
                 reference,
                 limit,
                 offset,
-            } => serde_json::to_string(&workspace.notes(&reference, limit, offset)?)?,
+            } => serde_json::to_string(&workspace.activity_feed(&reference, limit, offset)?)?,
         },
         Command::TrashList => serde_json::to_string(&workspace.list_trash()?)?,
         Command::Trash { reference, agent } => {
@@ -891,39 +1403,70 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             parent.as_deref(),
             agent.as_deref(),
         )?)?,
-        Command::Effort { command } => match command {
-            EffortCommand::Create { name } => {
-                serde_json::to_string(&workspace.create_effort(&name)?)?
+        Command::Plan { command } => match command {
+            PlanCommand::Context { id, bodies } => {
+                serde_json::to_string(&workspace.plan_context(&id, bodies)?)?
             }
-            EffortCommand::List { all } => serde_json::to_string(&workspace.list_efforts(all)?)?,
-            EffortCommand::Show { id } => serde_json::to_string(&workspace.show_effort(&id)?)?,
-            EffortCommand::Rename { id, name } => {
-                serde_json::to_string(&workspace.change_effort(&id, Some(&name), None)?)?
+            PlanCommand::Document {
+                id,
+                document_id,
+                remove,
+            } => {
+                serde_json::to_string(&workspace.set_plan_document(&id, &document_id, !remove)?)?
             }
-            EffortCommand::Archive { id } => {
-                serde_json::to_string(&workspace.change_effort(&id, None, Some(true))?)?
+            PlanCommand::Spec { id, document_id } => {
+                serde_json::to_string(&workspace.set_plan_spec(&id, document_id.as_deref())?)?
             }
-            EffortCommand::Reactivate { id } => {
-                serde_json::to_string(&workspace.change_effort(&id, None, Some(false))?)?
+            PlanCommand::Create { name } => serde_json::to_string(&workspace.create_plan(&name)?)?,
+            PlanCommand::List { all } => serde_json::to_string(&workspace.list_plans(all)?)?,
+            PlanCommand::Show { id } => serde_json::to_string(&workspace.show_plan(&id)?)?,
+            PlanCommand::Rename { id, name } => {
+                serde_json::to_string(&workspace.change_plan(&id, Some(&name), None)?)?
             }
-            EffortCommand::Add {
+            PlanCommand::Purpose { id, purpose } => {
+                serde_json::to_string(&workspace.set_plan_purpose(&id, &purpose)?)?
+            }
+            PlanCommand::Archive { id } => {
+                serde_json::to_string(&workspace.change_plan(&id, None, Some(true))?)?
+            }
+            PlanCommand::Reactivate { id } => {
+                serde_json::to_string(&workspace.change_plan(&id, None, Some(false))?)?
+            }
+            PlanCommand::Add {
                 id,
                 reference,
                 agent,
-            } => serde_json::to_string(&workspace.set_effort(
+            } => serde_json::to_string(&workspace.set_plan(
                 &reference,
                 Some(&id),
                 agent.as_deref(),
             )?)?,
-            EffortCommand::Remove { reference, agent } => {
-                serde_json::to_string(&workspace.set_effort(&reference, None, agent.as_deref())?)?
+            PlanCommand::Remove { reference, agent } => {
+                serde_json::to_string(&workspace.set_plan(&reference, None, agent.as_deref())?)?
             }
         },
-        Command::List { filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(String::new())?)?)?
+        Command::List {
+            filters,
+            latest_update,
+        } => {
+            let filter = filters.filter(String::new())?;
+            if latest_update {
+                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+            } else {
+                serde_json::to_string(&workspace.find_tickets(&filter)?)?
+            }
         }
-        Command::Search { query, filters } => {
-            serde_json::to_string(&workspace.find_tickets(&filters.filter(query)?)?)?
+        Command::Search {
+            query,
+            filters,
+            latest_update,
+        } => {
+            let filter = filters.filter(query)?;
+            if latest_update {
+                serde_json::to_string(&workspace.find_tickets_with_updates(&filter)?)?
+            } else {
+                serde_json::to_string(&workspace.find_tickets(&filter)?)?
+            }
         }
         Command::Backlinks {
             reference,
@@ -933,29 +1476,77 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Command::Context {
             reference,
             project,
-            effort,
+            plan,
             relationships,
-            notes,
+            activities,
+            latest_update,
             evidence,
             backlinks,
+            documents,
             conversation,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
             &reference,
             ContextOptions {
                 project,
-                effort,
+                plan,
                 relationships,
-                notes,
+                activities,
+                latest_update,
                 evidence,
                 backlinks,
+                documents,
                 conversation,
                 offset,
             },
         )?)?,
 
-        Command::Graph { reference } => {
-            serde_json::to_string(&workspace.dependency_graph(&reference)?)?
+        Command::Graph {
+            reference,
+            plan,
+            context,
+            include_details,
+            workspace: workspace_scope,
+            search,
+            kind,
+            tag,
+            relationship,
+            cursor,
+            adjacency_limit,
+            expand,
+            page,
+        } => {
+            if workspace_scope {
+                serde_json::to_string(&workspace.workspace_graph(
+                    &ticketd_core::WorkspaceGraphRequest {
+                        cursor,
+                        search,
+                        kind,
+                        tag,
+                        relationship,
+                        include_details,
+                        adjacency_limit,
+                        ..Default::default()
+                    },
+                )?)?
+            } else if context {
+                let pages = page
+                    .iter()
+                    .map(|value| serde_json::from_str(value))
+                    .collect::<Result<Vec<ticketd_core::ContextGraphPage>, _>>()?;
+                serde_json::to_string(&workspace.context_graph_with_pages(
+                    reference.as_deref().unwrap_or_default(),
+                    include_details,
+                    &expand,
+                    &pages,
+                )?)?
+            } else if let Some(plan) = plan {
+                serde_json::to_string(&workspace.plan_dependency_graph(&plan)?)?
+            } else {
+                serde_json::to_string(
+                    &workspace.dependency_graph(reference.as_deref().unwrap_or_default())?,
+                )?
+            }
         }
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
