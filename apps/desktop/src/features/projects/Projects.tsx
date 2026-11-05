@@ -95,6 +95,7 @@ function CheckoutRow({
         type="button"
         variant="ghost"
         size="sm"
+        className="checkout-remove"
         aria-label={`Remove checkout ${path}`}
         onClick={onAsk}
       >

@@ -4581,3 +4581,23 @@ fn dependency_graph_shows_blockers_of_a_ticket_with_many_dependents() {
     };
     assert_eq!(refs(&graph), refs(&again));
 }
+
+#[test]
+fn registering_a_missing_checkout_folder_names_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let project = workspace
+        .create_project("one", dir.path().to_str().unwrap())
+        .unwrap();
+    let missing = dir.path().join("gone");
+    let error = workspace
+        .register_checkout(&project.id, missing.to_str().unwrap())
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "No folder at {}. Choose the folder of a checkout.",
+            missing.display()
+        )
+    );
+}

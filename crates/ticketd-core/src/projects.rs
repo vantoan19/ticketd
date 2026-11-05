@@ -170,8 +170,15 @@ fn paths(connection: &Connection, id: &str) -> Result<Vec<String>, Error> {
 }
 
 fn normalize(path: &str) -> Result<String, Error> {
-    let path = std::fs::canonicalize(path)?;
-    path.to_str()
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::NoCheckoutFolder(path.to_owned()));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    canonical
+        .to_str()
         .map(str::to_owned)
         .ok_or(Error::InvalidCheckoutPath)
 }

@@ -216,6 +216,8 @@ pub enum Error {
     NoDataDirectory,
     #[error("a file already exists at {}; ticketd never replaces an existing file, so choose a new name", .0.display())]
     FileExists(std::path::PathBuf),
+    #[error("No folder at {0}. Choose the folder of a checkout.")]
+    NoCheckoutFolder(String),
     #[error("could not access workspace directory: {0}")]
     Directory(#[from] std::io::Error),
     #[error("workspace database error: {0}")]

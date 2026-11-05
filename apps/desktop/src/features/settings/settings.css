@@ -57,7 +57,7 @@
   .workspace.settings-open {
     flex-direction: column;
   }
-  /* The sections become one scrolling strip, so the page below is never covered. */
+  /* The sections become one wrapping strip, so the page below is never covered. */
   .settings-nav {
     width: 100%;
     max-height: none;
@@ -67,8 +67,8 @@
   }
   .settings-nav nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
-    overflow-x: auto;
   }
   .settings-nav [role="group"] {
     display: contents;
@@ -81,6 +81,7 @@
   }
   .settings-nav ul {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
   }
   .settings-nav ul li + li {

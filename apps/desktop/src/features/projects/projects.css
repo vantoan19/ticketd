@@ -113,3 +113,8 @@
   flex-direction: column;
   gap: 16px;
 }
+
+/* Removing a checkout is destructive, like the other remove actions. */
+.checkout-row .checkout-remove:not(:disabled) {
+  color: var(--destructive);
+}

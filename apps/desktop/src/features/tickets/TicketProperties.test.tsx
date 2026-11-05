@@ -140,3 +140,57 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
     expect.anything(),
   );
 });
+
+test("changing the status of a duplicate asks before removing its link", async () => {
+  Object.assign(Element.prototype, {
+    hasPointerCapture: () => false,
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+  });
+  bridge.invoke.mockResolvedValue({});
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-1",
+        title: "Ticket",
+        body: "",
+        status: "Duplicate",
+        tags: [],
+        project_id: null,
+        plan_id: null,
+        trashed: false,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+        duplicate_of: "T-8",
+      }}
+      projects={[]}
+      plans={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.keyDown(
+    screen.getByRole("combobox", { name: "Status: Duplicate" }),
+    { key: "Enter" },
+  );
+  fireEvent.click(await screen.findByRole("option", { name: "Todo" }));
+  expect(
+    await screen.findByText(/removes the duplicate link to T-8/),
+  ).toBeTruthy();
+  expect(bridge.invoke).not.toHaveBeenCalledWith(
+    "change_ticket",
+    expect.anything(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Change status" }));
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "change_ticket",
+      expect.objectContaining({
+        patch: expect.objectContaining({ status: "Todo" }),
+      }),
+    ),
+  );
+});
