@@ -13,7 +13,7 @@ export function LazyMarkdownEditor(props: MarkdownEditorProps) {
     <Suspense
       fallback={
         // Holds the editor's footprint so the form does not jump when it loads.
-        <div role="status" className="ui-input min-h-32">
+        <div role="status" className="markdown-editor min-h-32">
           <span className="sr-only">
             Loading {props.label?.toLowerCase() ?? "document"} editor…
           </span>
