@@ -397,7 +397,7 @@ export function useTicketWorkspace(
     navigation.kind === "trash"
       ? "Trash"
       : navigation.project === "unlinked"
-        ? "Unlinked"
+        ? "No project"
         : navigation.project !== "all"
           ? (projects.find((p) => p.id === navigation.project)?.name ??
             "Project")

@@ -147,7 +147,7 @@ export function TicketWorkspaceView({
       <ResizablePanel
         id="list"
         minSize={360}
-        defaultSize={400}
+        defaultSize={384}
         className="list-panel"
       >
         <TicketListPane

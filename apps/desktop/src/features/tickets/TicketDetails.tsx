@@ -137,10 +137,7 @@ export function TicketDetails({
           </p>
         )}
         {selected === null && (
-          <div className="detail-empty">
-            <strong>Select a ticket</strong>
-            <p>Read its description, links, and activity here.</p>
-          </div>
+          <p className="detail-empty">Select a ticket to read it here.</p>
         )}
         {Object.values(details).map((item) => (
           <TicketPage

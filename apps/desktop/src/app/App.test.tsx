@@ -78,8 +78,18 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
+async function openManageMenu(label: string, item: string) {
+  fireEvent.keyDown(screen.getByRole("button", { name: label }), {
+    key: "Enter",
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+}
+
 async function openNewTicket(
-  trigger = screen.getByRole("button", { name: "New" }),
+  trigger = screen.getByRole("button", { name: "New ticket" }),
 ) {
   fireEvent.keyDown(trigger, { key: "Enter" });
   await act(async () => {
@@ -330,7 +340,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  await openManageMenu("Manage projects", "All projects");
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
     target: { value: "Draft" },
@@ -401,6 +411,29 @@ test("an idle workspace costs one token poll per tick and refetches only when th
   bridge.token.next = () => ++tokenCalls;
 });
 
+test("lists No project after the named projects and shows a quiet hint with nothing selected", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) =>
+      command === "list_projects"
+        ? [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const scopes = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  ).getAllByRole("button");
+  expect(scopes.map((item) => item.textContent?.trim())).toEqual([
+    "Billing API",
+    "No project",
+  ]);
+  expect(screen.queryByText("Unlinked")).toBeNull();
+  expect(screen.getByText("Select a ticket to read it here.")).toBeTruthy();
+});
+
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string) =>
@@ -412,7 +445,7 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   });
   for (const name of ["New ticket", "Create your first ticket"]) {
     const trigger = screen.getByRole("button", {
-      name: name === "New ticket" ? "New" : name,
+      name,
     });
     trigger.focus();
     if (name === "New ticket") await openNewTicket(trigger);
@@ -1006,7 +1039,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  await openManageMenu("Manage projects", "All projects");
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1691,7 +1724,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Manage Plans" }));
+  await openManageMenu("Manage Plans", "All Plans");
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {

@@ -1,6 +1,13 @@
 import { useNow } from "@/lib/use-now";
 import { useRef, type ReactNode } from "react";
-import { Cloud, Plus } from "lucide-react";
+import {
+  Cloud,
+  Copy,
+  CornerDownRight,
+  Folder,
+  Layers,
+  Plus,
+} from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import {
@@ -10,14 +17,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
-import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
   readiness,
   readinessLabel,
   readinessShortLabel,
-  rowContext,
+  rowContextItem,
+  type RowContextKind,
   type RowScope,
 } from "./ticket-row";
 import { formatDateTime } from "@/lib/format";
@@ -35,6 +42,7 @@ export function TicketList({
   scope,
   rowAction,
   grouping,
+  singleStatus = false,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -55,18 +63,24 @@ export function TicketList({
     /** Omit to hide the per-group Add action (a read-only scope). */
     onAdd?: (status: string, trigger: HTMLButtonElement) => void;
   };
+  /**
+   * The view lists one status (Ready, In progress): no group header and no
+   * per-row Ready dot or status word, since the view's title says it.
+   */
+  singleStatus?: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   // Groups and rows share one list so a row that changes group keeps its
   // element and the list keeps its scroll position.
   const entries: (
     { header: ReturnType<typeof groupTickets>[number] } | { ticket: Ticket }
-  )[] = grouping
-    ? groupTickets(tickets, grouping.counts).flatMap((group) => [
-        { header: group },
-        ...group.tickets.map((ticket) => ({ ticket })),
-      ])
-    : tickets.map((ticket) => ({ ticket }));
+  )[] =
+    grouping && !singleStatus
+      ? groupTickets(tickets, grouping.counts).flatMap((group) => [
+          { header: group },
+          ...group.tickets.map((ticket) => ({ ticket })),
+        ])
+      : tickets.map((ticket) => ({ ticket }));
   const ordered = entries.flatMap((entry) =>
     "ticket" in entry ? [entry.ticket] : [],
   );
@@ -178,6 +192,7 @@ export function TicketList({
                   ticket={ticket}
                   scope={scope}
                   grouped={grouping !== undefined}
+                  singleStatus={singleStatus}
                 />
               </button>
               {rowAction && (
@@ -209,41 +224,47 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
   );
 }
 
+function ContextIcon({ kind }: { kind: RowContextKind }) {
+  const props = { "aria-hidden": true } as const;
+  if (kind === "duplicate") return <Copy {...props} />;
+  if (kind === "subticket") return <CornerDownRight {...props} />;
+  return kind === "plan" ? <Layers {...props} /> : <Folder {...props} />;
+}
+
+/** Line two, always in the same order: availability, context, tags, time. */
 function RowDetails({
   ticket,
   scope,
   grouped,
+  singleStatus,
 }: {
   ticket: Ticket;
   scope: RowScope;
   grouped: boolean;
+  singleStatus: boolean;
 }) {
   const now = useNow();
   const state = readiness(ticket);
-  const context = rowContext(ticket, scope);
+  const context = rowContextItem(ticket, scope);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
-  const active =
-    ticket.status === "In progress" || ticket.status === "In review";
+  const showState =
+    !singleStatus &&
+    (state.kind !== "status" ||
+      (!grouped && !context?.label.startsWith("Duplicate")));
   return (
-    <span
-      className={
-        active ? "ticket-row-meta ticket-row-meta-active" : "ticket-row-meta"
-      }
-    >
+    <span className="ticket-row-meta">
       <span className="ticket-row-contextual">
-        {/* A group header already names the status. */}
         {unavailable ? (
           // The source cannot be read: say so in place of Ready or Blocked, which
           // would describe content that may no longer be current.
           <span className="ticket-row-state">
             <StatusDot tone="attention" size={10} />
-            {state.kind === "status" && !grouped
+            {state.kind === "status" && !grouped && !singleStatus
               ? `${state.status} · Source unavailable`
               : "Source unavailable"}
           </span>
         ) : (
-          (state.kind !== "status" ||
-            (!grouped && !context?.startsWith("Duplicate"))) && (
+          showState && (
             <span className="ticket-row-state">
               {state.kind !== "status" && (
                 <StatusDot tone={state.kind} size={10} />
@@ -264,19 +285,13 @@ function RowDetails({
             </span>
           )
         )}
-        {active && ticket.progress_summary && (
-          <span
-            className="ticket-row-brief"
-            title={ticket.progress_summary.brief.text}
-          >
-            {progressBrief(ticket.progress_summary.brief.text)}
-            {ticket.progress_summary.brief.truncated ? "…" : ""}
+        {context && (
+          <span className="ticket-row-context" data-kind={context.kind}>
+            <ContextIcon kind={context.kind} />
+            <span className="ticket-row-context-label">{context.label}</span>
           </span>
         )}
-        {!active && context && (
-          <span className="ticket-row-context">{context}</span>
-        )}
-        {!active && ticket.tags.length > 0 && (
+        {ticket.tags.length > 0 && (
           <span className="ticket-row-tags">
             {ticket.tags.map((tag) => (
               <span key={tag} className="ticket-tag">
@@ -287,22 +302,7 @@ function RowDetails({
         )}
       </span>
       <span className="ticket-row-time">
-        {active && !ticket.trashed ? (
-          ticket.progress_summary ? (
-            <>
-              <time
-                dateTime={ticket.progress_summary.reported_at}
-                title={formatDateTime(ticket.progress_summary.reported_at)}
-              >
-                Reported {ago(ticket.progress_summary.reported_at, now)}
-              </time>
-            </>
-          ) : ticket.progress_summary === null ? (
-            "No update reported"
-          ) : (
-            "Update unavailable"
-          )
-        ) : ticket.updated_at ? (
+        {ticket.updated_at ? (
           <time
             dateTime={ticket.updated_at}
             title={formatDateTime(ticket.updated_at)}

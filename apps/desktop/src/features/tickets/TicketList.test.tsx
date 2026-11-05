@@ -207,7 +207,7 @@ test("a flat list has no group headers and names each status", () => {
   expect(screen.getByText("In progress", { selector: "span" })).toBeTruthy();
 });
 
-test("rows show core update times and authored progress instead of an empty second line", () => {
+test("rows end with the core update time, never a progress excerpt or a lone no-update note", () => {
   const when = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
   renderList([
     ticket({ id: "updated", reference: "T-1", updated_at: when }),
@@ -215,11 +215,7 @@ test("rows show core update times and authored progress instead of an empty seco
       id: "reported",
       reference: "T-2",
       status: "In progress",
-      latest_update: {
-        activity_id: "n1",
-        reported_at: when,
-        editing_agent: "agent",
-      },
+      updated_at: when,
       progress_summary: {
         activity_id: "n1",
         brief: { text: "Verified the fix", truncated: false },
@@ -233,36 +229,38 @@ test("rows show core update times and authored progress instead of an empty seco
       id: "unreported",
       reference: "T-3",
       status: "In review",
+      updated_at: when,
       progress_summary: null,
     }),
   ]);
-  expect(screen.getByText(/Updated 3 h ago/)).toBeTruthy();
-  expect(screen.getByText(/Reported 3 h ago/)).toBeTruthy();
-  expect(screen.getByText("Verified the fix")).toBeTruthy();
-  expect(screen.getByText("No update reported")).toBeTruthy();
+  expect(screen.getAllByText(/Updated 3 h ago/)).toHaveLength(3);
+  expect(screen.queryByText("Verified the fix")).toBeNull();
+  expect(screen.queryByText("No update reported")).toBeNull();
+  expect(screen.queryByText("Update unavailable")).toBeNull();
 });
 
-test("distinguishes unavailable progress and marks bounded briefs", () => {
-  const when = new Date().toISOString();
-  renderList([
-    ticket({ id: "1", reference: "T-1", status: "In progress" }),
-    ticket({
-      id: "2",
-      reference: "T-2",
-      status: "In review",
-      progress_summary: {
-        activity_id: "a",
-        brief: {
-          text: "**Long** [checkpoint](https://example.com)",
-          truncated: true,
-        },
-        reported_at: when,
-        updated_at: when,
-        editing_agent: null,
-        supporting_document_id: null,
-      },
-    }),
+test("a Plan and a project carry different icons", () => {
+  const { container } = renderList([
+    ticket({ id: "1", reference: "T-1", plan_id: "e1" }),
+    ticket({ id: "2", reference: "T-2", project_id: "p1" }),
   ]);
-  expect(screen.getByText("Update unavailable")).toBeTruthy();
-  expect(screen.getByText("Long checkpoint…")).toBeTruthy();
+  const icon = (name: string) =>
+    screen
+      .getByText(name)
+      .closest(".ticket-row-context")
+      ?.querySelector("svg")
+      ?.getAttribute("class");
+  expect(icon("Launch")).toContain("lucide-layers");
+  expect(icon("Website")).toContain("lucide-folder");
+  expect(container.querySelectorAll(".ticket-row-context svg")).toHaveLength(2);
+});
+
+test("a single-status view drops the group header and the Ready dot", () => {
+  renderList([ticket({ availability: "Ready" })], {
+    singleStatus: true,
+    grouping: { counts: { ...counts, todo: 1 }, onAdd: vi.fn() },
+  });
+  expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
+  expect(screen.queryByText("Ready")).toBeNull();
+  expect(screen.getByRole("button", { name: /First ticket/ })).toBeTruthy();
 });

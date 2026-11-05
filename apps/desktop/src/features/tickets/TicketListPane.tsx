@@ -373,6 +373,9 @@ export function TicketListPane({
                   projects,
                 }}
                 selected={selected}
+                singleStatus={
+                  navigation.kind === "ready" || navigation.kind === "progress"
+                }
                 {...(grouped &&
                   counts && {
                     grouping: {
