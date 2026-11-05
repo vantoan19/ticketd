@@ -35,13 +35,15 @@
 }
 .context-graph-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   border: 1px solid var(--border);
   min-height: 500px;
 }
 .context-graph-canvas {
+  position: relative;
   min-width: 0;
   min-height: 500px;
+  overflow: hidden;
 }
 .context-graph-preview {
   padding: 20px;
@@ -129,21 +131,13 @@
   }
 }
 
-.context-graph-page .react-flow__node-default {
-  background: var(--surface);
-  color: var(--foreground);
-  border-color: var(--border);
-  /* Cards are drawn small to fit a map, so their text starts larger than usual. */
-  font-size: 14px;
-  line-height: 1.25;
-  overflow: hidden;
-  /* A long unbroken title wraps inside the card instead of spilling out. */
-  overflow-wrap: anywhere;
-  max-height: 110px;
-}
 .context-graph-heading,
 .context-graph-toolbar {
   flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.context-graph-grow {
+  flex: 1;
 }
 .context-graph-preview {
   min-width: 0;
@@ -158,35 +152,239 @@
 }
 .graph-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  font-size: 12px;
+  line-height: 16px;
+}
+.graph-legend-title {
+  font-weight: 500;
+}
+.graph-legend ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   list-style: none;
   margin: 0;
   padding: 0;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
 }
 .graph-legend li {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.graph-legend svg {
+  flex: none;
 }
 
-/* Selection and keyboard focus read in both themes. */
-.context-graph-page .react-flow__node-default {
-  border-radius: var(--radius);
+/* Legend and the not-connected list stay on the canvas, whatever the pan. */
+.context-graph-pinned {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  width: 224px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100% - 80px);
+  overflow: auto;
 }
-.context-graph-page .react-flow__node-default.selected,
-.context-graph-page .react-flow__node-default.selectable:focus,
-.context-graph-page .react-flow__node-default.selectable.selected:hover {
-  border: 2px solid var(--ring);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
+.context-graph-unconnected {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  box-shadow: var(--shadow-border-base);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.context-graph-unconnected strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.context-graph-unconnected button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.context-graph-unconnected button:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+/* One control: zoom out, percentage, zoom in, Fit. */
+.context-graph-zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
   background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
-.context-graph-page .react-flow__node-default:focus-visible {
+.context-graph-zoom button {
+  height: 32px;
+  min-width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.context-graph-zoom button:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.context-graph-zoom button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.context-graph-zoom svg {
+  width: 14px;
+  height: 14px;
+}
+.context-graph-zoom > span:not(.context-graph-zoom-rule) {
+  width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.context-graph-zoom-rule {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+/* Cards: reference, title, then the kind and state. Theme tokens only. */
+.context-graph-page .react-flow__node-card {
+  width: 200px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-border-base);
+}
+.context-graph-page .react-flow__node-card.selected {
+  background: var(--recessed);
+  box-shadow: 0 0 0 1.5px var(--foreground);
+}
+.context-graph-card {
+  min-height: 56px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 18px;
+}
+.context-graph-card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-graph-card-ref {
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.context-graph-card-caption {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.context-graph-page .react-flow__node-card:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
+
+/* Toolbar of pickers and the selection panel. */
+.context-graph-search {
+  width: 260px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+}
+.context-graph-search:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.context-graph-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.context-graph-eyebrow {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.context-graph-selected {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.context-graph-selected h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+.context-graph-selected p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.context-graph-selected-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.context-graph-connection {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+
 .context-graph-page .react-flow__edges {
   color: var(--muted-foreground);
 }
@@ -194,24 +392,12 @@
   stroke: currentColor;
 }
 .context-graph-page .react-flow__edge-text {
-  fill: var(--foreground);
+  fill: var(--secondary-foreground, var(--foreground));
+  font-size: 11px;
 }
 .context-graph-page .react-flow__edge-textbg {
   fill: var(--surface);
-}
-.context-graph-page .react-flow__controls {
-  box-shadow: var(--shadow-border);
-}
-.context-graph-page .react-flow__controls-button {
-  background: var(--surface);
-  color: var(--foreground);
-  border-bottom: 1px solid var(--border);
-}
-.context-graph-page .react-flow__controls-button:hover {
-  background: var(--accent);
-}
-.context-graph-page .react-flow__controls-button svg {
-  fill: currentColor;
+  stroke: var(--border);
 }
 .context-graph-page .react-flow__attribution {
   background: transparent;
@@ -268,4 +454,7 @@
   margin-left: 4px;
   color: var(--muted-foreground);
   font-weight: 400;
+}
+.context-graph-toolbar {
+  min-height: 48px;
 }

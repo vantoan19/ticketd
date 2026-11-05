@@ -368,9 +368,12 @@ test("retains project drafts and clears filters when navigating scopes", async (
   );
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   expect(
     screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
@@ -561,17 +564,24 @@ test("clears additional filters while preserving the selected Plan", async () =>
   });
   fireEvent.click(screen.getByRole("button", { name: "Launch" }));
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
-  expect(screen.getByRole("button", { name: "Remove Tag: bug" })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
+  expect(
+    screen.getByRole("button", { name: "Remove Status: Todo" }),
+  ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
       name: "Clear filters",
     }),
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Remove Status: Todo" }),
+  ).toBeNull();
 });
 
 test("removes one filter chip and shows the query when nothing matches", async () => {
@@ -580,6 +590,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans" || command === "list_projects") return [];
       if (command === "find_tickets") return [];
+      if (command === "search_tags") return ["bug", "ui"];
       return bridgeDefault(command, args);
     },
   );
@@ -592,14 +603,25 @@ test("removes one filter chip and shows the query when nothing matches", async (
     target: { value: "zebra" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug, ui" },
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
   });
+  const filters = within(
+    screen.getByRole("dialog", { name: "Ticket filters" }),
+  );
+  fireEvent.click(filters.getByRole("button", { name: "bug" }));
+  fireEvent.click(filters.getByRole("button", { name: "ui" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(screen.getByText("No matching tickets")).toBeTruthy();
   expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Nothing matches.*in All tickets with the current filters/,
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
   expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();
@@ -608,6 +630,37 @@ test("removes one filter chip and shows the query when nothing matches", async (
   );
   expect(screen.queryByText("zebra", { selector: "q" })).toBeNull();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
+test("a filter applies live, counts N of M, and Done closes the panel", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { filter?: { status: string | null } }) => {
+      if (command === "count_tickets")
+        return {
+          ...(bridgeDefault(command) as object),
+          total: args?.filter?.status ? 3 : 7,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
+  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByLabelText("Active filters").textContent).toContain(
+    "3 of 7",
+  );
+  expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
+  // The Done status chip shares the name; the footer button comes last.
+  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
+  expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -659,7 +712,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
       tags: [],
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await openNewTicket();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
@@ -703,9 +756,12 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   const row = screen.getByRole("button", { name: /First/ });
   fireEvent.click(row);
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -1004,19 +1060,78 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   openMenu("Organize selected tickets");
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Add or remove tags…" }),
-  );
+  expect(screen.queryByRole("menuitem", { name: /Add or remove/ })).toBeNull();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove tag…" }));
   await act(async () => {});
-  const dialog = screen.getByRole("dialog", {
-    name: "Add or remove tags",
-  });
+  const dialog = screen.getByRole("dialog", { name: "Remove tag" });
+  expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
   fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
+});
+
+test("Organize has a separate Add tag action", async () => {
+  const changes: unknown[] = [];
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    bulk_change: (args: { change: unknown }) => {
+      changes.push(args.change);
+      return [];
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  openMenu("Organize selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", { name: "Add tag" });
+  expect(
+    within(dialog).queryByRole("button", { name: "Remove tag" }),
+  ).toBeNull();
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+    target: { value: "new" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ add_tags: ["new"] }]);
+});
+
+test("the status menu counts tickets per status and checks the one all share", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1),
+      bulkTicket(2),
+      bulkTicket(3, { status: "Done" }),
+    ],
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Status of selected tickets");
+  expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
+  const todo = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(todo.textContent).toContain("both");
+  expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
+  expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-3" }));
+  openMenu("Status of selected tickets");
+  const mixed = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(mixed.textContent).toContain("2 of 3");
+  expect(mixed.querySelector("svg.bulk-status-check")).toBeNull();
+});
+
+test("Escape clears the selection and the bar shows the shortcut", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  expect(
+    screen.getByRole("button", { name: "Clear selection" }).textContent,
+  ).toContain("Esc");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test("shows attention for a reminder while another view is active and after reopening", async () => {
@@ -1460,8 +1575,8 @@ test("a group's Add action starts a ticket in that status", async () => {
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "New ticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Status" }).textContent,
-  ).toContain("In review");
+    within(dialog).getByRole("combobox", { name: "Status: In review" }),
+  ).toBeTruthy();
 });
 
 test("the Duplicate group's Add action chooses a ticket and then reviews its canonical ticket", async () => {
@@ -1673,7 +1788,9 @@ test.each(["ticket", "document", "plan"] as const)(
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Back to workspace graph" }),
@@ -1774,7 +1891,9 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);

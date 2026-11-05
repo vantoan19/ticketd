@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useId, type ReactNode, type RefObject } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +23,7 @@ export function DialogShell({
   primaryLabel,
   blockedReason,
   onSubmit,
+  returnFocus,
   children,
 }: {
   open: boolean;
@@ -32,13 +33,18 @@ export function DialogShell({
   primaryLabel: string;
   blockedReason: string | null;
   onSubmit: () => void;
+  /** Where focus goes on close when the opener no longer exists. */
+  returnFocus?: RefObject<HTMLElement | null>;
   children: ReactNode;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+      <DialogContent
+        className="gap-0 overflow-hidden p-0 sm:max-w-lg"
+        {...(returnFocus && { returnFocus })}
+      >
         <form
           onSubmit={(event) => {
             event.preventDefault();

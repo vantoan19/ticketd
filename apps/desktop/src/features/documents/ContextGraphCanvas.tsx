@@ -4,18 +4,23 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   Background,
-  Controls,
+  Handle,
   ReactFlow,
   type Edge,
   type Node,
   type NodeChange,
+  type NodeProps,
+  type Position,
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
-import { centerZoom, panToInclude, READABLE_ZOOM } from "./graph-text";
+import { Maximize, Minus, Plus } from "lucide-react";
+import { centerZoom, panToInclude } from "./graph-text";
+import { GraphLegend } from "./GraphLegend";
 import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
@@ -23,6 +28,54 @@ import "@xyflow/react/dist/style.css";
 const MIN_ZOOM = 0.05;
 /** A lone card must not be blown up to fill the view. */
 const MAX_FIT_ZOOM = 1;
+/**
+ * Fit never clips a card: the zoom may go as low as the canvas allows, and the
+ * right margin keeps cards clear of the pinned legend.
+ */
+const FIT = {
+  padding: { top: "32px", right: "248px", bottom: "72px", left: "32px" },
+  duration: 200,
+  minZoom: MIN_ZOOM,
+  maxZoom: MAX_FIT_ZOOM,
+} as const;
+
+type CardData = { ref: string; title: string; caption: string };
+
+// Position's values are these strings.
+const SIDES = ["top", "right", "bottom", "left"] as const;
+
+/** A status-neutral card: reference, title and kind beneath. Handles are plumbing. */
+function CardNode({ data }: NodeProps<Node<CardData>>) {
+  return (
+    <div className="context-graph-card">
+      {SIDES.map((side) => (
+        <span key={side}>
+          <Handle id={`in-${side}`} type="target" position={side as Position} />
+          <Handle
+            id={`out-${side}`}
+            type="source"
+            position={side as Position}
+          />
+        </span>
+      ))}
+      <span className="context-graph-card-title">
+        {data.ref && <span className="context-graph-card-ref">{data.ref}</span>}{" "}
+        {data.title}
+      </span>
+      <span className="context-graph-card-caption">{data.caption}</span>
+    </div>
+  );
+}
+const NODE_TYPES = { card: CardNode };
+
+/** Which sides a line leaves and enters by: the ones facing each other. */
+function sides(from: Point, to: Point) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) * CARD_HEIGHT > Math.abs(dy) * CARD_WIDTH)
+    return dx > 0 ? ["right", "left"] : ["left", "right"];
+  return dy > 0 ? ["bottom", "top"] : ["top", "bottom"];
+}
 
 export function ContextGraphCanvas({
   nodes,
@@ -38,9 +91,15 @@ export function ContextGraphCanvas({
   onFitted,
   centerId,
   centerOn = null,
-  minFitZoom = READABLE_ZOOM,
+  overlay,
 }: {
-  nodes: { id: string; label: string }[];
+  nodes: {
+    id: string;
+    label: string;
+    ref?: string;
+    title?: string;
+    caption?: string;
+  }[];
   edges: Edge[];
   selected: string | null;
   positions: Record<string, Point>;
@@ -56,8 +115,8 @@ export function ContextGraphCanvas({
   centerId?: string | undefined;
   /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
   centerOn?: string | null;
-  /** The smallest zoom a fit may use; cards are never drawn smaller than this. */
-  minFitZoom?: number;
+  /** Shown under the legend, pinned to the canvas. */
+  overlay?: ReactNode;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -156,20 +215,13 @@ export function ContextGraphCanvas({
           { zoom: centerZoom(instance.current.getZoom()), duration: 200 },
         );
       } else {
-        void instance.current?.fitView({
-          padding: 0.2,
-          duration: 200,
-          // A map is only shown on request or when small, so it always opens at a
-          // readable zoom and the person pans; a lone card is not enlarged.
-          minZoom: minFitZoom,
-          maxZoom: MAX_FIT_ZOOM,
-        });
+        void instance.current?.fitView(FIT);
       }
       onFittedRef.current?.();
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, centerOn, placed, ready, positions, minFitZoom]);
+  }, [fit, centerOn, placed, ready, positions]);
   const container = useRef<HTMLDivElement | null>(null);
   // Cards that appear later (Expand, Load more) are panned into view; cards already
   // placed stay where they are.
@@ -246,32 +298,30 @@ export function ContextGraphCanvas({
         return;
       }
       window.clearTimeout(timer);
-      timer = window.setTimeout(
-        () =>
-          void instance.current?.fitView({
-            padding: 0.2,
-            duration: 200,
-            minZoom: minFitZoom,
-            maxZoom: MAX_FIT_ZOOM,
-          }),
-        150,
-      );
+      timer = window.setTimeout(() => void instance.current?.fitView(FIT), 150);
     });
     observer.observe(element);
     return () => {
       window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [minFitZoom]);
-  // Labels crowd a dense map, so a line names itself only while hovered; the
-  // item list states every connection in words.
-  const [hovered, setHovered] = useState<string | null>(null);
+  }, []);
+  // Every line names its relationship; it leaves and enters by the card sides
+  // that face each other.
   const shownEdges = useMemo(
     () =>
-      edges.map((edge) =>
-        edge.id === hovered ? edge : { ...edge, label: undefined },
-      ),
-    [edges, hovered],
+      edges.map((edge) => {
+        const from = positions[edge.source];
+        const to = positions[edge.target];
+        if (!from || !to) return edge;
+        const [out, into] = sides(from, to);
+        return {
+          ...edge,
+          sourceHandle: `out-${out}`,
+          targetHandle: `in-${into}`,
+        };
+      }),
+    [edges, positions],
   );
   const [sizes, setSizes] = useState<
     Record<string, { width: number; height: number }>
@@ -297,7 +347,13 @@ export function ContextGraphCanvas({
           return {
             id: node.id,
             position: positions[node.id]!,
-            data: { label: node.label },
+            type: "card",
+            data: {
+              label: node.label,
+              ref: node.ref ?? "",
+              title: node.title ?? node.label,
+              caption: node.caption ?? "",
+            },
             ariaLabel: node.label,
             style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
             selected: node.id === selected,
@@ -329,8 +385,7 @@ export function ContextGraphCanvas({
         edges={shownEdges}
         minZoom={MIN_ZOOM}
         proOptions={{ hideAttribution: true }}
-        onEdgeMouseEnter={(_, edge) => setHovered(edge.id)}
-        onEdgeMouseLeave={() => setHovered(null)}
+        nodeTypes={NODE_TYPES}
         onNodeClick={(_, node) => onSelect(node.id)}
         onInit={(value) => {
           instance.current = value;
@@ -344,8 +399,36 @@ export function ContextGraphCanvas({
         edgesFocusable={false}
       >
         <Background />
-        <Controls />
       </ReactFlow>
+      <div className="context-graph-pinned">
+        <GraphLegend />
+        {overlay}
+      </div>
+      <div className="context-graph-zoom" role="group" aria-label="Zoom">
+        <button
+          type="button"
+          aria-label="Zoom out"
+          onClick={() => void instance.current?.zoomOut({ duration: 150 })}
+        >
+          <Minus aria-hidden="true" />
+        </button>
+        <span aria-live="polite">{Math.round(viewport.zoom * 100)}%</span>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          onClick={() => void instance.current?.zoomIn({ duration: 150 })}
+        >
+          <Plus aria-hidden="true" />
+        </button>
+        <span className="context-graph-zoom-rule" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => void instance.current?.fitView(FIT)}
+        >
+          <Maximize aria-hidden="true" />
+          Fit
+        </button>
+      </div>
     </div>
   );
 }

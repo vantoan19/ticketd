@@ -29,11 +29,14 @@ export function BulkTagDialog({
   open,
   onOpenChange,
   count,
+  mode,
   onApply,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   count: number;
+  /** One action only; left out, both Add tag and Remove tag are offered. */
+  mode?: "add" | "remove";
   onApply: (mode: "add" | "remove", tag: string) => void;
 }) {
   const [tag, setTag] = useState("");
@@ -128,7 +131,7 @@ export function BulkTagDialog({
       // cmdk prevents default on every Enter, so adding is explicit.
       if (shown && suggestions.includes(highlight)) return;
       event.preventDefault();
-      apply("add");
+      apply(mode ?? "add");
     }
   }
 
@@ -149,7 +152,13 @@ export function BulkTagDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Add or remove tags</DialogTitle>
+          <DialogTitle>
+            {mode === "add"
+              ? "Add tag"
+              : mode === "remove"
+                ? "Remove tag"
+                : "Add or remove tags"}
+          </DialogTitle>
           <DialogDescription>
             Applies to {count} selected {count === 1 ? "ticket" : "tickets"}.
           </DialogDescription>
@@ -158,7 +167,7 @@ export function BulkTagDialog({
           className="bulk-tag-form"
           onSubmit={(event) => {
             event.preventDefault();
-            apply("add");
+            apply(mode ?? "add");
           }}
         >
           <Field>
@@ -230,18 +239,22 @@ export function BulkTagDialog({
             </p>
           </Field>
           {/* Removing sits at the far end from the submit button, which adds. */}
-          <DialogFooter className="sm:justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!name}
-              onClick={() => apply("remove")}
-            >
-              Remove tag
-            </Button>
-            <Button type="submit" disabled={!name}>
-              Add tag
-            </Button>
+          <DialogFooter className={mode ? undefined : "sm:justify-between"}>
+            {mode !== "add" && (
+              <Button
+                type={mode === "remove" ? "submit" : "button"}
+                variant={mode === "remove" ? "default" : "outline"}
+                disabled={!name}
+                onClick={mode === "remove" ? undefined : () => apply("remove")}
+              >
+                Remove tag
+              </Button>
+            )}
+            {mode !== "remove" && (
+              <Button type="submit" disabled={!name}>
+                Add tag
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

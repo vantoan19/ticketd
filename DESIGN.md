@@ -277,13 +277,19 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
 
-Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
+Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
+
+### Approved dark-theme deviations
+
+- Status group headers use the recessed surface with hairlines above and below in both themes; the canvas surface read as a hole inside the elevated dark panel.
+- Tag pills use the shadow-boundary ring (`0 0 0 1px #FFFFFF24` in dark) so they keep their shape on dark surfaces; pane edges and inputs use the same boundary, and links use `--link-foreground` (`#52AEFF` in dark).
+- Sidebar section labels are 12px secondary labels in both themes.
 
 ### List anatomy
 
 Use stable columns: selection, status, reference, title, then the source pill of an externally owned ticket. Titles receive flexible width. Reference and status columns do not move when a checkbox becomes checked.
 
-- Group rows by status in workflow order: In progress, In review, Todo, Done, Canceled, Duplicate. Each group has a 32px header on the canvas surface with the status icon, the status name in the subsection role, a 12px count, and an Add ticket action for that status. Omit empty groups. A status change moves the ticket to its new group without animating the reorder.
+- Group rows by status in workflow order: In progress, In review, Todo, Done, Canceled, Duplicate. Each group has a 32px header on the recessed surface (`#F2F2F2` light, `#1A1A1A` dark) with a hairline above and below (`#0000000D` light, `#FFFFFF14` dark) with the status icon, the status name in the subsection role, a 12px count, and an Add ticket action for that status. Omit empty groups. A status change moves the ticket to its new group without animating the reorder.
 - Once an external source is configured, a source filter below the list header offers All, GitHub, and Local with counts. It narrows the groups; it does not regroup the list by source.
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
 - Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.

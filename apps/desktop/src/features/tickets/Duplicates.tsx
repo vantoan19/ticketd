@@ -451,7 +451,12 @@ export function Duplicates({
               {shownError}
             </p>
           )}
-          <DialogFooter>
+          <DialogFooter className="items-center">
+            <p className="mr-auto text-xs text-muted-foreground">
+              {complete
+                ? "Nothing changes until you apply."
+                : "Choose Replace, Keep or Remove for each dependency."}
+            </p>
             <Button
               type="button"
               variant="outline"

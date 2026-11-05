@@ -88,6 +88,9 @@ export function useTicketWorkspace(
   // The counts describe the whole filtered result; they are null in Trash,
   // which lists tickets flat.
   const [counts, setCounts] = useState<StatusCounts | null>(null);
+  // How many tickets the scope holds without search or filters; null while
+  // nothing is narrowing it.
+  const [scopeTotal, setScopeTotal] = useState<number | null>(null);
   // The offset the displayed tickets were read at, for page-edge navigation.
   const [loadedOffset, setLoadedOffset] = useState(0);
   const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null);
@@ -146,6 +149,20 @@ export function useTicketWorkspace(
         limit: PAGE_SIZE,
         offset,
       };
+      // What the scope alone would list, so a filtered list can say "N of M".
+      const unfiltered: FindFilter = {
+        ...filterArgs,
+        query: "",
+        plan: navigation.plan || null,
+        status: navigation.kind === "progress" ? "In progress" : null,
+        tags: [],
+        availability: navigation.kind === "ready" ? "Ready" : null,
+        family: null,
+        order: "Workflow",
+      };
+      const scoped =
+        JSON.stringify({ ...unfiltered, order: 0 }) ===
+        JSON.stringify({ ...filterArgs, order: 0 });
       const result = await Promise.race([
         Promise.all([
           trash ? client.listTrash() : client.findTickets(filterArgs),
@@ -156,6 +173,9 @@ export function useTicketWorkspace(
           trash
             ? Promise.resolve(null)
             : client.countBySource(filterArgs).catch(() => null),
+          trash || scoped
+            ? Promise.resolve(null)
+            : client.countTickets(unfiltered).catch(() => null),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -190,6 +210,7 @@ export function useTicketWorkspace(
       setLoadedOffset(offset);
       setCounts(result[3]);
       setSourceCounts(result[4]);
+      setScopeTotal(result[5]?.total ?? null);
       setProjects(result[1]);
       setPlans(result[2]);
       setRevision((value) => value + 1);
@@ -218,6 +239,7 @@ export function useTicketWorkspace(
     availability,
     family,
     source,
+    navigation,
   ]);
   useEffect(() => {
     let active = true;
@@ -473,6 +495,7 @@ export function useTicketWorkspace(
     setTrash,
     tickets,
     counts,
+    scopeTotal,
     total,
     grouped: !trash && !query,
     position,
