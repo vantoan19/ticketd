@@ -17,8 +17,8 @@
   min-width: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  color: var(--foreground);
-  background: var(--accent);
+  color: var(--primary-foreground);
+  background: var(--primary);
   font-size: 12px;
   line-height: 16px;
   text-align: center;
@@ -95,13 +95,15 @@
   color: var(--muted-foreground);
 }
 .header-search input {
-  flex: 1;
+  flex: 1 1 160px;
+  min-width: 160px;
   height: 32px;
   border: 0;
   box-shadow: none;
   background: transparent;
 }
 .header-search-count {
+  flex: none;
   white-space: nowrap;
   font-size: 12px;
 }

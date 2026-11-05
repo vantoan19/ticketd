@@ -176,7 +176,7 @@
 }
 .bulk-bar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-height: 48px;
@@ -187,6 +187,16 @@
 @container (max-width: 440px) {
   .bulk-kbd {
     display: none;
+  }
+  .bulk-bar {
+    gap: 0;
+    padding-inline: 4px 4px;
+  }
+  .bulk-bar .ui-button {
+    padding-inline: 6px;
+  }
+  .bulk-count {
+    padding-inline: 4px;
   }
 }
 .bulk-spacer {
@@ -459,13 +469,14 @@
 }
 /* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
 .ticket-row-contextual .ticket-row-tags {
-  flex: 0 0 auto;
+  flex: none;
   min-width: 0;
   max-width: 50%;
 }
+/* The first tag is never the part that gives: the context name truncates first. */
 .ticket-row-contextual .ticket-tag:first-child {
-  flex: 0 1 auto;
-  min-width: 4ch;
+  flex: none;
+  max-width: 100%;
 }
 .ticket-row-contextual .ticket-tag-more {
   flex: none;

@@ -107,6 +107,9 @@ export function TicketListPane({
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family) ||
     source !== "all";
+  const filterCount =
+    [plan, status, availability, family].filter(Boolean).length +
+    tags.split(",").filter((tag) => tag.trim()).length;
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -163,7 +166,9 @@ export function TicketListPane({
       ? "Todo tickets with nothing left to wait on."
       : navigation.kind === "progress"
         ? "Tickets someone is working on right now."
-        : null;
+        : status
+          ? `${status} tickets.`
+          : null;
   const filterProps = {
     query,
     setQuery,
@@ -303,12 +308,14 @@ export function TicketListPane({
             ) : filtered ? (
               <EmptyState
                 icon={<SearchX />}
-                title="No matching tickets"
+                title={
+                  query ? `No tickets match “${query}”` : "No matching tickets"
+                }
                 description={
                   query
-                    ? `Nothing matches “${query}” in ${scopeName}${
-                        tags || status || availability || family || plan
-                          ? " with the current filters"
+                    ? `Searched titles, descriptions and updates in ${scopeName}${
+                        filterCount
+                          ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
                           : ""
                       }.`
                     : "Nothing matches the current filters."
@@ -421,7 +428,9 @@ export function TicketListPane({
                 }}
                 selected={selected}
                 singleStatus={
-                  navigation.kind === "ready" || navigation.kind === "progress"
+                  navigation.kind === "ready" ||
+                  navigation.kind === "progress" ||
+                  Boolean(status)
                 }
                 {...(grouped &&
                   counts && {
