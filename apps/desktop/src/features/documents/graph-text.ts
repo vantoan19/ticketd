@@ -118,11 +118,11 @@ export function describeEdge(
     case "blocks":
       return `${source} must be Done before ${target} is Ready`;
     case "membership":
-      return `${target} is in plan ${source}`;
+      return `${target} is in Plan ${source}`;
     case "document":
-      return `${target} is a document of plan ${source}`;
+      return `${target} is a document of Plan ${source}`;
     case "spec":
-      return `${target} is the primary spec of plan ${source}`;
+      return `${target} is the primary spec of Plan ${source}`;
     case "mention":
       return `${source} mentions ${target}${quoted}`;
     case "attached":

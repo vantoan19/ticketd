@@ -354,6 +354,7 @@ export function Projects({
         submitLabel={editing ? "Save project" : "Create project"}
         pending={pending === "save"}
         error={error}
+        errorId="project-form-error"
         onSubmit={() => void saveProject()}
         onCancel={() => {
           discard(editing);
@@ -379,9 +380,13 @@ export function Projects({
               id="project-path"
               value={draft.path}
               autoComplete="off"
-              aria-invalid={!!pathError}
+              aria-invalid={!!pathError || !!error}
               aria-describedby={
-                pathError ? "project-path-error" : "project-path-hint"
+                pathError
+                  ? "project-path-error"
+                  : error
+                    ? "project-form-error"
+                    : "project-path-hint"
               }
               onChange={(e) => update({ path: e.target.value })}
             />
@@ -405,6 +410,7 @@ export function Projects({
         submitLabel="Register checkout"
         pending={pending === "checkout"}
         error={error}
+        errorId="checkout-form-error"
         onSubmit={() => void registerCheckout()}
         onCancel={() => {
           if (checkoutProject) discardCheckout(checkoutProject.id);
@@ -418,9 +424,13 @@ export function Projects({
               id="checkout-path"
               value={checkoutPath}
               autoComplete="off"
-              aria-invalid={!!checkoutError}
+              aria-invalid={!!checkoutError || !!error}
               aria-describedby={
-                checkoutError ? "checkout-path-error" : undefined
+                checkoutError
+                  ? "checkout-path-error"
+                  : error
+                    ? "checkout-form-error"
+                    : undefined
               }
               onChange={(e) =>
                 checkoutProject &&

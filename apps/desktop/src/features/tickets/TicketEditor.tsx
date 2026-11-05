@@ -592,24 +592,21 @@ export function TicketEditor({
                   : ""}
       </p>
       {state === "failed" && (
-        <div role="alert">
-          <p>
-            Couldn&apos;t save your changes.{" "}
-            <button
-              type="button"
-              className="underline"
-              onClick={() => {
-                setState("pending");
-                setRetry((value) => value + 1);
-              }}
-            >
-              Retry
-            </button>
-          </p>
+        <div role="alert" className="document-save-error ticket-save-error">
+          <p>Couldn&apos;t save your changes. Your draft is still here.</p>
+          <Button
+            size="sm"
+            onClick={() => {
+              setState("pending");
+              setRetry((value) => value + 1);
+            }}
+          >
+            Retry
+          </Button>
           {error && (
             <details>
               <summary>Details</summary>
-              {error}
+              <pre>{error}</pre>
             </details>
           )}
         </div>

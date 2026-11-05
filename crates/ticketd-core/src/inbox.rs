@@ -93,6 +93,12 @@ impl Workspace {
             })
             .transpose()?;
         let ticket = self.show_ticket(reference)?;
+        // Snoozing or dismissing answers the reminder already delivered, so it
+        // must not keep claiming to be due in the inbox.
+        self.connection.execute(
+            "UPDATE inbox_entries SET read = 1 WHERE person = ?1 AND ticket_id = ?2 AND kind = 'reminder' AND read = 0",
+            params![LOCAL_PERSON, ticket.id],
+        )?;
         if let Some(due_at) = due_at {
             self.connection.execute("INSERT INTO ticket_reminders (person, ticket_id, due_at, delivered) VALUES (?1, ?2, ?3, 0) ON CONFLICT(person, ticket_id) DO UPDATE SET due_at = excluded.due_at, delivered = 0", params![LOCAL_PERSON, ticket.id, due_at])?;
         } else {
