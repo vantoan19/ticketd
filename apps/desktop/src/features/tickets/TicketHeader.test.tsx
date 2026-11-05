@@ -157,7 +157,11 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
 
 test("a trashed ticket offers Restore without graph or duplicate actions", async () => {
   header({ ticket: { ...ticket, trashed: true } });
-  expect(screen.getByRole("button", { name: "Restore" })).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Restore" })
+      .getAttribute("data-variant"),
+  ).toBe("default");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Ticket actions" }),
     {

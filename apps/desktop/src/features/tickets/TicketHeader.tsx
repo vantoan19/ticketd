@@ -188,7 +188,6 @@ export function TicketHeader({
           )}
           {ticket.trashed && (
             <Button
-              variant="outline"
               size="sm"
               disabled={pending}
               onClick={() => void setTrashed(false)}
