@@ -34,8 +34,8 @@ function dependencyError(
 ): string {
   const text = String(reason);
   if (blocker === dependent) return `${dependent} cannot block itself.`;
-  // The core names the loop's path; keep it when it is there.
-  if (/already exists\b/i.test(text)) return text.replace(/^Error:\s*/, "");
+  // The core names the loop once; keep it when it is there.
+  if (/can.t block\b/i.test(text)) return text.replace(/^Error:\s*/, "");
   if (/cycle/i.test(text))
     return `${dependent} already blocks ${blocker}, directly or through other tickets, so ${blocker} cannot also block it.`;
   if (/not found/i.test(text)) return `No ticket ${blocker} exists.`;
@@ -173,6 +173,8 @@ function Blockers({
                   <button type="button" onClick={() => onOpen(item.reference)}>
                     <span className="ticket-ref">{item.reference}</span>{" "}
                     {item.title}
+                    {projects.find((p) => p.id === item.project_id) &&
+                      ` · ${projects.find((p) => p.id === item.project_id)?.name}`}
                     {item.boundary && " · Outside Plan"}
                   </button>
                 </div>
@@ -331,6 +333,8 @@ export function PlanDependencies({
               ticket={graph.nodes.find((node) => node.reference === selected)!}
               origin=""
               projects={projects}
+              nodes={graph.nodes}
+              version={graph}
               onOpen={onOpen}
             />
           )}

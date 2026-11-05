@@ -24,15 +24,16 @@ const GROUP_PAGE = 10;
 export function ContextGraph({
   active = true,
   origin,
-  originLabel = "source",
+  originLabel,
   onBack,
   onOpen,
 }: {
   active?: boolean;
   origin: string;
-  /** What Back returns to once the history is empty. */
+  /** What Back returns to once the history is empty; defaults to the item the graph was opened from. */
   originLabel?: string;
-  onBack: () => void;
+  /** Gets the item the graph was opened from, so Back can return to it. */
+  onBack: (origin: Graph["nodes"][number] | null) => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
   const changeVersion = useWorkspaceChange();
@@ -63,6 +64,10 @@ export function ContextGraph({
   // Centering and going back unmount the control that had focus.
   const restoreFocus = useRef(false);
   const previewHeading = useRef<HTMLHeadingElement | null>(null);
+  // The item this graph was opened from; centring elsewhere does not change it.
+  const [originNode, setOriginNode] = useState<Graph["nodes"][number] | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [layoutError, setLayoutError] = useState("");
   // Every change (token, centre, expansion) starts a request; only the newest
@@ -83,6 +88,10 @@ export function ContextGraph({
       .then((value) => {
         if (!mounted.current || request !== latestRequest.current) return;
         setGraph(value);
+        if (center === origin)
+          setOriginNode(
+            value.nodes.find((node) => node.id === value.center) ?? null,
+          );
         // An expansion or page whose item is no longer shown has nothing to expand.
         const shown = new Set(value.nodes.map((node) => node.id));
         setExpandedIds((ids) =>
@@ -106,7 +115,15 @@ export function ContextGraph({
         if (mounted.current && request === latestRequest.current)
           setError(String(reason));
       });
-  }, [active, center, includeDetails, expandedIds, pages, changeVersion]);
+  }, [
+    active,
+    center,
+    origin,
+    includeDetails,
+    expandedIds,
+    pages,
+    changeVersion,
+  ]);
   useEffect(() => {
     if (graph && restoreFocus.current) {
       restoreFocus.current = false;
@@ -139,7 +156,7 @@ export function ContextGraph({
   function back() {
     const previous = history.at(-1);
     if (!previous) {
-      onBack();
+      onBack(originNode);
       return;
     }
     restoreFocus.current = true;
@@ -251,12 +268,14 @@ export function ContextGraph({
       <div className="context-graph-heading">
         <h1>Context graph</h1>
         <Button disabled={!preview} onClick={() => preview && onOpen(preview)}>
-          Open selected item
+          Open item
         </Button>
       </div>
       <div className="context-graph-toolbar">
         <Button variant="ghost" onClick={back}>
-          {history.length ? "Back" : `Back to ${originLabel}`}
+          {history.length
+            ? "Back"
+            : `Back to ${originLabel ?? originNode?.ticket_reference ?? originNode?.label ?? "source"}`}
         </Button>
         {centerLabel && (
           <span className="context-graph-scope">Centered on {centerLabel}</span>
@@ -410,7 +429,8 @@ export function ContextGraph({
         return (
           <div key={group.key}>
             <h3>
-              {group.title} {group.nodes.length}
+              {group.title}{" "}
+              <span className="context-graph-count">{group.nodes.length}</span>
             </h3>
             <ul className="context-graph-list">
               {group.nodes.slice(0, limit).map((node) => (

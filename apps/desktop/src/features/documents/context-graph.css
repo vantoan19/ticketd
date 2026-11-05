@@ -255,3 +255,14 @@
   align-items: center;
   gap: 6px;
 }
+
+.context-graph-page h3 {
+  margin: 20px 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.context-graph-count {
+  margin-left: 4px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}

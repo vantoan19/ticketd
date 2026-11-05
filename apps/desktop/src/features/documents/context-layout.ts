@@ -101,6 +101,49 @@ function separate(
   }
 }
 
+function overlaps(a: Point, b: Point): boolean {
+  return (
+    Math.abs(a.x - b.x) < CARD_WIDTH + GAP &&
+    Math.abs(a.y - b.y) < CARD_HEIGHT + GAP
+  );
+}
+
+/**
+ * Pushing cards apart can stall when new cards are squeezed between ones that
+ * must not move. Any new card still touching another goes to the nearest free
+ * spot instead, so an added card never covers an existing one.
+ */
+function settle(
+  ids: string[],
+  points: Record<string, Point>,
+  fixed: Set<string>,
+) {
+  const placed = ids.filter((id) => fixed.has(id));
+  for (const id of ids) {
+    if (fixed.has(id)) continue;
+    const at = points[id]!;
+    const free = (point: Point) =>
+      placed.every((other) => !overlaps(point, points[other]!));
+    if (!free(at)) {
+      search: for (let radius = 20; radius < 4000; radius += 20) {
+        const steps = Math.max(8, Math.round(radius / 10));
+        for (let step = 0; step < steps; step++) {
+          const angle = (2 * Math.PI * step) / steps;
+          const candidate = {
+            x: at.x + radius * Math.cos(angle),
+            y: at.y + radius * Math.sin(angle) * 0.6,
+          };
+          if (free(candidate)) {
+            points[id] = candidate;
+            break search;
+          }
+        }
+      }
+    }
+    placed.push(id);
+  }
+}
+
 // A bounded force layout accepts cycles and leaves already positioned nodes fixed.
 export function layoutContextGraph(
   request: LayoutRequest,
@@ -112,11 +155,14 @@ export function layoutContextGraph(
     const existing = request.positions[id];
     points[id] = existing ? { ...existing } : start[id]!;
   }
+  const centered = request.center !== undefined;
   for (let iteration = 0; iteration < 100; iteration++) {
     const forces: Record<string, Point> = Object.fromEntries(
       ids.map((id) => [id, { x: 0, y: 0 }]),
     );
-    for (let i = 0; i < ids.length; i++) {
+    // The grid already keeps cards apart, so with nothing central only the
+    // connection pull runs; repulsion would spread a small map past the view.
+    for (let i = 0; i < ids.length && centered; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const a = points[ids[i]!]!;
         const b = points[ids[j]!]!;
@@ -154,5 +200,6 @@ export function layoutContextGraph(
     ids.filter((id) => request.positions[id] || id === request.center),
   );
   separate(ids, points, fixed);
+  settle(ids, points, fixed);
   return points;
 }

@@ -29,9 +29,19 @@ import "./context-graph.css";
 
 // Radix Select items cannot have an empty value.
 const ALL = "__all__";
-/** Most cards the map draws, so their text stays readable. */
-const MAP_CARDS = 25;
+/** Most cards the map draws, so their text stays readable at the zoom it opens on. */
+const MAP_CARDS = 12;
+/** The workspace map opens at a zoom where 14px labels are close to full size. */
+const MAP_MIN_ZOOM = 0.9;
 const NO_POSITIONS: Record<string, Point> = {};
+
+/** Connections among the shown items, or the item's own total when only one is shown. */
+function connectionSummary(graph: Graph): string {
+  const count = (n: number) => `${n} ${n === 1 ? "connection" : "connections"}`;
+  const only = graph.nodes.length === 1 ? graph.nodes[0] : undefined;
+  if (only) return `${count(graph.connection_counts?.[only.id] ?? 0)} in total`;
+  return `${count(graph.edges.length)} among these items`;
+}
 
 export function WorkspaceGraph({
   active,
@@ -392,6 +402,7 @@ export function WorkspaceGraph({
               onSelect={setSelected}
               onError={setError}
               fit={fit}
+              minFitZoom={MAP_MIN_ZOOM}
               onFitted={() => setFit(false)}
             />
           )}
@@ -431,9 +442,7 @@ export function WorkspaceGraph({
               : relationship
                 ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
                 : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
-            · {graph.edges.length}{" "}
-            {graph.edges.length === 1 ? "connection" : "connections"}
-            {" among these items"}
+            · {connectionSummary(graph)}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
               <>
                 {" · "}

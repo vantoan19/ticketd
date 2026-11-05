@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import DependencyGraph from "./DependencyGraph";
+import DependencyGraph, { SelectionPanel } from "./DependencyGraph";
 import type { DependencyGraph as Graph } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -177,4 +177,31 @@ test("re-centers the graph on the selected ticket", async () => {
       reference: "T-3",
     }),
   );
+});
+
+test("the selection panel reloads its lists when the graph changes", async () => {
+  const ticket = graph.nodes[2]!;
+  const view = render(
+    <SelectionPanel
+      ticket={ticket}
+      origin=""
+      projects={[]}
+      version={graph}
+      onOpen={() => {}}
+    />,
+  );
+  await screen.findByText("Offscreen");
+  const shows = () =>
+    vi.mocked(invoke).mock.calls.filter(([c]) => c === "show_ticket").length;
+  const before = shows();
+  view.rerender(
+    <SelectionPanel
+      ticket={ticket}
+      origin=""
+      projects={[]}
+      version={{ ...graph }}
+      onOpen={() => {}}
+    />,
+  );
+  await waitFor(() => expect(shows()).toBe(before + 1));
 });

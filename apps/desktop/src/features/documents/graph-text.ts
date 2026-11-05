@@ -116,7 +116,7 @@ export function describeEdge(
     case "mention":
       return `${source} mentions ${target}${quoted}`;
     case "attached":
-      return `${source} has ${target} attached`;
+      return `${source} has ${target}`;
     case "activity":
       return `An update on ${source} mentions ${target}${quoted}`;
     case "support":

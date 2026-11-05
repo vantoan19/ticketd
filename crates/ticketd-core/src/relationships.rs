@@ -154,10 +154,20 @@ impl Workspace {
             return Err(Error::DependencySelf(blocker.into()));
         }
         if cycle {
+            let path = chain(&tx, &dependent_id, &blocker_id)?;
+            let between = path.get(1..path.len().saturating_sub(1)).unwrap_or(&[]);
+            let detail = if between.is_empty() {
+                format!("{dependent} already blocks {blocker}.")
+            } else {
+                format!(
+                    "{dependent} already reaches {blocker} through {}.",
+                    between.join(" → ")
+                )
+            };
             return Err(Error::DependencyCycle {
                 blocker: blocker.into(),
                 dependent: dependent.into(),
-                path: chain(&tx, &dependent_id, &blocker_id)?.join(" → "),
+                detail,
             });
         }
         let changed = tx.execute(

@@ -11,6 +11,7 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type NodeChange,
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
@@ -37,6 +38,7 @@ export function ContextGraphCanvas({
   onFitted,
   centerId,
   centerOn = null,
+  minFitZoom = READABLE_ZOOM,
 }: {
   nodes: { id: string; label: string }[];
   edges: Edge[];
@@ -54,6 +56,8 @@ export function ContextGraphCanvas({
   centerId?: string | undefined;
   /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
   centerOn?: string | null;
+  /** The smallest zoom a fit may use; cards are never drawn smaller than this. */
+  minFitZoom?: number;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -157,7 +161,7 @@ export function ContextGraphCanvas({
           duration: 200,
           // A map is only shown on request or when small, so it always opens at a
           // readable zoom and the person pans; a lone card is not enlarged.
-          minZoom: READABLE_ZOOM,
+          minZoom: minFitZoom,
           maxZoom: MAX_FIT_ZOOM,
         });
       }
@@ -165,7 +169,7 @@ export function ContextGraphCanvas({
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, centerOn, placed, ready, positions]);
+  }, [fit, centerOn, placed, ready, positions, minFitZoom]);
   const container = useRef<HTMLDivElement | null>(null);
   // Cards that appear later (Expand, Load more) are panned into view; cards already
   // placed stay where they are.
@@ -212,7 +216,7 @@ export function ContextGraphCanvas({
           void instance.current?.fitView({
             padding: 0.2,
             duration: 200,
-            minZoom: READABLE_ZOOM,
+            minZoom: minFitZoom,
             maxZoom: MAX_FIT_ZOOM,
           }),
         150,
@@ -223,7 +227,7 @@ export function ContextGraphCanvas({
       window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, []);
+  }, [minFitZoom]);
   // Labels crowd a dense map, so a line names itself only while hovered; the
   // item list states every connection in words.
   const [hovered, setHovered] = useState<string | null>(null);
@@ -234,19 +238,38 @@ export function ContextGraphCanvas({
       ),
     [edges, hovered],
   );
+  const [sizes, setSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
+  function rememberSizes(changes: NodeChange[]) {
+    const seen = changes.flatMap((change) =>
+      change.type === "dimensions" && change.dimensions
+        ? [[change.id, change.dimensions] as const]
+        : [],
+    );
+    if (seen.length)
+      setSizes((before) => ({ ...before, ...Object.fromEntries(seen) }));
+  }
   const flowNodes = useMemo<Node[]>(
     () =>
       nodes
         .filter((node) => positions[node.id])
-        .map((node) => ({
-          id: node.id,
-          position: positions[node.id]!,
-          data: { label: node.label },
-          ariaLabel: node.label,
-          style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
-          selected: node.id === selected,
-        })),
-    [nodes, positions, selected],
+        .map((node) => {
+          // React Flow hides a card until it is measured, and it only measures
+          // on a size change. A rebuilt node object (a renamed title) would
+          // otherwise lose its size and stay hidden, so carry the size over.
+          const measured = sizes[node.id];
+          return {
+            id: node.id,
+            position: positions[node.id]!,
+            data: { label: node.label },
+            ariaLabel: node.label,
+            style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
+            selected: node.id === selected,
+            ...(measured?.width ? { measured } : {}),
+          };
+        }),
+    [nodes, positions, selected, sizes],
   );
   // React Flow selects a focused node on Enter or Space without calling
   // onNodeClick, so the keyboard path reports the selection itself.
@@ -267,6 +290,7 @@ export function ContextGraphCanvas({
     >
       <ReactFlow
         nodes={flowNodes}
+        onNodesChange={rememberSizes}
         edges={shownEdges}
         minZoom={MIN_ZOOM}
         proOptions={{ hideAttribution: true }}
