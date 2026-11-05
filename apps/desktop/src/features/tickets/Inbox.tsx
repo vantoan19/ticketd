@@ -154,7 +154,6 @@ export function Inbox({
         entry.reference,
         snoozeInstant(choice, new Date()),
       );
-      await inboxClient.setRead([entry.id], true);
       reload();
     } catch (e) {
       setError(String(e));

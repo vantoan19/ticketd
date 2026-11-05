@@ -154,7 +154,7 @@ test("row actions are real buttons reachable by keyboard focus and mark one entr
   expect(store.find((e) => e.id === 2)?.read).toBe(false);
 });
 
-test("snoozing a due reminder reschedules it and marks the entry read", async () => {
+test("snoozing a due reminder reschedules it without marking the entry read", async () => {
   store = [
     entry({
       id: 7,
@@ -179,7 +179,7 @@ test("snoozing a due reminder reschedules it and marks the entry read", async ()
   expect(call.args.reference).toBe("T-7");
   const due = new Date(call.args.dueAt as string).getTime();
   expect(due).toBeGreaterThanOrEqual(before + 3600000 - 1000);
-  await waitFor(() => expect(store[0]!.read).toBe(true));
+  expect(store[0]!.read).toBe(false);
 });
 
 test("only reminders offer Snooze", async () => {
