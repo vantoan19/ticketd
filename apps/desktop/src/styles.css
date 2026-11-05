@@ -327,11 +327,12 @@
 .ui-button:disabled {
   color: var(--disabled-foreground);
   background: var(--recessed);
-  box-shadow: none;
+  box-shadow: var(--shadow-border-base);
 }
 .ui-button-ghost:disabled,
 .ui-button-link:disabled {
   background: transparent;
+  box-shadow: none;
 }
 .ui-button[data-readonly]:disabled,
 .ui-select[data-readonly]:disabled {

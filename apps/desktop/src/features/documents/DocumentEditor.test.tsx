@@ -572,6 +572,42 @@ it("lists each connected item once and names Plans that use the Document as spec
   await screen.findByRole("button", { name: /T-4/ });
   expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Spec of Roadmap" })).toBeTruthy();
+  expect(screen.getByText("Spec of the Plan Roadmap")).toBeTruthy();
+});
+
+const base = { id: "d1", created_at: "c", updated_at: "u", trashed: false };
+
+it("shows the title once in Read: a body heading that repeats it is not rendered again", () => {
+  const doc = {
+    ...base,
+    title: "Checkout spec",
+    body: "# Checkout spec\n\nSee the flow.",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(
+    screen.getAllByRole("heading", { name: "Checkout spec", level: 1 }),
+  ).toHaveLength(1);
+  expect(screen.getByText("See the flow.")).toBeTruthy();
+});
+
+it("keeps a body heading that differs from the explicit title", () => {
+  const doc = { ...base, title: "Checkout spec", body: "# Overview\n\nText" };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+});
+
+it("edits the title in place without repeating the heading as a placeholder", () => {
+  const doc = {
+    ...base,
+    title: null,
+    heading: "First line",
+    body: "First line\nMore",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  const title = screen.getByRole("textbox", { name: "Title" });
+  expect(title.getAttribute("placeholder")).toBe("Add a title (optional)");
+  expect(screen.queryByText("Optional title")).toBeNull();
 });
 const stored = {
   id: "d1",

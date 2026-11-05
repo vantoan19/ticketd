@@ -70,7 +70,7 @@ export function DialogShell({
             <DialogClose asChild>
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={onCancel}
               >

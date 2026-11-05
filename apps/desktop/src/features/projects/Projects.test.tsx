@@ -180,3 +180,12 @@ test("removing a checkout asks first and says tickets are unchanged", async () =
     expect(remove).toHaveBeenCalledWith("p1", "/other/checkout"),
   );
 });
+
+test("opens the tickets of a project from its card", () => {
+  const onOpenTickets = vi.fn();
+  render(<Projects {...props} onOpenTickets={onOpenTickets} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open tickets of Original" }),
+  );
+  expect(onOpenTickets).toHaveBeenCalledWith(project);
+});

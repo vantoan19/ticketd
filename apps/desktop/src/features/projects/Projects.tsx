@@ -227,10 +227,13 @@ export function Projects({
   projects,
   loading,
   onChange,
+  onOpenTickets,
 }: {
   projects: Project[];
   loading: boolean;
   onChange: () => Promise<void>;
+  /** Shows that project's tickets. */
+  onOpenTickets?: (project: Project) => void;
 }) {
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   // Drafts survive closing a dialog; a successful save discards them.
@@ -403,6 +406,17 @@ export function Projects({
                     {ticketsLabel(counts[item.id])}
                   </span>
                   <span className="projects-spacer" />
+                  {onOpenTickets && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={`Open tickets of ${item.name}`}
+                      onClick={() => onOpenTickets(item)}
+                    >
+                      Open tickets
+                    </Button>
+                  )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <IconButton
