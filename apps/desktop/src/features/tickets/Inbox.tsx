@@ -27,6 +27,7 @@ import {
   type Entry,
   type SnoozeChoice,
 } from "./inboxModel";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
 
 const PAGE_SIZE = 50;
@@ -119,6 +120,7 @@ export function Inbox({
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
+  const changeVersion = useWorkspaceChange();
   const reload = () => setTick((value) => value + 1);
   useEffect(() => {
     let active = true;
@@ -136,11 +138,7 @@ export function Inbox({
     return () => {
       active = false;
     };
-  }, [filter, pages, revision, tick]);
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((value) => value + 1), 2000);
-    return () => window.clearInterval(timer);
-  }, []);
+  }, [filter, pages, revision, tick, changeVersion]);
   async function mark(ids: number[], read: boolean) {
     try {
       for (let start = 0; start < ids.length; start += MARK_BATCH)

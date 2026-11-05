@@ -25,10 +25,23 @@ import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
+import {
+  useOnWorkspaceChange,
+  useWorkspaceChangePoll,
+  WorkspaceChangeProvider,
+} from "@/lib/workspace-change";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceActivityContext } from "@/features/tickets/source-activity";
 
 export function App() {
+  return (
+    <WorkspaceChangeProvider value={useWorkspaceChangePoll()}>
+      <AppContent />
+    </WorkspaceChangeProvider>
+  );
+}
+
+function AppContent() {
   const [view, setViewState] = useState<
     | "tickets"
     | "projects"
@@ -66,22 +79,22 @@ export function App() {
     key: number;
   } | null>(null);
   const [counts, setCounts] = useState<SidebarCounts | null>(null);
+  const loadCounts = useRef(() => {});
   useEffect(() => {
     let active = true;
-    const poll = () =>
+    loadCounts.current = () =>
       void countsClient
         .sidebar()
         .then((value) => {
           if (active) setCounts(value);
         })
         .catch(() => {});
-    poll();
-    const timer = window.setInterval(poll, 2000);
+    loadCounts.current();
     return () => {
       active = false;
-      window.clearInterval(timer);
     };
   }, []);
+  useOnWorkspaceChange(() => loadCounts.current());
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { plansClient, type View } from "@/lib/api/plans";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 
 /**
  * Loads one Plan's counts and members and runs its actions. The view reloads
@@ -15,6 +16,7 @@ export function usePlanView(
     view: View | null;
     error: string;
   } | null>(null);
+  const changeVersion = useWorkspaceChange();
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
   const [adding, setAdding] = useState(false);
@@ -39,7 +41,7 @@ export function usePlanView(
     return () => {
       active = false;
     };
-  }, [planId, revision]);
+  }, [planId, revision, changeVersion]);
   const current = loaded?.id === planId ? loaded : null;
   /** Runs a change, refreshes the workspace, and reports whether it worked. */
   const run = useCallback(

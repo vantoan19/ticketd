@@ -14,6 +14,7 @@ import { useBulkEdit } from "./useBulkEdit";
 import { useTicketWorkspace } from "./useTicketWorkspace";
 import type { Ticket } from "@/lib/api/client";
 import { bridgeDefault } from "@/test/bridge-defaults";
+import { TickingChanges } from "@/test/ticking-changes";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
@@ -149,7 +150,11 @@ function setUp(showTicket: (reference: string) => Promise<Ticket>) {
 }
 const marked = () => document.querySelector("[data-mention-target]");
 async function followBacklink() {
-  render(<Harness />);
+  render(
+    <TickingChanges>
+      <Harness />
+    </TickingChanges>,
+  );
   // Cache T-2 with its old body, then look at T-1, whose backlinks list T-2.
   act(() => api.select("T-2"));
   await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
@@ -167,7 +172,11 @@ test("a mention waits for the fresh body, so a stale cache neither misses nor lo
     await gate;
     return ticket("T-2", STORED);
   });
-  render(<Harness />);
+  render(
+    <TickingChanges>
+      <Harness />
+    </TickingChanges>,
+  );
   act(() => api.select("T-2"));
   await screen.findByText(/Blocked on T-1 today\./, { selector: "p" });
   act(() => api.select("T-1"));

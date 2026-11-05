@@ -26,6 +26,7 @@ import {
   type WaitingOutcome,
 } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
 import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
@@ -154,39 +155,21 @@ export function Duplicates({
   // Dependencies can change under an open review (from the CLI, another
   // window). Compare the shown preview with a fresh one and ask for a refresh
   // rather than leaving rows that no longer match.
-  useEffect(() => {
+  useOnWorkspaceChange(() => {
     if (!preview || stale || pending) return;
-    let current = true;
     const shown = JSON.stringify([preview.canonical, preview.edges]);
-    const timer = window.setInterval(() => {
-      void client
-        .previewDuplicate(
-          separate ? target : ticket.reference,
-          canonicalArg,
-          separate,
-        )
-        .then((latest) => {
-          if (
-            current &&
-            JSON.stringify([latest.canonical, latest.edges]) !== shown
-          )
-            setStale("changed");
-        })
-        .catch(() => {});
-    }, 2000);
-    return () => {
-      current = false;
-      window.clearInterval(timer);
-    };
-  }, [
-    preview,
-    stale,
-    pending,
-    separate,
-    target,
-    canonicalArg,
-    ticket.reference,
-  ]);
+    void client
+      .previewDuplicate(
+        separate ? target : ticket.reference,
+        canonicalArg,
+        separate,
+      )
+      .then((latest) => {
+        if (JSON.stringify([latest.canonical, latest.edges]) !== shown)
+          setStale("changed");
+      })
+      .catch(() => {});
+  });
 
   async function loadPreview() {
     setPending(true);

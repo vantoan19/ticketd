@@ -27,13 +27,20 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
-const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
+const bridge = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  // Moves on every poll, so each tick looks like a change made elsewhere.
+  token: { next: (): number => 0 },
+}));
+let tokenCalls = 0;
+bridge.token.next = () => ++tokenCalls;
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: unknown) => {
     if (command === "find_tickets_with_updates") {
       const tickets: unknown[] = await bridge.invoke("find_tickets", args);
       return tickets.map((ticket) => ({ ticket, latest_update: null }));
     }
+    if (command === "workspace_change_token") return bridge.token.next();
     return bridge.invoke(command, args);
   },
 }));
@@ -349,6 +356,35 @@ test("retains project drafts and clears filters when navigating scopes", async (
     ).getByRole("button", { name: "All tickets" }),
   );
   expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
+});
+
+test("an idle workspace costs one token poll per tick and refetches only when the token moves", async () => {
+  vi.useFakeTimers();
+  let token = 1;
+  bridge.token.next = () => token;
+  const calls: string[] = [];
+  bridge.invoke.mockImplementation(async (command: string) => {
+    calls.push(command);
+    return command === "count_tickets" ? bridgeDefault(command) : [];
+  });
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const loaded = calls.length;
+  const listed = () => calls.filter((c) => c === "find_tickets").length;
+  expect(listed()).toBe(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  // Ten idle seconds: no view fetched anything, only the token was polled.
+  expect(calls.length).toBe(loaded);
+  token = 2;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(listed()).toBe(2);
+  bridge.token.next = () => ++tokenCalls;
 });
 
 test("new ticket dialog focuses title and restores focus on Escape", async () => {

@@ -7,6 +7,7 @@ import { GraphLegend } from "./GraphLegend";
 import { connectionRows, edgeLabels, flowEdges, kindNames } from "./graph-text";
 import type { Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./context-graph.css";
 
 export function ContextGraph({
@@ -20,6 +21,7 @@ export function ContextGraph({
   onBack: () => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
+  const changeVersion = useWorkspaceChange();
   const [center, setCenter] = useState(origin);
   const [selected, setSelected] = useState<string | null>(null);
   const [includeDetails, setIncludeDetails] = useState(false);
@@ -82,12 +84,10 @@ export function ContextGraph({
         });
     }
     refresh();
-    const timer = window.setInterval(refresh, 5000);
     return () => {
       live = false;
-      window.clearInterval(timer);
     };
-  }, [active, center, includeDetails, expandedIds, pages]);
+  }, [active, center, includeDetails, expandedIds, pages, changeVersion]);
   useEffect(() => {
     if (graph && restoreFocus.current) {
       restoreFocus.current = false;
