@@ -98,7 +98,12 @@ import {
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
-import { checklistRule, closeCodeFence, openFenceRule } from "./input-rules";
+import {
+  checklistRule,
+  closeCodeFence,
+  markdownLinkRule,
+  openFenceRule,
+} from "./input-rules";
 import { linkPluginOptions } from "./link-options";
 import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
@@ -635,7 +640,10 @@ const richPlugins = [
     ],
   }),
   TablePlugin.configure({ options: { disableMerge: true } }),
-  LinkPlugin.configure({ options: linkPluginOptions }),
+  LinkPlugin.configure({
+    options: linkPluginOptions,
+    inputRules: [markdownLinkRule],
+  }),
   CodeBlockPlugin.configure({
     inputRules: [openFenceRule],
   }),

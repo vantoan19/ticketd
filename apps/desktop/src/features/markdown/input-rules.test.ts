@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { BulletedListRules } from "@platejs/list-classic";
 import { ListPlugin } from "@platejs/list-classic/react";
-import { checklistRule, closeCodeFence, openFenceRule } from "./input-rules";
+import { LinkPlugin } from "@platejs/link/react";
+import {
+  checklistRule,
+  closeCodeFence,
+  markdownLinkRule,
+  openFenceRule,
+} from "./input-rules";
+import { linkPluginOptions } from "./link-options";
 import { writeMarkdown } from "./plate-markdown";
 
 const richPlugins = [
@@ -11,6 +18,10 @@ const richPlugins = [
     inputRules: [BulletedListRules.markdown(), checklistRule],
   }),
   CodeBlockPlugin.configure({ inputRules: [openFenceRule] }),
+  LinkPlugin.configure({
+    options: linkPluginOptions,
+    inputRules: [markdownLinkRule],
+  }),
 ];
 
 function typing(initial: string, keys: (string | "\n")[]) {
@@ -45,5 +56,20 @@ describe("typed Markdown input rules", () => {
     expect(writeMarkdown(editor.children)).toBe("- [ ] task");
     const checked = typing("", [..."- [x] done"]);
     expect(writeMarkdown(checked.children)).toBe("- [x] done");
+  });
+  it("turns a typed [text](url) into a link on the closing parenthesis", () => {
+    const editor = typing("", [..."see [docs](https://example.com/a) now"]);
+    expect(writeMarkdown(editor.children)).toBe(
+      "see [docs](https://example.com/a) now",
+    );
+    expect(JSON.stringify(editor.children)).toContain('"type":"a"');
+    const ticketd = typing("", [..."[](ticketd://document/abc)"]);
+    expect(writeMarkdown(ticketd.children)).toBe(
+      "<ticketd://document/abc>",
+    );
+  });
+  it("leaves other targets as typed", () => {
+    const editor = typing("", [..."[x](javascript:alert)"]);
+    expect(JSON.stringify(editor.children)).not.toContain('"type":"a"');
   });
 });

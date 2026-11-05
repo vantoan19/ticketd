@@ -180,7 +180,19 @@ export function ContextGraph({
   const neighbours = graph ? graph.nodes.length - 1 : 0;
   const [mapChoice, setMapChoice] = useState<boolean | null>(null);
   const tooDense = neighbours > MAP_LIMIT;
-  const showMap = opensAsMap(neighbours, mapChoice);
+  // The automatic map/list choice is made once per centre; expanding must not flip the view.
+  const [autoChoice, setAutoChoice] = useState<{
+    center: string;
+    map: boolean;
+  } | null>(null);
+  if (graph && autoChoice?.center !== graph.center)
+    setAutoChoice({
+      center: graph.center,
+      map: opensAsMap(neighbours, null),
+    });
+  const showMap =
+    neighbours <= MAP_LIMIT &&
+    (mapChoice ?? autoChoice?.map ?? opensAsMap(neighbours, null));
   const [shownPerKind, setShownPerKind] = useState<Record<string, number>>({});
   // Items per relationship, so the summary counts the rows below it.
   const groupItems = new Map<string, Set<string>>();

@@ -1,6 +1,7 @@
 import { PathApi, defineInputRule, type TElement } from "platejs";
 import type { PlateEditor } from "platejs/react";
 import { toggleTaskList } from "@platejs/list-classic";
+import { upsertLink } from "@platejs/link";
 
 function isInCodeBlock(editor: PlateEditor) {
   return editor.api.some({ match: { type: "code_block" } });
@@ -101,6 +102,44 @@ export const checklistRule = defineInputRule({
           editor.tf.setNodes({ checked: false }, { at });
       }
     } else toggleTaskList(editor, match.checked);
+    return true;
+  },
+});
+
+/**
+ * Typing the closing ")" of "[text](url)" turns it into a link, for http(s) and ticketd:// targets.
+ * Without text the link reads as its URL.
+ */
+export const markdownLinkRule = defineInputRule({
+  target: "insertText",
+  trigger: ")",
+  enabled: ({ editor }) => !isInCodeBlock(editor),
+  resolve: ({ editor, isCollapsed }) => {
+    const focus = editor.selection?.focus;
+    if (!isCollapsed || !focus) return;
+    const block = editor.api.block();
+    if (!block) return;
+    const start = editor.api.start(block[1]);
+    if (!start) return;
+    const before = editor.api.string({ anchor: start, focus });
+    const match =
+      /\[([^[\]]*)\]\(((?:https?:\/\/|ticketd:\/\/)[^\s()]+)$/i.exec(before);
+    if (!match) return;
+    const length = match[0].length;
+    const anchor = editor.api.before(focus, {
+      distance: length,
+      unit: "character",
+    });
+    if (!anchor) return;
+    return {
+      range: { anchor, focus },
+      text: match[1] ?? "",
+      url: match[2] ?? "",
+    };
+  },
+  apply: ({ editor }, match) => {
+    editor.tf.delete({ at: match.range });
+    upsertLink(editor, { url: match.url, text: match.text || match.url });
     return true;
   },
 });
