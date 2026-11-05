@@ -91,7 +91,7 @@ test("a title-only save should not overwrite an externally updated body", async 
   expect(stored.body).toBe("External agent body");
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
     reference: "T-1",
-    patch: { title: "Renamed" },
+    patch: { title: "Renamed", expected_title: "First" },
   });
 });
 
@@ -177,7 +177,10 @@ test("keeps a failed Unicode rich draft visible and retries only the description
   await autosave();
   expect(bridge.invoke).toHaveBeenLastCalledWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "# Xin chào\n\n- [x] Second line 🌿" },
+    patch: {
+      body: "# Xin chào\n\n- [x] Second line 🌿",
+      expected_body: "# Xin chào\n\n- [ ] Second line 🌿",
+    },
   });
   expect(screen.getByRole("status").textContent).toBe("Saved");
 });
@@ -226,7 +229,10 @@ test("external description changes pause a rich draft until reload or overwrite 
   await autosave();
   expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("change_ticket", {
     reference: "T-1",
-    patch: { body: "- [x] External content" },
+    patch: {
+      body: "- [x] External content",
+      expected_body: "Another external edit",
+    },
   });
 });
 
@@ -486,4 +492,60 @@ test("an empty description has one add affordance and keeps focus when editing e
       screen.getByRole("button", { name: "Add a description…" }),
     ),
   );
+});
+
+test("a save the core refuses as stale keeps the draft and offers the choice", async () => {
+  vi.useFakeTimers();
+  const agent = { ...initial, title: "Agent title", body: "Agent wrote this" };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "change_ticket")
+      throw "ticket 'T-1' was changed elsewhere since it was loaded";
+    return agent;
+  });
+  render(<Harness />);
+  await editDescription();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30);
+  });
+  const editor = screen.getByRole("textbox", {
+    name: "Description rich text",
+  });
+  await act(async () => {
+    editor.focus();
+    document.execCommand?.("insertText", false, " mine");
+  });
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "My title" },
+  });
+  await autosave();
+  expect(bridge.invoke).toHaveBeenCalledWith(
+    "change_ticket",
+    expect.objectContaining({
+      patch: { title: "My title", expected_title: "First" },
+    }),
+  );
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
+    "My title",
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  // The notice holds autosave: nothing more is written until the person chooses.
+  bridge.invoke.mockClear();
+  await autosave();
+  expect(bridge.invoke).not.toHaveBeenCalled();
+});
+
+test("a clean editor adopts an external change without a notice", async () => {
+  const onSaved = vi.fn();
+  const { rerender } = render(
+    <TicketEditor ticket={initial} onSaved={onSaved} />,
+  );
+  rerender(
+    <TicketEditor
+      ticket={{ ...initial, body: "Agent body" }}
+      onSaved={onSaved}
+    />,
+  );
+  expect(screen.getByText("Agent body")).toBeTruthy();
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
 });

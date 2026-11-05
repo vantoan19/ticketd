@@ -276,7 +276,8 @@ function RowDetails({
             dateTime={ticket.updated_at}
             title={formatDateTime(ticket.updated_at)}
           >
-            Updated {ago(ticket.updated_at, now)}
+            {ticket.trashed ? "Trashed" : "Updated"}{" "}
+            {ago(ticket.updated_at, now)}
           </time>
         ) : (
           "Update time unknown"

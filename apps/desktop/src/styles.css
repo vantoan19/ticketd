@@ -46,7 +46,7 @@
   --recessed: #f2f2f2;
   --foreground: #171717;
   --muted-foreground: #4d4d4d;
-  --disabled-foreground: #8f8f8f;
+  --disabled-foreground: #6b6b6b;
   --primary: #171717;
   --primary-foreground: #fff;
   --primary-hover: #4d4d4d;
@@ -125,7 +125,7 @@
   --recessed: #1a1a1a;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
-  --disabled-foreground: #737373;
+  --disabled-foreground: #8a8a8a;
   --primary: #ededed;
   --primary-foreground: #171717;
   --primary-hover: #d4d4d4;

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { addableKinds } from "@/features/tickets/linked-work";
 import {
   cleanup,
   fireEvent,
@@ -150,6 +151,21 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
   expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
 });
 
+test("a trashed ticket still shows its relationships, without actions to change them", async () => {
+  bridge({
+    prerequisites: [
+      { reference: "T-2", title: "Blocker", status: "In progress" },
+    ],
+  });
+  renderSection({ ...base, trashed: true });
+  await screen.findByText("Blocker");
+  expect(screen.getByText("In progress · not done")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Add relationship" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /Remove relationship/ }),
+  ).toBeNull();
+});
+
 test("loading and a failed read are distinct from having no links", async () => {
   bridge({ never: true });
   const view = render(
@@ -287,13 +303,21 @@ async function chooseTarget() {
   fireEvent.click(within(matches).getByRole("button", { name: /T-5/ }));
 }
 
+async function chooseRelationship(kind: string) {
+  Element.prototype.scrollIntoView = vi.fn();
+  const phrase =
+    addableKinds.find((item) => item.kind === kind)?.phrase ?? kind;
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Relationship" }), {
+    key: "Enter",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: phrase }));
+}
+
 test("Link ticket adds a relationship in the chosen direction", async () => {
   bridge();
   const refresh = renderSection(base);
   await chooseTarget();
-  fireEvent.change(screen.getByLabelText("Relationship"), {
-    target: { value: "blocks" },
-  });
+  await chooseRelationship("blocks");
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Link ticket",
@@ -313,9 +337,7 @@ test("a refused link shows the reason inline and keeps the dialog open", async (
   bridge({ fail: { add_dependency: "dependency would create a cycle" } });
   renderSection(base);
   await chooseTarget();
-  fireEvent.change(screen.getByLabelText("Relationship"), {
-    target: { value: "blocked_by" },
-  });
+  await chooseRelationship("blocked_by");
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Link ticket",
@@ -334,9 +356,7 @@ test("choosing a new parent says it replaces the current one", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add relationship" }));
   const dialog = await screen.findByRole("dialog");
   expect(within(dialog).queryByRole("status")).toBeNull();
-  fireEvent.change(within(dialog).getByLabelText("Relationship"), {
-    target: { value: "parent" },
-  });
+  await chooseRelationship("parent");
   expect(within(dialog).getByRole("status").textContent).toBe(
     "This replaces the current parent T-3.",
   );
@@ -373,8 +393,8 @@ test("Link subticket opens the link dialog already saying this ticket is the par
   );
   const dialog = await screen.findByRole("dialog");
   expect(
-    (within(dialog).getByLabelText("Relationship") as HTMLSelectElement).value,
-  ).toBe("subticket");
+    within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
+  ).toContain("parent of");
 });
 
 test("a source-closed duplicate shows its external, resolved or unknown target without a remove action", async () => {

@@ -40,12 +40,14 @@ export function MarkDuplicateDialog({
   );
   const { results, error } = search;
 
+  // Escape closes the dialog and keeps the typed search and chosen ticket for
+  // when it reopens; a finished review discards them.
+  function discard() {
+    setQuery("");
+    search.reset();
+    setChosen(null);
+  }
   function change(next: boolean) {
-    if (!next) {
-      setQuery("");
-      search.reset();
-      setChosen(null);
-    }
     onOpenChange(next);
   }
   return (
@@ -65,6 +67,7 @@ export function MarkDuplicateDialog({
             refresh={refresh}
             onDone={() => {
               onMarked?.(chosen.reference);
+              discard();
               change(false);
             }}
             onCancel={() => setChosen(null)}

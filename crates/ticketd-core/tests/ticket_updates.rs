@@ -216,3 +216,56 @@ fn a_cut_short_brief_in_context_says_how_to_read_all_of_it() {
         Some(format!("ticketd activity show T-1 {}", long.id).as_str())
     );
 }
+
+#[test]
+fn a_stale_editor_cannot_overwrite_a_description_changed_elsewhere() {
+    use ticketd_core::Error;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("guard.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Guarded").unwrap();
+    let change = |body: &str, expected: Option<&str>| TicketPatch {
+        body: Some(body.into()),
+        expected_body: expected.map(Into::into),
+        ..Default::default()
+    };
+    workspace
+        .change_ticket(&ticket.reference, change("Agent wrote this", None))
+        .unwrap();
+    let stale = workspace.change_ticket(&ticket.reference, change("My draft", Some("")));
+    assert!(matches!(stale, Err(Error::TicketChanged(_))));
+    assert!(stale.unwrap_err().to_string().contains("changed elsewhere"));
+    assert_eq!(
+        workspace.show_ticket(&ticket.reference).unwrap().body,
+        "Agent wrote this"
+    );
+    // A matching revision saves, and a change that omits it (the CLI) is unguarded.
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            change("My draft", Some("Agent wrote this")),
+        )
+        .unwrap();
+    workspace
+        .change_ticket(&ticket.reference, change("CLI edit", None))
+        .unwrap();
+    // The title guard ignores a stale expectation for a field that is not changing.
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("Again".into()),
+                expected_title: Some("Old title".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let stale_title = workspace.change_ticket(
+        &ticket.reference,
+        TicketPatch {
+            title: Some("Mine".into()),
+            expected_title: Some("Old title".into()),
+            ..Default::default()
+        },
+    );
+    assert!(matches!(stale_title, Err(Error::TicketChanged(_))));
+}

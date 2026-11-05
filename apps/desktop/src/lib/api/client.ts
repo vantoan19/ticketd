@@ -791,6 +791,9 @@ export const client = {
     patch: {
       title?: string;
       body?: string;
+      /** The title/body last loaded or saved; the core rejects a stale change. */
+      expected_title?: string;
+      expected_body?: string;
       project_id?: string | null;
       status?: string;
     },
