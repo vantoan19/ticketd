@@ -282,6 +282,12 @@ impl Workspace {
     ) -> Result<PathBuf, Error> {
         let workspace = workspace.as_ref();
         let backup = backup.as_ref();
+        if !backup.is_file() {
+            return Err(Error::Backup(format!(
+                "backup file not found: {}",
+                backup.display()
+            )));
+        }
         let lock = lock_file(workspace)?;
         FileExt::try_lock_exclusive(&lock).map_err(|source| {
             if source.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
@@ -293,7 +299,8 @@ impl Workspace {
         let source = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         source.execute_batch("BEGIN")?;
         validate(&source)?;
-        if workspace.canonicalize()? == backup.canonicalize()? {
+        // A first restore on a new computer has no workspace file yet; it is created below.
+        if workspace.exists() && workspace.canonicalize()? == backup.canonicalize()? {
             return Err(Error::Backup("backup is the current workspace".into()));
         }
         let mut current = Connection::open(workspace)?;

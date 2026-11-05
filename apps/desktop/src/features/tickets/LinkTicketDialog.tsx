@@ -39,7 +39,7 @@ export function LinkTicketDialog({
   onOpenChange: (open: boolean) => void;
   onLinked: () => Promise<void>;
 }) {
-  const [kind, setKind] = useState<AddableKind>("blocked_by");
+  const [kind, setKind] = useState<AddableKind>("related");
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
   const [error, setError] = useState("");
@@ -48,7 +48,7 @@ export function LinkTicketDialog({
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setKind(initialKind ?? "blocked_by");
+    if (open) setKind(initialKind ?? "related");
   }
 
   // A ticket has one parent, so a link that gives it a new parent moves it.

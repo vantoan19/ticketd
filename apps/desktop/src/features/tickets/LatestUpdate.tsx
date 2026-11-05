@@ -1,5 +1,5 @@
 import { progressBrief } from "./progress-brief";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
@@ -40,6 +40,22 @@ export function LatestUpdate({
     };
   }, [active, reference, revision, retry]);
   const { update, error, loading } = state;
+  const text = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  const activityId = update?.activity_id;
+  // Another update starts collapsed again.
+  const [shownId, setShownId] = useState(activityId);
+  if (shownId !== activityId) {
+    setShownId(activityId);
+    setExpanded(false);
+  }
+  const briefText = update?.brief.text;
+  useLayoutEffect(() => {
+    const element = text.current;
+    if (element && !expanded)
+      setClipped(element.scrollHeight > element.clientHeight + 1);
+  }, [expanded, briefText]);
   return (
     <RailSection label="Latest update">
       {loading ? (
@@ -57,10 +73,24 @@ export function LatestUpdate({
         </>
       ) : update ? (
         <div className="latest-update">
-          <p>
+          <p
+            ref={text}
+            className="latest-update-text"
+            data-expanded={expanded || undefined}
+          >
             {progressBrief(update.brief.text)}
             {update.brief.truncated && "…"}
           </p>
+          {(clipped || expanded) && (
+            <Button
+              variant="link"
+              size="sm"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(!expanded)}
+            >
+              {expanded ? "Show less" : "Show more"}
+            </Button>
+          )}
           <small>
             {update.editing_agent && <>Agent: {update.editing_agent} · </>}
             <time

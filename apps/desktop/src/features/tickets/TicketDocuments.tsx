@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from "react";
-import { FileText, Plus } from "lucide-react";
+import { FileText, Plus, X } from "lucide-react";
 import { documents } from "@/features/documents/api";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { client, type Ticket } from "@/lib/api/client";
 import { DocumentPicker } from "./DocumentPicker";
 import { documentLinkMarkdown } from "@/features/documents/document-link";
 import { RailSection } from "./RailSection";
+import { withoutDocumentLink } from "./document-link";
 import "./ticket-documents.css";
 
 type DocumentLink = Awaited<ReturnType<typeof documents.links>>[0][number];
@@ -32,6 +33,14 @@ export function TicketDocuments({
   const [links, setLinks] = useState<DocumentLink[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+  // Trashing or restoring a Document elsewhere does not change this ticket, so
+  // coming back to the window checks again as well as a new workspace revision.
+  const [visits, setVisits] = useState(0);
+  useEffect(() => {
+    const again = () => setVisits((value) => value + 1);
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, []);
   useEffect(() => {
     let current = true;
     void documents
@@ -52,15 +61,27 @@ export function TicketDocuments({
     return () => {
       current = false;
     };
-  }, [ticket.id, ticket.body, revision]);
+  }, [ticket.id, ticket.body, revision, visits]);
   async function add(id: string, heading: string) {
     setOpen(false);
     setError("");
     try {
-      const line = documentLinkMarkdown(id, heading);
+      const line = `Document: ${documentLinkMarkdown(id, heading)}`;
       const body = ticket.body.trimEnd();
       const result = await client.changeTicket(ticket.reference, {
         body: body ? `${body}\n\n${line}\n` : `${line}\n`,
+      });
+      updateTicket(result);
+      await refresh();
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }
+  async function unlink(id: string) {
+    setError("");
+    try {
+      const result = await client.changeTicket(ticket.reference, {
+        body: withoutDocumentLink(ticket.body, id),
       });
       updateTicket(result);
       await refresh();
@@ -73,7 +94,7 @@ export function TicketDocuments({
       <div className="ticket-documents">
         <ul>
           {links.map((link) => (
-            <li key={link.target_id}>
+            <li key={link.target_id} className="ticket-documents-row">
               <button
                 type="button"
                 className="ticket-documents-item"
@@ -81,10 +102,21 @@ export function TicketDocuments({
                 onClick={() => openDocument?.(link.target_id)}
               >
                 <FileText aria-hidden="true" />
-                <span className="truncate">
+                <span className="ticket-documents-title">
                   {link.target_label}
-                  {link.target_trashed ? " (Trash)" : ""}
                 </span>
+                {link.target_trashed && (
+                  <span className="ticket-documents-badge">Trash</span>
+                )}
+              </button>
+              <button
+                type="button"
+                className="ticket-documents-unlink"
+                aria-label={`Unlink ${link.target_label}`}
+                title="Unlink"
+                onClick={() => void unlink(link.target_id)}
+              >
+                <X aria-hidden="true" />
               </button>
             </li>
           ))}

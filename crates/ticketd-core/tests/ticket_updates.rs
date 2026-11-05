@@ -187,3 +187,32 @@ fn ticket_context_pages_recent_reports_first() {
     assert_eq!(next.items[1].brief.text, "Report 1");
     assert_eq!(next.next_offset, None);
 }
+
+#[test]
+fn a_cut_short_brief_in_context_says_how_to_read_all_of_it() {
+    use ticketd_core::{ContextOptions, Workspace};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("w.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Long").unwrap();
+    let long = workspace
+        .add_activity(&ticket.reference, &"x".repeat(5000), None)
+        .unwrap();
+    workspace
+        .add_activity(&ticket.reference, "short", None)
+        .unwrap();
+    let context = workspace
+        .ticket_context(
+            &ticket.reference,
+            ContextOptions {
+                activities: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let items = context.activities.unwrap().items;
+    assert_eq!(items[0].fetch_brief, None);
+    assert_eq!(
+        items[1].fetch_brief.as_deref(),
+        Some(format!("ticketd activity show T-1 {}", long.id).as_str())
+    );
+}

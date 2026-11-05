@@ -168,7 +168,10 @@ export function Backlinks({
                   : "Description"}
               </span>
               <span className="mention-passage">
-                <EmphasizedPassage text={link.passage} reference={reference} />
+                <EmphasizedPassage
+                  text={plainPassage(link.passage)}
+                  reference={reference}
+                />
               </span>
             </button>
           </li>

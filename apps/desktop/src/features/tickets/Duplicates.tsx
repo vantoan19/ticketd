@@ -27,6 +27,8 @@ import {
 } from "@/lib/api/client";
 import { toFailure } from "@/lib/api/bridge-failure";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import { useTicketSearch } from "./useTicketSearch";
+import "./linked-work.css";
 import "./duplicate-review.css";
 
 type Unchosen = Choice | "";
@@ -110,6 +112,15 @@ export function Duplicates({
     canonicalInput.current?.focus();
   }, []);
   const target = canonical.trim();
+  const search = useTicketSearch(
+    canonical,
+    !preview,
+    (item) =>
+      item.reference !== ticket.reference &&
+      !item.trashed &&
+      (separate || item.status !== "Duplicate"),
+  );
+  const matches = canonical.trim() ? search.results : [];
   // Separate review replaces an existing endpoint with this ticket, after its duplicate link was removed.
   // The preview's normalized form of the source, which its edges refer to; the typed
   // text (T-01) only until a preview is loaded.
@@ -171,14 +182,16 @@ export function Duplicates({
       .catch(() => {});
   });
 
-  async function loadPreview() {
+  async function loadPreview(chosen?: string) {
+    const picked = chosen ?? target;
+    const pickedArg = separate ? ticket.reference : picked;
     setPending(true);
     setError("");
     setStale("");
     try {
       const result = await client.previewDuplicate(
-        separate ? target : ticket.reference,
-        canonicalArg,
+        separate ? picked : ticket.reference,
+        pickedArg,
         separate,
       );
       const resolved = separate
@@ -385,8 +398,8 @@ export function Duplicates({
           </p>
           {!separate && (
             <p className="duplicate-note">
-              Removing the duplicate link later restores the earlier status.
-              Dependency changes are reviewed separately then.
+              Removing the duplicate link later restores the earlier status. Any
+              dependency changes you apply now stay as they are.
             </p>
           )}
           {stale && (
@@ -439,7 +452,8 @@ export function Duplicates({
                   id={`canonical-${ticket.id}`}
                   value={canonical}
                   onChange={(event) => setCanonical(event.target.value)}
-                  placeholder="T-1"
+                  placeholder="Search by title or T-number"
+                  autoComplete="off"
                   required
                   aria-invalid={!!error}
                 />
@@ -448,6 +462,28 @@ export function Duplicates({
                 </Button>
               </div>
               <FieldError>{error}</FieldError>
+              {matches.length > 0 && (
+                <ul className="link-ticket-results" aria-label="Matches">
+                  {matches.map((item) => (
+                    <li key={item.reference}>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          setCanonical(item.reference);
+                          void loadPreview(item.reference);
+                        }}
+                      >
+                        <StatusIcon status={item.status} size={14} decorative />
+                        <span className="link-ticket-reference">
+                          {item.reference}
+                        </span>
+                        <span>{item.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Field>
           </FieldGroup>
           <Button

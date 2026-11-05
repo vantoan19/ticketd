@@ -85,3 +85,12 @@
   font-size: 13px;
   font-variant-ligatures: none;
 }
+
+.evidence-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}

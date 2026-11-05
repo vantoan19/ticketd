@@ -14,8 +14,11 @@ export function Subtickets({
   work,
   select,
   external = false,
+  quiet = false,
 }: {
   external?: boolean;
+  /** With no subtickets, show nothing; the page offers Link subticket in a shared row. */
+  quiet?: boolean;
   work: LinkedWorkState;
   select: (reference: string) => void;
 }) {
@@ -23,6 +26,8 @@ export function Subtickets({
   const rows = work.rows.filter((row) => row.kind === "subticket");
   const links = work.current?.links;
   if (!links) return null;
+  if (quiet && links.children_progress.total === 0 && rows.length === 0)
+    return null;
   const add = (
     <Button
       variant="ghost"

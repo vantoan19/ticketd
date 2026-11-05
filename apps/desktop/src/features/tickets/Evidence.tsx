@@ -70,17 +70,35 @@ export function Evidence({
   revision,
   trashed,
   refresh,
+  quiet = false,
+  onEmptyChange,
+  composeKey = 0,
 }: {
   reference: string;
   revision: number;
   trashed: boolean;
   refresh: () => Promise<void>;
+  /** With no evidence, show nothing; the page offers Add evidence in a shared row. */
+  quiet?: boolean;
+  /** Reports whether a finished read found no evidence at all. */
+  onEmptyChange?: (empty: boolean) => void;
+  /** Changing this opens the add form, for the page's shared Add evidence action. */
+  composeKey?: number;
 }) {
   const [composing, setComposing] = useState(false);
   const [items, setItems] = useState<EvidenceRecord[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [seenComposeKey, setSeenComposeKey] = useState(composeKey);
+  if (seenComposeKey !== composeKey) {
+    setSeenComposeKey(composeKey);
+    setComposing(true);
+  }
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<EvidenceRecord | null>(
+    null,
+  );
   const [pending, setPending] = useState(false);
   const { copied, copy: copyText } = useCopy();
   const request = useRef<{ key: string; id: string } | null>(null);
@@ -103,8 +121,13 @@ export function Evidence({
       if (page.length < 50) break;
     }
     setItems(all);
+    setLoaded(true);
     setMore(page.length === 50);
   }, [reference]);
+  const empty = loaded && items.length === 0;
+  useEffect(() => {
+    onEmptyChange?.(empty);
+  }, [empty, onEmptyChange]);
   useEffect(() => {
     void Promise.resolve()
       .then(load)
@@ -143,6 +166,7 @@ export function Evidence({
     try {
       await client.deleteEvidence(reference, id, writeId);
       request.current = null;
+      setConfirmDelete(null);
       setError("");
       await load();
       await refresh();
@@ -176,6 +200,7 @@ export function Evidence({
     }
     setComposing(true);
   }
+  if (quiet && !items.length && !composing && !editing && !error) return null;
   return (
     <section aria-label="Implementation evidence" className="evidence-section">
       <div className="evidence-heading">
@@ -196,6 +221,28 @@ export function Evidence({
         </p>
       )}
       {error && !composing && <p role="alert">{error}</p>}
+      {confirmDelete && (
+        <p role="alertdialog" className="evidence-confirm">
+          Delete evidence “{confirmDelete.name}”?
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={pending}
+            onClick={() => void remove(confirmDelete.id)}
+          >
+            Delete evidence
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirmDelete(null)}
+          >
+            Keep evidence
+          </Button>
+        </p>
+      )}
       <ol className="evidence-list">
         {items.map((item) => (
           <li key={item.id} className="evidence-item">
@@ -256,7 +303,7 @@ export function Evidence({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         variant="destructive"
-                        onSelect={() => void remove(item.id)}
+                        onSelect={() => setConfirmDelete(item)}
                       >
                         Delete
                       </DropdownMenuItem>

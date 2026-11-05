@@ -145,6 +145,22 @@ impl Workspace {
                     }
                     BatchOperation::Change { ticket, change } => {
                         let reference = resolve(&names, &ticket)?;
+                        if let Some(status) = change.patch.status {
+                            // Leaving Duplicate would silently drop which ticket it
+                            // duplicates; that is a deliberate act on one ticket.
+                            let current = self.show_ticket(&reference)?;
+                            if current.status == crate::Status::Duplicate
+                                && status != current.status
+                            {
+                                return Err(Error::InvalidBatch(format!(
+                                    "{reference} is a duplicate{}; open it and remove the duplicate link before changing its status",
+                                    current
+                                        .duplicate_of
+                                        .map(|of| format!(" of {of}"))
+                                        .unwrap_or_default()
+                                )));
+                            }
+                        }
                         self.apply_change_inner(&reference, *change, &names, started)
                     }
                 }

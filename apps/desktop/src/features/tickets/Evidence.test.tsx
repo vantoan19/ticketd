@@ -64,6 +64,9 @@ test("adds and removes a verification result", async () => {
     { button: 0, ctrlKey: false },
   );
   fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Delete evidence" }),
+  );
   await waitFor(() =>
     expect(screen.queryByText("Unit tests passed")).toBeNull(),
   );

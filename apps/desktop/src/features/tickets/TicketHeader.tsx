@@ -97,12 +97,15 @@ export function TicketHeader({
   }, [selected, ticket, position]);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
+  /** The ticket just moved to Trash, so the move can be undone from here. */
+  const [justTrashed, setJustTrashed] = useState<string | null>(null);
   async function setTrashed(value: boolean) {
     if (!ticket) return;
     setPending(true);
     setActionError("");
     try {
       updateTicket(await client.setTrashed(ticket.reference, value));
+      setJustTrashed(value ? ticket.reference : null);
       await refresh();
     } catch (reason) {
       setActionError(
@@ -295,6 +298,22 @@ export function TicketHeader({
           </IconButton>
         </div>
       )}
+      {justTrashed &&
+        ticket?.reference === justTrashed &&
+        ticket.trashed &&
+        !message && (
+          <p className="detail-header-message" role="status">
+            {justTrashed} moved to Trash.{" "}
+            <Button
+              variant="link"
+              size="xs"
+              disabled={pending}
+              onClick={() => void setTrashed(false)}
+            >
+              Undo
+            </Button>
+          </p>
+        )}
       {(message || copied) && (
         <p
           className="detail-header-message"

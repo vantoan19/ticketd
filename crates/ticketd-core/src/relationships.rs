@@ -111,8 +111,14 @@ impl Workspace {
         crate::ensure_editable(&tx, &blocker_id)?;
         crate::ensure_editable(&tx, &dependent_id)?;
         let cycle = reaches(&tx, &dependent_id, &blocker_id, None)?;
-        if blocker_id == dependent_id || cycle {
-            return Err(Error::DependencyCycle);
+        if blocker_id == dependent_id {
+            return Err(Error::DependencySelf(blocker.into()));
+        }
+        if cycle {
+            return Err(Error::DependencyCycle {
+                blocker: blocker.into(),
+                dependent: dependent.into(),
+            });
         }
         let changed = tx.execute(
             "INSERT OR IGNORE INTO dependencies (blocker_id, dependent_id) VALUES (?1, ?2)",
