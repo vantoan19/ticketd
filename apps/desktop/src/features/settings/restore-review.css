@@ -84,6 +84,17 @@
       scroll;
   background-repeat: no-repeat;
 }
+/* A fade pinned to the bottom edge shows there is more below, and never covers the last row at rest. */
+.restore-body::after {
+  content: "";
+  flex: none;
+  position: sticky;
+  bottom: 0;
+  height: 24px;
+  margin-top: -16px;
+  pointer-events: none;
+  background: linear-gradient(transparent, var(--popover));
+}
 .restore-body p {
   margin: 0;
 }

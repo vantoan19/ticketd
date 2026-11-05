@@ -330,4 +330,53 @@ describe("Toolbar layout and links", () => {
       "More formatting",
     ]);
   });
+  it("shows the placeholder only while the editor is empty (K10)", async () => {
+    const Harness = () => {
+      const [value, setValue] = useState("");
+      return (
+        <MarkdownEditor
+          value={value}
+          onChange={setValue}
+          placeholder="Write a thought…"
+        />
+      );
+    };
+    const view = render(<Harness />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    await waitFor(() =>
+      expect(
+        view.container.querySelectorAll("[data-slate-placeholder]"),
+      ).toHaveLength(1),
+    );
+    editable.focus();
+    fireEvent(
+      editable,
+      createEvent.paste(editable, {
+        clipboardData: { getData: () => "Checkout idea for retries\n" },
+      }),
+    );
+    await waitFor(() =>
+      expect(editable.textContent).toContain("Checkout idea for retries"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      view.container.querySelectorAll("[data-slate-placeholder]"),
+    ).toHaveLength(0);
+  });
+  it("hides the placeholder beside content that has no text (K10)", async () => {
+    const view = render(
+      <MarkdownEditor
+        value="---"
+        onChange={vi.fn()}
+        placeholder="Write a thought…"
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(
+      view.container.querySelectorAll("[data-slate-placeholder]"),
+    ).toHaveLength(0);
+  });
 });

@@ -63,9 +63,13 @@
   overflow-wrap: anywhere;
   outline: none;
 }
+/* The ring sits on the rounded frame, not the square text area inside it. */
 .rich-document:focus-visible {
+  outline: none;
+}
+.markdown-editor:has(.rich-document:focus-visible) {
   outline: 1px solid var(--input-focus);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 .rich-document > * {
   margin-block: 12px;
