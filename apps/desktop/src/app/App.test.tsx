@@ -615,10 +615,9 @@ test("removes one filter chip and shows the query when nothing matches", async (
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(screen.getByText("No matching tickets")).toBeTruthy();
-  expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
   expect(
     screen.getByText(
-      /Nothing matches.*in All tickets with the current filters/,
+      /Nothing matches “zebra” in All tickets with the current filters/,
     ),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
@@ -628,7 +627,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  expect(screen.queryByText("zebra", { selector: "q" })).toBeNull();
+  expect(screen.queryByText(/Nothing matches “zebra”/)).toBeNull();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 

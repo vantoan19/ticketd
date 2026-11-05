@@ -1414,3 +1414,32 @@ html[data-input="pointer"]
   box-shadow: none;
   outline: none;
 }
+.rail-trash-note {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 18px;
+}
+.rail-trash-note svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+.rail-trash-note span {
+  flex: 1;
+}
+.ticket-properties[data-trashed] :is(button, [role="combobox"]):disabled,
+.ticket-properties[data-trashed] :is(input, textarea)[readonly] {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+  opacity: 1;
+  cursor: default;
+}

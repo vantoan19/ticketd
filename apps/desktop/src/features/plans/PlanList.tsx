@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ArchiveRestore, Layers } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -93,9 +94,15 @@ export function PlanList({
         </Alert>
       )}
       {shown.length === 0 ? (
-        <p className="plan-note">
-          {archived ? "No archived Plans." : "No Plans yet."}
-        </p>
+        <EmptyState
+          icon={<Layers />}
+          title={archived ? "No archived Plans" : "No Plans yet"}
+          description={
+            archived
+              ? "Plans you archive are kept here, read-only."
+              : "A Plan groups tickets toward one goal. Create one above."
+          }
+        />
       ) : (
         <ul
           className="plan-index-list"
