@@ -4450,7 +4450,10 @@ fn dependency_graph_shows_blockers_of_a_ticket_with_many_dependents() {
     assert!(graph.nodes.iter().any(|n| n.reference == blocker.reference));
     let again = workspace.dependency_graph(&hub.reference).unwrap();
     let refs = |g: &ticketd_core::DependencyGraph| {
-        g.nodes.iter().map(|n| n.reference.clone()).collect::<Vec<_>>()
+        g.nodes
+            .iter()
+            .map(|n| n.reference.clone())
+            .collect::<Vec<_>>()
     };
     assert_eq!(refs(&graph), refs(&again));
 }

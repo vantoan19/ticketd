@@ -332,6 +332,9 @@ export function WorkspaceGraph({
       {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
         <p role="status" className="context-graph-status">
           {filtered ? "No items match these filters." : "Nothing to show yet."}{" "}
+          {kind && relationship
+            ? "A connection to an item of another type is not shown while Item type is set. "
+            : ""}
           {filtered && (
             <Button variant="outline" size="sm" onClick={clearFilters}>
               Clear filters
@@ -341,9 +344,11 @@ export function WorkspaceGraph({
       ) : (
         graph && (
           <p role="status" className="context-graph-status">
-            {relationship
-              ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
-              : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
+            {relationship && graph.nodes.length === 0
+              ? "No connected items on this page"
+              : relationship
+                ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
+                : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
             · {graph.edges.length}{" "}
             {graph.edges.length === 1 ? "connection" : "connections"}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (

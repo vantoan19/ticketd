@@ -133,7 +133,15 @@ export function Canvas({
   /** Keep text legible: large graphs scroll instead of shrinking past it. */
   readable?: boolean;
 }) {
-  const positions = useMemo(() => layoutGraph(graph), [graph]);
+  // Positions depend only on which tickets and edges exist, so a refresh that
+  // returns the same graph keeps the layout (and its identity) as it was.
+  const topology = useMemo(
+    () =>
+      JSON.stringify([graph.nodes.map((node) => node.reference), graph.edges]),
+    [graph],
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const positions = useMemo(() => layoutGraph(graph), [topology]);
   // Nodes and edges keep their identity until the graph or selection changes,
   // and the flow remounts for a new graph so every handle is measured afresh;
   // otherwise arrows can vanish after a blocker is added or removed.

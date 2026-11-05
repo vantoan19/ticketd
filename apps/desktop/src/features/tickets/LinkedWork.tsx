@@ -260,7 +260,7 @@ export function LinkedWork({
             }
           >
             <Network aria-hidden="true" />
-            Dependencies
+            {openContextGraph ? "Context graph" : "Dependencies"}
           </Button>
           {linkAction}
         </div>

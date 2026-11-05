@@ -126,3 +126,37 @@ test("drops an expansion whose item is no longer shown", async () => {
     ),
   );
 });
+
+test("a crowded neighbourhood opens as a grouped list with a map toggle", async () => {
+  const nodes = Array.from({ length: 14 }, (_, index) => ({
+    id: `n${index}`,
+    kind: "ticket" as const,
+    label: `T-${index} · Item`,
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  }));
+  vi.mocked(client.contextGraphExpanded)
+    .mockReset()
+    .mockResolvedValue({
+      center: "n0",
+      nodes,
+      edges: nodes.slice(1).map((node) => ({
+        source: "n0",
+        target: node.id,
+        kind: "mention" as const,
+        explanation: null,
+      })),
+      omitted: false,
+      omitted_groups: [],
+      continuations: [],
+      hidden_details: false,
+      max_nodes: 100,
+      max_edges: 300,
+      max_work: 800,
+    });
+  render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
+  expect(await screen.findByText("Mentions 13")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show map" }));
+  expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
+});

@@ -89,6 +89,9 @@ export function App() {
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
+  // Once opened it stays mounted (hidden), so coming back restores its filters,
+  // selection and viewport exactly as Back does.
+  const [workspaceGraphMounted, setWorkspaceGraphMounted] = useState(false);
   // The only way to change the top-level view or the open graph: switching view
   // closes any graph, and opening a graph leaves the view as it was.
   // `keepGraph` only hides the graph so Back to context graph can return to it.
@@ -103,6 +106,7 @@ export function App() {
       return;
     }
     const graph = next.graph ?? null;
+    if (graph === "__workspace__") setWorkspaceGraphMounted(true);
     setWorkspaceGraphOpen(graph === "__workspace__");
     setLocalGraphOrigin(graph && graph !== "__workspace__" ? graph : null);
     setGraphOrigin(graph);
@@ -243,6 +247,7 @@ export function App() {
                     onCapture={() => setCapture(true)}
                     counts={counts}
                     view={view}
+                    workspaceGraphOpen={graphOrigin === "__workspace__"}
                     setView={openView}
                     projects={projects}
                     plans={plans}
@@ -374,7 +379,7 @@ export function App() {
                       onCaptureClose={() => setCapture(false)}
                     />
                   </div>
-                  {workspaceGraphOpen && (
+                  {workspaceGraphMounted && (
                     <div
                       className="context-view-wrapper"
                       hidden={graphOrigin !== "__workspace__"}

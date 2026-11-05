@@ -586,16 +586,22 @@ fn graph_draws_subticket_related_and_discovered_relationships() {
         )
         .unwrap();
     let graph = workspace.context_graph(&child.reference, false).unwrap();
-    assert!(graph.edges.iter().any(|e| e.kind == "subticket"
-        && e.source == parent.id
-        && e.target == child.id));
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.kind == "subticket" && e.source == parent.id && e.target == child.id)
+    );
     let graph = workspace.context_graph(&parent.reference, false).unwrap();
     for kind in ["subticket", "related", "discovered"] {
         assert!(graph.edges.iter().any(|e| e.kind == kind), "{kind}");
     }
-    assert!(graph.edges.iter().any(|e| e.kind == "discovered"
-        && e.source == parent.id
-        && e.target == found.id));
+    assert!(
+        graph
+            .edges
+            .iter()
+            .any(|e| e.kind == "discovered" && e.source == parent.id && e.target == found.id)
+    );
     let filtered = workspace
         .workspace_graph(&WorkspaceGraphRequest {
             relationship: Some("related".into()),

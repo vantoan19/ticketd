@@ -142,3 +142,33 @@
 .context-graph-page .react-flow__background {
   background: var(--background);
 }
+
+/* Connection handles are plumbing, not controls. */
+.context-graph-page .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+/* The preview sits below the map on medium widths so it never covers it. */
+@media (max-width: 1100px) {
+  .context-graph-main {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .context-graph-preview {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+@media (max-width: 700px) {
+  .context-graph-canvas {
+    min-height: 420px;
+    height: 420px;
+  }
+  .context-graph-preview {
+    border-top: 0;
+  }
+}
+.context-graph-groups {
+  margin: 0 0 16px;
+  color: var(--muted-foreground);
+}

@@ -1,12 +1,14 @@
-import { dashedKinds, edgeLabels } from "./graph-text";
+import { edgeDashes, edgeLabels, edgeStrokeWidth } from "./graph-text";
 
 const legendKinds = [
   "blocks",
   "membership",
+  "document",
   "subticket",
   "related",
   "discovered",
   "mention",
+  "activity",
   "support",
 ];
 
@@ -23,8 +25,10 @@ export function GraphLegend() {
               x2="22"
               y2="4"
               stroke="currentColor"
-              strokeWidth="1.5"
-              {...(dashedKinds.has(kind) ? { strokeDasharray: "4 3" } : {})}
+              strokeWidth={edgeStrokeWidth(kind)}
+              {...(edgeDashes[kind]
+                ? { strokeDasharray: edgeDashes[kind] }
+                : {})}
             />
             <polygon points="22,0 28,4 22,8" fill="currentColor" />
           </svg>
