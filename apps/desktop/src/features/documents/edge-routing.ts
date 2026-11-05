@@ -164,6 +164,10 @@ function overlap(a: Rect, b: Rect): boolean {
   );
 }
 
+/** A label centre keeps this far from a bend, past where the corner is rounded. */
+const BEND_CLEAR = 12;
+/** Half the box around an arrowhead's tip that labels keep clear. */
+const ARROW_REACH = 9;
 /** Gap kept between a label and any card or other label. */
 const LABEL_GAP = 4;
 
@@ -206,9 +210,16 @@ export function placeLabel(
   const fractions = Array.from({ length: 49 }, (_, i) => 0.02 + i * 0.02).sort(
     (a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5),
   );
+  // The line is drawn with rounded bends, so a label sits only on a straight
+  // stretch: its centre is then exactly on the drawn line.
+  const straight = (at: Point) =>
+    points
+      .slice(1, -1)
+      .every((bend) => Math.hypot(bend.x - at.x, bend.y - at.y) >= BEND_CLEAR);
   for (const fraction of fractions) {
     const at = pointAt(points, fraction);
-    if (inside(at) && clear(at, [...avoidCards, ...taken])) return at;
+    if (inside(at) && straight(at) && clear(at, [...avoidCards, ...taken]))
+      return at;
   }
   // No point of the line is clear of the cards: the label rides on the line,
   // above the cards, at the point nearest the middle that misses other labels.
@@ -216,6 +227,7 @@ export function placeLabel(
   let least = Infinity;
   for (const fraction of fractions) {
     const at = pointAt(points, fraction);
+    if (!straight(at)) continue;
     const box = boxAt(at);
     const covered = taken.reduce(
       (sum, rect) =>
@@ -254,12 +266,25 @@ export function routeAll(
   const bounds = all.length ? inflate(boundsOf(all), 40) : undefined;
   const taken: Rect[] = [];
   const routes: Record<string, Route> = {};
+  const paths: Record<string, Point[]> = {};
   for (const edge of edges) {
     const source = cards[edge.source];
     const target = cards[edge.target];
     if (!source || !target) continue;
     const others = all.filter((rect) => rect !== source && rect !== target);
-    const points = routeEdge(source, target, others);
+    paths[edge.id] = routeEdge(source, target, others);
+    // Every arrowhead stays visible: no label is placed over one.
+    const tip = paths[edge.id]![paths[edge.id]!.length - 1]!;
+    taken.push({
+      x: tip.x - ARROW_REACH,
+      y: tip.y - ARROW_REACH,
+      width: 2 * ARROW_REACH,
+      height: 2 * ARROW_REACH,
+    });
+  }
+  for (const edge of edges) {
+    const points = paths[edge.id];
+    if (!points) continue;
     const size = labelSize(edge.label ?? "");
     const label = placeLabel(points, size, all, taken, bounds);
     taken.push({

@@ -1,7 +1,10 @@
+import { labelSize } from "./edge-routing";
+
 export type Point = { x: number; y: number };
 export type LayoutRequest = {
   nodes: string[];
-  edges: { source: string; target: string }[];
+  /** `label` is the text drawn on the line; the layout leaves room for it. */
+  edges: { source: string; target: string; label?: string }[];
   positions: Record<string, Point>;
   /** The item the map is about; it sits in the middle with the rest around it. */
   center?: string;
@@ -12,6 +15,32 @@ export const CARD_WIDTH = 180;
 export const CARD_HEIGHT = 72;
 const GAP = 24;
 const MID = { x: 400, y: 240 };
+/** Room the arrowhead takes at the target end of a line. */
+const ARROW = 14;
+/** Clear space kept on each side of a label, along the line. */
+const LABEL_PAD = 10;
+
+/** How far a card reaches from its middle in the direction of the unit vector (ux, uy). */
+function reach(ux: number, uy: number): number {
+  return Math.min(
+    ux === 0 ? Infinity : CARD_WIDTH / 2 / Math.abs(ux),
+    uy === 0 ? Infinity : CARD_HEIGHT / 2 / Math.abs(uy),
+  );
+}
+
+/**
+ * The free length a line needs between its two cards so its label, a clear
+ * margin on each side of it and the arrowhead all fit on the line itself.
+ */
+function freeLength(label: string | undefined, ux: number, uy: number) {
+  const size = labelSize(label ?? "");
+  const along = label
+    ? Math.abs(ux) * size.width + Math.abs(uy) * size.height
+    : 0;
+  return along + 2 * LABEL_PAD + ARROW;
+}
+
+type LayoutEdge = LayoutRequest["edges"][number];
 
 /** Concentric rings sized by card footprint, so a dense set starts without overlap. */
 function ringPlacement(ids: string[], center?: string): Record<string, Point> {
@@ -59,7 +88,8 @@ function separate(
   ids: string[],
   points: Record<string, Point>,
   fixed: Set<string>,
-) {
+): boolean {
+  let any = false;
   const w = CARD_WIDTH + GAP;
   const h = CARD_HEIGHT + GAP;
   for (let pass = 0; pass < 600; pass++) {
@@ -97,8 +127,47 @@ function separate(
         }
       }
     }
-    if (!moved) return;
+    if (!moved) return any;
+    any = true;
   }
+  return any;
+}
+
+/**
+ * Pushes the cards at the two ends of a line apart until the line has a free
+ * stretch long enough for its label and arrowhead. Positioned cards stay put.
+ */
+function spaceEdges(
+  edges: LayoutEdge[],
+  points: Record<string, Point>,
+  fixed: Set<string>,
+): boolean {
+  let moved = false;
+  for (const edge of edges) {
+    const a = points[edge.source];
+    const b = points[edge.target];
+    if (!a || !b || edge.source === edge.target) continue;
+    const fa = fixed.has(edge.source);
+    const fb = fixed.has(edge.target);
+    if (fa && fb) continue;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const d = Math.hypot(dx, dy);
+    // Coincident middles have no direction: spread sideways.
+    const ux = d < 1e-3 ? 1 : dx / d;
+    const uy = d < 1e-3 ? 0 : dy / d;
+    const short = freeLength(edge.label, ux, uy) - (d - 2 * reach(ux, uy));
+    if (short <= 0.5) continue;
+    moved = true;
+    const push = short + 1;
+    const shareA = fa ? 0 : fb ? 1 : 0.5;
+    const shareB = fb ? 0 : fa ? 1 : 0.5;
+    a.x -= ux * push * shareA;
+    a.y -= uy * push * shareA;
+    b.x += ux * push * shareB;
+    b.y += uy * push * shareB;
+  }
+  return moved;
 }
 
 function overlaps(a: Point, b: Point): boolean {
@@ -184,7 +253,11 @@ export function layoutContextGraph(
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const distance = Math.max(Math.hypot(dx, dy), 1);
-      const force = Math.max(-5, Math.min(5, (distance - 180) * 0.02));
+      const ux = dx / distance;
+      const uy = dy / distance;
+      // Rest length: just far enough for the label and arrowhead between the cards.
+      const rest = 2 * reach(ux, uy) + freeLength(edge.label, ux, uy) + 24;
+      const force = Math.max(-5, Math.min(5, (distance - rest) * 0.02));
       forces[edge.source]!.x += (dx / distance) * force;
       forces[edge.source]!.y += (dy / distance) * force;
       forces[edge.target]!.x -= (dx / distance) * force;
@@ -201,5 +274,11 @@ export function layoutContextGraph(
   );
   separate(ids, points, fixed);
   settle(ids, points, fixed);
+  // Cards pushed apart for a label can collide with others, and the reverse.
+  for (let round = 0; round < 60; round++) {
+    const spaced = spaceEdges(request.edges, points, fixed);
+    const apart = separate(ids, points, fixed);
+    if (!spaced && !apart) break;
+  }
   return points;
 }

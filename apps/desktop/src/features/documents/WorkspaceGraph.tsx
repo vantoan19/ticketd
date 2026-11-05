@@ -443,18 +443,21 @@ export function WorkspaceGraph({
                 onFitted={() => setFit(false)}
               />
             )}
-            <aside className="context-graph-preview">
-              {(graph?.nodes.length ?? 0) > MAP_CARDS && (
-                <p>
-                  The map shows the newest {MAP_CARDS} items; the list shows the{" "}
-                  {graph?.nodes.length} loaded
-                  {graph?.total && graph.total > graph.nodes.length
-                    ? ` of ${graph.total}`
-                    : ""}
-                  .
-                </p>
-              )}
-              {previewPanel}
+            <aside className="context-graph-preview context-graph-preview-split">
+              {/* Scrolls on its own, so a long selection never pushes the Not connected list out of the panel. */}
+              <div className="context-graph-preview-body">
+                {(graph?.nodes.length ?? 0) > MAP_CARDS && (
+                  <p>
+                    The map shows the newest {MAP_CARDS} items; the list shows
+                    the {graph?.nodes.length} loaded
+                    {graph?.total && graph.total > graph.nodes.length
+                      ? ` of ${graph.total}`
+                      : ""}
+                    .
+                  </p>
+                )}
+                {previewPanel}
+              </div>
               {unconnected.length > 0 && (
                 <div
                   className="context-graph-unconnected"

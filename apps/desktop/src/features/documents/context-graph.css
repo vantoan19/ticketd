@@ -562,3 +562,49 @@
 .context-graph-page .context-graph-body .context-graph-strip {
   margin-top: 0;
 }
+
+/* The map's side panel: the selection scrolls inside its own area and the Not connected list stays in view below it. */
+.context-graph-preview-split {
+  overflow: hidden;
+}
+.context-graph-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Shadows at the cut edges show the selection scrolls. */
+  background:
+    linear-gradient(var(--background) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--background) 70%) bottom / 100% 24px local,
+    radial-gradient(
+        farthest-side at 50% 0,
+        color-mix(in srgb, var(--foreground) 22%, transparent),
+        transparent
+      )
+      top / 100% 8px scroll,
+    radial-gradient(
+        farthest-side at 50% 100%,
+        color-mix(in srgb, var(--foreground) 22%, transparent),
+        transparent
+      )
+      bottom / 100% 8px scroll;
+  background-repeat: no-repeat;
+}
+.context-graph-preview-split .context-graph-unconnected {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin-top: 0;
+}
+.context-graph-preview-split .context-graph-unconnected-list {
+  flex: 0 1 auto;
+  min-height: 48px;
+}
+@media (max-width: 700px) {
+  /* The panel sits above the map at its natural height, nothing is cut. */
+  .context-graph-preview-split {
+    overflow: auto;
+  }
+}
