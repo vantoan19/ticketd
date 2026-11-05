@@ -1,5 +1,13 @@
-import { expect, test } from "vitest";
-import { connectionRows, describeEdge, plainText } from "./graph-text";
+import { describe, expect, it, test } from "vitest";
+import {
+  centerZoom,
+  connectionRows,
+  describeEdge,
+  opensAsMap,
+  panToInclude,
+  plainText,
+  stateLine,
+} from "./graph-text";
 
 const nodes = [
   {
@@ -61,4 +69,69 @@ test("every relationship kind has a style and styles differ by dash and colour",
     edgeStyles.length,
   );
   expect(edgeStyle("spec").name).toMatch(/Primary spec/);
+});
+
+describe("map rules", () => {
+  it("opens crowded neighbourhoods as a list and lets the person choose a map", () => {
+    expect(opensAsMap(12, null)).toBe(true);
+    expect(opensAsMap(13, null)).toBe(false);
+    expect(opensAsMap(13, true)).toBe(true);
+    expect(opensAsMap(12, false)).toBe(false);
+    expect(opensAsMap(31, true)).toBe(false);
+    expect(opensAsMap(80, true, 100)).toBe(true);
+  });
+  it("never centers below a readable zoom", () => {
+    expect(centerZoom(0.3)).toBe(0.6);
+    expect(centerZoom(1.2)).toBe(1.2);
+  });
+  it("pans just enough to include new cards without changing zoom", () => {
+    const view = { x: 0, y: 0, zoom: 1 };
+    const size = { width: 500, height: 400 };
+    expect(
+      panToInclude(view, size, { x: 40, y: 40, width: 100, height: 50 }),
+    ).toEqual(view);
+    expect(
+      panToInclude(view, size, { x: 450, y: 40, width: 100, height: 50 }),
+    ).toEqual({
+      x: -74,
+      y: 0,
+      zoom: 1,
+    });
+  });
+  it("words an attached Document without a quote and skips empty state parts", () => {
+    const nodes = new Map([
+      [
+        "t",
+        {
+          id: "t",
+          kind: "ticket",
+          label: "T-9 · A",
+          ticket_reference: "T-9",
+          state: null,
+          trashed: false,
+          activity_detail: false,
+        },
+      ],
+      [
+        "d",
+        {
+          id: "d",
+          kind: "document",
+          label: "Linked",
+          state: null,
+          trashed: false,
+          activity_detail: false,
+        },
+      ],
+    ] as const);
+    expect(
+      describeEdge(
+        { source: "t", target: "d", kind: "attached", explanation: null },
+        nodes as never,
+      ),
+    ).toBe("T-9 has Linked attached");
+    expect(
+      stateLine({ state: null, trashed: false, activity_detail: true }),
+    ).toBe("Update details");
+  });
 });

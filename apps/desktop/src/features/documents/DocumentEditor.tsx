@@ -872,13 +872,17 @@ export function DocumentEditor({
                       {item.trashed ? " (Trash)" : ""}
                     </Button>
                     <p className="document-direction">
-                      {item.to && item.from
-                        ? "Links to and linked from"
-                        : item.to
-                          ? "Links to"
-                          : item.kind === "plan" && item.passages.length === 0
-                            ? "Uses this Document as its spec"
-                            : "Linked from"}
+                      {item.attached && item.passages.length === 0
+                        ? item.to
+                          ? "Attached Document"
+                          : `Attached to ${item.label}`
+                        : item.to && item.from
+                          ? "Links to and linked from"
+                          : item.to
+                            ? "Links to"
+                            : item.kind === "plan" && item.passages.length === 0
+                              ? "Uses this Document as its spec"
+                              : "Linked from"}
                     </p>
                     {item.passages.map((passage) => (
                       <DocumentNavigation.Provider
@@ -985,6 +989,8 @@ type Connection = {
   to: boolean;
   from: boolean;
   passages: string[];
+  /** A person attached the Document to the ticket; there is no passage to quote. */
+  attached: boolean;
 };
 /** One row per connected item, however many links or directions join it to this Document. */
 function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
@@ -1003,7 +1009,9 @@ function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
         to: false,
         from: false,
         passages: [],
+        attached: false,
       };
+      if (link.explicit) row.attached = true;
       if (out) row.to = true;
       else row.from = true;
       if (link.passage && !row.passages.includes(link.passage))

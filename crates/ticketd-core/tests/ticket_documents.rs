@@ -20,6 +20,7 @@ fn an_explicit_reference_leaves_the_description_alone_and_shows_in_every_context
     let outgoing = workspace.context_links(&ticket.reference, 100, 0).unwrap();
     assert_eq!(outgoing.len(), 1);
     assert!(outgoing[0].explicit);
+    assert!(outgoing[0].passage.is_empty());
     assert_eq!(outgoing[0].target_id, document.id);
     let incoming = workspace.context_backlinks(&document.id, 100, 0).unwrap();
     assert_eq!(incoming.len(), 1);

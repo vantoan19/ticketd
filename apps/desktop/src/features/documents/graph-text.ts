@@ -10,6 +10,7 @@ export const edgeLabels: Record<string, string> = {
   document: "Plan document",
   spec: "Primary spec",
   mention: "Mentions",
+  attached: "Attached",
   activity: "Update mentions",
   support: "Update cites",
   subticket: "Subticket",
@@ -52,8 +53,8 @@ export const edgeStyles: EdgeStyle[] = [
     color: "#b07cf0",
   },
   {
-    name: "Mentions, Update mentions, Update cites",
-    kinds: ["mention", "activity", "support"],
+    name: "Mentions, Attached, Update mentions, Update cites",
+    kinds: ["mention", "attached", "activity", "support"],
     dash: "4 3 1 3",
     width: 1.5,
     color: "#e0a030",
@@ -114,6 +115,8 @@ export function describeEdge(
       return `${target} is the primary spec of plan ${source}`;
     case "mention":
       return `${source} mentions ${target}${quoted}`;
+    case "attached":
+      return `${source} has ${target} attached`;
     case "activity":
       return `An update on ${source} mentions ${target}${quoted}`;
     case "support":
@@ -175,4 +178,70 @@ export function connectionRows(
     text:
       describeEdge(row.edge, byId) + (row.extra ? ` (+${row.extra} more)` : ""),
   }));
+}
+
+/** More neighbours than this open as a grouped list; the map is one click away. */
+export const LIST_FIRST_LIMIT = 12;
+/** A map needs the whole neighbourhood to be readable, so a very dense one stays a list. */
+export const MAP_LIMIT = 30;
+/** Cards smaller than this cannot be read. */
+export const READABLE_ZOOM = 0.6;
+
+/** Whether the map shows: the person's choice if any, else only a small neighbourhood. */
+export function opensAsMap(
+  neighbours: number,
+  choice: boolean | null,
+  limit = MAP_LIMIT,
+): boolean {
+  return neighbours <= limit && (choice ?? neighbours <= LIST_FIRST_LIMIT);
+}
+
+/** Centering keeps the person's zoom, but never leaves a map too small to read. */
+export function centerZoom(current: number): number {
+  return Math.max(current, READABLE_ZOOM);
+}
+
+/**
+ * The smallest pan (zoom unchanged) that brings `rect`, in flow coordinates, inside a view of
+ * `size` pixels, or the same viewport when it already fits. Existing cards never move.
+ */
+export function panToInclude(
+  viewport: { x: number; y: number; zoom: number },
+  size: { width: number; height: number },
+  rect: { x: number; y: number; width: number; height: number },
+  margin = 24,
+): { x: number; y: number; zoom: number } {
+  const shift = (
+    start: number,
+    length: number,
+    view: number,
+    offset: number,
+  ) => {
+    const from = start * viewport.zoom + offset;
+    const to = (start + length) * viewport.zoom + offset;
+    if (to - from + 2 * margin > view) return offset + margin - from;
+    if (from < margin) return offset + margin - from;
+    if (to > view - margin) return offset + view - margin - to;
+    return offset;
+  };
+  return {
+    ...viewport,
+    x: shift(rect.x, rect.width, size.width, viewport.x),
+    y: shift(rect.y, rect.height, size.height, viewport.y),
+  };
+}
+
+/** "Active · Trashed · Update details", skipping whatever does not apply. */
+export function stateLine(node: {
+  state: string | null;
+  trashed: boolean;
+  activity_detail: boolean;
+}): string {
+  return [
+    node.state,
+    node.trashed ? "Trashed" : null,
+    node.activity_detail ? "Update details" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

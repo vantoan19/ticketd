@@ -177,6 +177,7 @@ export const contextGraphSchema = z.object({
         "document",
         "spec",
         "mention",
+        "attached",
         "activity",
         "support",
         "subticket",
@@ -209,6 +210,8 @@ export const workspaceGraphSchema = contextGraphSchema
     total: z.number(),
     omitted_groups: z.array(z.string()),
     node_tags: z.record(z.string(), z.string()),
+    /** Every connection an item has in the workspace, shown or not. */
+    connection_counts: z.record(z.string(), z.number()).optional(),
   });
 export type WorkspaceGraph = z.infer<typeof workspaceGraphSchema>;
 export type WorkspaceGraphRequest = {

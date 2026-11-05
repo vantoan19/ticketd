@@ -4,13 +4,21 @@ import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
 import { GraphLegend } from "./GraphLegend";
-import { connectionRows, edgeLabels, flowEdges, kindNames } from "./graph-text";
+import {
+  connectionRows,
+  edgeLabels,
+  flowEdges,
+  kindNames,
+  MAP_LIMIT,
+  opensAsMap,
+  stateLine,
+} from "./graph-text";
+import { Crosshair } from "lucide-react";
 import type { Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./context-graph.css";
 
-const DENSE_LIMIT = 30;
 const GROUP_PAGE = 10;
 
 export function ContextGraph({
@@ -151,15 +159,20 @@ export function ContextGraph({
   // The choice holds for the whole graph session, whichever item is centred.
   const neighbours = graph ? graph.nodes.length - 1 : 0;
   const [mapChoice, setMapChoice] = useState<boolean | null>(null);
-  const tooDense = neighbours > DENSE_LIMIT;
-  const showMap = !tooDense && (mapChoice ?? neighbours <= 12);
+  const tooDense = neighbours > MAP_LIMIT;
+  const showMap = opensAsMap(neighbours, mapChoice);
   const [shownPerKind, setShownPerKind] = useState<Record<string, number>>({});
-  const groupCounts = new Map<string, number>();
+  // Items per relationship, so the summary counts the rows below it.
+  const groupItems = new Map<string, Set<string>>();
   for (const edge of graph?.edges ?? [])
-    if (edge.source === graph?.center || edge.target === graph?.center)
-      groupCounts.set(edge.kind, (groupCounts.get(edge.kind) ?? 0) + 1);
-  const groupSummary = [...groupCounts]
-    .map(([kind, count]) => `${edgeLabels[kind] ?? kind} ${count}`)
+    if (edge.source === graph?.center || edge.target === graph?.center) {
+      const other = edge.source === graph?.center ? edge.target : edge.source;
+      const items = groupItems.get(edge.kind) ?? new Set<string>();
+      items.add(other);
+      groupItems.set(edge.kind, items);
+    }
+  const groupSummary = [...groupItems]
+    .map(([kind, items]) => `${edgeLabels[kind] ?? kind} ${items.size}`)
     .join(" · ");
   const hiddenDetails = !!graph?.hidden_details && !includeDetails;
   // Support connections stay hidden until update details are shown.
@@ -225,7 +238,7 @@ export function ContextGraph({
         {centerLabel && (
           <span className="context-graph-scope">Centered on {centerLabel}</span>
         )}
-        {neighbours > 12 && !tooDense && (
+        {neighbours > 0 && !tooDense && (
           <Button
             variant="outline"
             size="sm"
@@ -266,11 +279,7 @@ export function ContextGraph({
           <strong ref={previewHeading} tabIndex={-1}>
             {preview.label}
           </strong>
-          <span>
-            {preview.state}
-            {preview.trashed ? " · Trashed" : ""}
-            {preview.activity_detail ? " · Update details" : ""}
-          </span>
+          <span>{stateLine(preview)}</span>
           {actions(preview)}
         </div>
       )}
@@ -309,11 +318,7 @@ export function ContextGraph({
                 <h2 ref={previewHeading} tabIndex={-1}>
                   {preview.label}
                 </h2>
-                <p>
-                  {preview.state}
-                  {preview.trashed ? " · Trashed" : ""}
-                  {preview.activity_detail ? " · Update details" : ""}
-                </p>
+                <p>{stateLine(preview)}</p>
                 {actions(preview)}
                 <p>
                   Selecting previews an item. Center it to explore its
@@ -374,6 +379,12 @@ export function ContextGraph({
         </p>
       )}
       <h2>Connected items</h2>
+      {graph && kindGroups.length === 0 && (
+        <p role="status">
+          Nothing is connected to this item yet. Mention it with T-n or attach
+          it to a ticket to connect it.
+        </p>
+      )}
       {kindGroups.map((group) => {
         const limit = shownPerKind[group.kind] ?? GROUP_PAGE;
         return (
@@ -389,10 +400,12 @@ export function ContextGraph({
                   </button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon-sm"
+                    aria-label={`Center on ${node.label}`}
+                    title="Center on this item"
                     onClick={() => focus(node.id)}
                   >
-                    Center on {node.label}
+                    <Crosshair aria-hidden="true" />
                   </Button>
                   {graph &&
                     connectionRows(node.id, graph).map((row) => (

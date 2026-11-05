@@ -88,12 +88,12 @@ const GROUPS: [(&str, &str); 24] = [
         "discovered",
     ),
     (
-        "SELECT ticket_id, document_id, 'Linked Document' FROM ticket_documents WHERE ticket_id = ?1 ORDER BY document_id LIMIT ?2",
-        "mention",
+        "SELECT ticket_id, document_id, NULL FROM ticket_documents WHERE ticket_id = ?1 ORDER BY document_id LIMIT ?2",
+        "attached",
     ),
     (
-        "SELECT ticket_id, document_id, 'Linked Document' FROM ticket_documents WHERE document_id = ?1 ORDER BY ticket_id LIMIT ?2",
-        "mention",
+        "SELECT ticket_id, document_id, NULL FROM ticket_documents WHERE document_id = ?1 ORDER BY ticket_id LIMIT ?2",
+        "attached",
     ),
 ];
 
@@ -106,6 +106,10 @@ const MAX_NODES: usize = 100;
 const MAX_EXPANSIONS: usize = 8;
 const GROUP_LIMIT: usize = 50;
 const MAX_EDGES: usize = 300;
+
+/// Most recently changed first: a ticket or Document by its last update, a Plan by its newest
+/// ticket. Used for paging and for listing the shown items.
+const RECENCY: &str = "COALESCE((SELECT updated_at FROM tickets WHERE id = e.id), (SELECT updated_at FROM documents WHERE id = e.id), (SELECT MAX(updated_at) FROM tickets WHERE plan_id = e.id), '')";
 
 #[derive(Debug, Serialize)]
 pub struct ContextGraphNode {
@@ -523,6 +527,8 @@ pub struct WorkspaceGraphRequest {
 #[derive(Debug, Serialize)]
 pub struct WorkspaceGraph {
     pub node_tags: BTreeMap<String, String>,
+    /// How many connections each shown item has in the whole workspace, shown or not.
+    pub connection_counts: BTreeMap<String, usize>,
     pub nodes: Vec<ContextGraphNode>,
     /// Items matching the search, type and tag filters across the workspace.
     pub total: usize,
@@ -557,7 +563,14 @@ impl Workspace {
             filter.push_str(" AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id = e.id AND d.originating_activity_id IS NOT NULL AND NOT d.kept)");
         }
         if let Some(search) = request.search.as_deref().filter(|s| !s.trim().is_empty()) {
-            let phrase = format!("\"{}\"", search.replace('"', "\"\""));
+            // Same rule as Document search: every word is a prefix term, so partial words
+            // match as the user types.
+            let words: Vec<&str> = search.split_whitespace().collect();
+            let expression = words
+                .iter()
+                .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(" ");
             filter.push_str(" AND (");
             for (index, (table, fts)) in [
                 ("tickets", "ticket_graph_fts"),
@@ -573,9 +586,23 @@ impl Workspace {
                 filter.push_str(&format!(
                     "e.id IN (SELECT {table}.id FROM {table} CROSS JOIN {fts} ON {fts}.rowid = {table}.rowid WHERE {fts} MATCH ?)"
                 ));
-                args.push(phrase.clone().into());
+                args.push(expression.clone().into());
             }
-            filter.push(')');
+            // A Document is also found by its visible heading, which can come from the
+            // originating update's brief and is not in the full-text index.
+            filter.push_str(" OR e.id IN (SELECT d.id FROM documents d WHERE ");
+            for (index, word) in words.iter().enumerate() {
+                if index > 0 {
+                    filter.push_str(" AND ");
+                }
+                filter.push_str(&format!("{} LIKE ? ESCAPE '\\'", crate::documents::HEADING));
+                let escaped = word
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_");
+                args.push(format!("%{escaped}%").into());
+            }
+            filter.push_str("))");
         }
         if let Some(tag) = request.tag.as_deref().filter(|s| !s.is_empty()) {
             let tag = tag.trim().to_lowercase();
@@ -592,7 +619,16 @@ impl Workspace {
             Vec::new()
         } else {
             let mut page_args = args.clone();
-            page_args.push(request.cursor.clone().unwrap_or_default().into());
+            // The cursor is the last item's recency and id; paging continues strictly after it.
+            let after = match request.cursor.as_deref().and_then(|c| c.split_once('|')) {
+                Some((recency, id)) => {
+                    page_args.push(recency.to_owned().into());
+                    page_args.push(recency.to_owned().into());
+                    page_args.push(id.to_owned().into());
+                    format!(" AND ({RECENCY} < ? OR ({RECENCY} = ? AND e.id > ?))")
+                }
+                None => String::new(),
+            };
             page_args.push(((remaining + 1) as i64).into());
             // A relationship filter selects candidates before paging too, so a match
             // deep in the workspace is not hidden behind pages of unrelated items.
@@ -615,10 +651,10 @@ impl Workspace {
                 };
             }
             let mut stmt = tx.prepare(&format!(
-                "SELECT e.id {filter}{related} AND e.id > ? ORDER BY e.id LIMIT ?"
+                "SELECT e.id, {RECENCY} {filter}{related}{after} ORDER BY {RECENCY} DESC, e.id LIMIT ?"
             ))?;
             stmt.query_map(rusqlite::params_from_iter(page_args.iter()), |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
             .collect::<Result<Vec<_>, _>>()?
         };
@@ -627,12 +663,12 @@ impl Workspace {
         let next_cursor = if more {
             candidates
                 .last()
-                .cloned()
+                .map(|(id, recency)| format!("{recency}|{id}"))
                 .or_else(|| request.cursor.clone())
         } else {
             None
         };
-        ids.extend(candidates);
+        ids.extend(candidates.into_iter().map(|(id, _)| id));
         let mut nodes = graph_nodes(&tx, &ids)?;
         nodes.retain(|node| {
             ids.contains(&node.id)
@@ -747,9 +783,50 @@ impl Workspace {
                 .collect();
             nodes.retain(|node| connected.contains(&node.id));
         }
+        // List the shown items newest first, like paging does.
+        let mut recency = BTreeMap::new();
+        let mut connection_counts = BTreeMap::new();
+        for chunk in nodes.chunks(100) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let mut stmt = tx.prepare(&format!(
+                "SELECT e.id, {RECENCY} FROM entities e WHERE e.id IN ({placeholders})"
+            ))?;
+            for row in stmt.query_map(
+                rusqlite::params_from_iter(chunk.iter().map(|node| &node.id)),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )? {
+                let (id, key) = row?;
+                recency.insert(id, key);
+            }
+            // The total is exact up to a bound, so a hub reads as "many".
+            for (sql, _) in GROUPS {
+                let term = format!(
+                    "SELECT ? AS anchor, COUNT(*) FROM (WITH g(a, b, c) AS ({}) SELECT * FROM g WHERE b <> '')",
+                    sql.replace("?1", "?").replace("?2", "1000")
+                );
+                let query = vec![term; chunk.len()].join(" UNION ALL ");
+                let mut stmt = tx.prepare(&query)?;
+                let parameters = chunk.iter().flat_map(|node| [&node.id, &node.id]);
+                for row in stmt.query_map(rusqlite::params_from_iter(parameters), |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                })? {
+                    let (id, count) = row?;
+                    if count > 0 {
+                        *connection_counts.entry(id).or_default() += count as usize;
+                    }
+                }
+            }
+        }
+        nodes.sort_by(|a, b| {
+            recency
+                .get(&b.id)
+                .cmp(&recency.get(&a.id))
+                .then_with(|| a.id.cmp(&b.id))
+        });
         tx.commit()?;
         Ok(WorkspaceGraph {
             node_tags,
+            connection_counts,
             nodes,
             total,
             edges,
