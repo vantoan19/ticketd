@@ -976,7 +976,7 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   );
   await act(async () => {});
   const dialog = screen.getByRole("dialog", {
-    name: "Add or remove tag",
+    name: "Add or remove tags",
   });
   fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },

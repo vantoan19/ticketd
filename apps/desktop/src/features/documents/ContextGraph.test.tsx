@@ -162,3 +162,38 @@ test("a crowded neighbourhood opens as a grouped list with a map toggle", async 
   fireEvent.click(screen.getByRole("button", { name: "Show map" }));
   expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
 });
+
+test("expanding a map that grows past the list-first size keeps the map", async () => {
+  const node = (id: string) => ({
+    id,
+    kind: "ticket" as const,
+    label: `T-${id} · Item`,
+    state: "Todo",
+    trashed: false,
+    activity_detail: false,
+  });
+  const graph = (count: number) => ({
+    center: "n0",
+    nodes: Array.from({ length: count }, (_, index) => node(`n${index}`)),
+    edges: [],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 50,
+    max_edges: 300,
+    max_work: 800,
+  });
+  vi.mocked(client.contextGraphExpanded)
+    .mockReset()
+    .mockImplementation(async (_center, _details, expanded) =>
+      graph(expanded.length ? 20 : 3),
+    );
+  render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "T-n1 · Item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
+  await waitFor(() =>
+    expect(client.contextGraphExpanded).toHaveBeenCalledTimes(2),
+  );
+  await screen.findByRole("button", { name: "Show list" });
+});

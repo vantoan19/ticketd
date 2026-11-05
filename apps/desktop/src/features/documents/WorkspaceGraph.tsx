@@ -31,8 +31,8 @@ import "./context-graph.css";
 const ALL = "__all__";
 /** Most cards the map draws, so their text stays readable at the zoom it opens on. */
 const MAP_CARDS = 12;
-/** The workspace map opens at a zoom where 14px labels are close to full size. */
-const MAP_MIN_ZOOM = 0.9;
+/** Up to 12 cards fit whole at any window width; labels stay legible down to this zoom. */
+const MAP_MIN_ZOOM = 0.55;
 const NO_POSITIONS: Record<string, Point> = {};
 
 /** Connections among the shown items, or the item's own total when only one is shown. */
@@ -409,8 +409,12 @@ export function WorkspaceGraph({
           <aside className="context-graph-preview">
             {(graph?.nodes.length ?? 0) > MAP_CARDS && (
               <p>
-                The map shows the newest {MAP_CARDS} items; the list below shows
-                all {graph?.nodes.length}.
+                The map shows the newest {MAP_CARDS} items; the list shows the{" "}
+                {graph?.nodes.length} loaded
+                {graph?.total && graph.total > graph.nodes.length
+                  ? ` of ${graph.total}`
+                  : ""}
+                .
               </p>
             )}
             {previewPanel}

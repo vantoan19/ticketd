@@ -137,6 +137,9 @@
   font-size: 14px;
   line-height: 1.25;
   overflow: hidden;
+  /* A long unbroken title wraps inside the card instead of spilling out. */
+  overflow-wrap: anywhere;
+  max-height: 110px;
 }
 .context-graph-heading,
 .context-graph-toolbar {

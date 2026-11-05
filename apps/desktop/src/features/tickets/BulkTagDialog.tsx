@@ -149,7 +149,7 @@ export function BulkTagDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Add or remove tag</DialogTitle>
+          <DialogTitle>Add or remove tags</DialogTitle>
           <DialogDescription>
             Applies to {count} selected {count === 1 ? "ticket" : "tickets"}.
           </DialogDescription>

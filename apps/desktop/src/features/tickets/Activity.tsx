@@ -121,7 +121,11 @@ function quoteOf(brief: string): string {
       .find(Boolean) ?? "";
   const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
   const plain = sentence.replace(/\.$/, "");
-  return plain.length > 80 ? `${plain.slice(0, 79).trimEnd()}…` : plain;
+  if (plain.length <= 80) return plain;
+  // Cut at a word boundary so the quote never ends mid-word.
+  const cut = plain.slice(0, 79);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > 20 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 export function Activity({
