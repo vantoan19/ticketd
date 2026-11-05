@@ -1,8 +1,9 @@
 import { useContext, useEffect, useState } from "react";
-import { FileText, Plus, X } from "lucide-react";
-import { documents } from "@/features/documents/api";
+import { FileText, Pencil, Plus, X } from "lucide-react";
+import { documents, type DocumentSummary } from "@/features/documents/api";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
   PopoverContent,
@@ -68,9 +69,18 @@ export function TicketDocuments({
       setError(String(reason));
     }
   }
-  function add(id: string) {
+  async function add(picked: DocumentSummary) {
     setOpen(false);
-    void change(id, true);
+    // Attaching Activity details is a decision to keep them as a Document.
+    if (picked.origin_ticket) {
+      try {
+        await documents.keep(picked.id, crypto.randomUUID());
+      } catch (reason) {
+        setError(String(reason));
+        return;
+      }
+    }
+    await change(picked.id, true);
   }
   function editDescription() {
     window.dispatchEvent(
@@ -108,15 +118,14 @@ export function TicketDocuments({
                   <X aria-hidden="true" />
                 </button>
               ) : (
-                <button
-                  type="button"
+                <IconButton
+                  size="icon-xs"
                   className="ticket-documents-edit"
-                  aria-label={`Edit description to remove ${link.target_label}`}
-                  title="Mentioned in the description"
+                  label={`Edit description to remove ${link.target_label}`}
                   onClick={editDescription}
                 >
-                  Edit description
-                </button>
+                  <Pencil aria-hidden="true" />
+                </IconButton>
               )}
             </li>
           ))}
@@ -136,8 +145,9 @@ export function TicketDocuments({
           </PopoverTrigger>
           <PopoverContent align="end" className="ticket-documents-popover">
             <DocumentPicker
+              includeSupport
               exclude={links.map((link) => link.target_id)}
-              onPick={(picked) => add(picked.id)}
+              onPick={(picked) => void add(picked)}
             />
           </PopoverContent>
         </Popover>

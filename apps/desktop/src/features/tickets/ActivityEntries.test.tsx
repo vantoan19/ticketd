@@ -164,3 +164,21 @@ test("Activity puts the composer before labelled notes and quiet relative histor
       .compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 });
+
+test("an empty composer offers Cancel and says why Post is disabled", async () => {
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "activity_feed" || command === "ticket_history") return [];
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<Activity {...props} reference="T-23" />);
+  fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
+  expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
+  expect(screen.getByText("Write an update to post.")).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Post update" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.getByRole("button", { name: "Write an update…" })).toBeTruthy();
+});

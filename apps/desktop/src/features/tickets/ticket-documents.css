@@ -118,11 +118,7 @@
 
 .ticket-documents-edit {
   flex: none;
-  padding: 0 4px;
-  border-radius: 6px;
   color: var(--muted-foreground);
-  font-size: 12px;
-  white-space: nowrap;
 }
 .ticket-documents-edit:hover,
 .ticket-documents-edit:focus-visible {

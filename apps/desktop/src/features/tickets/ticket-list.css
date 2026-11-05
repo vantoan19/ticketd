@@ -196,7 +196,21 @@
   line-height: 16px;
 }
 .bulk-error {
+  flex-wrap: nowrap;
+  max-width: 100%;
   color: var(--error-foreground);
+}
+/* One line; Details shows the whole message. */
+.bulk-error-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-error-text[data-open] {
+  max-height: 6rem;
+  overflow: auto;
+  white-space: normal;
 }
 .bulk-menu-count {
   margin-left: auto;

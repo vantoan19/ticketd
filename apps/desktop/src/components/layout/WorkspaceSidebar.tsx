@@ -24,16 +24,17 @@ import {
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import { useContext, type RefObject } from "react";
+import { useContext, useRef, type RefObject } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
@@ -93,6 +94,7 @@ export function WorkspaceSidebar({
   // While the workspace graph is open no other entry reads as current.
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
+  const newTrigger = useRef<HTMLButtonElement>(null);
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const archivedPlans = plans.filter((e) => e.archived).length;
@@ -105,34 +107,43 @@ export function WorkspaceSidebar({
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <strong>ticketd</strong>
-          <Tooltip>
-            <TooltipTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button
+                ref={newTrigger}
                 className="new-ticket"
                 variant="ghost"
-                size="icon-sm"
-                aria-label="New ticket"
-                onClick={(event) => {
-                  createTriggerRef.current = event.currentTarget;
+                size="sm"
+                aria-label="New"
+              >
+                <Plus aria-hidden="true" />
+                New
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(event) => event.preventDefault()}
+            >
+              <DropdownMenuItem
+                onSelect={() => {
+                  createTriggerRef.current = newTrigger.current;
                   setView("tickets");
-                  setCreating(true);
+                  // After the menu has closed, so it cannot take focus back.
+                  window.setTimeout(() => setCreating(true), 0);
                 }}
               >
-                <Plus />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>New ticket</TooltipContent>
-          </Tooltip>
+                New ticket
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onCapture}>
+                Capture a thought
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </SidebarHeader>
       <SidebarContent className="sidebar-body">
         <nav aria-label="Workspace views" className="sidebar-nav">
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={onCapture}>
-                <Plus size={16} /> Capture a thought
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
@@ -220,7 +231,7 @@ export function WorkspaceSidebar({
                       }
                       onClick={() => scope("all", p.id)}
                     >
-                      <Folder size={16} /> <span>{p.name}</span>
+                      <Folder size={16} /> <span title={p.name}>{p.name}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -246,7 +257,8 @@ export function WorkspaceSidebar({
                         }
                         onClick={() => scope("all", "all", e.id)}
                       >
-                        <Layers size={16} /> <span>{e.name}</span>
+                        <Layers size={16} />{" "}
+                        <span title={e.name}>{e.name}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}

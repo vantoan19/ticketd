@@ -39,9 +39,11 @@ export function BulkControls({
   plans: TicketWorkspace["plans"];
 }) {
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [detailsFor, setDetailsFor] = useState<unknown>(null);
   const retry = useRef<HTMLButtonElement>(null);
   const failureNote = useRef<HTMLDivElement>(null);
   const { pending, failure, notice, selection } = bulk;
+  const showDetails = failure !== null && detailsFor === failure;
   // The menu that started a change is disabled, then gone, while it applies.
   // Say where focus goes next: Retry after a failure, the list heading after
   // success (its confirmation is already in the live region below).
@@ -221,7 +223,21 @@ export function BulkControls({
           className="bulk-message bulk-error"
           role="alert"
         >
-          <span>{failure.message}</span>
+          <span
+            className="bulk-error-text"
+            data-open={showDetails || undefined}
+            title={showDetails ? undefined : failure.message}
+          >
+            {failure.message}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={showDetails}
+            onClick={() => setDetailsFor(showDetails ? null : failure)}
+          >
+            Details
+          </Button>
           {failure.retryable && (
             <Button
               ref={retry}
