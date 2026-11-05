@@ -1,6 +1,5 @@
 import { useContext, useState } from "react";
-import { FileText, MoreHorizontal } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { FileText, MoreHorizontal, Plus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -103,25 +102,26 @@ export function PlanDocuments({
         </details>
       )}
       {!readOnly && (
-        <Button
-          variant="ghost"
-          size="sm"
+        <IconButton
+          label="Add context"
           aria-expanded={adding}
           onClick={() => setAdding(!adding)}
         >
-          Add context
-        </Button>
+          <Plus />
+        </IconButton>
       )}
       {adding && !readOnly && (
-        <DocumentPicker
-          includeSupport
-          exclude={view.documents.map((doc) => doc.id)}
-          onPick={(doc) =>
-            void state.run(() =>
-              plansClient.setDocument(view.plan.id, doc.id, true),
-            )
-          }
-        />
+        <div className="plan-document-picker">
+          <DocumentPicker
+            includeSupport
+            exclude={view.documents.map((doc) => doc.id)}
+            onPick={(doc) =>
+              void state.run(() =>
+                plansClient.setDocument(view.plan.id, doc.id, true),
+              )
+            }
+          />
+        </div>
       )}
     </section>
   );

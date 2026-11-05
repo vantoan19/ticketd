@@ -17,6 +17,8 @@ import "./ticket-filters.css";
 
 type Props = {
   part?: "controls" | "chips";
+  /** Show the Filter control with its word, as a Plan's toolbar does. */
+  labeledFilter?: boolean;
   query: string;
   setQuery: (value: string) => void;
   plan: string;
@@ -133,19 +135,35 @@ export function TicketFilters(p: Props) {
           )}
           <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
             <PopoverTrigger asChild>
-              <IconButton
-                label={
-                  filterCount ? `Filters, ${filterCount} active` : "Filters"
-                }
-                aria-label={
-                  filterCount ? `Filters, ${filterCount} active` : "Filters"
-                }
-              >
-                <SlidersHorizontal />
-                {filterCount > 0 && (
-                  <span className="filter-count">{filterCount}</span>
-                )}
-              </IconButton>
+              {p.labeledFilter ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                >
+                  <SlidersHorizontal data-icon="inline-start" />
+                  Filter
+                  {filterCount > 0 && (
+                    <span className="filter-count">{filterCount}</span>
+                  )}
+                </Button>
+              ) : (
+                <IconButton
+                  label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                  aria-label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                >
+                  <SlidersHorizontal />
+                  {filterCount > 0 && (
+                    <span className="filter-count">{filterCount}</span>
+                  )}
+                </IconButton>
+              )}
             </PopoverTrigger>
             <PopoverContent
               className="filters-content"

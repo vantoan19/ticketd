@@ -12,9 +12,7 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PlanHeader } from "@/features/plans/PlanHeader";
-import { usePlanView } from "@/features/plans/usePlanView";
+import type { PlanViewState } from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
@@ -34,16 +32,14 @@ export function TicketListPane({
   workspace,
   bulk,
   listRef,
-  planMode,
-  setPlanMode,
+  planState,
   onOpen,
   onCreate,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
-  planMode: "list" | "dependencies";
-  setPlanMode: (mode: "list" | "dependencies") => void;
+  planState: PlanViewState;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
@@ -85,7 +81,6 @@ export function TicketListPane({
     clearFilters,
     queryError,
     refreshFailed,
-    revision,
   } = workspace;
   // An Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
@@ -105,7 +100,6 @@ export function TicketListPane({
   // An archived Plan is read-only: no new tickets into it, no removing from it.
   const planWritable = scopedPlan !== undefined && !scopedPlan.archived;
   const addDisabled = scopedPlan?.archived === true;
-  const planState = usePlanView(planScope, revision, refresh);
   const filtered =
     navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
@@ -190,6 +184,26 @@ export function TicketListPane({
     total,
     scopeTotal,
   };
+  const members = planState.view?.members ?? [];
+  const memberProjects = [
+    ...new Set(
+      members.map(
+        (member) =>
+          projects.find((item) => item.id === member.project_id)?.name ??
+          "no project",
+      ),
+    ),
+  ];
+  const blocked = members.filter(
+    (member) => member.availability === "Blocked",
+  ).length;
+  const planSummary = [
+    `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`,
+    memberProjects.length > 0 ? memberProjects.join(", ") : null,
+    blocked > 0 ? `${blocked} blocked` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <section
       className="ticket-list"
@@ -198,14 +212,10 @@ export function TicketListPane({
       aria-labelledby="tickets-heading"
     >
       {scopedPlan ? (
-        <PlanHeader
-          key={scopedPlan.id}
-          plan={scopedPlan}
-          plans={plans}
-          state={planState}
-        >
-          <TicketFilters part="controls" {...filterProps} />
-        </PlanHeader>
+        <div className="plan-list-toolbar">
+          <p className="plan-list-summary">{planSummary}</p>
+          <TicketFilters part="controls" labeledFilter {...filterProps} />
+        </div>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
@@ -236,19 +246,6 @@ export function TicketListPane({
       )}
       {singleStatusNote && (
         <p className="list-description">{singleStatusNote}</p>
-      )}
-      {scopedPlan && (
-        <div className="plan-view-switch">
-          <SegmentedControl
-            aria-label="Plan view"
-            value={planMode}
-            onValueChange={setPlanMode}
-            options={[
-              { value: "list", label: "List" },
-              { value: "dependencies", label: "Dependencies" },
-            ]}
-          />
-        </div>
       )}
       {removed && removed.plan === planScope && (
         <p className="plan-undo" role="status">

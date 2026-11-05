@@ -1,8 +1,44 @@
 .plan-header {
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px 20px 12px;
+  gap: 10px;
+  padding: 20px 16px 16px 24px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.plan-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.plan-workspace[hidden] {
+  display: none !important;
+}
+.plan-rename-hint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.plan-list-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* One full-width row: name and state, then the actions. The rename input
    takes the title's place at the same size, so nothing below moves. */
@@ -100,8 +136,8 @@
 }
 .plan-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 .plan-counts {
   display: flex;
@@ -234,14 +270,29 @@
   color: var(--destructive);
 }
 .plan-documents {
+  position: relative;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
   margin-left: auto;
+  text-align: left;
+}
+.plan-documents > details > ul,
+.plan-document-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 320px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--popover, var(--background));
+  box-shadow:
+    var(--shadow-border-base),
+    0 8px 24px -8px #0000002e;
 }
 .plan-documents > details {
-  flex-basis: 100%;
+  position: static;
 }
 .plan-documents summary {
   color: var(--muted-foreground);
@@ -271,19 +322,12 @@
 }
 .plan-dependencies {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
   padding: 12px 24px 24px;
-}
-.plan-dependencies-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.plan-dependencies-header h2 {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  font-weight: 500;
+  overflow-y: auto;
 }
 .plan-graph-canvas {
   height: 440px;
@@ -375,9 +419,6 @@
 .plan-blocker-form {
   margin-top: 4px;
 }
-.plan-view-switch {
-  padding: 0 20px;
-}
 .plan-undo {
   display: flex;
   align-items: center;
@@ -406,4 +447,29 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
+}
+
+.plan-dependencies-key {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.plan-dependencies-key > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-dependencies-key svg {
+  color: var(--foreground);
+}
+.plan-dependencies-key-box {
+  width: 28px;
+  height: 14px;
+  border-radius: 4px;
+  outline: 1px dashed var(--muted-foreground);
+  outline-offset: -1px;
 }
