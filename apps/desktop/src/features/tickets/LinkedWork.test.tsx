@@ -320,7 +320,7 @@ async function chooseRelationship(kind: string) {
   Element.prototype.scrollIntoView = vi.fn();
   const phrase =
     addableKinds.find((item) => item.kind === kind)?.phrase ?? kind;
-  fireEvent.keyDown(screen.getByRole("combobox", { name: "Relationship" }), {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: /^Relationship: / }), {
     key: "Enter",
   });
   fireEvent.click(await screen.findByRole("option", { name: phrase }));
@@ -404,7 +404,8 @@ test("Add subticket opens the link dialog already saying this ticket is the pare
   fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
   const dialog = await screen.findByRole("dialog", { name: "Add subticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
+    within(dialog).getByRole("combobox", { name: /^Relationship: / })
+      .textContent,
   ).toContain("parent of");
   // The primary waits for a chosen ticket and says why.
   expect(

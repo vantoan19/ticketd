@@ -57,22 +57,6 @@
   width: 160px;
   height: 28px;
 }
-.create-tag-suggestions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.create-tag-suggestions button {
-  padding: 0 8px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--muted-foreground);
-  box-shadow: var(--shadow-border);
-  font-size: 13px;
-}
 .create-more {
   display: inline-flex;
   align-items: center;

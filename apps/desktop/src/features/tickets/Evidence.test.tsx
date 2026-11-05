@@ -45,9 +45,9 @@ test("adds and removes a verification result", async () => {
     />,
   );
   Element.prototype.scrollIntoView = vi.fn();
-  expect(screen.queryByLabelText("Type")).toBeNull();
+  expect(screen.queryByLabelText(/^Type: /)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
-  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type" }), {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: /^Type: / }), {
     key: "Enter",
   });
   fireEvent.click(await screen.findByRole("option", { name: /^Verification/ }));

@@ -855,8 +855,24 @@ export function DocumentEditor({
         {!initial && saveError}
         {capture && (
           <footer>
-            {statusLine}
-            <Button onClick={requestClose}>Done</Button>
+            {body.trim() ? (
+              statusLine
+            ) : (
+              <span
+                role="status"
+                id="capture-blocked"
+                className="document-status"
+              >
+                Write a thought to finish
+              </span>
+            )}
+            <Button
+              disabled={!body.trim()}
+              {...(!body.trim() && { "aria-describedby": "capture-blocked" })}
+              onClick={requestClose}
+            >
+              Done
+            </Button>
           </footer>
         )}
       </div>

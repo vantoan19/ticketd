@@ -285,11 +285,17 @@ test("tags are chips that can be added and removed", () => {
   expect(screen.queryByText("bug")).toBeNull();
 });
 
-test("a suggested tag is added with one click", async () => {
+test("suggested tags are options in the field's dropdown, not chips beside it", async () => {
   answers.tags = ["alpha", "beta"];
   render(<Harness create={vi.fn()} />);
-  const list = await screen.findByRole("list", { name: "Tag suggestions" });
-  fireEvent.click(within(list).getByRole("button", { name: "alpha" }));
+  const input = screen.getByRole("textbox", { name: "Add tag" });
+  expect(screen.queryByRole("listbox")).toBeNull();
+  fireEvent.focus(input);
+  const list = await screen.findByRole("listbox", {
+    name: "Add tag suggestions",
+  });
+  fireEvent.click(within(list).getByRole("option", { name: "alpha" }));
   expect(screen.getByRole("button", { name: "Remove alpha" })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: "alpha" })).toBeNull();
   expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
 });

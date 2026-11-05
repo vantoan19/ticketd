@@ -82,12 +82,36 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function renderReview(
+  refresh: () => Promise<void>,
+  props: { startSeparate?: boolean } = {},
+) {
+  return render(
+    <Duplicates
+      ticket={ticket}
+      refresh={refresh}
+      open
+      onOpenChange={() => {}}
+      title="Mark as duplicate"
+      description="Choose the canonical ticket and review its dependencies."
+      {...props}
+    />,
+  );
+}
+/** Reviews the typed reference; the chooser has no separate Review button. */
+function submitReview() {
+  fireEvent.keyDown(
+    screen.getByRole("textbox", { name: /ticket reference|endpoint/ }),
+    { key: "Enter" },
+  );
+}
+
 async function openReview(refresh = vi.fn(async () => {})) {
-  render(<Duplicates ticket={ticket} refresh={refresh} />);
+  renderReview(refresh);
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
     target: { value: "T-2" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  submitReview();
   await screen.findByText("Affected dependencies");
   return refresh;
 }
@@ -233,11 +257,11 @@ test("a ticket with no dependencies can be marked directly", async () => {
     edges: [],
     replacement_issues: [],
   };
-  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
+  renderReview(async () => {});
   fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
     target: { value: "T-2" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  submitReview();
   const apply = await screen.findByRole("button", { name: "Mark duplicate" });
   expect((apply as HTMLButtonElement).disabled).toBe(false);
   expect(screen.getByText(/Removing the duplicate link later/)).toBeTruthy();
@@ -252,14 +276,11 @@ test("reviews separate dependency changes for an existing endpoint", async () =>
     edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
     replacement_issues: [null],
   };
-  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Review separate dependency changes" }),
-  );
+  renderReview(async () => {}, { startSeparate: true });
   fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
     target: { value: "T-9" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  submitReview();
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "replace");
   fireEvent.click(await enabled("Apply dependency changes"));
@@ -291,14 +312,11 @@ test("a separate review does not claim the kept endpoint is a duplicate", async 
     edges: [{ ...edge("T-9", "T-3"), replacement_blocker: "T-1" }],
     replacement_issues: [null],
   };
-  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Review separate dependency changes" }),
-  );
+  renderReview(async () => {}, { startSeparate: true });
   fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
     target: { value: "T-9" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  submitReview();
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
@@ -441,14 +459,11 @@ test("a separate review compares against the preview's normalized source", async
     ],
     replacement_issues: [null],
   };
-  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Review separate dependency changes" }),
-  );
+  renderReview(async () => {}, { startSeparate: true });
   fireEvent.change(screen.getByLabelText("Existing endpoint to replace"), {
     target: { value: "T-09" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
+  submitReview();
   await screen.findByText("Affected dependencies");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
@@ -586,20 +601,36 @@ test("a trashed endpoint explains why Replace is unavailable", async () => {
   ).toBeTruthy();
 });
 
-test("the review kind cannot be switched while a preview is loading", async () => {
-  vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
-  render(<Duplicates ticket={ticket} refresh={async () => {}} />);
-  fireEvent.change(screen.getByLabelText("Canonical ticket reference"), {
-    target: { value: "T-2" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Review dependencies" }));
-  await waitFor(() =>
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Review separate dependency changes",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true),
-  );
+test("one flow in the dialog shell: Cancel, and a primary that waits for a canonical ticket", async () => {
+  renderReview(async () => {});
+  expect(
+    screen.getByRole("dialog", { name: "Mark as duplicate" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Review dependencies" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", {
+      name: "Review separate dependency changes",
+    }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  const primary = screen.getByRole("button", { name: "Mark duplicate" });
+  expect((primary as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    screen.getByText("Choose the canonical ticket to review"),
+  ).toBeTruthy();
+});
+
+test("the primary names what it applies and waits for every dependency choice", async () => {
+  await openReview();
+  expect(
+    screen.getByText("Choose Replace, Keep or Remove for each dependency"),
+  ).toBeTruthy();
+  choose("T-1 blocks T-3", "remove");
+  expect(
+    screen.getByRole("button", {
+      name: "Mark duplicate and apply 1 change",
+    }) as HTMLButtonElement,
+  ).toBeTruthy();
 });

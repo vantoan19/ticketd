@@ -466,6 +466,26 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   }
 });
 
+test("choosing New ticket closes the New ticket tooltip", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const trigger = screen.getByRole("button", { name: "New ticket" });
+  trigger.focus();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryAllByRole("tooltip").length).toBeGreaterThan(0);
+  await openNewTicket(trigger);
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
+});
+
 test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
   vi.useFakeTimers();
   let tickets = [
@@ -1598,13 +1618,26 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     await vi.advanceTimersByTimeAsync(200);
   });
   fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  await act(async () => {});
+  const review = screen.getByRole("dialog", {
+    name: "Mark T-2 as a duplicate",
+  });
   expect(
-    within(dialog).getByText(/Choose the canonical ticket for T-2/),
+    within(review).getByText(/Choose the canonical ticket for T-2/),
   ).toBeTruthy();
   // The cursor is where the next answer goes, not on the dialog's frame.
   expect(document.activeElement).toBe(
-    within(dialog).getByLabelText("Canonical ticket reference"),
+    within(review).getByLabelText("Canonical ticket reference"),
   );
+  // One flow: Cancel, and a primary that waits for the canonical ticket.
+  expect(within(review).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(
+    (
+      within(review).getByRole("button", {
+        name: "Mark duplicate",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
   // Nothing is marked until the review names a canonical ticket.
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
