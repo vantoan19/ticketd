@@ -164,9 +164,7 @@ function MultiSelectField({
     >
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && (
-          <span className="source-required"> (optional)</span>
-        )}
+        {!field.required && <span className="source-required">Optional</span>}
       </Label>
       <div className="source-chip-input">
         {value.length > 0 && (
@@ -192,9 +190,9 @@ function MultiSelectField({
           disabled={disabled || full}
           placeholder={
             field.key === "repositories"
-              ? "Add a repository…"
+              ? "e.g. acme/billing-api"
               : field.key === "labels"
-                ? "Any label"
+                ? "e.g. bug, payments"
                 : "Search or type, then press Enter"
           }
           aria-describedby={field.help ? `${id}-help` : undefined}
@@ -339,16 +337,18 @@ function TextField({
     <div className="source-field" data-field={field.key}>
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && (
-          <span className="source-required"> (optional)</span>
-        )}
+        {!field.required && <span className="source-required">Optional</span>}
       </Label>
       <Input
         id={id}
         value={value}
         disabled={disabled}
         placeholder={
-          field.key === "assignee" ? "Anyone" : (field.placeholder ?? undefined)
+          field.key === "assignee"
+            ? "e.g. octocat"
+            : field.placeholder
+              ? `e.g. ${field.placeholder}`
+              : undefined
         }
         aria-describedby={field.help ? `${id}-help` : undefined}
         aria-invalid={errors.length > 0 || undefined}

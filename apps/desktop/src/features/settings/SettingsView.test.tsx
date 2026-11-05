@@ -313,3 +313,11 @@ test("the Attention footer opens the inbox", () => {
   );
   expect(openInbox).toHaveBeenCalled();
 });
+
+test("workspace stats use short one-line labels", async () => {
+  render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
+  await screen.findByLabelText("Workspace path");
+  const location = screen.getByRole("region", { name: "Location" });
+  expect(location.textContent).toContain("Documents");
+  expect(location.textContent).not.toContain("including details and Trash");
+});
