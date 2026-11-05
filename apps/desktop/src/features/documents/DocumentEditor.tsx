@@ -605,9 +605,17 @@ export function DocumentEditor({
     </div>
   );
   const connected = groupConnections(links);
+  // A Plan row with no passage is a Plan attachment: the designated spec, or (attached) a supporting Document.
   const planSpec = connected.find(
-    (item) => item.kind === "plan" && item.passages.length === 0,
+    (item) =>
+      item.kind === "plan" && item.passages.length === 0 && !item.attached,
   );
+  const planSupport = planSpec
+    ? undefined
+    : connected.find(
+        (item) =>
+          item.kind === "plan" && item.passages.length === 0 && item.attached,
+      );
   const sharing = new Map<string, number>();
   for (const item of connected)
     for (const passage of item.passages)
@@ -751,6 +759,8 @@ export function DocumentEditor({
               value={savedDocument?.updated_at ?? initial.updated_at}
             />
             {planSpec && ` · spec of the Plan ${planSpec.label}`}
+            {planSupport &&
+              ` · supporting Document of the Plan ${planSupport.label}`}
           </p>
         )}
         {suggestion && (
@@ -1171,7 +1181,7 @@ function ConnectedLabel({ item }: { item: Connection }) {
   }, [item.kind, item.label]);
   const text =
     item.kind === "plan" && item.passages.length === 0
-      ? `Spec of ${item.label}`
+      ? `${item.attached ? "Supporting Document of" : "Spec of"} ${item.label}`
       : ticket?.title
         ? `${item.label} · ${ticket.title}`
         : item.label;

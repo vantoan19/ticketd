@@ -270,7 +270,7 @@ export function RestoreDialog({
       }}
     >
       <DialogContent
-        className="restore-dialog sm:max-w-[600px]"
+        className="restore-dialog sm:max-w-[640px]"
         showCloseButton={phase.name !== "restoring"}
         onInteractOutside={(event) => event.preventDefault()}
       >
@@ -350,23 +350,6 @@ export function RestoreDialog({
                 follows, reminders, and inbox state.{" "}
                 {differences(inspection.current, valid.summary)}
               </p>
-              <div className="restore-notes">
-                <p>
-                  <strong>A safety backup comes first.</strong>{" "}
-                  <span className="restore-muted">
-                    ticketd saves a backup of this workspace next to it before
-                    replacing anything. Restore that backup the same way to
-                    undo.
-                  </span>
-                </p>
-                <p>
-                  <strong>Pause ticketd CLI commands.</strong>{" "}
-                  <span className="restore-muted">
-                    Stop other ticketd commands, such as an agent recording
-                    activities, until the restore finishes.
-                  </span>
-                </p>
-              </div>
             </>
           )}
 
@@ -435,12 +418,33 @@ export function RestoreDialog({
           )}
         </div>
 
+        {valid && (
+          <div className="restore-pinned">
+            <div className="restore-notes">
+              <p>
+                <strong>A safety backup comes first.</strong>{" "}
+                <span className="restore-muted">
+                  ticketd saves a backup of this workspace next to it before
+                  replacing anything. Restore that backup the same way to undo.
+                </span>
+              </p>
+              <p>
+                <strong>Pause ticketd CLI commands.</strong>{" "}
+                <span className="restore-muted">
+                  Stop other ticketd commands, such as an agent recording
+                  activities, until the restore finishes.
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="restore-footer">
           <span className="restore-muted">
             {done
               ? "To undo, restore the safety backup from Settings."
               : valid
-                ? "You can undo this with the safety backup."
+                ? ""
                 : "Choose a backup saved by this version or earlier."}
           </span>
           {done ? (

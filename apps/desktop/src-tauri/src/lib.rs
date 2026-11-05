@@ -225,10 +225,11 @@ fn document_context_links(
         .and_then(|w| {
             let offset = offset.unwrap_or(0);
             let mut backlinks = w.context_backlinks(&id, 100, offset)?;
-            // A Plan that uses this Document as its spec is a connection even though
-            // no Markdown link states it.
-            for plan in w.list_plans(false)?.into_iter().filter(|_| offset == 0) {
-                if plan.spec_document_id.as_deref() == Some(id.as_str()) {
+            // A Plan the Document is attached to is a connection even though no Markdown
+            // link states it. The designated spec is not `explicit`; a supporting
+            // Document is, because a person attached it.
+            if offset == 0 {
+                for (plan, spec) in w.document_plans(&id)? {
                     backlinks.push(ticketd_core::ContextLink {
                         activity_id: None,
                         source_id: plan.id,
@@ -240,7 +241,7 @@ fn document_context_links(
                         target_label: String::new(),
                         source_trashed: false,
                         target_trashed: false,
-                        explicit: false,
+                        explicit: !spec,
                     });
                 }
             }

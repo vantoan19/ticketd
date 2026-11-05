@@ -767,7 +767,8 @@ fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ()
     workspace.open_document(&second.id).unwrap();
     let rows = workspace.recent_documents().unwrap();
     let row = rows.iter().find(|row| row.id == first.id).unwrap();
-    assert_eq!(row.snippet, "Heading Bold link item");
+    // The leading heading is the row title, not part of the excerpt.
+    assert_eq!(row.snippet, "Bold link item");
     assert_eq!(row.tags, ["a", "b"]);
     assert!(!row.updated_at.is_empty());
     let found = workspace.search_documents("link", None, 10, 0).unwrap();

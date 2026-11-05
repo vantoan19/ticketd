@@ -52,8 +52,14 @@
   gap: 0;
   padding: 0;
   overflow: hidden;
-  max-height: calc(100dvh - 32px);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+.restore-head,
+.restore-pinned,
+.restore-footer {
+  flex: none;
 }
 .restore-head {
   display: flex;
@@ -66,6 +72,8 @@
   flex-direction: column;
   gap: 16px;
   padding: 20px 24px 24px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   /* Edge shadows appear only while there is more to scroll to. */
   background:
@@ -163,6 +171,9 @@
   padding: 8px 12px;
   text-align: right;
 }
+.restore-compare td {
+  white-space: nowrap;
+}
 .restore-compare thead th {
   font-size: 12px;
   line-height: 16px;
@@ -176,7 +187,6 @@
   text-align: left;
   font-weight: 400;
   color: var(--muted-foreground);
-  white-space: nowrap;
 }
 .restore-compare td[data-differs="true"] {
   font-weight: 500;
@@ -188,6 +198,18 @@
   padding: 12px 16px;
   border-radius: 8px;
   background: var(--recessed);
+}
+/* The safety notes stay in view above the footer however far the body scrolls. */
+.restore-pinned {
+  padding: 0 24px 16px;
+}
+.restore-pinned .restore-notes {
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+}
+.restore-pinned p {
+  margin: 0;
 }
 .restore-notes code {
   font-family: var(--font-mono);
