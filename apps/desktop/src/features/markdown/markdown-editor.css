@@ -20,6 +20,15 @@
   padding: 4px 76px 4px 4px;
   background: var(--background);
 }
+.rich-toolbar[data-floating] {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  border-radius: 6px;
+  box-shadow: var(--shadow-border);
+}
 /* Hidden by visibility, never removed: controls below must not move when the editor loses focus. */
 .rich-toolbar[data-visible="false"] {
   visibility: hidden;
@@ -74,6 +83,13 @@
 .rich-document > * {
   margin-block: 12px;
 }
+/* The frame's own padding is the only space above the first block and below the last. */
+.rich-document > :first-child {
+  margin-top: 0;
+}
+.rich-document > :last-child {
+  margin-bottom: 0;
+}
 .rich-document h1 {
   font-size: 32px;
   font-weight: 600;
@@ -101,9 +117,14 @@
   list-style: none;
   margin-left: -20px;
 }
-.rich-document [data-slate-placeholder] {
+.rich-document[data-empty] > :first-child::before {
+  content: var(--editor-placeholder);
+  position: absolute;
+  inset: 0 auto auto 0;
+  max-width: 100%;
   color: var(--muted-foreground);
-  opacity: 1 !important;
+  pointer-events: none;
+  user-select: none;
 }
 .rich-document li > input {
   margin-right: 8px;
@@ -211,4 +232,8 @@
 }
 .markdown-editor :is(.cm-activeLine, .cm-activeLineGutter) {
   background: var(--recessed);
+}
+.mermaid-pending {
+  height: 160px;
+  padding: 12px;
 }

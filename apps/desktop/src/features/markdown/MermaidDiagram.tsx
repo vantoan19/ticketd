@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Code, Maximize2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -136,9 +137,11 @@ export function MermaidDiagram({ source }: { source: string }) {
             <AlertDescription>{current.error}</AlertDescription>
           </Alert>
         ) : !current ? (
-          <p role="status" className="p-3 text-muted-foreground">
-            Rendering diagram…
-          </p>
+          // A block-sized skeleton: the diagram arrives in place without moving the text below.
+          <div role="status" className="mermaid-pending">
+            <Skeleton aria-hidden="true" className="h-full w-full" />
+            <span className="sr-only">Rendering diagram…</span>
+          </div>
         ) : !expanded ? (
           diagram
         ) : null}
