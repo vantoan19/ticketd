@@ -731,7 +731,7 @@ enum ActivityCommand {
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
         /// Read the brief from a file (- reads stdin)
-        #[arg(long)]
+        #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
         /// Name of the agent posting this activity, shown beside it
         #[arg(long)]
@@ -754,7 +754,7 @@ enum ActivityCommand {
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
         /// Read the new brief from a file (- reads stdin)
-        #[arg(long)]
+        #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
         /// Name of the agent making this edit, shown beside the activity
         #[arg(long)]
@@ -767,7 +767,7 @@ enum ActivityCommand {
     Delete { reference: String, id: String },
     /// Read an exact authored activity
     Show { reference: String, id: String },
-    /// Read the chronological activity feed
+    /// Read the activity feed, newest first
     List {
         reference: String,
         #[arg(long, default_value_t = 50)]

@@ -84,9 +84,9 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
     expect(screen.getByRole("alert").textContent).toContain("Database busy"),
   );
   expect(composer).toHaveProperty("value", "A **draft**");
-  expect(localStorage.getItem("ticketd:activity-draft:T-1")).toBe(
-    "A **draft**",
-  );
+  expect(
+    JSON.parse(localStorage.getItem("ticketd:activity-draft:T-1") ?? "{}"),
+  ).toMatchObject({ brief: "A **draft**" });
   expect(composer).toHaveProperty("readOnly", false);
   expect(
     bridge.invoke.mock.calls.filter(
@@ -316,6 +316,7 @@ test("an unloaded targeted note can be edited and deleted without a stale copy",
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "Delete update" }),
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Delete update" }));
   await waitFor(() =>
     expect(screen.queryByText("Edited earlier update")).toBeNull(),
   );
@@ -738,8 +739,10 @@ test("restores a selected supporting Document after navigation", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Investigation" }));
   view.unmount();
   render(<Activity {...props} />);
-  expect(await screen.findByText("Investigation")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Remove Document" })).toBeTruthy();
+  expect(await screen.findByText("Attached: Investigation")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Remove attached Document" }),
+  ).toBeTruthy();
 });
 
 test("a brief of only whitespace entities cannot be posted", async () => {
@@ -828,4 +831,36 @@ test("offers refresh when the requested update was removed", async () => {
   await screen.findByText(/update is no longer available/i);
   fireEvent.click(screen.getByRole("button", { name: "Refresh updates" }));
   expect(refresh).toHaveBeenCalled();
+});
+
+test("restores the whole draft, brief, details and attached Document, from one object", async () => {
+  bridge.invoke.mockImplementation((command: string) => {
+    if (command === "show_document")
+      return Promise.resolve({
+        id: "doc-1",
+        title: "Investigation",
+        body: "",
+        created_at: "2026-01-01",
+        updated_at: "2026-01-01",
+        trashed: false,
+      });
+    return Promise.resolve([]);
+  });
+  localStorage.setItem(
+    "ticketd:activity-draft:T-994",
+    JSON.stringify({ brief: "Brief", details: "More", support: "doc-1" }),
+  );
+  render(
+    <Activity
+      reference="T-994"
+      status="Todo"
+      revision={0}
+      projects={[]}
+      active
+      trashed={false}
+    />,
+  );
+  expect(await screen.findByText("Attached: Investigation")).toBeTruthy();
+  expect(await screen.findByText("Brief")).toBeTruthy();
+  expect(screen.getByText("Draft kept on this device")).toBeTruthy();
 });

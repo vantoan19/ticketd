@@ -224,7 +224,8 @@ export function Inbox({
                     className="inbox-ticket"
                     onClick={() => {
                       if (!e.read) void mark([e.id], true);
-                      if (e.kind === "activity" && !e.deleted)
+                      // A deleted update still opens with its id, so the ticket says it is gone.
+                      if (e.kind === "activity")
                         select(e.reference, e.from_value);
                       else select(e.reference);
                     }}

@@ -43,8 +43,20 @@ import "./activity.css";
  * Unsubmitted update drafts by ticket identity. They outlive this component so
  * switching tickets, or the detail remounting, never loses typed text.
  */
-const noteDrafts = new Map<string, string>();
+type Draft = {
+  brief: string;
+  /** Null while the update has no details section. */
+  details: string | null;
+  /** The id of an existing Document attached to the update, or "". */
+  support: string;
+};
+const drafts = new Map<string, Draft>();
 const draftKey = (reference: string) => `ticketd:activity-draft:${reference}`;
+// Earlier versions kept details and the attachment under their own keys.
+const legacyDetailKey = (reference: string) =>
+  `ticketd:activity-details:${reference}`;
+const legacySupportKey = (reference: string) =>
+  `ticketd:activity-support:${reference}`;
 
 function localValue(key: string): string | null {
   try {
@@ -54,17 +66,35 @@ function localValue(key: string): string | null {
   }
 }
 
-function loadDraft(reference: string): string {
+function parseDraft(raw: string): Draft {
   try {
-    return (
-      localStorage.getItem(draftKey(reference)) ??
-      noteDrafts.get(reference) ??
-      ""
-    );
+    const value: unknown = JSON.parse(raw);
+    if (typeof value === "object" && value !== null && "brief" in value) {
+      const { brief, details, support } = value as Record<string, unknown>;
+      return {
+        brief: typeof brief === "string" ? brief : "",
+        details: typeof details === "string" ? details : null,
+        support: typeof support === "string" ? support : "",
+      };
+    }
   } catch {
-    return noteDrafts.get(reference) ?? "";
+    /* A plain string is the earlier format: the brief alone. */
   }
+  return { brief: raw, details: null, support: "" };
 }
+
+function loadDraft(reference: string): Draft {
+  const raw = localValue(draftKey(reference));
+  const base = raw !== null ? parseDraft(raw) : drafts.get(reference);
+  return {
+    brief: base?.brief ?? "",
+    details: base?.details ?? localValue(legacyDetailKey(reference)),
+    support: base?.support || (localValue(legacySupportKey(reference)) ?? ""),
+  };
+}
+
+const hasDraft = (draft: Draft) =>
+  draft.brief !== "" || draft.details !== null || draft.support !== "";
 
 export function Activity({
   reference,
@@ -96,6 +126,7 @@ export function Activity({
   plans?: Plan[];
 }) {
   const now = useNow();
+  const [feedback, setFeedback] = useState("");
   const [loadError, setLoadError] = useState("");
   const [targetMissing, setTargetMissing] = useState<string | null>(null);
   const [targetNote, setTargetNote] = useState<AuthoredActivity | null>(null);
@@ -125,11 +156,17 @@ export function Activity({
       current = false;
     };
   }, [active, reference, revision, targetId, targetKey]);
-  // Leaving the ticket ends the "no longer available" notice for good.
+  // Leaving the ticket ends the "no longer available" notice for good, and
+  // the confirmation of a deletion belongs to the ticket it happened on.
   const [wasActive, setWasActive] = useState(active);
-  if (wasActive !== active) {
+  const [wasReference, setWasReference] = useState(reference);
+  if (wasActive !== active || wasReference !== reference) {
     setWasActive(active);
-    if (!active) setTargetMissing(null);
+    setWasReference(reference);
+    if (!active || wasReference !== reference) {
+      setTargetMissing(null);
+      setFeedback("");
+    }
   }
   const [feed, setFeed] = useState<ActivityFeedEntry[]>([]);
   const notes = feed.flatMap((item) =>
@@ -140,38 +177,50 @@ export function Activity({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraftValue] = useState(() => loadDraft(ticketId));
-  const [composing, setComposing] = useState(() =>
-    Boolean(
-      loadDraft(ticketId) ||
-      localValue(`ticketd:activity-details:${ticketId}`) !== null ||
-      localValue(`ticketd:activity-support:${ticketId}`),
-    ),
-  );
-  function setDraft(content: string) {
-    if (content) noteDrafts.set(ticketId, content);
-    else noteDrafts.delete(ticketId);
+  const [saved, setSaved] = useState<Draft>(() => loadDraft(ticketId));
+  const savedRef = useRef(saved);
+  const [composing, setComposing] = useState(() => hasDraft(saved));
+  const requestKey = `ticketd:activity-request:${ticketId}`;
+  /** Changes part of the draft and keeps the whole draft, as one object, on this device. */
+  function updateDraft(patch: Partial<Draft>) {
+    const next = { ...savedRef.current, ...patch };
+    savedRef.current = next;
+    setSaved(next);
     try {
-      if (content) localStorage.setItem(draftKey(ticketId), content);
-      else localStorage.removeItem(draftKey(ticketId));
+      if (hasDraft(next)) {
+        drafts.set(ticketId, next);
+        localStorage.setItem(draftKey(ticketId), JSON.stringify(next));
+      } else {
+        drafts.delete(ticketId);
+        localStorage.removeItem(draftKey(ticketId));
+      }
+      localStorage.removeItem(legacyDetailKey(ticketId));
+      localStorage.removeItem(legacySupportKey(ticketId));
+      if (patch.support !== undefined) localStorage.removeItem(requestKey);
     } catch {
       setError("Could not save the unpublished update on this device.");
     }
-    setDraftValue(content);
   }
-  const detailKey = `ticketd:activity-details:${ticketId}`;
-  const selectionKey = `ticketd:activity-support:${ticketId}`;
-  const requestKey = `ticketd:activity-request:${ticketId}`;
-  const [details, setDetailsValue] = useState(
-    () => localValue(detailKey) ?? "",
-  );
-  const [showDetails, setShowDetails] = useState(
-    () => localValue(detailKey) !== null,
-  );
-  const [support, setSupportValue] = useState(
-    () => localValue(selectionKey) ?? "",
-  );
+  function clearDraft() {
+    updateDraft({ brief: "", details: null, support: "" });
+    try {
+      localStorage.removeItem(requestKey);
+    } catch {
+      setError("Could not clear the unpublished update on this device.");
+    }
+  }
+  const draft = saved.brief;
+  const details = saved.details ?? "";
+  const showDetails = saved.details !== null;
+  const support = saved.support;
+  const setDraft = (brief: string) => updateDraft({ brief });
+  const setDetails = (value: string) => updateDraft({ details: value });
+  const setSupport = (value: string) => updateDraft({ support: value });
   const [supportTitle, setSupportTitle] = useState("");
+  /** What each update's details Document is called and whether it is in Trash. */
+  const [detailDocuments, setDetailDocuments] = useState<
+    Record<string, { heading: string; trashed: boolean; attached: boolean }>
+  >({});
   const [picking, setPicking] = useState(false);
   const [view, setView] = useState<"all" | "updates">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -192,31 +241,12 @@ export function Activity({
       current = false;
     };
   }, [active, support]);
-  function setDetails(value: string) {
-    setDetailsValue(value);
-    try {
-      localStorage.setItem(detailKey, value);
-    } catch {
-      setError("Could not save the unpublished update on this device.");
-    }
-  }
-  function setSupport(value: string) {
-    setSupportValue(value);
-    try {
-      if (value) localStorage.setItem(selectionKey, value);
-      else localStorage.removeItem(selectionKey);
-      localStorage.removeItem(requestKey);
-    } catch {
-      setError("Could not save the unpublished update on this device.");
-    }
-  }
   const [edit, setEdit] = useState<{
     id: string;
     original: string;
     content: string;
   } | null>(null);
   const [pending, setPending] = useState(false);
-  const [feedback, setFeedback] = useState("");
   const busy = useRef(false);
   const pages = useRef(1);
   const [more, setMore] = useState(false);
@@ -318,17 +348,7 @@ export function Activity({
       }
       if (edit) setEdit(null);
       else {
-        setDraft("");
-        try {
-          localStorage.removeItem(detailKey);
-          localStorage.removeItem(selectionKey);
-          localStorage.removeItem(requestKey);
-        } catch {
-          setError("Could not clear the unpublished update on this device.");
-        }
-        setDetailsValue("");
-        setSupportValue("");
-        setShowDetails(false);
+        clearDraft();
         setComposing(false);
       }
       await loadNotes();
@@ -394,6 +414,33 @@ export function Activity({
     !notes.some((note) => note.id === targetId)
       ? [...notes, targetNote]
       : notes;
+  const detailIds = displayedNotes.flatMap((note) =>
+    note.supporting_document_id ? [note.supporting_document_id] : [],
+  );
+  const detailIdsKey = detailIds.join(",");
+  useEffect(() => {
+    if (!active || !detailIdsKey) return;
+    let current = true;
+    for (const id of detailIdsKey.split(","))
+      void documents
+        .show(id)
+        .then((document) => {
+          if (current)
+            setDetailDocuments((previous) => ({
+              ...previous,
+              [id]: {
+                heading: document.title || document.heading || "Document",
+                trashed: document.trashed,
+                // Generated details remember the update they came from.
+                attached: !document.origin_brief,
+              },
+            }));
+        })
+        .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [active, detailIdsKey, revision]);
   const changed =
     edit &&
     !displayedNotes.some(
@@ -509,6 +556,7 @@ export function Activity({
               <LazyMarkdownEditor
                 key={edit?.id ?? "new"}
                 label={edit ? "Edit update" : "New update"}
+                placeholder="Write an update…"
                 value={draftText}
                 onChange={(content) =>
                   edit ? setEdit({ ...edit, content }) : setDraft(content)
@@ -534,16 +582,12 @@ export function Activity({
                 size="sm"
                 disabled={pending}
                 onClick={() => {
+                  updateDraft({ details: null });
                   try {
-                    localStorage.removeItem(detailKey);
                     localStorage.removeItem(requestKey);
                   } catch {
-                    setError(
-                      "Could not clear the unpublished details on this device.",
-                    );
+                    /* The retry id is best effort. */
                   }
-                  setDetailsValue("");
-                  setShowDetails(false);
                 }}
               >
                 Remove details
@@ -553,15 +597,22 @@ export function Activity({
           {!edit && support && (
             <p className="activity-attached">
               <FileText aria-hidden="true" />
-              <span className="truncate">{supportTitle || "Document"}</span>
+              <span className="truncate">
+                Attached: {supportTitle || "Document"}
+              </span>
+              <span aria-hidden="true">·</span>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
+                aria-label="Remove attached Document"
                 onClick={() => setSupport("")}
               >
-                Remove Document
+                Remove
               </Button>
+              <span className="activity-muted">
+                Remove it to write details instead.
+              </span>
             </p>
           )}
           {!edit && picking && (
@@ -580,13 +631,18 @@ export function Activity({
             </p>
           )}
           <div className="activity-actions">
-            {!edit && !showDetails && !support && (
+            {!edit && !showDetails && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
+                disabled={!!support}
+                title={
+                  support
+                    ? "Remove the attached Document to write details instead"
+                    : undefined
+                }
                 onClick={() => {
-                  setShowDetails(true);
                   setDetails("");
                   setPicking(false);
                 }}
@@ -608,7 +664,7 @@ export function Activity({
               </Button>
             )}
             <span className="activity-actions-end">
-              {!edit && (
+              {!edit && hasDraft(saved) && (
                 <span className="activity-muted">
                   Draft kept on this device
                 </span>
@@ -630,19 +686,7 @@ export function Activity({
                   size="sm"
                   disabled={pending}
                   onClick={() => {
-                    setDraft("");
-                    try {
-                      localStorage.removeItem(detailKey);
-                      localStorage.removeItem(selectionKey);
-                      localStorage.removeItem(requestKey);
-                    } catch {
-                      setError(
-                        "Could not clear the unpublished update on this device.",
-                      );
-                    }
-                    setDetailsValue("");
-                    setSupportValue("");
-                    setShowDetails(false);
+                    clearDraft();
                     setPicking(false);
                     setComposing(false);
                   }}
@@ -748,11 +792,7 @@ export function Activity({
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           variant="destructive"
-                          onSelect={() =>
-                            item.note.supporting_document_id
-                              ? setConfirmDelete(item.note.id)
-                              : void remove(item.note.id)
-                          }
+                          onSelect={() => setConfirmDelete(item.note.id)}
                         >
                           Delete update
                         </DropdownMenuItem>
@@ -762,7 +802,9 @@ export function Activity({
                 </div>
                 {confirmDelete === item.note.id && (
                   <p role="alertdialog" className="activity-confirm">
-                    Delete update? Its details stay in Documents.
+                    {item.note.supporting_document_id
+                      ? "Delete update? Its details stay in Documents."
+                      : "Delete update?"}
                     <Button
                       type="button"
                       variant="destructive"
@@ -790,15 +832,12 @@ export function Activity({
                   />
                 </div>
                 {item.note.supporting_document_id && (
-                  <Button
-                    type="button"
-                    variant="link"
-                    onClick={() =>
+                  <DetailsLink
+                    info={detailDocuments[item.note.supporting_document_id]}
+                    open={() =>
                       openDocument?.(item.note.supporting_document_id!)
                     }
-                  >
-                    Open details
-                  </Button>
+                  />
                 )}
               </li>
             ) : (
@@ -831,5 +870,34 @@ export function Activity({
         </Button>
       )}
     </section>
+  );
+}
+
+/** The link from an update to its details Document, named by what it holds. */
+function DetailsLink({
+  info,
+  open,
+}: {
+  info: { heading: string; trashed: boolean; attached: boolean } | undefined;
+  open: () => void;
+}) {
+  if (!info)
+    return (
+      <Button type="button" variant="link" onClick={open}>
+        Open details
+      </Button>
+    );
+  return (
+    <Button
+      type="button"
+      variant="link"
+      className="activity-details-link"
+      onClick={open}
+    >
+      <span className="truncate">
+        {info.attached ? "Attached" : "Details"} · {info.heading}
+      </span>
+      {info.trashed && <span className="activity-muted">In Trash</span>}
+    </Button>
   );
 }

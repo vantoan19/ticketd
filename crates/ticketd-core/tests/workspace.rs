@@ -1764,6 +1764,32 @@ fn bulk_status_rolls_back_when_a_selected_ticket_is_trashed() {
 }
 
 #[test]
+fn bulk_status_refuses_a_duplicate_instead_of_dropping_its_canonical() {
+    use ticketd_core::{BatchOperation, Status, WriteRequest};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("bulk.sqlite")).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    workspace
+        .mark_duplicate(&source.reference, &canonical.reference, None)
+        .unwrap();
+    let operations: Vec<BatchOperation> = serde_json::from_value(serde_json::json!([
+        {"operation":"change", "ticket":source.reference, "change":{"status":"Todo"}}
+    ]))
+    .unwrap();
+    let error = workspace
+        .write(Some("bulk-duplicate"), WriteRequest::Batch { operations })
+        .unwrap_err();
+    assert!(error.to_string().contains("remove the duplicate link"));
+    let after = workspace.show_ticket(&source.reference).unwrap();
+    assert_eq!(after.status, Status::Duplicate);
+    assert_eq!(
+        after.duplicate_of.as_deref(),
+        Some(canonical.reference.as_str())
+    );
+}
+
+#[test]
 fn followed_note_remains_understandable_after_deletion() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
@@ -1780,6 +1806,36 @@ fn followed_note_remains_understandable_after_deletion() {
     assert_eq!(entries[0].kind, "activity");
     assert_eq!(entries[0].from_value, note.id);
     assert_eq!(entries[0].to_value, "Original finding");
+    assert!(entries[0].deleted && !entries[0].read);
+}
+
+#[test]
+fn the_local_persons_own_changes_do_not_notify_them() {
+    use ticketd_core::{Status, TicketPatch};
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Tracked").unwrap();
+    workspace.set_following(&ticket.reference, true).unwrap();
+    let status = |status| TicketPatch {
+        status: Some(status),
+        ..Default::default()
+    };
+    workspace
+        .change_ticket(&ticket.reference, status(Status::InProgress))
+        .unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    workspace.act_as_local_person().unwrap();
+    workspace
+        .change_ticket(&ticket.reference, status(Status::Done))
+        .unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 1);
+    let patch = TicketPatch {
+        status: Some(Status::Todo),
+        editing_agent: Some("agent".into()),
+        ..Default::default()
+    };
+    workspace.change_ticket(&ticket.reference, patch).unwrap();
+    assert_eq!(workspace.inbox(100, 0).unwrap().len(), 2);
 }
 
 #[test]
@@ -4428,7 +4484,7 @@ fn the_author_is_not_notified_and_deleted_updates_read_as_deleted() {
         .delete_activity(&ticket.reference, &agent.id)
         .unwrap();
     let entries = workspace.inbox(100, 0).unwrap();
-    assert!(entries[0].read && entries[0].deleted);
+    assert!(!entries[0].read && entries[0].deleted);
 }
 
 #[test]

@@ -313,6 +313,9 @@ test("a refused link shows the reason inline and keeps the dialog open", async (
   bridge({ fail: { add_dependency: "dependency would create a cycle" } });
   renderSection(base);
   await chooseTarget();
+  fireEvent.change(screen.getByLabelText("Relationship"), {
+    target: { value: "blocked_by" },
+  });
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Link ticket",

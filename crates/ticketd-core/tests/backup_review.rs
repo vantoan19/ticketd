@@ -399,3 +399,17 @@ fn missing_context_maintenance_triggers_cannot_replace_workspace() {
         assert_eq!(workspace.list_tickets().unwrap().len(), 2);
     }
 }
+
+#[test]
+fn restore_names_a_missing_backup_and_creates_a_missing_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    populated(&source).backup(&backup).unwrap();
+    let target = dir.path().join("new-computer.sqlite3");
+    let missing = dir.path().join("nope.sqlite3");
+    let error = Workspace::restore(&target, &missing).unwrap_err();
+    assert!(error.to_string().contains("nope.sqlite3"), "{error}");
+    Workspace::restore(&target, &backup).unwrap();
+    assert!(Workspace::open(&target).unwrap().show_ticket("T-1").is_ok());
+}

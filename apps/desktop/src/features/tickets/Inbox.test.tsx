@@ -188,7 +188,7 @@ test("only reminders offer Snooze", async () => {
   expect(screen.queryByRole("button", { name: /Snooze/ })).toBeNull();
 });
 
-test("a deleted update reads as deleted and opens the ticket only", async () => {
+test("a deleted update reads as deleted and opens the ticket with its id", async () => {
   store = [
     entry({
       id: 9,
@@ -203,5 +203,5 @@ test("a deleted update reads as deleted and opens the ticket only", async () => 
   render(<Inbox revision={0} select={select} />);
   expect(await screen.findByText("Update deleted")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Gone/ }));
-  expect(select).toHaveBeenCalledWith("T-9");
+  expect(select).toHaveBeenCalledWith("T-9", "note-id");
 });

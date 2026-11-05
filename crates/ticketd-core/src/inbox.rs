@@ -39,7 +39,9 @@ pub(crate) fn record(
     to: &str,
     agent: Option<&str>,
 ) -> Result<(), Error> {
-    connection.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent) SELECT person, ticket_id, ?2, ?3, ?4, ?5 FROM ticket_follows WHERE ticket_id = ?1", params![ticket_id, kind, from, to, agent])?;
+    // A connection acting as the local person never notifies them of their own
+    // unattributed changes; changes attributed to an agent or a source still do.
+    connection.execute("INSERT INTO inbox_entries (person, ticket_id, kind, from_value, to_value, editing_agent) SELECT person, ticket_id, ?2, ?3, ?4, ?5 FROM ticket_follows WHERE ticket_id = ?1 AND (?5 IS NOT NULL OR NOT EXISTS (SELECT 1 FROM sqlite_temp_master WHERE name = 'acting_person'))", params![ticket_id, kind, from, to, agent])?;
     Ok(())
 }
 
@@ -53,6 +55,13 @@ pub(crate) fn follow(connection: &rusqlite::Connection, ticket_id: &str) -> Resu
 }
 
 impl Workspace {
+    /// Marks this connection as the local person's own hands (the desktop):
+    /// their unattributed changes create no inbox entries for themselves.
+    pub fn act_as_local_person(&mut self) -> Result<(), Error> {
+        self.connection
+            .execute_batch("CREATE TEMP TABLE IF NOT EXISTS acting_person (x INTEGER)")?;
+        Ok(())
+    }
     /// Return the scheduled instant in UTC, independent of following.
     pub fn reminder(&self, reference: &str) -> Result<Option<String>, Error> {
         let ticket = self.show_ticket(reference)?;

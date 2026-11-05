@@ -138,3 +138,9 @@
   width: 14px;
   height: 14px;
 }
+
+.activity-details-link {
+  max-width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+}

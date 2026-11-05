@@ -150,8 +150,10 @@ pub enum Error {
     DependencyReviewMode(duplicates::ReviewMode),
     #[error("a ticket cannot be reviewed against itself")]
     ReviewSameTicket,
-    #[error("dependency would create a cycle or self-link")]
-    DependencyCycle,
+    #[error("{0} cannot block itself")]
+    DependencySelf(String),
+    #[error("{blocker} already depends on {dependent}, so this would create a cycle")]
+    DependencyCycle { blocker: String, dependent: String },
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
     InvalidHierarchy,
     #[error("tag name must not be empty")]
@@ -938,10 +940,6 @@ impl Workspace {
         ensure_editable(&tx, &id_ticket)?;
         tx.execute("INSERT INTO document_opens (document_id) SELECT id FROM documents WHERE originating_activity_id = ?1 AND kept = 0 ON CONFLICT(document_id) DO NOTHING", [id])?;
         activities::delete(&tx, &id_ticket, id)?;
-        tx.execute(
-            "UPDATE inbox_entries SET read = 1 WHERE kind = 'activity' AND from_value = ?1",
-            [id],
-        )?;
         tx.commit()?;
         Ok(())
     }
