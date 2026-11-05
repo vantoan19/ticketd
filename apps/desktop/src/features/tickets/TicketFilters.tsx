@@ -65,25 +65,25 @@ export function TicketFilters(p: Props) {
     },
     !p.navigation.plan &&
       p.plan && {
-        label: `Plan: ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
+        label: `Plan is ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
         clear: () => update(p.setPlan, ""),
       },
     p.navigation.kind !== "progress" &&
       p.status && {
-        label: `Status: ${p.status}`,
+        label: `Status is ${p.status}`,
         clear: () => update(p.setStatus, ""),
       },
     ...tagList.map((tag) => ({
-      label: `Tag: ${tag}`,
+      label: `Tag is ${tag}`,
       clear: () => setTagList(tagList.filter((item) => item !== tag)),
     })),
     p.navigation.kind !== "ready" &&
       p.availability && {
-        label: `Availability: ${p.availability}`,
+        label: `Availability is ${p.availability}`,
         clear: () => update(p.setAvailability, ""),
       },
     p.family && {
-      label: `Parent: ${p.family}`,
+      label: `Parent is ${p.family}`,
       clear: () => update(p.setFamily, ""),
     },
   ].filter((chip): chip is { label: string; clear: () => void } =>
@@ -113,8 +113,8 @@ export function TicketFilters(p: Props) {
               />
               {p.query.trim() && (
                 <span role="status" className="header-search-count">
-                  {p.total} {p.total === 1 ? "result" : "results"} in{" "}
-                  {p.scopeName}
+                  {p.total} {p.total === 1 ? "result" : "results"}
+                  <span className="sr-only"> in {p.scopeName}</span>
                 </span>
               )}
               <Kbd>Esc</Kbd>
@@ -269,8 +269,13 @@ export function TicketFilters(p: Props) {
               <X data-icon="inline-end" />
             </Button>
           ))}
-          <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-            Clear filters
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Clear filters"
+            onClick={p.clearFilters}
+          >
+            Clear
           </Button>
         </div>
       )}

@@ -642,7 +642,7 @@ test("clears additional filters while preserving the selected Plan", async () =>
     ),
   );
   expect(
-    screen.getByRole("button", { name: "Remove Status: Todo" }),
+    screen.getByRole("button", { name: "Remove Status is Todo" }),
   ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
@@ -651,7 +651,7 @@ test("clears additional filters while preserving the selected Plan", async () =>
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
   expect(
-    screen.queryByRole("button", { name: "Remove Status: Todo" }),
+    screen.queryByRole("button", { name: "Remove Status is Todo" }),
   ).toBeNull();
 });
 
@@ -685,20 +685,22 @@ test("removes one filter chip and shows the query when nothing matches", async (
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(screen.getByText("No matching tickets")).toBeTruthy();
+  expect(screen.getByText("No tickets match “zebra”")).toBeTruthy();
   expect(
     screen.getByText(
-      /Nothing matches “zebra” in All tickets with the current filters/,
+      /Searched titles, descriptions and updates in All tickets, with 2 filters on/,
     ),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
-  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Remove Tag is bug" }));
+  expect(
+    screen.queryByRole("button", { name: "Remove Tag is bug" }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove Tag is ui" })).toBeTruthy();
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  expect(screen.queryByText(/Nothing matches “zebra”/)).toBeNull();
+  expect(screen.queryByText(/Searched titles/)).toBeNull();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
