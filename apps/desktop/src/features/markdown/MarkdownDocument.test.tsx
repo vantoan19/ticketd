@@ -74,7 +74,7 @@ test("routes multiple Mermaid fences to diagrams and copies the exact original C
       }
     />,
   );
-  const toggles = screen.getAllByRole("button", { name: "Show source" });
+  const toggles = screen.getAllByRole("button", { name: "Source" });
   expect(toggles).toHaveLength(2);
   fireEvent.click(toggles[0]!);
   expect(

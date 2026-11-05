@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Code, Maximize2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,7 +105,7 @@ export function MermaidDiagram({ source }: { source: string }) {
     >
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <div className="markdown-block-toolbar">
-          <span>Mermaid</span>
+          <span>Mermaid diagram</span>
           <Button
             type="button"
             variant="ghost"
@@ -114,9 +115,10 @@ export function MermaidDiagram({ source }: { source: string }) {
             disabled={Boolean(current?.error)}
             onClick={() => setShowSource((value) => !value)}
           >
-            {sourceVisible ? "Hide source" : "Show source"}
+            <Code aria-hidden="true" />
+            Source
           </Button>
-          <CopySourceButton label="Copy source" source={source} />
+          <CopySourceButton label="Copy" icon source={source} />
           <DialogTrigger asChild>
             <Button
               type="button"
@@ -124,7 +126,8 @@ export function MermaidDiagram({ source }: { source: string }) {
               size="sm"
               disabled={!current?.svg}
             >
-              Expand diagram
+              <Maximize2 aria-hidden="true" />
+              Expand
             </Button>
           </DialogTrigger>
         </div>
@@ -137,10 +140,7 @@ export function MermaidDiagram({ source }: { source: string }) {
             Rendering diagram…
           </p>
         ) : !expanded ? (
-          <>
-            {zoomControls}
-            {diagram}
-          </>
+          diagram
         ) : null}
         {sourceVisible && (
           <pre
