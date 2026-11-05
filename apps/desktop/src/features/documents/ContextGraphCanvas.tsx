@@ -213,7 +213,10 @@ export function ContextGraphCanvas({
       const measured =
         instance.current?.getNodes().every((node) => node.measured?.width) ??
         false;
-      if (!measured && tries++ < 30) {
+      // A canvas with no size yet (the pane is still laying out) cannot be fitted.
+      const sized =
+        !!container.current?.clientWidth && !!container.current?.clientHeight;
+      if ((!measured || !sized) && tries++ < 60) {
         frame = window.requestAnimationFrame(attempt);
         return;
       }
@@ -230,6 +233,7 @@ export function ContextGraphCanvas({
           container.current?.clientWidth || FULL_MARGIN_WIDTH,
         );
         void instance.current?.fitView(options);
+        fitSized.current = sized;
         // The pane can still be settling (toolbar, side panel) on open; fit once
         // more so a card is never left cut at the edge.
         window.clearTimeout(settleTimer.current);
@@ -244,6 +248,8 @@ export function ContextGraphCanvas({
     return () => window.cancelAnimationFrame(frame);
   }, [fit, centerOn, placed, ready, positions]);
   const container = useRef<HTMLDivElement | null>(null);
+  // Whether the opening fit ran against a canvas that had a measured size.
+  const fitSized = useRef(false);
   // Cards that appear later (Expand, Load more) are panned into view; cards already
   // placed stay where they are.
   const placedIds = useRef<Set<string> | null>(null);
@@ -311,13 +317,12 @@ export function ContextGraphCanvas({
   useEffect(() => {
     const element = container.current;
     if (!element || typeof ResizeObserver === "undefined") return;
-    let first = true;
     let timer = 0;
     const observer = new ResizeObserver(() => {
-      if (first) {
-        first = false;
-        return;
-      }
+      const sized = !!element.clientWidth && !!element.clientHeight;
+      // The canvas just got its first real size: fit now, whatever ran before it.
+      const late = sized && !fitSized.current && !!instance.current;
+      if (late) fitSized.current = true;
       window.clearTimeout(timer);
       timer = window.setTimeout(
         () =>

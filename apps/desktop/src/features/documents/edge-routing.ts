@@ -144,6 +144,17 @@ function pointAt(points: Point[], fraction: number): Point {
   return points[0]!;
 }
 
+function boundsOf(rects: Rect[]): Rect {
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  return {
+    x,
+    y,
+    width: Math.max(...rects.map((r) => r.x + r.width)) - x,
+    height: Math.max(...rects.map((r) => r.y + r.height)) - y,
+  };
+}
+
 function overlap(a: Rect, b: Rect): boolean {
   return (
     a.x < b.x + b.width &&
@@ -153,35 +164,62 @@ function overlap(a: Rect, b: Rect): boolean {
   );
 }
 
+/** Gap kept between a label and any card or other label. */
+const LABEL_GAP = 4;
+
 /**
- * The spot along the line, nearest its middle, where a label of `size` touches
- * no card and none of the `taken` labels. Falls back to the middle.
+ * The spot, nearest the middle of the line, where a label of `size` touches no
+ * card and none of the `taken` labels. Tries points along the line first, then
+ * points beside it (above and below), and stays inside `bounds` when given so a
+ * label is never cut at the canvas edge. Falls back to the middle.
  */
 export function placeLabel(
   points: Point[],
   size: { width: number; height: number },
   cards: Rect[],
   taken: Rect[] = [],
+  bounds?: Rect,
 ): Point {
-  const avoid = [...cards.map((rect) => inflate(rect, 2)), ...taken];
-  for (const fraction of [
-    0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9,
-  ]) {
-    const at = pointAt(points, fraction);
+  const avoid = [...cards.map((rect) => inflate(rect, LABEL_GAP)), ...taken];
+  const fits = (at: Point) => {
     const box = {
       x: at.x - size.width / 2,
       y: at.y - size.height / 2,
       width: size.width,
       height: size.height,
     };
-    if (!avoid.some((rect) => overlap(box, rect))) return at;
+    if (
+      bounds &&
+      (box.x < bounds.x ||
+        box.y < bounds.y ||
+        box.x + box.width > bounds.x + bounds.width ||
+        box.y + box.height > bounds.y + bounds.height)
+    )
+      return false;
+    return !avoid.some((rect) => overlap(box, rect));
+  };
+  const fractions = Array.from({ length: 49 }, (_, i) => 0.02 + i * 0.02).sort(
+    (a, b) => Math.abs(a - 0.5) - Math.abs(b - 0.5),
+  );
+  for (const fraction of fractions) {
+    const at = pointAt(points, fraction);
+    if (fits(at)) return at;
   }
+  // Nowhere on the line is clear: sit just above or below it.
+  const step = size.height + LABEL_GAP;
+  for (const lift of [1, 2, 3])
+    for (const fraction of fractions)
+      for (const side of [-1, 1]) {
+        const at = pointAt(points, fraction);
+        const candidate = { x: at.x, y: at.y + side * lift * step };
+        if (fits(candidate)) return candidate;
+      }
   return pointAt(points, 0.5);
 }
 
 /** Rough pixel size of an edge label at the map's label font. */
 export function labelSize(text: string): { width: number; height: number } {
-  return { width: Math.round(text.length * 6.2 + 14), height: 18 };
+  return { width: Math.round(text.length * 6.8 + 16), height: 18 };
 }
 
 /** Routes every edge around the cards and places each label clear of cards and earlier labels. */
@@ -190,6 +228,7 @@ export function routeAll(
   edges: { id: string; source: string; target: string; label?: string }[],
 ): Record<string, Route> {
   const all = Object.values(cards);
+  const bounds = all.length ? inflate(boundsOf(all), 40) : undefined;
   const taken: Rect[] = [];
   const routes: Record<string, Route> = {};
   for (const edge of edges) {
@@ -199,7 +238,7 @@ export function routeAll(
     const others = all.filter((rect) => rect !== source && rect !== target);
     const points = routeEdge(source, target, others);
     const size = labelSize(edge.label ?? "");
-    const label = placeLabel(points, size, all, taken);
+    const label = placeLabel(points, size, all, taken, bounds);
     taken.push({
       x: label.x - size.width / 2,
       y: label.y - size.height / 2,
