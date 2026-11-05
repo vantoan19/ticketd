@@ -44,6 +44,8 @@ impl Workspace {
                 "INSERT OR IGNORE INTO ticket_documents(ticket_id, document_id) VALUES (?1, ?2)",
                 params![ticket_id, document_id],
             )?;
+            // Attaching Activity details is a decision to keep them as a Document.
+            tx.execute("UPDATE documents SET kept = 1 WHERE id = ?1", [document_id])?;
         } else {
             tx.execute(
                 "DELETE FROM ticket_documents WHERE ticket_id = ?1 AND document_id = ?2",

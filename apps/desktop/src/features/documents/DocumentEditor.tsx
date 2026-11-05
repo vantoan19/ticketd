@@ -191,6 +191,13 @@ export function DocumentEditor({
     setTrashed(value);
   };
   const [external, setExternal] = useState<Snapshot | null>(null);
+  // The draft "Reload saved content" threw away, offered back for a few seconds.
+  const [discarded, setDiscarded] = useState<Snapshot | null>(null);
+  useEffect(() => {
+    if (!discarded) return;
+    const timer = window.setTimeout(() => setDiscarded(null), 10000);
+    return () => window.clearTimeout(timer);
+  }, [discarded]);
   const externalRef = useRef<Snapshot | null>(null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
   const saved = useRef<Snapshot>({ title, body, suggestion: null });
@@ -695,6 +702,7 @@ export function DocumentEditor({
               <Button
                 variant="outline"
                 onClick={() => {
+                  setDiscarded(draft.current);
                   saved.current = external;
                   revision.current = externalRevision.current;
                   draft.current = external;
@@ -729,6 +737,24 @@ export function DocumentEditor({
               </Button>
             </div>
           </div>
+        )}
+        {discarded && (
+          <p role="status" className="document-conflict-undo">
+            Your draft was discarded.{" "}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => {
+                draft.current = discarded;
+                setTitle(discarded.title);
+                setBody(discarded.body);
+                setDiscarded(null);
+                refocusEditor();
+              }}
+            >
+              Undo
+            </Button>
+          </p>
         )}
         {initial && saveError}
         <div className="document-body">

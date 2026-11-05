@@ -337,6 +337,8 @@
 }
 .document-list-content p {
   margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 20px;
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }

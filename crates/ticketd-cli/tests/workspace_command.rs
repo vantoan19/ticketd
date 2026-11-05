@@ -373,3 +373,29 @@ fn context_documents_include_mentioned_documents_with_their_source() {
     assert_eq!(item["source"], "update");
     assert!(item["activity_id"].is_string());
 }
+
+#[test]
+fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    run(dir.path(), &["create", "Outcome"]);
+    let details = dir.path().join("details.md");
+    std::fs::write(&details, "linked findings").unwrap();
+    let activity: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "activity",
+            "add",
+            "T-1",
+            "--brief",
+            "Update",
+            "--details-file",
+            details.to_str().unwrap(),
+        ],
+    ))
+    .unwrap();
+    let id = activity["supporting_document_id"].as_str().unwrap();
+    run(dir.path(), &["document", "link-ticket", id, "T-1"]);
+    let found: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["document", "search", "linked"])).unwrap();
+    assert_eq!(found[0]["id"], id);
+}

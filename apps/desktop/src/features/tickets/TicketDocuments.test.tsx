@@ -68,22 +68,13 @@ test("unlinking removes only an explicit reference and a mention offers Edit des
   window.removeEventListener("ticketd:edit-description", edit);
 });
 
-test("attaching Activity details from the picker keeps them as a Document", async () => {
+test("attaching Activity details from the picker links them without a separate keep call", async () => {
   vi.mocked(invoke).mockImplementation((command) => {
     if (command === "document_context_links") return Promise.resolve([[], []]);
     if (command === "recent_documents")
       return Promise.resolve([
         { id: "d9", heading: "Trace", origin_ticket: "T-11" },
       ]);
-    if (command === "keep_document")
-      return Promise.resolve({
-        id: "d9",
-        title: null,
-        body: "",
-        created_at: "",
-        updated_at: "",
-        trashed: false,
-      });
     return Promise.resolve(null);
   });
   render(
@@ -107,10 +98,7 @@ test("attaching Activity details from the picker keeps them as a Document", asyn
       requestId: expect.any(String),
     }),
   );
-  expect(invoke).toHaveBeenCalledWith("keep_document", {
-    id: "d9",
-    requestId: expect.any(String),
-  });
+  expect(invoke).not.toHaveBeenCalledWith("keep_document", expect.anything());
 });
 
 test("a Document mentioned only by an update says so and opens that update", async () => {

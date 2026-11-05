@@ -49,7 +49,7 @@ fn validate(input: &EvidenceInput) -> Result<(), Error> {
         }) || input.value.chars().any(char::is_whitespace)
         {
             return Err(Error::InvalidEvidence(
-                "pull request must be an HTTP(S) URL with a host".into(),
+                "Pull request link must start with http:// or https:// and include a host".into(),
             ));
         }
     }

@@ -290,7 +290,7 @@ export function TicketPage({
             {!ticket.trashed && <LinkedWorkDialogs work={work} />}
           </>
         )}
-        {active && (
+        {active && !ticket.trashed && (
           <RailSection label="Attention">
             <div className="rail-attention">
               <Follow

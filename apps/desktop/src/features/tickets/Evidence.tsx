@@ -152,7 +152,7 @@ export function Evidence({
       await load();
       await refresh();
     } catch (reason) {
-      setError(String(reason));
+      setError(String(reason).replace(/^invalid evidence: /, ""));
     } finally {
       pendingRef.current = false;
       setPending(false);

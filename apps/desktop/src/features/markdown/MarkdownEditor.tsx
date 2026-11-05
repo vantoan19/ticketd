@@ -659,6 +659,8 @@ export interface MarkdownEditorProps {
   placeholder?: string;
   /** Bump to return focus to the editor at its last caret (e.g. after a conflict action). */
   focusRequest?: number;
+  /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
+  paragraphAfterQuote?: boolean;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -670,6 +672,7 @@ export function MarkdownEditor({
   autoFocus = false,
   placeholder,
   focusRequest = 0,
+  paragraphAfterQuote = false,
 }: MarkdownEditorProps) {
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
@@ -752,13 +755,21 @@ export function MarkdownEditor({
         container.current?.querySelector<HTMLElement>(".cm-content")?.focus();
         return;
       }
-      if (!editor.selection && lastSelection.current)
+      const last = editor.children.at(-1);
+      if (paragraphAfterQuote && last && last.type === "blockquote") {
+        // Markdown drops a trailing blank paragraph, so the reply caret needs one made here.
+        editor.tf.insertNodes(
+          { type: "p", children: [{ text: "" }] },
+          { at: [editor.children.length] },
+        );
+        editor.tf.select(editor.api.end([]) ?? [editor.children.length - 1]);
+      } else if (!editor.selection && lastSelection.current)
         editor.tf.select(lastSelection.current);
       editor.tf.focus();
       container.current?.querySelector<HTMLElement>(".rich-document")?.focus();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusRequest, readOnly, source, editor]);
+  }, [focusRequest, readOnly, source, editor, paragraphAfterQuote]);
   useEffect(() => {
     if (value === emitted.current) return;
     synchronizing.current = true;

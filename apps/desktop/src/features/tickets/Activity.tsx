@@ -280,6 +280,7 @@ export function Activity({
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
   const [picking, setPicking] = useState(false);
+  const attachButton = useRef<HTMLButtonElement>(null);
   const [composer, setComposer] = useState<HTMLFormElement | null>(null);
   const compact = useCompactComposer(composer);
   // Bumped to put the caret in the update editor / the new Details editor.
@@ -536,6 +537,12 @@ export function Activity({
     if (!element) return;
     revealInDetail(element);
     element.focus({ preventScroll: true });
+    // A brief highlight shows which update was asked for.
+    element.classList.add("activity-entry-target");
+    window.setTimeout(
+      () => element.classList.remove("activity-entry-target"),
+      2000,
+    );
     revealedTarget.current = { id: targetId, key: targetKey };
   }, [active, targetId, targetKey, feed, targetNote]);
   const entries = [
@@ -640,6 +647,7 @@ export function Activity({
                 }
                 readOnly={pending}
                 focusRequest={focusUpdate}
+                paragraphAfterQuote
               />
             </Field>
           </FieldGroup>
@@ -697,13 +705,23 @@ export function Activity({
             </p>
           )}
           {!edit && picking && (
-            <DocumentPicker
-              onPick={(picked) => {
-                setSupport(picked.id);
-                setSupportTitle(picked.heading);
+            <div
+              onKeyDown={(event) => {
+                if (event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
                 setPicking(false);
+                attachButton.current?.focus();
               }}
-            />
+            >
+              <DocumentPicker
+                onPick={(picked) => {
+                  setSupport(picked.id);
+                  setSupportTitle(picked.heading);
+                  setPicking(false);
+                }}
+              />
+            </div>
           )}
           {changed && (
             <p role="status" className="activity-muted">
@@ -766,7 +784,9 @@ export function Activity({
                 type="button"
                 variant="ghost"
                 size="sm"
+                ref={attachButton}
                 aria-expanded={picking}
+                className={picking ? "bg-accent" : undefined}
                 onClick={() => setPicking(!picking)}
               >
                 <FileText aria-hidden="true" />

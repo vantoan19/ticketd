@@ -59,7 +59,12 @@ export function TicketDocuments({
           if (!known || sourceRank(link) < sourceRank(known))
             byDocument.set(link.target_id, link);
         }
-        setLinks([...byDocument.values()]);
+        // Attached Documents list first, like the CLI's context.
+        setLinks(
+          [...byDocument.values()].sort(
+            (a, b) => sourceRank(a) - sourceRank(b),
+          ),
+        );
       })
       .catch(() => {});
     return () => {
@@ -78,20 +83,13 @@ export function TicketDocuments({
   }
   async function add(picked: DocumentSummary) {
     setOpen(false);
-    // Attaching Activity details is a decision to keep them as a Document.
-    if (picked.origin_ticket) {
-      try {
-        await documents.keep(picked.id, crypto.randomUUID());
-      } catch (reason) {
-        setError(String(reason));
-        return;
-      }
-    }
     await change(picked.id, true);
   }
   function editDescription() {
     window.dispatchEvent(
-      new CustomEvent("ticketd:edit-description", { detail: ticket.reference }),
+      new CustomEvent("ticketd:edit-description", {
+        detail: ticket.reference,
+      }),
     );
   }
   return (

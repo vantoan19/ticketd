@@ -160,3 +160,19 @@ fn context_documents_name_how_each_one_relates_to_the_ticket() {
     );
     assert_eq!(items[2].activity_id.as_deref(), Some(activity.id.as_str()));
 }
+
+#[test]
+fn linking_activity_details_to_a_ticket_keeps_them_as_a_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    let activity = workspace
+        .add_activity_with_details(&ticket.reference, "Brief", None, Some("Trace"), None)
+        .unwrap();
+    let id = activity.supporting_document_id.clone().unwrap();
+    assert!(!workspace.show_document(&id).unwrap().kept);
+    workspace
+        .set_ticket_document(&ticket.reference, &id, true)
+        .unwrap();
+    assert!(workspace.show_document(&id).unwrap().kept);
+}
