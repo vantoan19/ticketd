@@ -16,11 +16,13 @@ export function PlanList({
   plans,
   archived,
   onOpen,
+  onBrowsePlans,
   refresh,
 }: {
   plans: Plan[];
   archived: boolean;
   onOpen: (id: string) => void;
+  onBrowsePlans?: () => void;
   refresh: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
@@ -101,6 +103,13 @@ export function PlanList({
             archived
               ? "Plans you archive are kept here, read-only."
               : "A Plan groups tickets toward one goal. Create one above."
+          }
+          action={
+            archived && onBrowsePlans ? (
+              <Button variant="outline" size="sm" onClick={onBrowsePlans}>
+                Back to Plans
+              </Button>
+            ) : undefined
           }
         />
       ) : (
