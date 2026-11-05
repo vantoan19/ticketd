@@ -104,6 +104,7 @@
   padding: 0 6px;
   border-radius: 999px;
   background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
   white-space: nowrap;
 }
 .ticket-rows li:hover .ticket-tag,
@@ -281,7 +282,7 @@
     opacity: 1;
   }
 }
-/* A status group's header is a 32px band on the canvas surface. Rows and
+/* A status group's header is a 32px recessed band with a hairline above and below. Rows and
    headers share one list, so a row that changes group is not remounted. */
 .ticket-rows li.ticket-group-header {
   align-items: center;
@@ -290,10 +291,13 @@
   margin-top: 12px;
   margin-bottom: 2px;
   padding: 0 4px 0 32px;
-  background: var(--background);
+  background: var(--recessed);
+  box-shadow:
+    0 1px 0 0 var(--group-hairline),
+    0 -1px 0 0 var(--group-hairline);
 }
 .ticket-rows li.ticket-group-header:hover {
-  background: var(--background);
+  background: var(--recessed);
 }
 .ticket-rows li.ticket-group-header:first-child {
   margin-top: 0;
