@@ -172,7 +172,7 @@ test("Back to a centre that opened as a map and grew past the list limit keeps t
   await screen.findByTestId("view");
   fireEvent.click(screen.getByRole("button", { name: "n2" }));
   fireEvent.click(screen.getByRole("button", { name: "Expand connections" }));
-  await screen.findByRole("button", { name: "Show list" });
+  await screen.findByRole("radio", { name: "Graph", checked: true });
   fireEvent.click(screen.getByRole("button", { name: "n1" }));
   fireEvent.click(screen.getByRole("button", { name: "Center on this item" }));
   await waitFor(() =>
@@ -184,6 +184,6 @@ test("Back to a centre that opened as a map and grew past the list limit keeps t
     ),
   );
   fireEvent.click(await screen.findByRole("button", { name: /^Back to / }));
-  await screen.findByRole("button", { name: "Show list" });
+  await screen.findByRole("radio", { name: "Graph", checked: true });
   expect(screen.getByTestId("view")).toBeTruthy();
 });

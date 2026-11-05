@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, vi, test, expect } from "vitest";
 
@@ -159,8 +160,10 @@ test("a crowded neighbourhood opens as a grouped list with a map toggle", async 
   expect(
     await screen.findByRole("heading", { name: "Mentions 13" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Show map" }));
-  expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
+  expect(
+    screen.getByRole("radio", { name: "Graph", checked: true }),
+  ).toBeTruthy();
 });
 
 test("expanding a map that grows past the list-first size keeps the map", async () => {
@@ -195,5 +198,47 @@ test("expanding a map that grows past the list-first size keeps the map", async 
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenCalledTimes(2),
   );
-  await screen.findByRole("button", { name: "Show list" });
+  await screen.findByRole("radio", { name: "Graph", checked: true });
+});
+
+test("one 48px toolbar, with Open item in the panel beside the map", async () => {
+  const node = (id: string, kind: "ticket" | "document", label: string) => ({
+    id,
+    kind,
+    label,
+    state: null,
+    trashed: false,
+    activity_detail: false,
+  });
+  vi.mocked(client.contextGraphExpanded).mockResolvedValue({
+    center: "one",
+    nodes: [node("one", "ticket", "T-1 · First"), node("two", "document", "D")],
+    edges: [
+      { source: "one", target: "two", kind: "mention", explanation: "x" },
+    ],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 50,
+    max_edges: 300,
+    max_work: 800,
+  });
+  const open = vi.fn();
+  const { container } = render(
+    <ContextGraph origin="T-1" onBack={vi.fn()} onOpen={open} />,
+  );
+  const header = (await screen.findByRole("heading", { name: "Context graph" }))
+    .parentElement!;
+  expect(header.textContent).toContain("2 items · 1 relationship");
+  expect(screen.queryByText(/Centered on/)).toBeNull();
+  expect(screen.queryByRole("button", { name: /Show (list|map)/ })).toBeNull();
+  expect(screen.queryByText("Include update details")).toBeNull();
+  const aside = container.querySelector(".context-graph-preview")!;
+  fireEvent.click(within(aside as HTMLElement).getByText("Open item"));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
+  // The legend has its own row beside the canvas, never over it.
+  const canvas = screen.getByText("Canvas").parentElement!;
+  expect(canvas.querySelector(".graph-legend")).toBeNull();
+  expect(container.querySelector(".graph-legend")).toBeTruthy();
 });

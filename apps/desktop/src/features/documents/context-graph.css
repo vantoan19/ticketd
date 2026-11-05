@@ -1,6 +1,37 @@
 .context-graph-page {
-  padding: 24px;
+  padding: 0;
   overflow: auto;
+}
+/* Room below the last line, so the status line is never clipped by the pane. */
+.context-graph-body {
+  padding: 16px 20px 48px;
+}
+.context-graph-page .list-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--background);
+}
+.context-graph-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.context-graph-edge-label {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .context-graph-heading h1 {
   font-size: 24px;
@@ -33,20 +64,32 @@
   gap: 12px;
   margin-bottom: 16px;
 }
+/* Fixed height: selecting an item never moves the canvas or the legend. */
 .context-graph-main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
   border: 1px solid var(--border);
-  min-height: 500px;
+  height: clamp(420px, calc(100vh - 220px), 640px);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+/* The canvas, then the legend and the not-connected list in a row of their own. */
+.context-graph-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 .context-graph-canvas {
   position: relative;
+  flex: 1 1 0;
   min-width: 0;
-  min-height: 500px;
+  min-height: 0;
   overflow: hidden;
 }
 .context-graph-preview {
-  padding: 20px;
+  padding: 16px 20px;
+  overflow: auto;
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -117,11 +160,10 @@
 @media (max-width: 700px) {
   .context-graph-main {
     grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
+    height: auto;
   }
-  .context-graph-canvas {
-    min-height: 320px;
-    height: 320px;
+  .context-graph-stage {
+    height: 420px;
   }
   /* The selected item's details come before the map on narrow screens. */
   .context-graph-preview {
@@ -182,18 +224,32 @@
   flex: none;
 }
 
-/* Legend and the not-connected list stay on the canvas, whatever the pan. */
+/* Legend and the not-connected list have their own row under the canvas. */
 .context-graph-pinned {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 5;
-  width: 224px;
+  flex: none;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: calc(100% - 80px);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
+  max-height: 120px;
   overflow: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.context-graph-pinned .graph-legend {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 0;
+  box-shadow: none;
+  background: none;
+}
+.context-graph-pinned .graph-legend ul {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
 .context-graph-unconnected {
   display: flex;
@@ -202,8 +258,8 @@
   gap: 6px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
-  box-shadow: var(--shadow-border-base);
+  background: none;
+  padding: 0;
   font-size: 12px;
   line-height: 16px;
   color: var(--muted-foreground);
@@ -415,22 +471,7 @@
   opacity: 0;
   pointer-events: none;
 }
-/* The preview sits below the map on medium widths so it never covers it. */
-@media (max-width: 1100px) {
-  .context-graph-main {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
-  }
-  .context-graph-preview {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-}
 @media (max-width: 700px) {
-  .context-graph-canvas {
-    min-height: 420px;
-    height: 420px;
-  }
   .context-graph-preview {
     border-top: 0;
   }
@@ -452,4 +493,14 @@
 }
 .context-graph-toolbar {
   min-height: 48px;
+}
+
+.context-graph-page > .context-graph-toolbar {
+  min-height: 48px;
+  margin: 0;
+  padding: 8px 20px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.context-graph-page .context-graph-body .context-graph-strip {
+  margin-top: 0;
 }
