@@ -132,6 +132,7 @@ export function PlanHeader({
             </Button>
           ) : (
             <Button
+              variant="ghost"
               size="sm"
               disabled={pending}
               onClick={() => setAdding(true)}

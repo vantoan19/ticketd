@@ -897,7 +897,7 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   await act(async () => {});
   const alert = screen.getByRole("alert");
   expect(alert.querySelector(".bulk-error-text")?.textContent).toBe(
-    "Nothing changed. T-2 could not be updated: T-2 is trashed.",
+    "T-2 is trashed. Nothing changed.",
   );
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   expect(document.activeElement).toBe(alert);

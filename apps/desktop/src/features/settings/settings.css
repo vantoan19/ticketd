@@ -57,10 +57,38 @@
   .workspace.settings-open {
     flex-direction: column;
   }
+  /* The sections become one scrolling strip, so the page below is never covered. */
   .settings-nav {
     width: 100%;
-    max-height: 40%;
-    padding-bottom: 0;
+    max-height: none;
+    overflow: visible;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+  .settings-nav nav {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+  .settings-nav [role="group"] {
+    display: contents;
+  }
+  .settings-nav [role="group"] + [role="group"] {
+    margin-top: 0;
+  }
+  .settings-nav-heading {
+    display: none;
+  }
+  .settings-nav ul {
+    display: flex;
+    gap: 4px;
+  }
+  .settings-nav ul li + li {
+    margin-top: 0;
+  }
+  .settings-nav li button {
+    width: auto;
+    white-space: nowrap;
   }
 }
 

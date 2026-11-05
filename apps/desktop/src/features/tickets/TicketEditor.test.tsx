@@ -527,7 +527,9 @@ test("a save the core refuses as stale keeps the draft and offers the choice", a
       patch: { title: "My title", expected_title: "First" },
     }),
   );
-  expect(screen.getByText(/changed elsewhere.*while you were editing/)).toBeTruthy();
+  expect(
+    screen.getByText(/changed elsewhere.*while you were editing/),
+  ).toBeTruthy();
   expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
     "My title",
   );
@@ -550,7 +552,9 @@ test("a clean editor adopts an external change without a notice", async () => {
     />,
   );
   expect(screen.getByText("Agent body")).toBeTruthy();
-  expect(screen.queryByText(/changed elsewhere.*while you were editing/)).toBeNull();
+  expect(
+    screen.queryByText(/changed elsewhere.*while you were editing/),
+  ).toBeNull();
 });
 
 test("a conflict shows the saved text as the description and the draft as labelled", () => {
@@ -622,7 +626,9 @@ test("unsaved text survives a reload and is checked against the stored text", as
   expect((screen.getByLabelText("Title") as HTMLTextAreaElement).value).toBe(
     "My title",
   );
-  expect(screen.queryByText(/changed elsewhere.*while you were editing/)).toBeNull();
+  expect(
+    screen.queryByText(/changed elsewhere.*while you were editing/),
+  ).toBeNull();
   cleanup();
   // Reload after an agent changed the title: the conflict is raised.
   render(

@@ -35,7 +35,7 @@ test("a rejected batch names the ticket that prevented it and keeps the selectio
   await act(() => result.current.applyOrganization({ plan_id: "e1" }, "ok"));
   expect(result.current.failure).toEqual({
     reference: "T-2",
-    message: "Nothing changed. T-2 could not be updated: ticket is trashed.",
+    message: "T-2: ticket is trashed. Nothing changed.",
     // The core refused the change itself, so sending it again cannot succeed.
     retryable: false,
   });
