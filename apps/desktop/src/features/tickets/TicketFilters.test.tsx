@@ -24,6 +24,9 @@ test("Search and Filters start as named icon buttons and search opens on demand"
       setOffset={vi.fn()}
       navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
+      scopeName="All tickets"
+      total={7}
+      scopeTotal={null}
     />,
   );
   expect(screen.queryByRole("textbox", { name: "Search tickets" })).toBeNull();
@@ -33,6 +36,7 @@ test("Search and Filters start as named icon buttons and search opens on demand"
     target: { value: "cache" },
   });
   expect(setQuery).toHaveBeenCalledWith("cache");
+  expect(screen.getByRole("search")).toBeTruthy();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
@@ -57,6 +61,9 @@ test("an active search shows as a removable chip", () => {
       setOffset={vi.fn()}
       navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
+      scopeName="All tickets"
+      total={1}
+      scopeTotal={7}
     />,
   );
   fireEvent.click(
@@ -64,4 +71,5 @@ test("an active search shows as a removable chip", () => {
   );
   expect(setQuery).toHaveBeenCalledWith("");
   expect(screen.getByRole("button", { name: "Clear filters" })).toBeTruthy();
+  expect(screen.getByText("1 of 7")).toBeTruthy();
 });
