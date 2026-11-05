@@ -1106,3 +1106,19 @@ fn activity_details_document_is_found_by_its_displayed_heading() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].id, id);
 }
+
+#[test]
+fn an_update_brief_names_its_details_by_its_first_sentence() {
+    use ticketd_core::derive_brief_heading;
+    assert_eq!(
+        derive_brief_heading("Fixed the parser in v1.2. Then reran everything.").as_deref(),
+        Some("Fixed the parser in v1.2")
+    );
+    assert_eq!(
+        derive_brief_heading("Did it work? Yes.").as_deref(),
+        Some("Did it work?")
+    );
+    let long = "word ".repeat(40);
+    let heading = derive_brief_heading(&long).unwrap();
+    assert!(heading.chars().count() <= 80 && heading.ends_with('…'));
+}

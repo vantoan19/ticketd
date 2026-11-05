@@ -112,3 +112,25 @@ test("attaching Activity details from the picker keeps them as a Document", asyn
     requestId: expect.any(String),
   });
 });
+
+test("a Document mentioned only by an update says so and opens that update", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "document_context_links"
+        ? [[{ ...link("d3", "Trace", false), activity_id: "a1" }], []]
+        : null,
+    ),
+  );
+  const open = vi.fn();
+  render(
+    <TicketDocuments
+      ticket={ticket}
+      revision={0}
+      refresh={() => Promise.resolve()}
+      onOpenUpdate={open}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "From update" }));
+  expect(open).toHaveBeenCalledWith("a1");
+  expect(screen.queryByRole("button", { name: /Edit description/ })).toBeNull();
+});

@@ -156,6 +156,9 @@ export function TicketEditor({
   );
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  // "Keep my draft" saves at once instead of waiting out the typing delay.
+  const immediate = useRef(false);
+  const [bodyFocus, setBodyFocus] = useState(0);
   const [bodyMode, setBodyMode] = useState<"unopened" | "editing" | "reading">(
     "unopened",
   );
@@ -262,7 +265,9 @@ export function TicketEditor({
   useEffect(() => {
     if (!dirty || externalChange || inFlight.current || state === "failed")
       return;
+    const delay = immediate.current ? 0 : 500;
     const timer = window.setTimeout(() => {
+      immediate.current = false;
       inFlight.current = true;
       setSaving(true);
       setState("pending");
@@ -314,8 +319,9 @@ export function TicketEditor({
           inFlight.current = false;
           setSaving(false);
         });
-    }, 500);
+    }, delay);
     return () => window.clearTimeout(timer);
+    // `saving` re-arms the save a conflict choice made while another was still in flight.
   }, [
     draft,
     saved,
@@ -325,6 +331,7 @@ export function TicketEditor({
     onSaved,
     state,
     retry,
+    saving,
   ]);
 
   function adoptSaved() {
@@ -332,20 +339,33 @@ export function TicketEditor({
     setSaved({ title: ticket.title, body: ticket.body });
     setConfirmSaved(false);
     setState("saved");
+    focusEditor();
+  }
+  /** After a conflict choice the notice goes away; the caret returns to the text in conflict. */
+  function focusEditor() {
+    if (bodyConflict) {
+      setBodyMode("editing");
+      setBodyFocus((count) => count + 1);
+    } else window.requestAnimationFrame(() => titleRef.current?.focus());
   }
   const conflict = externalChange && dirty;
   const draftHasText =
     (titleConflict && draft.title.trim() !== "") ||
     (bodyConflict && draft.body.trim() !== "");
+  // Title and description edits record no author, so only a source ticket can name who changed it.
+  const changedBy = ticket.source?.provider_name
+    ? ` by ${ticket.source.provider_name}`
+    : "";
   const notice = conflict && (
     <div role="status" className="editor-conflict">
       <p>
         {titleConflict && bodyConflict
-          ? "The saved title and description changed while you were editing."
+          ? "The saved title and description"
           : titleConflict
-            ? "The saved title changed while you were editing."
-            : "The saved description changed while you were editing."}{" "}
-        Your unsaved draft is kept until you choose.
+            ? "The saved title"
+            : "The saved description"}{" "}
+        changed elsewhere{changedBy} while you were editing. Your unsaved draft
+        is kept until you choose.
       </p>
       {titleConflict && (
         <p>
@@ -367,35 +387,46 @@ export function TicketEditor({
             variant="ghost"
             size="sm"
             type="button"
-            onClick={() => setConfirmSaved(false)}
+            onClick={() => {
+              setConfirmSaved(false);
+              focusEditor();
+            }}
           >
             Cancel
           </Button>
         </div>
       ) : (
-        <div className="editor-conflict-actions">
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() =>
-              draftHasText ? setConfirmSaved(true) : adoptSaved()
-            }
-          >
-            Use saved text
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              setSaved({ title: ticket.title, body: ticket.body });
-              setState("pending");
-            }}
-          >
-            Keep my draft
-          </Button>
-        </div>
+        <>
+          <div className="editor-conflict-actions">
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() =>
+                draftHasText ? setConfirmSaved(true) : adoptSaved()
+              }
+            >
+              Use saved text
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => {
+                immediate.current = true;
+                setSaved({ title: ticket.title, body: ticket.body });
+                setState("pending");
+                focusEditor();
+              }}
+            >
+              Keep my draft
+            </Button>
+          </div>
+          <p className="editor-conflict-help">
+            Use saved text discards your draft. Keep my draft replaces the saved
+            text with it.
+          </p>
+        </>
       )}
     </div>
   );
@@ -487,6 +518,7 @@ export function TicketEditor({
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
               autoFocus={editingBody}
+              focusRequest={bodyFocus}
             />
           </div>
         )}

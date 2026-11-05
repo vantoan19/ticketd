@@ -68,7 +68,10 @@ export function Documents({
   target,
   onDocumentClose,
   listRequest,
+  backLabel = "Back to Documents",
 }: {
+  /** Names where the reader's Back button goes: the list, or the ticket it was opened from. */
+  backLabel?: string;
   capture: boolean;
   active: boolean;
   onCapture?: () => void;
@@ -577,7 +580,7 @@ export function Documents({
           }
           onOpenDocument={open}
           closeRequest={listRequest ?? 0}
-          backLabel="Back to Documents"
+          backLabel={backLabel}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
             setSelected(null);
@@ -612,7 +615,10 @@ export function Documents({
                 </Button>
               )}
               {keptId === selected.id && selected.kept && (
-                <p role="status">Kept in Documents.</p>
+                // The Visibility row says it; this only announces the change.
+                <p role="status" className="sr-only">
+                  Kept in Documents.
+                </p>
               )}
               <section aria-label="Document tags">
                 <h2>Tags</h2>

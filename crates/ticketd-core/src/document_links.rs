@@ -252,8 +252,47 @@ pub fn derive_heading(markdown: &str) -> Option<String> {
     Some(format!("{}…", cut.trim_end()))
 }
 
+/// A heading for Activity details taken from the update's brief: its first sentence, at most
+/// 80 characters, so a long brief is not repeated whole as the Document's name.
+pub fn derive_brief_heading(markdown: &str) -> Option<String> {
+    const MAX: usize = 80;
+    let line = derive_heading(markdown)?;
+    let chars: Vec<char> = line.chars().collect();
+    let end = (0..chars.len())
+        .find(|&index| {
+            matches!(chars[index], '.' | '!' | '?')
+                && chars.get(index + 1).is_none_or(|next| next.is_whitespace())
+        })
+        .map_or(chars.len(), |index| {
+            // A full stop ends the sentence quietly; ! and ? are part of it.
+            if chars[index] == '.' {
+                index
+            } else {
+                index + 1
+            }
+        });
+    let sentence: String = chars[..end].iter().collect();
+    if sentence.chars().count() <= MAX {
+        return Some(sentence);
+    }
+    let cut: String = sentence.chars().take(MAX - 1).collect();
+    // Prefer ending on a whole word.
+    let cut = cut.rsplit_once(' ').map_or(cut.as_str(), |(head, _)| head);
+    Some(format!("{}…", cut.trim_end()))
+}
+
 pub(crate) fn register_heading_function(connection: &Connection) -> Result<(), Error> {
     use rusqlite::functions::FunctionFlags;
+    connection.create_scalar_function(
+        "ticketd_brief_heading",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .and_then(|text| derive_brief_heading(&text)))
+        },
+    )?;
     connection.create_scalar_function(
         "ticketd_heading",
         1,

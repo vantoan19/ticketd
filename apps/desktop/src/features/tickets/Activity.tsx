@@ -97,6 +97,33 @@ function loadDraft(reference: string): Draft {
 const hasDraft = (draft: Draft) =>
   draft.brief !== "" || draft.details !== null || draft.support !== "";
 
+/** Below this width the composer's secondary actions share one Add menu. */
+const COMPACT_WIDTH = 460;
+function useCompactComposer(element: HTMLElement | null) {
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = () => setCompact(element.clientWidth < COMPACT_WIDTH);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return compact;
+}
+
+/** The first sentence of an update, short enough to quote in a reply. */
+function quoteOf(brief: string): string {
+  const line =
+    brief
+      .split("\n")
+      .map((text) => text.replace(/^[#>\s*-]+/, "").trim())
+      .find(Boolean) ?? "";
+  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
+  const plain = sentence.replace(/\.$/, "");
+  return plain.length > 80 ? `${plain.slice(0, 79).trimEnd()}…` : plain;
+}
+
 export function Activity({
   reference,
   ticketId = reference,
@@ -253,6 +280,12 @@ export function Activity({
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
   const [picking, setPicking] = useState(false);
+  const [composer, setComposer] = useState<HTMLFormElement | null>(null);
+  const compact = useCompactComposer(composer);
+  // Bumped to put the caret in the update editor / the new Details editor.
+  const [focusUpdate, setFocusUpdate] = useState(0);
+  const [focusDetails, setFocusDetails] = useState(false);
+  const replied = useRef(false);
   const [view, setView] = useState<"all" | "updates">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const openDocument = useContext(DocumentNavigation);
@@ -312,6 +345,18 @@ export function Activity({
       current = false;
     };
   }, [active, loadNotes, reference, revision, status]);
+  function startDetails() {
+    setDetails("");
+    setPicking(false);
+    setFocusDetails(true);
+  }
+  /** Replies start from a quote of the update, in the same composer. */
+  function reply(brief: string) {
+    const base = hasVisibleText(draft) ? `${draft.trimEnd()}\n\n` : "";
+    setComposing(true);
+    setDraft(`${base}> Re: ${quoteOf(brief)}\n\n`);
+    replied.current = true;
+  }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
@@ -576,6 +621,7 @@ export function Activity({
       )}
       {!trashed && (composing || edit) && (
         <form
+          ref={setComposer}
           className="activity-composer"
           onSubmit={(event) => void save(event)}
         >
@@ -593,6 +639,7 @@ export function Activity({
                   edit ? setEdit({ ...edit, content }) : setDraft(content)
                 }
                 readOnly={pending}
+                focusRequest={focusUpdate}
               />
             </Field>
           </FieldGroup>
@@ -607,6 +654,7 @@ export function Activity({
                 value={details}
                 onChange={setDetails}
                 readOnly={pending}
+                autoFocus={focusDetails}
               />
               <Button
                 type="button"
@@ -614,6 +662,7 @@ export function Activity({
                 size="sm"
                 disabled={pending}
                 onClick={() => {
+                  setFocusDetails(false);
                   updateDraft({ details: null });
                   try {
                     localStorage.removeItem(requestKey);
@@ -666,7 +715,36 @@ export function Activity({
             className="activity-actions"
             data-sticky={(!edit && showDetails) || undefined}
           >
-            {!edit && !showDetails && (
+            {!edit && !showDetails && compact && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Add details or a Document"
+                  >
+                    <Plus aria-hidden="true" />
+                    Add
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    disabled={!!support}
+                    onSelect={startDetails}
+                  >
+                    Add details
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!!support}
+                    onSelect={() => setPicking(true)}
+                  >
+                    Attach Document
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {!edit && !showDetails && !compact && (
               <Button
                 type="button"
                 variant="ghost"
@@ -677,16 +755,13 @@ export function Activity({
                     ? "Remove the attached Document to write details instead"
                     : undefined
                 }
-                onClick={() => {
-                  setDetails("");
-                  setPicking(false);
-                }}
+                onClick={startDetails}
               >
                 <Plus aria-hidden="true" />
                 Add details
               </Button>
             )}
-            {!edit && !showDetails && !support && (
+            {!edit && !showDetails && !support && !compact && (
               <Button
                 type="button"
                 variant="ghost"
@@ -699,15 +774,6 @@ export function Activity({
               </Button>
             )}
             <span className="activity-actions-end">
-              {!edit && hasDraft(saved) && (
-                <span
-                  className="activity-muted"
-                  title="Draft kept on this device"
-                  aria-label="Draft kept on this device"
-                >
-                  Draft kept
-                </span>
-              )}
               {edit ? (
                 <Button
                   type="button"
@@ -718,6 +784,32 @@ export function Activity({
                 >
                   Cancel edit
                 </Button>
+              ) : hasDraft(saved) ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={pending}
+                      aria-label="Draft actions"
+                    >
+                      <MoreHorizontal aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => {
+                        clearDraft();
+                        setPicking(false);
+                        setComposing(false);
+                      }}
+                    >
+                      Discard draft
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : (
                 <Button
                   type="button"
@@ -725,18 +817,12 @@ export function Activity({
                   size="sm"
                   disabled={pending}
                   onClick={() => {
-                    clearDraft();
                     setPicking(false);
                     setComposing(false);
                   }}
                 >
-                  {hasDraft(saved) ? "Discard draft" : "Cancel"}
+                  Cancel
                 </Button>
-              )}
-              {!pending && !hasVisibleText(draftText) && (
-                <span id={`post-hint-${ticketId}`} className="activity-muted">
-                  Write an update to post.
-                </span>
               )}
               <Button
                 type="submit"
@@ -752,6 +838,14 @@ export function Activity({
               </Button>
             </span>
           </div>
+          {!pending && !hasVisibleText(draftText) && (
+            <p id={`post-hint-${ticketId}`} className="activity-caption">
+              {edit ? "An update needs some text." : "Write an update to post."}
+            </p>
+          )}
+          {!edit && hasDraft(saved) && (
+            <p className="activity-caption">Draft kept on this device</p>
+          )}
         </form>
       )}
       {loading && entries.length === 0 ? (
@@ -827,7 +921,23 @@ export function Activity({
                           <MoreHorizontal />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent
+                        align="end"
+                        onCloseAutoFocus={(event) => {
+                          // Focus goes to the composer, not back to the menu button.
+                          if (replied.current) {
+                            event.preventDefault();
+                            replied.current = false;
+                            setFocusUpdate((count) => count + 1);
+                          }
+                        }}
+                      >
+                        <DropdownMenuItem
+                          disabled={!!edit}
+                          onSelect={() => reply(item.note.brief)}
+                        >
+                          Reply
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() =>
                             setEdit({

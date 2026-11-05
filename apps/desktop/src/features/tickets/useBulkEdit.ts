@@ -122,8 +122,10 @@ function describeFailure(reason: unknown, selection: string[]): BulkFailure {
   return {
     retryable: failure.code !== "batch_operation",
     reference,
-    message: reference
-      ? `Nothing changed. ${reference} could not be updated: ${detail}.`
-      : `Nothing changed. ${detail}.`,
+    // The reason leads; the reassurance follows.
+    message:
+      reference && !detail.includes(reference)
+        ? `${reference}: ${detail}. Nothing changed.`
+        : `${detail}. Nothing changed.`,
   };
 }

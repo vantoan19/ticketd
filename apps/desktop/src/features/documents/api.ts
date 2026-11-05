@@ -26,6 +26,8 @@ const linkSchema = z.object({
   source_trashed: z.boolean(),
   target_trashed: z.boolean(),
   explicit: z.boolean().optional(),
+  /** The update that mentions the target, when the link comes from one. */
+  activity_id: z.string().nullable().optional(),
 });
 const linkDocuments = {
   linkMarkdown: async (reference: string) =>

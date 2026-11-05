@@ -281,6 +281,7 @@ export function TicketPage({
             ticket={ticket}
             revision={revision}
             refresh={refresh}
+            onOpenUpdate={(id) => setUpdateTarget({ id, key: Date.now() })}
           />
         )}
         {active && (

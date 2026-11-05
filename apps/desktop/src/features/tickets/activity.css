@@ -108,12 +108,12 @@
   min-width: 0;
   margin-inline-start: auto;
 }
-/* "Draft kept on this device" shrinks before the actions wrap to a second row. */
-.activity-actions-end .activity-muted {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Reasons and status sit on their own lines under the action row. */
+.activity-caption {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.4;
 }
 .activity-attached {
   display: flex;
