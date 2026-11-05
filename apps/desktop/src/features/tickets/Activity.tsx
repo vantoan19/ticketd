@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -135,8 +136,18 @@ export function Activity({
   const revealedTarget = useRef<{ id: string; key: number } | null>(null);
   const targetId = target?.id;
   const targetKey = target?.key;
+  // The target a visit already showed is not looked up again when the ticket is
+  // selected afresh; only a newly opened target (a new key) is.
+  const leftTargetKey = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!active) return;
+    return () => {
+      leftTargetKey.current = targetKey;
+    };
+  }, [active, targetKey]);
   useEffect(() => {
     if (!active || targetId === undefined) return;
+    if (targetKey !== undefined && leftTargetKey.current === targetKey) return;
     let current = true;
     const request = { id: targetId };
     targetRequest.current = request;
@@ -824,13 +835,13 @@ export function Activity({
                     </Button>
                   </p>
                 )}
-                <div className="markdown-preview activity-note">
+                <ClampedBrief>
                   <MarkdownDocument
                     source={item.note.brief}
                     select={select}
                     revision={revision}
                   />
-                </div>
+                </ClampedBrief>
                 {item.note.supporting_document_id && (
                   <DetailsLink
                     info={detailDocuments[item.note.supporting_document_id]}
@@ -874,6 +885,48 @@ export function Activity({
 }
 
 /** The link from an update to its details Document, named by what it holds. */
+/** A long update stays a few lines tall until Show more is chosen. */
+function ClampedBrief({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => {
+      if (!expanded)
+        setClipped(element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [expanded]);
+  return (
+    <>
+      <div
+        ref={box}
+        className="markdown-preview activity-note"
+        data-expanded={expanded || undefined}
+      >
+        {children}
+      </div>
+      {(clipped || expanded) && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </Button>
+      )}
+    </>
+  );
+}
+
 function DetailsLink({
   info,
   open,

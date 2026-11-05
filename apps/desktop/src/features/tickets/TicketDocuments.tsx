@@ -8,11 +8,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { client, type Ticket } from "@/lib/api/client";
+import { type Ticket } from "@/lib/api/client";
 import { DocumentPicker } from "./DocumentPicker";
-import { documentLinkMarkdown } from "@/features/documents/document-link";
 import { RailSection } from "./RailSection";
-import { withoutDocumentLink } from "./document-link";
 import "./ticket-documents.css";
 
 type DocumentLink = Awaited<ReturnType<typeof documents.links>>[0][number];
@@ -21,12 +19,10 @@ type DocumentLink = Awaited<ReturnType<typeof documents.links>>[0][number];
 export function TicketDocuments({
   ticket,
   revision,
-  updateTicket,
   refresh,
 }: {
   ticket: Ticket;
   revision: number;
-  updateTicket: (ticket: Ticket) => void;
   refresh: () => Promise<void>;
 }) {
   const openDocument = useContext(DocumentNavigation);
@@ -47,47 +43,39 @@ export function TicketDocuments({
       .links(ticket.id)
       .then(([outgoing]) => {
         if (!current) return;
-        const seen = new Set<string>();
-        setLinks(
-          outgoing.filter((link) => {
-            if (link.target_kind !== "document" || seen.has(link.target_id))
-              return false;
-            seen.add(link.target_id);
-            return true;
-          }),
-        );
+        // One row per Document; it is explicit if any of its links is.
+        const byDocument = new Map<string, DocumentLink>();
+        for (const link of outgoing) {
+          if (link.target_kind !== "document") continue;
+          const known = byDocument.get(link.target_id);
+          if (!known || (link.explicit && !known.explicit))
+            byDocument.set(link.target_id, link);
+        }
+        setLinks([...byDocument.values()]);
       })
       .catch(() => {});
     return () => {
       current = false;
     };
   }, [ticket.id, ticket.body, revision, visits]);
-  async function add(id: string, heading: string) {
-    setOpen(false);
+  async function change(id: string, present: boolean) {
     setError("");
     try {
-      const line = `Document: ${documentLinkMarkdown(id, heading)}`;
-      const body = ticket.body.trimEnd();
-      const result = await client.changeTicket(ticket.reference, {
-        body: body ? `${body}\n\n${line}\n` : `${line}\n`,
-      });
-      updateTicket(result);
+      await documents.setTicketDocument(ticket.reference, id, present);
+      setVisits((value) => value + 1);
       await refresh();
     } catch (reason) {
       setError(String(reason));
     }
   }
-  async function unlink(id: string) {
-    setError("");
-    try {
-      const result = await client.changeTicket(ticket.reference, {
-        body: withoutDocumentLink(ticket.body, id),
-      });
-      updateTicket(result);
-      await refresh();
-    } catch (reason) {
-      setError(String(reason));
-    }
+  function add(id: string) {
+    setOpen(false);
+    void change(id, true);
+  }
+  function editDescription() {
+    window.dispatchEvent(
+      new CustomEvent("ticketd:edit-description", { detail: ticket.reference }),
+    );
   }
   return (
     <RailSection label="Documents">
@@ -109,15 +97,27 @@ export function TicketDocuments({
                   <span className="ticket-documents-badge">Trash</span>
                 )}
               </button>
-              <button
-                type="button"
-                className="ticket-documents-unlink"
-                aria-label={`Unlink ${link.target_label}`}
-                title="Unlink"
-                onClick={() => void unlink(link.target_id)}
-              >
-                <X aria-hidden="true" />
-              </button>
+              {link.explicit ? (
+                <button
+                  type="button"
+                  className="ticket-documents-unlink"
+                  aria-label={`Unlink ${link.target_label}`}
+                  title="Unlink"
+                  onClick={() => void change(link.target_id, false)}
+                >
+                  <X aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="ticket-documents-edit"
+                  aria-label={`Edit description to remove ${link.target_label}`}
+                  title="Mentioned in the description"
+                  onClick={editDescription}
+                >
+                  Edit description
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -137,7 +137,7 @@ export function TicketDocuments({
           <PopoverContent align="end" className="ticket-documents-popover">
             <DocumentPicker
               exclude={links.map((link) => link.target_id)}
-              onPick={(picked) => void add(picked.id, picked.heading)}
+              onPick={(picked) => add(picked.id)}
             />
           </PopoverContent>
         </Popover>

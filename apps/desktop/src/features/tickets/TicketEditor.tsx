@@ -85,6 +85,16 @@ export function TicketEditor({
     "unopened",
   );
   const editingBody = bodyMode === "editing";
+  // The rail's Documents offer "Edit description" for a Document the description mentions.
+  const reference = ticket.reference;
+  useEffect(() => {
+    const edit = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === reference)
+        setBodyMode("editing");
+    };
+    window.addEventListener("ticketd:edit-description", edit);
+    return () => window.removeEventListener("ticketd:edit-description", edit);
+  }, [reference]);
   const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);

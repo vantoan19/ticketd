@@ -14,7 +14,10 @@ import {
   type SourceHealth,
 } from "@/lib/api/sources";
 import { loadPreferences } from "@/lib/preferences";
-import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import {
+  useOnWorkspaceChange,
+  useWorkspaceChange,
+} from "@/lib/workspace-change";
 import type { MentionTarget } from "./Backlinks";
 export const PAGE_SIZE = 50;
 type View = "tickets" | "projects" | "plans" | "settings" | "inbox";
@@ -106,7 +109,11 @@ export function useTicketWorkspace(
   const [details, setDetails] = useState<Record<string, Ticket>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [revision, setRevision] = useState(0);
+  const [listRevision, setRevision] = useState(0);
+  // The list only changes when a listed ticket does, but a Document, Activity or
+  // another ticket can change what the open ticket's page shows. Pages key their
+  // reads on this revision, so it also moves with every workspace change.
+  const revision = listRevision + useWorkspaceChange();
   // Advances on every successful poll, changed data or not, for views that poll their own sources.
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);

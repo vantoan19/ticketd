@@ -16,6 +16,8 @@ pub struct ContextLink {
     pub target_label: String,
     pub source_trashed: bool,
     pub target_trashed: bool,
+    /// True for a reference a person attached to the ticket, as opposed to a mention in its text.
+    pub explicit: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,7 +47,9 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 
 /// Explicit-link mentions plus numeric `T-n` mentions resolved when read, so a reference to a
 /// ticket created later appears, and the context graph and link lists always agree.
-const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage FROM context_mentions UNION SELECT n.source_id, t.id, n.passage FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0)";
+/// Explicit ticket-to-Document references (the `ticket_documents` table) join them with the
+/// fixed passage `Linked Document` and `explicit` set.
+const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0 UNION SELECT ticket_id, document_id, 'Linked Document', 1 FROM ticket_documents)";
 
 /// Every standalone `T-n` ticket reference in plain text, as the byte offset and length of the
 /// token and its number. This is the one rule for what counts as a numeric mention.
@@ -371,7 +375,7 @@ impl Workspace {
             return Err(Error::NotFound(id.to_owned()));
         }
         let column = if outgoing { "source_id" } else { "target_id" };
-        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT {h} FROM documents d WHERE d.id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT {h} FROM documents d WHERE d.id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0) FROM (SELECT source_id, target_id, passage, NULL AS activity_id FROM {mentions} UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3", h = crate::documents::HEADING, mentions = DOCUMENT_MENTIONS))?;
+        let mut statement = self.connection.prepare(&format!("SELECT m.source_id, m.target_id, s.kind, t.kind, m.passage, COALESCE((SELECT 'T-' || number FROM tickets WHERE id = s.id), (SELECT {h} FROM documents d WHERE d.id = s.id), (SELECT name FROM plans WHERE id = s.id), s.id), COALESCE((SELECT 'T-' || number FROM tickets WHERE id = t.id), (SELECT {h} FROM documents d WHERE d.id = t.id), (SELECT name FROM plans WHERE id = t.id), t.id), m.activity_id , COALESCE((SELECT trashed FROM documents WHERE id = s.id), (SELECT trashed FROM tickets WHERE id = s.id), 0), COALESCE((SELECT trashed FROM documents WHERE id = t.id), (SELECT trashed FROM tickets WHERE id = t.id), 0), m.explicit FROM (SELECT source_id, target_id, passage, NULL AS activity_id, explicit FROM {mentions} UNION ALL SELECT a.ticket_id, m.target_id, m.passage, m.activity_id, 0 FROM activity_mentions m JOIN activities a ON a.id = m.activity_id) m JOIN entities s ON s.id = m.source_id JOIN entities t ON t.id = m.target_id WHERE m.{column} = ?1 ORDER BY m.source_id, m.target_id, m.passage LIMIT ?2 OFFSET ?3", h = crate::documents::HEADING, mentions = DOCUMENT_MENTIONS))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(ContextLink {
@@ -385,6 +389,7 @@ impl Workspace {
                     target_label: r.get(6)?,
                     source_trashed: r.get(8)?,
                     target_trashed: r.get(9)?,
+                    explicit: r.get(10)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -413,7 +418,7 @@ impl Workspace {
         offset: u32,
     ) -> Result<Vec<DocumentBacklink>, Error> {
         self.show_document(id)?;
-        let mut statement = self.connection.prepare("SELECT t.number, t.title, m.passage FROM (SELECT source_id, target_id, passage FROM context_mentions UNION SELECT n.source_id, t.id, n.passage FROM numeric_mentions n JOIN tickets t ON t.number = n.number WHERE n.activity = 0) m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3")?;
+        let mut statement = self.connection.prepare(&format!("SELECT t.number, t.title, m.passage FROM {DOCUMENT_MENTIONS} m JOIN tickets t ON t.id = m.source_id WHERE m.target_id = ?1 ORDER BY t.number, m.passage LIMIT ?2 OFFSET ?3"))?;
         let links = statement
             .query_map(params![id, limit.clamp(1, 100), offset], |r| {
                 Ok(DocumentBacklink {

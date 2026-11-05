@@ -27,6 +27,7 @@ impl Workspace {
             ("project_checkouts", "project_id, path"),
             ("plans", "id, name, archived, purpose, spec_document_id"),
             ("plan_documents", "plan_id, document_id"),
+            ("ticket_documents", "ticket_id, document_id"),
             (
                 "tickets",
                 "number, id, title, status, body, project_id, plan_id, trashed, updated_at",

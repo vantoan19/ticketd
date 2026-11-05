@@ -1,4 +1,4 @@
-const GROUPS: [(&str, &str); 22] = [
+const GROUPS: [(&str, &str); 24] = [
     (
         "SELECT blocker_id, dependent_id, NULL FROM dependencies WHERE blocker_id = ?1 ORDER BY dependent_id LIMIT ?2",
         "blocks",
@@ -86,6 +86,14 @@ const GROUPS: [(&str, &str); 22] = [
     (
         "SELECT source_id, target_id, NULL FROM contextual_relationships WHERE kind = 'discovered' AND target_id = ?1 ORDER BY source_id LIMIT ?2",
         "discovered",
+    ),
+    (
+        "SELECT ticket_id, document_id, 'Linked Document' FROM ticket_documents WHERE ticket_id = ?1 ORDER BY document_id LIMIT ?2",
+        "mention",
+    ),
+    (
+        "SELECT ticket_id, document_id, 'Linked Document' FROM ticket_documents WHERE document_id = ?1 ORDER BY ticket_id LIMIT ?2",
+        "mention",
     ),
 ];
 

@@ -43,6 +43,7 @@ pub use relationships::RelationshipKind;
 mod search;
 pub use search::{Availability, TicketFilter, TicketOrder};
 mod tags;
+mod ticket_documents;
 pub use plans::{Plan, PlanCounts, PlanView};
 
 use std::{
@@ -70,7 +71,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 45;
+pub const FORMAT_VERSION: i64 = 46;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -665,6 +666,9 @@ impl Workspace {
         }
         if version < 45 {
             change_token::migrate(&transaction)?;
+        }
+        if version < 46 {
+            ticket_documents::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(())

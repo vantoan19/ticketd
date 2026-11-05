@@ -40,6 +40,22 @@ enum DocumentCommand {
     },
     /// Print the Markdown link text for a ticket, Plan or Document, to paste into a body
     Link { target: String },
+    /// Attach a Document to a ticket's context without editing its description
+    LinkTicket {
+        id: String,
+        ticket: String,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Remove a Document attached with link-ticket (mentions in the description stay)
+    UnlinkTicket {
+        id: String,
+        ticket: String,
+        /// Makes retries safe: repeating this ID with the same input returns the first result instead of writing again
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Create a ticket from a Document and link them
     CreateTicket { id: String, title: String },
     /// List only tickets that mention a Document, with passages
@@ -345,6 +361,9 @@ enum Command {
         evidence: bool,
         #[arg(long)]
         backlinks: bool,
+        /// The Documents attached to the ticket with `document link-ticket`
+        #[arg(long)]
+        documents: bool,
         /// The source's comments and events (read-only; authors are the source's, not editing agents)
         #[arg(long)]
         conversation: bool,
@@ -934,6 +953,30 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::to_string(&workspace.context_backlinks(&id, 100, offset)?)?
             }
             DocumentCommand::Link { target } => workspace.context_link_markdown(&target)?,
+            DocumentCommand::LinkTicket {
+                id,
+                ticket,
+                request_id,
+            } => bare(workspace.write(
+                request_id.as_deref(),
+                WriteRequest::SetTicketDocument {
+                    reference: ticket,
+                    document_id: id,
+                    present: true,
+                },
+            )?)?,
+            DocumentCommand::UnlinkTicket {
+                id,
+                ticket,
+                request_id,
+            } => bare(workspace.write(
+                request_id.as_deref(),
+                WriteRequest::SetTicketDocument {
+                    reference: ticket,
+                    document_id: id,
+                    present: false,
+                },
+            )?)?,
             DocumentCommand::CreateTicket { id, title } => {
                 serde_json::to_string(&workspace.create_ticket_from_document(&id, &title)?)?
             }
@@ -1437,6 +1480,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             latest_update,
             evidence,
             backlinks,
+            documents,
             conversation,
             offset,
         } => serde_json::to_string(&workspace.ticket_context(
@@ -1449,6 +1493,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
                 latest_update,
                 evidence,
                 backlinks,
+                documents,
                 conversation,
                 offset,
             },
