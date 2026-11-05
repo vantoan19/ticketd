@@ -71,7 +71,7 @@ test("an untouched ticket reports no save state until something is saved", async
   });
   expect(screen.getByRole("status").textContent).toBe("Pending save");
   await autosave();
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect(screen.getByRole("status").textContent).toBe("Title saved");
 });
 
 test("a title-only save should not overwrite an externally updated body", async () => {
@@ -183,7 +183,7 @@ test("keeps a failed Unicode rich draft visible and retries only the description
       expected_body: "# Xin chào\n\n- [ ] Second line 🌿",
     },
   });
-  expect(screen.getByRole("status").textContent).toBe("Saved");
+  expect(screen.getByRole("status").textContent).toBe("Description saved");
 });
 
 test("external description changes pause a rich draft until reload or overwrite is chosen", async () => {

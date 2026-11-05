@@ -29,6 +29,8 @@
   }
 }
 .duplicate-dialog {
+  display: flex;
+  flex-direction: column;
   max-height: 85vh;
   overflow-y: auto;
 }

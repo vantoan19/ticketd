@@ -4601,3 +4601,40 @@ fn registering_a_missing_checkout_folder_names_the_path() {
         )
     );
 }
+
+#[test]
+fn a_checkout_folder_belongs_to_one_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let shared = dir.path().join("shared");
+    let other = dir.path().join("other");
+    std::fs::create_dir_all(&shared).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let alpha = workspace
+        .create_project("Alpha", shared.to_str().unwrap())
+        .unwrap();
+    let beta = workspace
+        .create_project("Beta", other.to_str().unwrap())
+        .unwrap();
+    let message = |result: Result<_, ticketd_core::Error>| match result {
+        Ok(_) => String::new(),
+        Err(error) => error.to_string(),
+    };
+    assert_eq!(
+        message(workspace.create_project("Gamma", shared.to_str().unwrap())),
+        "This folder is registered to Alpha."
+    );
+    assert_eq!(
+        message(workspace.register_checkout(&beta.id, shared.to_str().unwrap())),
+        "This folder is registered to Alpha."
+    );
+    assert_eq!(
+        message(workspace.edit_project(&beta.id, "Beta", shared.to_str().unwrap())),
+        "This folder is registered to Alpha."
+    );
+    // Re-registering a folder on its own project stays harmless.
+    workspace
+        .register_checkout(&alpha.id, shared.to_str().unwrap())
+        .unwrap();
+    assert_eq!(workspace.list_projects().unwrap().len(), 2);
+}

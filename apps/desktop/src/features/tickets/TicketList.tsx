@@ -114,6 +114,7 @@ export function TicketList({
                 <label className="ticket-select">
                   <input
                     type="checkbox"
+                    tabIndex={-1}
                     aria-label={`Select ${ticket.reference}`}
                     checked={bulkSelection.includes(ticket.reference)}
                     disabled={selectionDisabled}

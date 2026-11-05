@@ -126,6 +126,8 @@ pub enum Error {
         "checkout matches multiple projects; specify --project explicitly or remove a registration"
     )]
     AmbiguousProject,
+    #[error("This folder is registered to {0}.")]
+    CheckoutTaken(String),
     #[error("checkout path must be valid Unicode")]
     InvalidCheckoutPath,
     #[error("project name and path must not be empty")]

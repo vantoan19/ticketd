@@ -399,3 +399,44 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
         serde_json::from_str(&run(dir.path(), &["document", "search", "linked"])).unwrap();
     assert_eq!(found[0]["id"], id);
 }
+
+#[test]
+fn project_commands_refuse_a_checkout_folder_registered_elsewhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let taken = dir.path().join("taken");
+    let free = dir.path().join("free");
+    std::fs::create_dir(&taken).unwrap();
+    std::fs::create_dir(&free).unwrap();
+    run(
+        dir.path(),
+        &["project", "create", "Alpha", taken.to_str().unwrap()],
+    );
+    let beta: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["project", "create", "Beta", free.to_str().unwrap()],
+    ))
+    .unwrap();
+    let beta = beta["id"].as_str().unwrap();
+    let failing: [&[&str]; 2] = [
+        &["project", "create", "Gamma", taken.to_str().unwrap()],
+        &["project", "register", beta, taken.to_str().unwrap()],
+    ];
+    for args in failing {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("This folder is registered to Alpha."),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

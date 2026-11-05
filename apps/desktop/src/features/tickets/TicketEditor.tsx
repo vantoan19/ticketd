@@ -183,6 +183,8 @@ export function TicketEditor({
   const editButton = useRef<HTMLButtonElement>(null);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
+  // Which field the last save carried, so the status line names it.
+  const [savedField, setSavedField] = useState("Changes");
   const bodyRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLParagraphElement>(null);
@@ -281,6 +283,13 @@ export function TicketEditor({
       const patch: { title?: string; body?: string } = {};
       if (draft.title !== saved.title) patch.title = draft.title;
       if (draft.body !== saved.body) patch.body = draft.body;
+      setSavedField(
+        patch.title !== undefined && patch.body !== undefined
+          ? "Title and description"
+          : patch.title !== undefined
+            ? "Title"
+            : "Description",
+      );
       // The core refuses the change if the stored text is no longer what this editor
       // last loaded or saved, so an agent's edit is never silently overwritten.
       const guarded = {
@@ -577,9 +586,9 @@ export function TicketEditor({
             : dirty && state !== "failed"
               ? "Pending save"
               : state === "failed"
-                ? "Save failed"
+                ? `${savedField} not saved`
                 : state === "saved"
-                  ? "Saved"
+                  ? `${savedField} saved`
                   : ""}
       </p>
       {state === "failed" && (
