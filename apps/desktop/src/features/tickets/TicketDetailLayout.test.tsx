@@ -93,7 +93,7 @@ function renderDetails(item: Ticket = ticket) {
 }
 
 test("the property rail holds Status, Source, Project, Plan, Tags, Relationships, and Attention in order", async () => {
-  renderDetails();
+  renderDetails({ ...ticket, status: "In progress" });
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
   });
@@ -118,7 +118,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
   expect(screen.queryByText(/Owned by GitHub/)).toBeNull();
   expect(screen.getByText("Local ticket")).toBeTruthy();
   expect(
-    within(rail).getByRole("combobox", { name: "Status: Todo" }),
+    within(rail).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
     within(rail).getByRole("button", { name: "Project: Unlinked" }),
@@ -195,6 +195,17 @@ test("the header shows the list position with Previous and Next", async () => {
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(false);
+});
+
+test("Latest update appears only for In progress and In review tickets", async () => {
+  renderDetails();
+  const rail = await screen.findByRole("complementary", {
+    name: "Ticket properties",
+  });
+  await within(rail).findByRole("button", { name: "Add relationship" });
+  expect(
+    within(rail).queryByRole("heading", { name: "Latest update" }),
+  ).toBeNull();
 });
 
 test("Latest update jumps to its note and tags appear as separate chips", async () => {

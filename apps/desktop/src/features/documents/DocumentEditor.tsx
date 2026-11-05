@@ -62,6 +62,8 @@ function documentHasEditorFocus() {
     )
   );
 }
+/** The core stores a whitespace-only title as NULL; the saved baseline must match what it stored. */
+const storedTitle = (title: string) => (title.trim() ? title : "");
 type Pending = {
   id: string | null;
   title: string | null;
@@ -135,6 +137,19 @@ export function DocumentEditor({
   const [failed, setFailed] = useState(false);
   const [failureDetail, setFailureDetail] = useState("");
   const [failedTrash, setFailedTrash] = useState(false);
+  // Editor state model. A Trash/Restore click is a one-shot intent: it is queued in
+  // `transition` until the draft is saved, and dropped (remembered in `failedTransition`
+  // for the Retry button only) as soon as anything fails, so autosave never replays it.
+  const failedTransition = useRef<{
+    trashed: boolean;
+    requestId: string;
+  } | null>(null);
+  // Mirrors `trashed` for async callbacks. A Document in Trash cannot be written to.
+  const trashedRef = useRef(initial?.trashed ?? false);
+  const applyTrashed = (value: boolean) => {
+    trashedRef.current = value;
+    setTrashed(value);
+  };
   const [external, setExternal] = useState<Snapshot | null>(null);
   const externalRef = useRef<Snapshot | null>(null);
   const draft = useRef<Snapshot>({ title, body, suggestion });
@@ -142,6 +157,9 @@ export function DocumentEditor({
   const id = useRef(initial?.id ?? null);
   const pending = useRef<Pending | null>(null);
   const saving = useRef(false);
+  const lastVersion = useRef<string | null>(
+    initial ? `${initial.updated_at}|${initial.trashed}` : null,
+  );
   const ticketRequest = useRef<{ title: string; id: string } | null>(null);
   const creatingTicket = useRef(false);
   const closeRequested = useRef(false);
@@ -165,11 +183,17 @@ export function DocumentEditor({
         transition.current.trashed,
         transition.current.requestId,
       );
-      setTrashed(result.trashed);
+      applyTrashed(result.trashed);
+      lastVersion.current = `${result.updated_at}|${result.trashed}`;
       transition.current = null;
+      failedTransition.current = null;
       setFailed(false);
       setStatus(result.trashed ? "Moved to Trash" : "Restored");
+      // A draft kept while the Document was in Trash can be saved now.
+      if (!result.trashed) void save();
     } catch (error) {
+      failedTransition.current = transition.current;
+      transition.current = null;
       setFailed(true);
       setFailedTrash(true);
       setFailureDetail(String(error));
@@ -180,8 +204,13 @@ export function DocumentEditor({
   };
   const save = async () => {
     if (saving.current || externalRef.current) return;
+    if (trashedRef.current && id.current) {
+      // Writes to a Document in Trash fail; don't let that block Restore or closing.
+      if (closeRequested.current) finish();
+      return;
+    }
     const snapshot = draft.current;
-    const titleChanged = snapshot.title !== saved.current.title;
+    const titleChanged = storedTitle(snapshot.title) !== saved.current.title;
     const bodyChanged =
       snapshot.body !== saved.current.body ||
       snapshot.suggestion !== saved.current.suggestion;
@@ -225,14 +254,18 @@ export function DocumentEditor({
         request.requestId,
       );
       id.current = result.id;
+      lastVersion.current = `${result.updated_at}|${result.trashed}`;
       setSavedDocument(result);
-      saved.current = request.snapshot;
+      saved.current = {
+        ...request.snapshot,
+        title: storedTitle(request.snapshot.title),
+      };
       pending.current = null;
       saving.current = false;
       setStatus("Saved locally");
       refreshLinks();
       if (
-        draft.current.title !== saved.current.title ||
+        storedTitle(draft.current.title) !== saved.current.title ||
         draft.current.body !== saved.current.body ||
         draft.current.suggestion !== saved.current.suggestion
       )
@@ -242,6 +275,8 @@ export function DocumentEditor({
     } catch (error) {
       saving.current = false;
       closeRequested.current = false;
+      afterSave.current = null;
+      transition.current = null;
       setFailed(true);
       setFailedTrash(false);
       setFailureDetail(String(error));
@@ -262,11 +297,19 @@ export function DocumentEditor({
       if (!id.current || saving.current) return;
       // Links change when other Documents or tickets are edited, not only this one.
       refreshLinksRef.current();
+      const polled = id.current;
       void documents
-        .show(id.current)
-        .then((document) => {
+        .version(polled)
+        .then(async (version) => {
+          // Only fetch the body when the stored Document actually changed.
+          if (version.join("|") === lastVersion.current) return;
+          const document = await documents.show(polled);
           if (saving.current) return;
-          setTrashed(document.trashed);
+          // Remembered only once resolved: a deferred conflict must be re-checked next poll.
+          const resolved = () => {
+            lastVersion.current = version.join("|");
+          };
+          applyTrashed(document.trashed);
           setSavedDocument(document);
           const currentSuggestion = saved.current.suggestion;
           const link = currentSuggestion
@@ -286,10 +329,18 @@ export function DocumentEditor({
           if (
             next.title === saved.current.title &&
             next.body === saved.current.body
-          )
+          ) {
+            // The outside change was undone or already matches: nothing to resolve.
+            resolved();
+            if (externalRef.current) {
+              externalRef.current = null;
+              setExternal(null);
+            }
             return;
+          }
           const editing = documentHasEditorFocus();
-          const titleDirty = draft.current.title !== saved.current.title;
+          const titleDirty =
+            storedTitle(draft.current.title) !== saved.current.title;
           const bodyDirty =
             draft.current.body !== saved.current.body ||
             draft.current.suggestion !== saved.current.suggestion;
@@ -337,6 +388,10 @@ export function DocumentEditor({
           };
           saved.current = next;
           draft.current = merged;
+          // Merging resolves any earlier conflict notice; leaving it would block saving.
+          resolved();
+          externalRef.current = null;
+          setExternal(null);
           if (!titleDirty) setTitle(merged.title);
           if (!bodyDirty) {
             setBody(merged.body);
@@ -347,19 +402,33 @@ export function DocumentEditor({
     }, 2000);
     return () => window.clearInterval(timer);
   }, [active]);
+  // While the conflict notice is up, clicks that would leave or Trash the Document are
+  // ignored (not queued), so they cannot fire later after the person resolves it.
   const navigate = (action: () => void) => {
+    if (externalRef.current) return;
     afterSave.current = action;
     closeRequested.current = true;
     void save();
   };
   const requestClose = () => {
+    if (externalRef.current) return;
     afterSave.current = null;
     closeRequested.current = true;
     void save();
   };
-  const toggleTrash = () => {
-    transition.current = { trashed: !trashed, requestId: crypto.randomUUID() };
-    void save();
+  const startTransition = (next: { trashed: boolean; requestId: string }) => {
+    if (externalRef.current) return;
+    transition.current = next;
+    // Restore doesn't wait for the draft: it can't be saved while in Trash.
+    if (trashedRef.current) void finishTransition();
+    else void save();
+  };
+  const toggleTrash = () =>
+    startTransition({ trashed: !trashed, requestId: crypto.randomUUID() });
+  const retry = () => {
+    if (failedTrash && failedTransition.current)
+      startTransition(failedTransition.current);
+    else void save();
   };
   const locked = trashed || transitioning;
   const capture = !initial;
@@ -402,7 +471,7 @@ export function DocumentEditor({
           ? "We couldn’t update Trash. Nothing was lost."
           : "We couldn’t save your changes. Your draft is still here."}
       </p>
-      <Button onClick={() => void save()}>Retry</Button>
+      <Button onClick={retry}>Retry</Button>
       {failureDetail && (
         <details>
           <summary>Details</summary>
@@ -672,9 +741,9 @@ export function DocumentEditor({
               >
                 Insert link
               </Button>
-              {linkError && <p role="alert">{linkError}</p>}
             </>
           )}
+          {linkError && <p role="alert">{linkError}</p>}
           <section aria-label="Connected items">
             <h2>Connected items</h2>
             {links.some((group) => group.length === 100) && (

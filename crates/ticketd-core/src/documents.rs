@@ -242,6 +242,18 @@ impl Workspace {
             .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
     }
 
+    /// Cheap change check for an open editor: `(updated_at, trashed)` without reading the body.
+    pub fn document_version(&self, id: &str) -> Result<(String, bool), Error> {
+        self.connection
+            .query_row(
+                "SELECT updated_at, trashed FROM documents WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
+    }
+
     pub fn open_document(&mut self, id: &str) -> Result<Document, Error> {
         let document = self.show_document(id)?;
         self.connection.execute("INSERT INTO document_opens (document_id) VALUES (?1) ON CONFLICT(document_id) DO UPDATE SET sequence = (SELECT coalesce(max(sequence), 0) + 1 FROM document_opens)", [id])?;

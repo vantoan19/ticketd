@@ -145,6 +145,12 @@ fn show_document(id: String) -> Result<Document, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn document_version(id: String) -> Result<(String, bool), String> {
+    Workspace::open_default()
+        .and_then(|w| w.document_version(&id))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn open_document(id: String) -> Result<Document, String> {
     Workspace::open_default()
         .and_then(|mut w| w.open_document(&id))
@@ -1358,6 +1364,7 @@ pub fn run() -> Result<(), tauri::Error> {
             trashed_documents,
             set_document_trashed,
             show_document,
+            document_version,
             open_document,
             save_document,
             backup_workspace,

@@ -14,6 +14,7 @@ vi.mock("./api", () => ({
   documents: {
     save: vi.fn(),
     show: vi.fn(),
+    version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
     createTicket: vi.fn(),
@@ -35,6 +36,11 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
     />
   ),
 }));
+/** The stored Document differs from what the editor last saw. */
+const outside = (document: Awaited<ReturnType<typeof documents.show>>) => {
+  vi.mocked(documents.show).mockResolvedValue(document);
+  vi.mocked(documents.version).mockResolvedValue(["outside", document.trashed]);
+};
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
 });
@@ -89,7 +95,7 @@ it("notices saved changes beneath a focused draft and offers reload", async () =
     trashed: false,
   };
   vi.mocked(documents.save).mockRejectedValue("offline");
-  vi.mocked(documents.show).mockResolvedValue({
+  outside({
     ...original,
     body: "Changed externally",
   });
@@ -125,7 +131,7 @@ it("preserves an unrelated saved title when saving over a conflicting body", asy
       title: "External title",
       body: "Draft",
     });
-  vi.mocked(documents.show).mockResolvedValue({
+  outside({
     ...original,
     title: "External title",
     body: "External body",
@@ -441,6 +447,11 @@ it("preserves successive unrelated saved title changes under a body conflict", a
       title: "External 2",
       body: "Local draft",
     });
+  let polls = 0;
+  vi.mocked(documents.version).mockImplementation(async () => [
+    `poll-${++polls}`,
+    false,
+  ]);
   vi.mocked(documents.show)
     .mockResolvedValueOnce({
       ...doc,
@@ -546,4 +557,106 @@ it("lists each connected item once and names Plans that use the Document as spec
   );
   expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Spec of Roadmap" })).toBeTruthy();
+});
+const stored = {
+  id: "d1",
+  title: null,
+  body: "Original",
+  created_at: "now",
+  updated_at: "now",
+  trashed: false,
+};
+const tick = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+it("clears the conflict notice once a later poll merges the outside change", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "Typed" });
+  outside({ ...stored, body: "Outside" });
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  const editor = screen.getByLabelText("Your thought");
+  editor.focus();
+  await tick(2000);
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  editor.blur();
+  await tick(2000);
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
+  fireEvent.change(editor, { target: { value: "Typed" } });
+  await tick(400);
+  expect(documents.save).toHaveBeenCalledOnce();
+});
+it("drops a failed Trash request instead of replaying it on the next autosave", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.setTrashed).mockRejectedValue("busy");
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "More" });
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+  await tick(0);
+  expect(documents.setTrashed).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "More" },
+  });
+  await tick(400);
+  expect(documents.save).toHaveBeenCalledOnce();
+  expect(documents.setTrashed).toHaveBeenCalledOnce();
+});
+it("ignores Back to work under the conflict notice instead of replaying it", async () => {
+  vi.useFakeTimers();
+  const close = vi.fn();
+  vi.mocked(documents.save).mockRejectedValue("offline");
+  outside({ ...stored, body: "Outside" });
+  render(<DocumentEditor initial={stored} onClose={close} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
+  await tick(2400);
+  fireEvent.click(screen.getByRole("button", { name: "Back to work" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  await tick(1000);
+  expect(close).not.toHaveBeenCalled();
+});
+it("restores a Document trashed elsewhere without resending the unsaved draft", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockRejectedValue("document is in Trash");
+  outside({ ...stored, trashed: true });
+  vi.mocked(documents.setTrashed).mockResolvedValue({
+    ...stored,
+    trashed: false,
+  });
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Draft" },
+  });
+  await tick(400);
+  expect(documents.save).toHaveBeenCalledOnce();
+  await tick(2000);
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await tick(0);
+  expect(documents.setTrashed).toHaveBeenCalledOnce();
+});
+it("does not report a conflict after saving a whitespace-only title", async () => {
+  vi.useFakeTimers();
+  const titled = { ...stored, title: "Doc" };
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, title: null });
+  outside({ ...stored, title: null });
+  render(<DocumentEditor initial={titled} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  screen.getByLabelText("Optional title").focus();
+  fireEvent.change(screen.getByLabelText("Optional title"), {
+    target: { value: "   " },
+  });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls[0]?.[1]).toBeNull();
+  await tick(2000);
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
+  fireEvent.change(screen.getByLabelText("Optional title"), {
+    target: { value: "New" },
+  });
+  await tick(400);
+  expect(documents.save).toHaveBeenCalledTimes(2);
 });

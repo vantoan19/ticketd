@@ -300,10 +300,14 @@ export function Activity({
             /* Replace malformed local state. */
           }
         }
-        localStorage.setItem(
-          requestKey,
-          JSON.stringify({ payload, id: requestId }),
-        );
+        try {
+          localStorage.setItem(
+            requestKey,
+            JSON.stringify({ payload, id: requestId }),
+          );
+        } catch {
+          /* The retry id is best effort; a full store must not block posting. */
+        }
         await client.addActivityWithDetails(
           reference,
           draft,
