@@ -31,7 +31,11 @@ export function Picker<T extends string>({
       onValueChange={(next) => onValueChange(next as T)}
       {...(disabled !== undefined && { disabled })}
     >
-      <SelectTrigger size="sm" aria-label={`${label}: ${current}`}>
+      <SelectTrigger
+        size="sm"
+        className="ui-picker"
+        aria-label={`${label}: ${current}`}
+      >
         <span className="text-muted-foreground">{label}</span>
         <SelectValue />
       </SelectTrigger>

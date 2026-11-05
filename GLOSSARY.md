@@ -52,7 +52,7 @@ A repository associated with tickets, with an explicit identity preserved across
 _Avoid_: Work grouping
 
 **Project context**:
-The project selected for a particular UI or CLI interaction, independent of other interactions. Explicit selection takes precedence over inference from a registered checkout; without either, new tickets remain unlinked.
+The project selected for a particular UI or CLI interaction, independent of other interactions. Explicit selection takes precedence over inference from a registered checkout; without either, new tickets remain unlinked. The unlinked choice is shown to users as "No project".
 
 **Plan**:
 A named grouping of tickets pursuing a shared objective, potentially spanning multiple projects; each ticket belongs to at most one Plan and membership is optional. A Plan is Active or explicitly Archived, with progress expressed as counts by status of all non-trashed members, including parents and subtickets equally.

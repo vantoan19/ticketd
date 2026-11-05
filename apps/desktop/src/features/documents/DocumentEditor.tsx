@@ -827,6 +827,7 @@ export function DocumentEditor({
               {...(capture ? { placeholder: "Write a thought…" } : {})}
               readOnly={locked}
               autoFocus={capture}
+              persistentToolbar={capture}
               focusRequest={focusRequest}
             />
           ) : (

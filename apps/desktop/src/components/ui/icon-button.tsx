@@ -12,26 +12,38 @@ import {
  * name and the tooltip that appears on hover and keyboard focus. It also works
  * as the child of a menu or popover trigger (`asChild`).
  */
+// A tooltip only labels. It must not open, or outlive the moment, a menu or
+// dialog is layered over its trigger: a menu item that opens a dialog returns
+// focus to the trigger, which would otherwise show the label over the dialog.
+const OVERLAY = '[role="dialog"], [role="alertdialog"], [role="menu"]';
+
 function IconButton({
   label,
   variant = "ghost",
   size = "icon-sm",
-  hideTooltip,
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "aria-label" | "children"> & {
   label: string;
   children: React.ReactNode;
-  /** Keeps the tooltip closed, for example once the button's menu item opened a dialog. */
-  hideTooltip?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) return;
+    const observer = new MutationObserver(() => {
+      if (typeof document !== "undefined" && document.querySelector(OVERLAY))
+        setOpen(false);
+    });
+    observer.observe(document.body, { childList: true });
+    return () => observer.disconnect();
+  }, [open]);
   return (
     <TooltipProvider>
       <Tooltip
-        {...(hideTooltip !== undefined && {
-          open: open && !hideTooltip,
-          onOpenChange: setOpen,
-        })}
+        open={open}
+        onOpenChange={(next) => {
+          if (next && document.querySelector(OVERLAY)) return;
+          setOpen(next);
+        }}
       >
         <TooltipTrigger asChild>
           <Button aria-label={label} variant={variant} size={size} {...props} />
