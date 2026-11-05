@@ -1013,7 +1013,8 @@ export function MarkdownEditor({
           {!readOnly && <Toolbar visible={active || persistentToolbar} />}
           <PlateContent
             readOnly={readOnly}
-            {...(placeholder ? { placeholder } : {})}
+            // Only while the document is empty: Slate's own check can lag a trailing blank paragraph.
+            {...(placeholder && value.trim() === "" ? { placeholder } : {})}
             aria-label={`${label} rich text`}
             role={slash ? "combobox" : "textbox"}
             aria-autocomplete={slash ? "list" : undefined}
