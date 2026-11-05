@@ -167,17 +167,19 @@ export function PlanHeader({
             />
             {nameError && <FieldError>{nameError}</FieldError>}
           </Field>
-          <Button type="submit" size="sm" disabled={pending}>
-            Save name
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setRenaming(false)}
-          >
-            Cancel
-          </Button>
+          <div className="plan-rename-actions">
+            <Button type="submit" size="sm" disabled={pending}>
+              Save name
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setRenaming(false)}
+            >
+              Cancel
+            </Button>
+          </div>
         </form>
       )}
       {editingPurpose ? (

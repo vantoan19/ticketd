@@ -264,7 +264,7 @@ it("opens a trashed Document readably and restores it", async () => {
     true,
   );
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-  await screen.findByRole("button", { name: "Move to Trash" });
+  await screen.findByRole("button", { name: "Document actions" });
   expect(documents.setTrashed).toHaveBeenCalledWith(
     "d1",
     false,
@@ -631,7 +631,11 @@ it("drops a failed Trash request instead of replaying it on the next autosave", 
   vi.mocked(documents.setTrashed).mockRejectedValue("busy");
   vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "More" });
   render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to Trash" }));
   await tick(0);
   expect(documents.setTrashed).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: "Write" }));

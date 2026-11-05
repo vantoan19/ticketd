@@ -775,6 +775,21 @@ fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ()
 }
 
 #[test]
+fn snippets_keep_literal_characters_and_drop_table_syntax() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let doc = workspace
+        .create_document(
+            Some("T"),
+            "2\\*3\\*4 and \\[x]\n\n| a | b |\n|---|---|\n| 1 | 2 |",
+        )
+        .unwrap();
+    let rows = workspace.all_documents_page(50, 0, false).unwrap();
+    let row = rows.iter().find(|row| row.id == doc.id).unwrap();
+    assert_eq!(row.snippet, "2*3*4 and [x] a b 1 2");
+}
+
+#[test]
 fn heading_is_first_plain_text_line_without_markdown_markers() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

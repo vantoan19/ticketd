@@ -39,7 +39,11 @@ export function PlanDocuments({
     return (
       <li key={doc.id} className="plan-document-row">
         <FileText aria-hidden="true" size={14} />
-        <button type="button" onClick={() => openDocument?.(doc.id)}>
+        <button
+          type="button"
+          title={doc.heading}
+          onClick={() => openDocument?.(doc.id)}
+        >
           {doc.heading}
           {doc.trashed && " (Trashed)"}
         </button>
@@ -145,6 +149,9 @@ export function PlanDocuments({
                     }
                   >
                     <span title={doc.heading}>{doc.heading}</span>
+                    {doc.origin_ticket && (
+                      <small> {doc.origin_ticket} · Activity details</small>
+                    )}
                   </Button>
                 </li>
               ))}

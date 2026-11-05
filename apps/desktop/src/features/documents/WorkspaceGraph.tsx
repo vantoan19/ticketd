@@ -6,12 +6,22 @@ import { connectionRows, edgeLabels, flowEdges, kindNames } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   client,
   type WorkspaceGraph as Graph,
   type WorkspaceGraphRequest,
 } from "@/lib/api/client";
 import "@xyflow/react/dist/style.css";
 import "./context-graph.css";
+
+// Radix Select items cannot have an empty value.
+const ALL = "__all__";
 
 export function WorkspaceGraph({
   active,
@@ -214,22 +224,27 @@ export function WorkspaceGraph({
             }}
           />
         </label>
-        <label>
-          Item type{" "}
-          <select
-            value={kind}
-            onChange={(event) => {
-              setKind(event.target.value);
+        <div className="context-graph-select">
+          <span id="graph-kind-label">Item type</span>
+          <Select
+            value={kind || ALL}
+            onValueChange={(value) => {
+              setKind(value === ALL ? "" : value);
               setAdjacencyLimit(3);
               setPagesLoaded(1);
             }}
           >
-            <option value="">All</option>
-            <option value="ticket">Tickets</option>
-            <option value="document">Documents</option>
-            <option value="plan">Plans</option>
-          </select>
-        </label>
+            <SelectTrigger size="sm" aria-labelledby="graph-kind-label">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All</SelectItem>
+              <SelectItem value="ticket">Tickets</SelectItem>
+              <SelectItem value="document">Documents</SelectItem>
+              <SelectItem value="plan">Plans</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <label>
           Tag{" "}
           <input
@@ -241,34 +256,39 @@ export function WorkspaceGraph({
             }}
           />
         </label>
-        <label>
-          Relationship{" "}
-          <select
-            value={relationship}
-            onChange={(event) => {
-              setRelationship(event.target.value);
+        <div className="context-graph-select">
+          <span id="graph-relationship-label">Relationship</span>
+          <Select
+            value={relationship || ALL}
+            onValueChange={(value) => {
+              setRelationship(value === ALL ? "" : value);
               setAdjacencyLimit(3);
               setPagesLoaded(1);
             }}
           >
-            <option value="">All</option>
-            {[
-              "blocks",
-              "membership",
-              "document",
-              "mention",
-              "activity",
-              "support",
-              "subticket",
-              "related",
-              "discovered",
-            ].map((value) => (
-              <option key={value} value={value}>
-                {edgeLabels[value]}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger size="sm" aria-labelledby="graph-relationship-label">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All</SelectItem>
+              {[
+                "blocks",
+                "membership",
+                "document",
+                "mention",
+                "activity",
+                "support",
+                "subticket",
+                "related",
+                "discovered",
+              ].map((value) => (
+                <SelectItem key={value} value={value}>
+                  {edgeLabels[value]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <label>
           <input
             type="checkbox"

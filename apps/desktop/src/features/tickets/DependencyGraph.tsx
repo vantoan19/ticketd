@@ -88,6 +88,13 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
     </>
   );
 }
+// Leaves room above the first node for the zoom controls.
+const FIT_PADDING = {
+  top: "56px",
+  right: "24px",
+  bottom: "24px",
+  left: "24px",
+} as const;
 const nodeTypes = { ticket: TicketNode };
 
 function Toolbar() {
@@ -107,7 +114,7 @@ function Toolbar() {
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => void fitView({ padding: 0.2 })}
+        onClick={() => void fitView({ padding: FIT_PADDING, maxZoom: 1 })}
       >
         <Maximize aria-hidden="true" />
         Fit
@@ -192,10 +199,10 @@ export function Canvas({
         fitView
         fitViewOptions={
           readable
-            ? { padding: 0.1, minZoom: 0.7, maxZoom: 1 }
-            : { padding: 0.2 }
+            ? { padding: FIT_PADDING, minZoom: 0.45, maxZoom: 1 }
+            : { padding: FIT_PADDING, maxZoom: 1 }
         }
-        minZoom={0.2}
+        minZoom={readable ? 0.45 : 0.2}
         nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}

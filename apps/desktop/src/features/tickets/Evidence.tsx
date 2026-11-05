@@ -2,6 +2,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { MoreHorizontal, Plus } from "lucide-react";
 import {
   Dialog,
@@ -307,31 +314,36 @@ export function Evidence({
             <fieldset disabled={pending}>
               <FieldGroup>
                 <Field>
-                  <label className="evidence-label">
+                  <span className="evidence-label" id="evidence-type-label">
                     Type
-                    <select
-                      value={draft.kind}
-                      onChange={(event) => {
-                        const kind = Object.keys(labels).find(
-                          (key) => key === event.target.value,
-                        );
-                        if (
-                          kind === "pull_request" ||
-                          kind === "commit" ||
-                          kind === "branch" ||
-                          kind === "worktree" ||
-                          kind === "verification"
-                        )
-                          setDraft({ ...draft, kind });
-                      }}
+                  </span>
+                  <Select
+                    value={draft.kind}
+                    onValueChange={(value) => {
+                      if (
+                        value === "pull_request" ||
+                        value === "commit" ||
+                        value === "branch" ||
+                        value === "worktree" ||
+                        value === "verification"
+                      )
+                        setDraft({ ...draft, kind: value });
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      aria-labelledby="evidence-type-label"
                     >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
                       {Object.entries(labels).map(([key, label]) => (
-                        <option key={key} value={key}>
+                        <SelectItem key={key} value={key}>
                           {label}
-                        </option>
+                        </SelectItem>
                       ))}
-                    </select>
-                  </label>
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field>
                   <label className="evidence-label">
