@@ -101,14 +101,15 @@ export function LinkTicketDialog({
   }
   const visible = query.trim() ? results : [];
   // The title names the button that opened the dialog.
-  const title = initialKind === "subticket" ? "Link subticket" : "Link ticket";
+  const title =
+    initialKind === "subticket" ? "Add subticket" : "Add relationship";
   return (
     <DialogShell
       open={open}
       onOpenChange={change}
       title={title}
       description={`Choose how ${ticket.reference} relates to another ticket.`}
-      primaryLabel={pending ? "Linking…" : title}
+      primaryLabel={pending ? "Linking…" : "Link ticket"}
       blockedReason={
         pending ? "Linking…" : chosen ? null : "Choose a ticket to link"
       }

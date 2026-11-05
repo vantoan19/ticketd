@@ -178,9 +178,18 @@
   .linked-work-reference {
     grid-column: 2;
   }
+  /* A long related title wraps so the ticket can still be told apart. */
   .linked-work-title {
     grid-column: 3;
-    white-space: nowrap;
+    white-space: normal;
+    overflow: visible;
+    align-items: flex-start;
+  }
+  .linked-work-title .truncate {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .linked-work-remove {
     position: absolute;

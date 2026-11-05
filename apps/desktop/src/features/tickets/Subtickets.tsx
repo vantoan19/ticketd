@@ -8,17 +8,14 @@ import "./subtickets.css";
 
 /**
  * The ticket's subtickets directly under its description, with local progress.
- * With none, only the Link subticket action shows.
+ * With none, only the Add subticket action shows.
  */
 export function Subtickets({
   work,
   select,
   external = false,
-  quiet = false,
 }: {
   external?: boolean;
-  /** With no subtickets, show nothing; the page offers Link subticket in a shared row. */
-  quiet?: boolean;
   work: LinkedWorkState;
   select: (reference: string) => void;
 }) {
@@ -26,8 +23,6 @@ export function Subtickets({
   const rows = work.rows.filter((row) => row.kind === "subticket");
   const links = work.current?.links;
   if (!links) return null;
-  if (quiet && links.children_progress.total === 0 && rows.length === 0)
-    return null;
   const add = (
     <Button
       variant="ghost"
@@ -35,7 +30,7 @@ export function Subtickets({
       onClick={() => work.openLink("subticket")}
     >
       <Plus aria-hidden="true" />
-      Link subticket
+      Add subticket
     </Button>
   );
   // Progress comes from the core over every subticket, not the page read.

@@ -59,29 +59,14 @@ export function Evidence({
   revision,
   trashed,
   refresh,
-  quiet = false,
-  onEmptyChange,
-  composeKey = 0,
 }: {
   reference: string;
   revision: number;
   trashed: boolean;
   refresh: () => Promise<void>;
-  /** With no evidence, show nothing; the page offers Add evidence in a shared row. */
-  quiet?: boolean;
-  /** Reports whether a finished read found no evidence at all. */
-  onEmptyChange?: (empty: boolean) => void;
-  /** Changing this opens the add form, for the page's shared Add evidence action. */
-  composeKey?: number;
 }) {
   const [composing, setComposing] = useState(false);
   const [items, setItems] = useState<EvidenceRecord[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [seenComposeKey, setSeenComposeKey] = useState(composeKey);
-  if (seenComposeKey !== composeKey) {
-    setSeenComposeKey(composeKey);
-    setComposing(true);
-  }
   const [draft, setDraft] = useState<EvidenceInput>(blank);
   const [editing, setEditing] = useState<EvidenceRecord | null>(null);
   const [error, setError] = useState("");
@@ -110,13 +95,8 @@ export function Evidence({
       if (page.length < 50) break;
     }
     setItems(all);
-    setLoaded(true);
     setMore(page.length === 50);
   }, [reference]);
-  const empty = loaded && items.length === 0;
-  useEffect(() => {
-    onEmptyChange?.(empty);
-  }, [empty, onEmptyChange]);
   useEffect(() => {
     void Promise.resolve()
       .then(load)
@@ -188,12 +168,11 @@ export function Evidence({
     }
     setComposing(true);
   }
-  if (quiet && !items.length && !composing && !editing && !error) return null;
   return (
-    <section aria-label="Implementation evidence" className="evidence-section">
+    <section aria-label="Evidence" className="evidence-section">
       <div className="evidence-heading">
         <h3>
-          Implementation evidence{" "}
+          Evidence{" "}
           <span className="text-muted-foreground">{items.length || ""}</span>
         </h3>
         {!trashed && (

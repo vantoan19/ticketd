@@ -396,21 +396,19 @@ test("subtickets read under the description with local progress, not in the rail
   );
 });
 
-test("Link subticket opens the link dialog already saying this ticket is the parent", async () => {
+test("Add subticket opens the link dialog already saying this ticket is the parent", async () => {
   bridge({
     children: [{ reference: "T-8", title: "Part", status: "Todo" }],
   });
   renderSection(base);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Link subticket" }),
-  );
-  const dialog = await screen.findByRole("dialog", { name: "Link subticket" });
+  fireEvent.click(await screen.findByRole("button", { name: "Add subticket" }));
+  const dialog = await screen.findByRole("dialog", { name: "Add subticket" });
   expect(
     within(dialog).getByRole("combobox", { name: "Relationship" }).textContent,
   ).toContain("parent of");
   // The primary waits for a chosen ticket and says why.
   expect(
-    within(dialog).getByRole("button", { name: "Link subticket" }),
+    within(dialog).getByRole("button", { name: "Link ticket" }),
   ).toHaveProperty("disabled", true);
   expect(within(dialog).getByText("Choose a ticket to link")).toBeTruthy();
 });
