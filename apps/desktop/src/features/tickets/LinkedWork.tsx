@@ -143,6 +143,16 @@ export function LinkedWork({
     return (
       <RailSection label="Relationships">
         <div id={`linked-work-${reference}`} className="linked-work" data-empty>
+          {current?.links && openContextGraph && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => openContextGraph(reference)}
+            >
+              <Network aria-hidden="true" />
+              Context graph
+            </Button>
+          )}
           {linkAction}
           {!current && (
             <span className="linked-work-state" role="status">

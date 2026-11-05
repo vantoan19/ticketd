@@ -1643,7 +1643,7 @@ test.each(["ticket", "document", "plan"] as const)(
     fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Back to context graph" }),
+      screen.getByRole("button", { name: "Back to workspace graph" }),
     );
     expect((screen.getByLabelText("Search") as HTMLInputElement).value).toBe(
       "First",
@@ -1673,7 +1673,7 @@ test("a sidebar view leaves an open workspace graph", async () => {
   expect(screen.getByRole("region", { name: "Workspace graph" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
   expect(screen.queryByRole("region", { name: "Workspace graph" })).toBeNull();
-  expect(screen.queryByText("Back to context graph")).toBeNull();
+  expect(screen.queryByText("Back to workspace graph")).toBeNull();
 });
 
 test("opening the workspace graph from Plans does not stack the Plans list", async () => {

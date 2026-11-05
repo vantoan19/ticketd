@@ -3,7 +3,7 @@ import { ArrowLeft, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Canvas } from "@/features/tickets/DependencyGraph";
+import { Canvas, SelectionPanel } from "@/features/tickets/DependencyGraph";
 import { byReference } from "@/features/tickets/dependency-graph-model";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { useTicketSearch } from "@/features/tickets/useTicketSearch";
@@ -35,7 +35,7 @@ function dependencyError(
   const text = String(reason);
   if (blocker === dependent) return `${dependent} cannot block itself.`;
   // The core names the loop's path; keep it when it is there.
-  if (/close a loop/i.test(text)) return text.replace(/^Error:\s*/, "");
+  if (/already exists\b/i.test(text)) return text.replace(/^Error:\s*/, "");
   if (/cycle/i.test(text))
     return `${dependent} already blocks ${blocker}, directly or through other tickets, so ${blocker} cannot also block it.`;
   if (/not found/i.test(text)) return `No ticket ${blocker} exists.`;
@@ -326,6 +326,14 @@ export function PlanDependencies({
               readable
             />
           </div>
+          {graph.nodes.find((node) => node.reference === selected) && (
+            <SelectionPanel
+              ticket={graph.nodes.find((node) => node.reference === selected)!}
+              origin=""
+              projects={projects}
+              onOpen={onOpen}
+            />
+          )}
           <p className="plan-note plan-legend">
             Arrows run from blocker to the ticket that waits. Dashed tickets are
             outside this Plan.

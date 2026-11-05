@@ -24,11 +24,14 @@ const GROUP_PAGE = 10;
 export function ContextGraph({
   active = true,
   origin,
+  originLabel = "source",
   onBack,
   onOpen,
 }: {
   active?: boolean;
   origin: string;
+  /** What Back returns to once the history is empty. */
+  originLabel?: string;
   onBack: () => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
@@ -190,14 +193,34 @@ export function ContextGraph({
   const centerLabel = graph?.nodes.find(
     (node) => node.id === graph.center,
   )?.label;
-  const kindGroups = (["ticket", "document", "plan"] as const)
-    .map((kind) => ({
+  // Connected items group by how they connect to the centre, with the same
+  // counts as the summary; items only reached through an expansion come last.
+  const nodeById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
+  const relationGroups = [...groupItems]
+    .map(([kind, items]) => ({
+      key: kind,
       kind,
-      nodes: (graph?.nodes ?? []).filter(
-        (node) => node.id !== graph?.center && node.kind === kind,
-      ),
+      title: edgeLabels[kind] ?? kind,
+      nodes: [...items].flatMap((id) => nodeById.get(id) ?? []),
     }))
     .filter((group) => group.nodes.length > 0);
+  const direct = new Set([...groupItems.values()].flatMap((set) => [...set]));
+  const further = (graph?.nodes ?? []).filter(
+    (node) => node.id !== graph?.center && !direct.has(node.id),
+  );
+  const kindGroups = [
+    ...relationGroups,
+    ...(further.length
+      ? [
+          {
+            key: "further",
+            kind: null,
+            title: "Further connections",
+            nodes: further,
+          },
+        ]
+      : []),
+  ];
   function actions(item: Graph["nodes"][number]) {
     if (item.id === graph?.center) return null;
     const expanded = expandedIds.includes(item.id);
@@ -233,7 +256,7 @@ export function ContextGraph({
       </div>
       <div className="context-graph-toolbar">
         <Button variant="ghost" onClick={back}>
-          {history.length ? "Back" : "Back to source"}
+          {history.length ? "Back" : `Back to ${originLabel}`}
         </Button>
         {centerLabel && (
           <span className="context-graph-scope">Centered on {centerLabel}</span>
@@ -253,11 +276,8 @@ export function ContextGraph({
             checked={includeDetails}
             onChange={(event) => {
               const include = event.target.checked;
-              if (!include) {
-                setExpandedIds([]);
-                setPages([]);
-                setGraph(null);
-              }
+              // Expand choices stay; ones whose item disappears are dropped when
+              // the graph reloads.
               setIncludeDetails(include);
             }}
           />{" "}
@@ -386,11 +406,11 @@ export function ContextGraph({
         </p>
       )}
       {kindGroups.map((group) => {
-        const limit = shownPerKind[group.kind] ?? GROUP_PAGE;
+        const limit = shownPerKind[group.key] ?? GROUP_PAGE;
         return (
-          <div key={group.kind}>
+          <div key={group.key}>
             <h3>
-              {kindNames[group.kind]}s {group.nodes.length}
+              {group.title} {group.nodes.length}
             </h3>
             <ul className="context-graph-list">
               {group.nodes.slice(0, limit).map((node) => (
@@ -409,12 +429,14 @@ export function ContextGraph({
                     <Crosshair aria-hidden="true" />
                   </Button>
                   {graph &&
-                    connectionRows(node.id, graph).map((row) => (
-                      <p key={row.key}>
-                        <strong>{edgeLabels[row.kind] ?? row.kind}</strong> ·{" "}
-                        {row.text}
-                      </p>
-                    ))}
+                    connectionRows(node.id, graph)
+                      .filter((row) => !group.kind || row.kind === group.kind)
+                      .map((row) => (
+                        <p key={row.key}>
+                          <strong>{edgeLabels[row.kind] ?? row.kind}</strong> ·{" "}
+                          {row.text}
+                        </p>
+                      ))}
                 </li>
               ))}
             </ul>
@@ -425,12 +447,11 @@ export function ContextGraph({
                 onClick={() =>
                   setShownPerKind((value) => ({
                     ...value,
-                    [group.kind]: limit + GROUP_PAGE,
+                    [group.key]: limit + GROUP_PAGE,
                   }))
                 }
               >
-                Show {Math.min(GROUP_PAGE, group.nodes.length - limit)} more{" "}
-                {kindNames[group.kind].toLowerCase()}s
+                Show {Math.min(GROUP_PAGE, group.nodes.length - limit)} more
               </Button>
             )}
           </div>

@@ -40,19 +40,24 @@ function planContext(
   const unlinked = members.some((item) => !item.project_id);
   const tickets = `${members.length} ${members.length === 1 ? "ticket" : "tickets"}`;
   const done = members.filter((item) => item.status === "Done").length;
-  // A Duplicate is resolved by its original, so it never holds progress back.
+  // A Duplicate is resolved by its original and a Canceled ticket will not be
+  // done, so neither holds progress back.
   const duplicates = members.filter(
     (item) => item.status === "Duplicate",
   ).length;
-  const counted = members.length - duplicates;
+  const canceled = members.filter((item) => item.status === "Canceled").length;
+  const counted = members.length - duplicates - canceled;
   const blocked = members.filter(
     (item) => item.availability === "Blocked",
   ).length;
   return [
-    names.length || unlinked
-      ? `${tickets} across ${list([...names, ...(unlinked ? ["Unlinked"] : [])])}`
-      : tickets,
+    names.length === 0 && unlinked
+      ? `${tickets}, not in a project`
+      : names.length
+        ? `${tickets} across ${list([...names, ...(unlinked ? ["Unlinked"] : [])])}`
+        : tickets,
     ...(counted ? [`${done} of ${counted} done`] : []),
+    ...(canceled ? [`${canceled} canceled`] : []),
     ...(duplicates ? [`${duplicates} duplicate`] : []),
     ...(blocked ? [`${blocked} blocked`] : []),
   ].join(" · ");

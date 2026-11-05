@@ -677,7 +677,10 @@ fn workspace_search_matches_prefixes_headings_and_counts_hidden_connections() {
     assert_eq!(by_prefix.nodes[0].id, hub.id);
     // The hub's spokes are not shown, but their number is.
     assert!(by_prefix.edges.is_empty());
-    assert_eq!(by_prefix.connection_counts[&hub.id], 5 + 1);
+    // The update-details edge counts only when details are included.
+    assert_eq!(by_prefix.connection_counts[&hub.id], 5);
+    let with_details = workspace.workspace_graph(&search("hu", true)).unwrap();
+    assert_eq!(with_details.connection_counts[&hub.id], 5 + 1);
 }
 
 #[test]

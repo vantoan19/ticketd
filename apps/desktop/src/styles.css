@@ -613,6 +613,13 @@
   flex: 1 1 auto;
   min-height: 120px;
   overflow-y: auto;
+  /* Edge shadows appear only while there is more to scroll to. */
+  background:
+    linear-gradient(var(--sidebar) 30%, transparent) top / 100% 24px local,
+    linear-gradient(transparent, var(--sidebar) 70%) bottom / 100% 24px local,
+    linear-gradient(var(--border), transparent) top / 100% 8px scroll,
+    linear-gradient(transparent, var(--border)) bottom / 100% 8px scroll;
+  background-repeat: no-repeat;
 }
 .sidebar-heading {
   color: var(--foreground);

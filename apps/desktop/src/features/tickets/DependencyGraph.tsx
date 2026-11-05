@@ -106,7 +106,21 @@ function Toolbar({
   const { zoomIn, zoomOut, setViewport } = useReactFlow();
   const width = useStore((state) => state.width);
   const height = useStore((state) => state.height);
-  const zoom = useStore((state) => state.transform[2]);
+  const [panX, panY, zoom] = useStore((state) => state.transform);
+  // Tickets wholly outside the view, so a dense graph never silently hides some.
+  let offscreen = 0;
+  if (width && height)
+    for (const at of positions.values()) {
+      const left = at.x * zoom + panX;
+      const top = at.y * zoom + panY;
+      if (
+        left + NODE_WIDTH * zoom < 0 ||
+        left > width ||
+        top + NODE_HEIGHT * zoom < 0 ||
+        top > height
+      )
+        offscreen++;
+    }
   return (
     <Panel position="top-left" className="graph-toolbar">
       <IconButton label="Zoom out" onClick={() => void zoomOut()}>
@@ -136,6 +150,11 @@ function Toolbar({
         <Maximize aria-hidden="true" />
         Fit
       </Button>
+      {offscreen > 0 && (
+        <span className="graph-zoom" role="status">
+          {offscreen} off-screen
+        </span>
+      )}
     </Panel>
   );
 }
@@ -255,8 +274,11 @@ export function Canvas({
         id: `${edge.blocker}-${edge.dependent}`,
         source: edge.blocker,
         target: edge.dependent,
-        type: "smoothstep",
-        markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+        // Each edge keeps its own curve; a stepped route would merge the edges of
+        // a hub into one shared bus.
+        type: "default",
+        // The marker's arrow is a quarter of its box, so the box is large.
+        markerEnd: { type: MarkerType.ArrowClosed, width: 40, height: 40 },
       })),
     [graph],
   );
@@ -272,6 +294,7 @@ export function Canvas({
         nodesFocusable={false}
         edgesFocusable={false}
         elementsSelectable={false}
+        zoomOnDoubleClick={false}
         proOptions={{ hideAttribution: true }}
       >
         <Background />
@@ -330,7 +353,7 @@ function TicketList({
   );
 }
 
-function SelectionPanel({
+export function SelectionPanel({
   ticket,
   origin,
   projects,
@@ -342,10 +365,12 @@ function SelectionPanel({
   ticket: GraphTicket;
   origin: string;
   projects: Project[];
-  plans: Plan[];
+  /** Without Plans the panel leaves out the Plan line. */
+  plans?: Plan[];
   onOpen: (reference: string) => void;
-  onBack: () => void;
-  onCenter: (reference: string) => void;
+  /** With neither back nor center the panel is compact: facts and Open only. */
+  onBack?: () => void;
+  onCenter?: (reference: string) => void;
 }) {
   const [loaded, setLoaded] = useState<{
     ticket: Ticket;
@@ -377,7 +402,7 @@ function SelectionPanel({
     status: item.status,
   }));
   const project = projects.find((item) => item.id === detail?.project_id);
-  const plan = plans.find((item) => item.id === detail?.plan_id);
+  const plan = plans?.find((item) => item.id === detail?.plan_id);
   const placeholder = detail ? "None" : "Loading…";
   return (
     <aside className="graph-panel" aria-label="Selected ticket">
@@ -407,25 +432,33 @@ function SelectionPanel({
       <dl className="graph-panel-facts">
         <dt>Project</dt>
         <dd>{project?.name ?? placeholder}</dd>
-        <dt>Plan</dt>
-        <dd>{plan?.name ?? placeholder}</dd>
+        {plans && (
+          <>
+            <dt>Plan</dt>
+            <dd>{plan?.name ?? placeholder}</dd>
+          </>
+        )}
       </dl>
       <div className="graph-panel-actions">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onCenter(ticket.reference)}
-        >
-          Center graph on {ticket.reference}
-        </Button>
+        {onCenter && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onCenter(ticket.reference)}
+          >
+            Center graph on {ticket.reference}
+          </Button>
+        )}
         {ticket.reference !== origin && (
           <Button size="sm" onClick={() => onOpen(ticket.reference)}>
             Open {ticket.reference}
           </Button>
         )}
-        <Button variant="outline" size="sm" onClick={onBack}>
-          Back to original ticket
-        </Button>
+        {onBack && (
+          <Button variant="outline" size="sm" onClick={onBack}>
+            Back to original ticket
+          </Button>
+        )}
       </div>
     </aside>
   );

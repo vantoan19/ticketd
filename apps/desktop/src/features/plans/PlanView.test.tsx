@@ -166,6 +166,20 @@ test("shows status counts and members for the Plan, and updates both when a memb
   );
 });
 
+test("progress leaves out Canceled and Duplicate tickets and says when none are in a project", async () => {
+  tickets = [
+    { id: "1", reference: "T-1", status: "Done", plan: "e1" },
+    { id: "2", reference: "T-2", status: "Canceled", plan: "e1" },
+    { id: "3", reference: "T-3", status: "Duplicate", plan: "e1" },
+  ];
+  await openLaunch();
+  expect(
+    await screen.findByText(
+      "Plan · 3 tickets, not in a project · 1 of 1 done · 1 canceled · 1 duplicate",
+    ),
+  ).toBeTruthy();
+});
+
 test("an empty name shows an inline error and changes nothing", async () => {
   await openLaunch();
   fireEvent.click(screen.getByRole("button", { name: "Rename Plan" }));

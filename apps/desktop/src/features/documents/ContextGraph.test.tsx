@@ -156,7 +156,9 @@ test("a crowded neighbourhood opens as a grouped list with a map toggle", async 
       max_work: 800,
     });
   render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
-  expect(await screen.findByText("Mentions 13")).toBeTruthy();
+  expect(
+    await screen.findByRole("heading", { name: "Mentions 13" }),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Show map" }));
   expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
 });

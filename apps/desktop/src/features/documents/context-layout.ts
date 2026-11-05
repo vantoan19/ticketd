@@ -16,6 +16,19 @@ const MID = { x: 400, y: 240 };
 /** Concentric rings sized by card footprint, so a dense set starts without overlap. */
 function ringPlacement(ids: string[], center?: string): Record<string, Point> {
   const points: Record<string, Point> = {};
+  if (!center) {
+    // Nothing is central (the workspace map): a compact, nearly square grid fits
+    // the view at a larger zoom than rings do, and the forces then pull
+    // connected cards together.
+    const columns = Math.max(1, Math.ceil(Math.sqrt(ids.length)));
+    ids.forEach((id, index) => {
+      points[id] = {
+        x: MID.x + (index % columns) * (CARD_WIDTH + GAP),
+        y: MID.y + Math.floor(index / columns) * (CARD_HEIGHT + GAP),
+      };
+    });
+    return points;
+  }
   const rest = ids.filter((id) => id !== center);
   if (center && ids.includes(center)) points[center] = { ...MID };
   let index = 0;

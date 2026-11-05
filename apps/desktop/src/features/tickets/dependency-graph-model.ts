@@ -7,8 +7,8 @@ export const NODE_HEIGHT = 76;
 /** Widest rank drawn on one row; wider ranks wrap onto more rows. */
 export const MAX_PER_ROW = 8;
 /** Above this many linked tickets rows are narrower, so the graph stays readable. */
-export const DENSE_NODES = 20;
-export const DENSE_PER_ROW = 5;
+export const DENSE_NODES = 8;
+export const DENSE_PER_ROW = 4;
 const COLUMN_GAP = 32;
 const ROW_GAP = 64;
 
