@@ -98,9 +98,9 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
     Ok(())
 }
 
-// A Document's heading: its explicit title, else the first plain-text line of its body, else
-// of the originating Activity's brief. `ticketd_heading` is registered on every workspace connection.
-pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_heading(substr(d.body, 1, 4096)), ticketd_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), 'Untitled')";
+// A Document's heading: its explicit title, else the originating Activity's brief (docs/mvp-spec.md),
+// else the first plain-text line of its body. `ticketd_heading` is registered on every workspace connection.
+pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), ticketd_heading(substr(d.body, 1, 4096)), 'Untitled')";
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(
@@ -130,49 +130,28 @@ fn summary_from_row(
 /// is centred on its first match so a result shows why it matched.
 fn plain_snippet(body: &str, query: Option<&str>) -> String {
     const LIMIT: usize = 160;
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
     let mut text = String::new();
-    let mut fenced = false;
-    for line in body.lines() {
-        let line = line.trim();
-        if line.starts_with("```") || line.starts_with("~~~") {
-            fenced = !fenced;
-            continue;
-        }
-        if fenced || line.is_empty() {
-            continue;
-        }
-        let line = line.trim_start_matches(['#', '>', ' ']);
-        let line = line
-            .strip_prefix("- ")
-            .or_else(|| line.strip_prefix("* "))
-            .unwrap_or(line);
-        let line = line
-            .strip_prefix("[ ] ")
-            .or_else(|| line.strip_prefix("[x] "))
-            .unwrap_or(line);
-        let mut chars = line.chars().peekable();
-        let mut plain = String::new();
-        while let Some(ch) = chars.next() {
-            match ch {
-                '*' | '_' | '`' | '\\' => {}
-                '!' if chars.peek() == Some(&'[') => {}
-                '[' => {}
-                ']' if chars.peek() == Some(&'(') => {
-                    for next in chars.by_ref() {
-                        if next == ')' {
-                            break;
-                        }
-                    }
-                }
-                ']' => {}
-                other => plain.push(other),
+    let mut in_code_block = false;
+    for event in Parser::new_ext(
+        body,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES,
+    ) {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
+            Event::End(TagEnd::CodeBlock) => in_code_block = false,
+            Event::Text(part) | Event::Code(part) | Event::InlineMath(part) if !in_code_block => {
+                text.push_str(&part);
             }
+            // Inline markup ends no word; every other boundary (block, table cell, break) separates words.
+            Event::End(
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link,
+            ) => {}
+            Event::SoftBreak | Event::HardBreak | Event::End(_) | Event::Rule => text.push(' '),
+            _ => {}
         }
-        if !text.is_empty() {
-            text.push(' ');
-        }
-        text.push_str(plain.trim());
     }
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let chars: Vec<char> = text.chars().collect();
     let start = query
         .and_then(|needle| {
@@ -285,6 +264,26 @@ impl Workspace {
         let columns = summary_columns();
         let sql = format!(
             "SELECT {columns} FROM documents d LEFT JOIN document_opens o ON d.id = o.document_id WHERE d.trashed = 0 AND (o.document_id IS NOT NULL OR d.kept = 1 OR (?3 AND d.originating_activity_id IS NOT NULL)) AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY o.sequence DESC, d.created_at DESC, d.id LIMIT ?1 OFFSET ?2"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        Ok(statement
+            .query_map(params![limit.min(100), offset, include_support], |row| {
+                summary_from_row(row, None)
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
+    /// Every live Document, most recently changed first, one bounded page at a time.
+    /// Activity details are included only when asked for or kept.
+    pub fn all_documents_page(
+        &self,
+        limit: u32,
+        offset: u32,
+        include_support: bool,
+    ) -> Result<Vec<DocumentSummary>, Error> {
+        let columns = summary_columns();
+        let sql = format!(
+            "SELECT {columns} FROM documents d WHERE d.trashed = 0 AND (?3 OR d.originating_activity_id IS NULL OR d.kept = 1) ORDER BY d.updated_at DESC, d.id LIMIT ?1 OFFSET ?2"
         );
         let mut statement = self.connection.prepare(&sql)?;
         Ok(statement

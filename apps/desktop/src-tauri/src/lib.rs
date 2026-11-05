@@ -118,6 +118,12 @@ fn set_document_tag(id: String, tag: String, present: bool) -> Result<(), String
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn all_documents(offset: u32, include_support: bool) -> Result<Vec<DocumentSummary>, String> {
+    Workspace::open_default()
+        .and_then(|w| w.all_documents_page(50, offset, include_support))
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn trashed_documents(offset: u32) -> Result<Vec<DocumentSummary>, String> {
     Workspace::open_default()
         .and_then(|w| w.trashed_documents_page(50, offset))
@@ -1361,6 +1367,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_document_pin,
             document_tags,
             set_document_tag,
+            all_documents,
             trashed_documents,
             set_document_trashed,
             show_document,
