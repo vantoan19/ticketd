@@ -11,7 +11,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type FormEvent,
   type ReactNode,
 } from "react";
@@ -98,21 +97,19 @@ function loadDraft(reference: string): Draft {
 const hasDraft = (draft: Draft) =>
   draft.brief !== "" || draft.details !== null || draft.support !== "";
 
-const compactQuery = "(max-width: 1023px)";
-/** Below 1024px the composer's secondary actions share one Add menu. */
-function useCompactComposer() {
-  return useSyncExternalStore(
-    (notify) => {
-      if (typeof window.matchMedia !== "function") return () => {};
-      const media = window.matchMedia(compactQuery);
-      media.addEventListener("change", notify);
-      return () => media.removeEventListener("change", notify);
-    },
-    () =>
-      typeof window.matchMedia === "function" &&
-      window.matchMedia(compactQuery).matches,
-    () => false,
-  );
+/** Below this width the composer's secondary actions share one Add menu. */
+const COMPACT_WIDTH = 460;
+function useCompactComposer(element: HTMLElement | null) {
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const measure = () => setCompact(element.clientWidth < COMPACT_WIDTH);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return compact;
 }
 
 /** The first sentence of an update, short enough to quote in a reply. */
@@ -283,10 +280,12 @@ export function Activity({
     Record<string, { heading: string; trashed: boolean; attached: boolean }>
   >({});
   const [picking, setPicking] = useState(false);
-  const compact = useCompactComposer();
+  const [composer, setComposer] = useState<HTMLFormElement | null>(null);
+  const compact = useCompactComposer(composer);
   // Bumped to put the caret in the update editor / the new Details editor.
   const [focusUpdate, setFocusUpdate] = useState(0);
   const [focusDetails, setFocusDetails] = useState(false);
+  const replied = useRef(false);
   const [view, setView] = useState<"all" | "updates">("all");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const openDocument = useContext(DocumentNavigation);
@@ -356,7 +355,7 @@ export function Activity({
     const base = hasVisibleText(draft) ? `${draft.trimEnd()}\n\n` : "";
     setComposing(true);
     setDraft(`${base}> Re: ${quoteOf(brief)}\n\n`);
-    setFocusUpdate((count) => count + 1);
+    replied.current = true;
   }
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -622,6 +621,7 @@ export function Activity({
       )}
       {!trashed && (composing || edit) && (
         <form
+          ref={setComposer}
           className="activity-composer"
           onSubmit={(event) => void save(event)}
         >
@@ -921,7 +921,17 @@ export function Activity({
                           <MoreHorizontal />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent
+                        align="end"
+                        onCloseAutoFocus={(event) => {
+                          // Focus goes to the composer, not back to the menu button.
+                          if (replied.current) {
+                            event.preventDefault();
+                            replied.current = false;
+                            setFocusUpdate((count) => count + 1);
+                          }
+                        }}
+                      >
                         <DropdownMenuItem
                           disabled={!!edit}
                           onSelect={() => reply(item.note.brief)}
