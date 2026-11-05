@@ -313,6 +313,18 @@ export function WorkspaceGraph({
       setLoadingPage(false);
     }
   };
+  // Pinned below the scrolling selection in the map's panel, so they never sit
+  // below the fold of a long selection.
+  const previewActions = preview ? (
+    <div className="context-graph-preview-actions">
+      <Button onClick={() => onOpen(preview)}>
+        {preview.kind === "ticket" ? "Open ticket" : "Open item"}
+      </Button>
+      <Button variant="outline" onClick={() => onFocus(preview.id)}>
+        Show only its neighbors
+      </Button>
+    </div>
+  ) : null;
   const previewPanel = preview ? (
     <>
       <p className="context-graph-eyebrow">Selected</p>
@@ -347,11 +359,6 @@ export function WorkspaceGraph({
           in total
         </p>
       )}
-      <span className="context-graph-grow" />
-      <Button onClick={() => onOpen(preview)}>Open item</Button>
-      <Button variant="outline" onClick={() => onFocus(preview.id)}>
-        Context graph
-      </Button>
     </>
   ) : (
     <p>Select an item to preview it.</p>
@@ -486,6 +493,7 @@ export function WorkspaceGraph({
                 )}
                 {previewPanel}
               </div>
+              {previewActions}
               {unconnected.length > 0 && (
                 <div
                   className="context-graph-unconnected"
@@ -514,7 +522,10 @@ export function WorkspaceGraph({
             </aside>
           </div>
         ) : (
-          <aside className="context-graph-strip">{previewPanel}</aside>
+          <aside className="context-graph-strip">
+            {previewPanel}
+            {previewActions}
+          </aside>
         )}
         {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
           <p role="status" className="context-graph-status">

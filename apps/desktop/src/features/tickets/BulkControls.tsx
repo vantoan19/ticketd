@@ -123,7 +123,7 @@ export function BulkControls({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 disabled={pending}
                 aria-label="Status of selected tickets"
@@ -171,7 +171,7 @@ export function BulkControls({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 disabled={pending}
                 aria-label="Organize selected tickets"

@@ -1433,7 +1433,9 @@ test("totals and group counts describe the whole result, not the loaded page", a
     .map(([, args]) => args.filter.order);
   expect(new Set(asked)).toEqual(new Set(["Workflow"]));
   const countCall = bridge.invoke.mock.calls.find(
-    ([command]) => command === "count_tickets",
+    // The Projects page counts tickets without a project; skip that one.
+    ([command, args]) =>
+      command === "count_tickets" && args.filter.unlinked === false,
   );
   expect(countCall?.[1].filter.order).toBe("Workflow");
 });
@@ -1897,7 +1899,9 @@ test.each(["ticket", "document", "plan"] as const)(
     fireEvent.click(
       screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Back to workspace graph" }),
     );
@@ -2000,7 +2004,9 @@ test("returns to local graph state after opening an item", async () => {
   fireEvent.click(
     screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });

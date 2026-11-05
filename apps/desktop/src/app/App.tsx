@@ -379,6 +379,10 @@ function AppContent() {
                           navigate({});
                           scope("all", item.id);
                         }}
+                        onShowUnassigned={() => {
+                          navigate({});
+                          scope("all", "unlinked");
+                        }}
                       />
                     </div>
                   }

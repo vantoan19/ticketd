@@ -71,7 +71,9 @@ test("filters workspace results and focuses a selected item deliberately", async
   fireEvent.click(
     (await screen.findAllByRole("button", { name: "Discovery" })).at(-1)!,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
   expect(focus).toHaveBeenCalledWith("doc");
   fireEvent.change(screen.getByLabelText("Search"), {
     target: { value: "needle" },
@@ -122,7 +124,9 @@ test("expands omitted connections while retaining the selected item", async () =
       expect.objectContaining({ adjacency_limit: 6 }),
     ),
   );
-  expect(screen.getByRole("button", { name: "Context graph" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  ).toBeTruthy();
 });
 
 test("connects visible items across candidate pages", async () => {
@@ -358,7 +362,9 @@ test("items with no relationship leave the canvas for a Not connected list", asy
   fireEvent.click(
     within(group).getByRole("button", { name: "T-4 · Dark mode" }),
   );
-  expect(await screen.findByRole("button", { name: "Open item" })).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "Open ticket" }),
+  ).toBeTruthy();
 });
 
 test("an item created while the graph is open is added, not left counted but unseen", async () => {
@@ -391,4 +397,45 @@ test("an item created while the graph is open is added, not left counted but uns
       { name: "Untitled" },
     ),
   ).toBeTruthy();
+});
+
+test("a selected ticket offers Open ticket and Show only its neighbors", async () => {
+  vi.mocked(client.workspaceGraph).mockResolvedValue({
+    node_tags: {},
+    total: 1,
+    nodes: [
+      {
+        id: "one",
+        kind: "ticket",
+        label: "T-1 · First",
+        state: "Todo",
+        trashed: false,
+        activity_detail: false,
+      },
+    ],
+    edges: [],
+    next_cursor: null,
+    omitted: false,
+    omitted_groups: [],
+  });
+  const open = vi.fn();
+  const focus = vi.fn();
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={focus}
+      onOpen={open}
+    />,
+  );
+  fireEvent.click(
+    (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
+  expect(focus).toHaveBeenCalledWith("one");
 });
