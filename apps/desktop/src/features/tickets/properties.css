@@ -181,6 +181,8 @@
 }
 /* The rail shows a two-line excerpt; Activity holds the full entry. */
 .latest-update-text {
+  font-size: 14px;
+  line-height: 20px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -206,6 +208,11 @@ aside.ticket-properties :disabled svg {
   align-items: center;
   gap: 10px;
   min-height: 32px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.rail-none {
+  color: var(--muted-foreground);
   font-size: 14px;
   line-height: 20px;
 }

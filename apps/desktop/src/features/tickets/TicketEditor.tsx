@@ -573,18 +573,6 @@ export function TicketEditor({
               <div
                 ref={documentRef}
                 className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
-                onClick={(event) => {
-                  const target = event.target;
-                  if (
-                    target instanceof Element &&
-                    target.closest(
-                      "a, button, input, select, textarea, summary, [role=button]",
-                    )
-                  )
-                    return;
-                  if (window.getSelection()?.toString()) return;
-                  setBodyMode("editing");
-                }}
               >
                 <MarkdownDocument
                   source={rendered}

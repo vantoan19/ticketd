@@ -1925,7 +1925,7 @@ test("opens Capture from anywhere with the global shortcut", async () => {
   expect(await screen.findByRole("dialog")).toBeTruthy();
 });
 
-test("the ticket detail has one bounded scroller so the wheel can move it", async () => {
+test("the ticket detail bounds its height so the document and rail can scroll on their own", async () => {
   vi.useFakeTimers();
   const ticket = {
     id: "1",
@@ -1957,6 +1957,15 @@ test("the ticket detail has one bounded scroller so the wheel can move it", asyn
   expect(panel.style.overflow).toBe("hidden");
   expect(panel.style.display).toBe("flex");
   const detail = panel.querySelector<HTMLElement>(".ticket-detail")!;
-  expect(detail.querySelectorAll(".detail-scroll")).toHaveLength(1);
-  expect(detail.querySelector(".detail-scroll")!.parentElement).toBe(detail);
+  const bounded = detail.querySelectorAll(".detail-scroll");
+  expect(bounded).toHaveLength(1);
+  expect(bounded[0]!.parentElement).toBe(detail);
+  // The document column and the rail are siblings, each scrolling by its own
+  // overflow (styles.css) once the pane is wide enough for both.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
+  expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
+  expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
 });
