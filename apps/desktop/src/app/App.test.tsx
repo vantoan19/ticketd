@@ -1640,7 +1640,9 @@ test.each(["ticket", "document", "plan"] as const)(
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Open item" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Back to workspace graph" }),
@@ -1741,7 +1743,9 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);

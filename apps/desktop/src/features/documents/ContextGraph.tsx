@@ -3,8 +3,9 @@ import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
-import { GraphLegend, KindIcon } from "./GraphLegend";
+import { KindIcon } from "./GraphLegend";
 import {
+  cardParts,
   connectionRows,
   edgeLabels,
   flowEdges,
@@ -340,7 +341,8 @@ export function ContextGraph({
             <ContextGraphCanvas
               nodes={(graph?.nodes ?? []).map((node) => ({
                 id: node.id,
-                label: `${kindNames[node.kind].toUpperCase()} · ${node.label}`,
+                label: node.label,
+                ...cardParts(node),
               }))}
               edges={edges}
               selected={selected}
@@ -389,9 +391,6 @@ export function ContextGraph({
             " · Too many connections for a map; use the list or center on an item."}
         </p>
       )}
-      <div className="context-graph-toolbar">
-        <GraphLegend />
-      </div>
       {graph && (
         <p role="status" className="context-graph-status">
           Showing {graph.nodes.length}{" "}

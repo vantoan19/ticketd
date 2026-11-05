@@ -1,12 +1,29 @@
 // @vitest-environment jsdom
-import { act, render } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 
+const instance = {
+  fitView: vi.fn(),
+  zoomIn: vi.fn(),
+  zoomOut: vi.fn(),
+  getNodes: () => [],
+  getZoom: () => 1,
+};
 vi.mock("@xyflow/react", () => ({
-  ReactFlow: () => <div>Canvas</div>,
+  ReactFlow: ({ onInit }: { onInit: (value: unknown) => void }) => {
+    onInit(instance);
+    return <div>Canvas</div>;
+  },
   Background: () => null,
-  Controls: () => null,
+  Handle: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
 }));
 
@@ -70,4 +87,35 @@ test("metadata refresh keeps layout and stale worker results are ignored", () =>
   );
   expect(onPositions).toHaveBeenCalledWith({ a: { x: 2, y: 2 } });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+test("the legend and one zoom and Fit control stay on the canvas, and Fit never clips", () => {
+  const view = render(
+    <ContextGraphCanvas
+      edges={[]}
+      selected={null}
+      positions={{}}
+      onPositions={vi.fn()}
+      viewport={{ x: 0, y: 0, zoom: 0.5 }}
+      onViewport={vi.fn()}
+      onSelect={vi.fn()}
+      onError={vi.fn()}
+      nodes={[]}
+    />,
+  );
+  const canvas = view.getByLabelText("Connections canvas");
+  expect(within(canvas).getByRole("list", { name: "Legend" })).toBeTruthy();
+  const zoom = within(canvas).getByRole("group", { name: "Zoom" });
+  expect(zoom.textContent).toContain("50%");
+  fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));
+  expect(instance.zoomIn).toHaveBeenCalled();
+  fireEvent.click(within(zoom).getByRole("button", { name: "Fit" }));
+  // No readable-zoom floor: a crowded map zooms out until every card is inside.
+  expect(instance.fitView).toHaveBeenCalledWith(
+    expect.objectContaining({ minZoom: 0.05 }),
+  );
+  expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
+});

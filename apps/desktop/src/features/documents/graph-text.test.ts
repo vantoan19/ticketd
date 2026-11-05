@@ -1,8 +1,10 @@
 import { describe, expect, it, test } from "vitest";
 import {
+  cardParts,
   centerZoom,
   connectionRows,
   describeEdge,
+  flowEdges,
   opensAsMap,
   panToInclude,
   plainText,
@@ -199,4 +201,33 @@ test("a passage differing from the title only by punctuation is not repeated", (
       nodes,
     ),
   ).not.toContain("“");
+});
+
+test("every edge is labeled on the line and nodes have no all-caps type prefix", () => {
+  const edges = flowEdges(
+    (["blocks", "mention", "subticket", "membership", "spec"] as const).map(
+      (kind) => ({ source: "a", target: "b", kind, explanation: null }),
+    ),
+  );
+  expect(edges.map((edge) => edge.label)).toEqual([
+    "blocks",
+    "mentions",
+    "parent of",
+    "in Plan",
+    "spec of",
+  ]);
+  expect(
+    cardParts({
+      id: "t",
+      kind: "ticket",
+      label: "T-3 · Redesign pricing page",
+      state: "Todo",
+      trashed: false,
+      activity_detail: false,
+    }),
+  ).toEqual({
+    ref: "T-3",
+    title: "Redesign pricing page",
+    caption: "Ticket · Todo",
+  });
 });
