@@ -84,14 +84,23 @@ afterEach(() => {
 async function openReview(onRestore: () => Promise<void> = async () => {}) {
   render(<SettingsView onRestore={onRestore} onOpenInbox={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Restore from backup…" }));
-  return screen.findByRole("dialog", { name: "Restore from a backup" });
+  return screen.findByRole("dialog", { name: "Restore from backup" });
 }
 
 function replaceButton(dialog: HTMLElement) {
   return within(dialog).getByRole("button", {
-    name: "Replace workspace",
+    name: "Replace workspace with backup",
   }) as HTMLButtonElement;
 }
+
+test("the comparison names what will be replaced, current workspace first", async () => {
+  const dialog = await openReview();
+  await within(dialog).findByText("Backup checked.");
+  const headers = within(within(dialog).getByRole("table"))
+    .getAllByRole("columnheader")
+    .map((cell) => cell.textContent);
+  expect(headers).toEqual(["Replaces", "Current workspace", "This backup"]);
+});
 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);

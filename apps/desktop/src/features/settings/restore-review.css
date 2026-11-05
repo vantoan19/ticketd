@@ -161,6 +161,9 @@
   font-weight: 500;
   color: var(--muted-foreground);
 }
+.restore-compare thead th:first-child {
+  text-align: left;
+}
 .restore-compare tbody th {
   text-align: left;
   font-weight: 400;
