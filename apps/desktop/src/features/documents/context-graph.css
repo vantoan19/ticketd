@@ -133,6 +133,10 @@
   background: var(--surface);
   color: var(--foreground);
   border-color: var(--border);
+  /* Cards are drawn small to fit a map, so their text starts larger than usual. */
+  font-size: 14px;
+  line-height: 1.25;
+  overflow: hidden;
 }
 .context-graph-heading,
 .context-graph-toolbar {

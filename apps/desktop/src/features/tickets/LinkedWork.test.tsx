@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { LinkedWork, LinkedWorkDialogs } from "@/features/tickets/LinkedWork";
 import { Subtickets } from "@/features/tickets/Subtickets";
 import { useLinkedWork } from "@/features/tickets/useLinkedWork";
@@ -149,6 +150,18 @@ test("a ticket with no links shows only Add relationship once the read succeeds"
   ).toBe("Relationships");
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByRole("button", { name: "Dependencies" })).toBeNull();
+});
+
+test("a ticket with no links still offers its Context graph", async () => {
+  bridge();
+  const open = vi.fn();
+  render(
+    <ContextGraphNavigation.Provider value={open}>
+      <Section ticket={base} refresh={vi.fn()} onOpenGraph={vi.fn()} />
+    </ContextGraphNavigation.Provider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Context graph" }));
+  expect(open).toHaveBeenCalledWith("T-1");
 });
 
 test("a trashed ticket still shows its relationships, without actions to change them", async () => {

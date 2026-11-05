@@ -96,7 +96,7 @@ test("the map or list choice holds after centring on another item", async () => 
   expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
 });
 
-test("a very dense neighbourhood stays a list and groups rows by kind", async () => {
+test("a very dense neighbourhood stays a list and groups rows by relationship", async () => {
   const items = [
     node("hub", "Hub"),
     ...Array.from({ length: 35 }, (_, i) => node(`t${i}`, `Ticket ${i}`)),
@@ -107,15 +107,14 @@ test("a very dense neighbourhood stays a list and groups rows by kind", async ()
     .mockResolvedValue(graph(items));
   render(<ContextGraph origin="hub" onBack={vi.fn()} onOpen={vi.fn()} />);
   expect(
-    await screen.findByRole("heading", { name: "Tickets 35" }),
+    await screen.findByRole("heading", { name: "Mentions 36" }),
   ).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Documents 1" })).toBeTruthy();
   expect(screen.queryByText("Canvas")).toBeNull();
   expect(screen.queryByRole("button", { name: "Show map" })).toBeNull();
   expect(
     screen.queryByRole("button", { name: "Center on Ticket 10" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Show 10 more tickets" }));
+  fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
   expect(
     screen.getByRole("button", { name: "Center on Ticket 10" }),
   ).toBeTruthy();

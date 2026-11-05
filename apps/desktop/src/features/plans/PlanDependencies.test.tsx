@@ -27,6 +27,9 @@ vi.mock("@/features/tickets/DependencyGraph", () => ({
       ))}
     </div>
   ),
+  SelectionPanel: ({ ticket }: { ticket: { reference: string } }) => (
+    <aside aria-label="Selected ticket">{ticket.reference}</aside>
+  ),
 }));
 afterEach(() => {
   cleanup();

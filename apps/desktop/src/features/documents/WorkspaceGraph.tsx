@@ -29,6 +29,9 @@ import "./context-graph.css";
 
 // Radix Select items cannot have an empty value.
 const ALL = "__all__";
+/** Most cards the map draws, so their text stays readable. */
+const MAP_CARDS = 25;
+const NO_POSITIONS: Record<string, Point> = {};
 
 export function WorkspaceGraph({
   active,
@@ -58,7 +61,6 @@ export function WorkspaceGraph({
   const [error, setError] = useState("");
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
-  const [positions, setPositions] = useState<Record<string, Point>>({});
   const [viewport, setViewport] = useState<Viewport>({
     x: 100,
     y: 100,
@@ -78,6 +80,15 @@ export function WorkspaceGraph({
     }),
     [search, kind, tag, relationship, includeDetails],
   );
+  // A new search or filter is a new map, not a continuation of the old one, so
+  // positions only count for the request they were laid out for.
+  const [placed, setPlaced] = useState<{
+    request: WorkspaceGraphRequest;
+    points: Record<string, Point>;
+  }>({ request, points: {} });
+  const positions = placed.request === request ? placed.points : NO_POSITIONS;
+  const setPositions = (points: Record<string, Point>) =>
+    setPlaced({ request, points });
   const currentRequest = useRef(request);
   useEffect(() => {
     currentRequest.current = request;
@@ -144,17 +155,29 @@ export function WorkspaceGraph({
       current = false;
     };
   }, [active, revision, request, adjacencyLimit]);
+  // A map of more than a couple of dozen cards cannot be read; it shows the newest.
+  const mapNodes = useMemo(
+    () => (graph?.nodes ?? []).slice(0, MAP_CARDS),
+    [graph],
+  );
   const nodes = useMemo(
     () =>
-      (graph?.nodes ?? []).map((node) => ({
+      mapNodes.map((node) => ({
         id: node.id,
         label: `${kindNames[node.kind].toUpperCase()} · ${node.label}${node.trashed ? " (Trash)" : ""}`,
       })),
-    [graph],
+    [mapNodes],
   );
-  const edges = useMemo(() => flowEdges(graph?.edges ?? []), [graph]);
+  const edges = useMemo(() => {
+    const shown = new Set(mapNodes.map((node) => node.id));
+    return flowEdges(
+      (graph?.edges ?? []).filter(
+        (edge) => shown.has(edge.source) && shown.has(edge.target),
+      ),
+    );
+  }, [graph, mapNodes]);
   const preview = graph?.nodes.find((node) => node.id === selected);
-  const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, 100);
+  const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, Infinity);
   const filtered = !!(search || kind || tag || relationship);
   function clearFilters() {
     setSearch("");
@@ -229,7 +252,8 @@ export function WorkspaceGraph({
           {graph?.connection_counts?.[preview.id]}{" "}
           {graph?.connection_counts?.[preview.id] === 1
             ? "connection"
-            : "connections"}
+            : "connections"}{" "}
+          in total
         </p>
       )}
       <Button onClick={() => onOpen(preview)}>Open item</Button>
@@ -371,7 +395,15 @@ export function WorkspaceGraph({
               onFitted={() => setFit(false)}
             />
           )}
-          <aside className="context-graph-preview">{previewPanel}</aside>
+          <aside className="context-graph-preview">
+            {(graph?.nodes.length ?? 0) > MAP_CARDS && (
+              <p>
+                The map shows the newest {MAP_CARDS} items; the list below shows
+                all {graph?.nodes.length}.
+              </p>
+            )}
+            {previewPanel}
+          </aside>
         </div>
       ) : (
         <aside className="context-graph-strip">{previewPanel}</aside>
@@ -401,9 +433,7 @@ export function WorkspaceGraph({
                 : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
             · {graph.edges.length}{" "}
             {graph.edges.length === 1 ? "connection" : "connections"}
-            {graph.edges.length === 0 &&
-              Object.values(graph.connection_counts ?? {}).some((n) => n > 0) &&
-              " among these items"}
+            {" among these items"}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
               <>
                 {" · "}
@@ -459,7 +489,7 @@ export function WorkspaceGraph({
                   {graph.connection_counts?.[node.id] === 1
                     ? "connection"
                     : "connections"}{" "}
-                  · open its Context graph to see them
+                  in total · open its Context graph to see them
                 </p>
               )}
           </li>

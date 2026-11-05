@@ -300,7 +300,9 @@ function AppContent() {
                           setGraphOrigin(localGraphOrigin ?? "__workspace__")
                         }
                       >
-                        Back to context graph
+                        {localGraphOrigin
+                          ? "Back to context graph"
+                          : "Back to workspace graph"}
                       </Button>
                     )}
                   {error && (
@@ -426,6 +428,9 @@ function AppContent() {
                         key={localGraphOrigin}
                         active={graphOrigin === localGraphOrigin}
                         origin={localGraphOrigin}
+                        {...(workspaceGraphOpen && {
+                          originLabel: "workspace graph",
+                        })}
                         onBack={() => {
                           setLocalGraphOrigin(null);
                           setGraphOrigin(

@@ -800,8 +800,15 @@ impl Workspace {
             }
             // The total is exact up to a bound, so a hub reads as "many".
             for (sql, _) in GROUPS {
+                // Edges to update details count only when details are included, so the
+                // count matches the connections the graph can draw.
+                let visible = if request.include_details {
+                    ""
+                } else {
+                    " AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.id IN (g.a, g.b) AND d.originating_activity_id IS NOT NULL AND NOT d.kept)"
+                };
                 let term = format!(
-                    "SELECT ? AS anchor, COUNT(*) FROM (WITH g(a, b, c) AS ({}) SELECT * FROM g WHERE b <> '')",
+                    "SELECT ? AS anchor, COUNT(*) FROM (WITH g(a, b, c) AS ({}) SELECT * FROM g WHERE b <> ''{visible})",
                     sql.replace("?1", "?").replace("?2", "1000")
                 );
                 let query = vec![term; chunk.len()].join(" UNION ALL ");
