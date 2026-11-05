@@ -129,7 +129,7 @@ describe("map rules", () => {
         { source: "t", target: "d", kind: "attached", explanation: null },
         nodes as never,
       ),
-    ).toBe("T-9 has Linked attached");
+    ).toBe("T-9 has Linked");
     expect(
       stateLine({ state: null, trashed: false, activity_detail: true }),
     ).toBe("Update details");

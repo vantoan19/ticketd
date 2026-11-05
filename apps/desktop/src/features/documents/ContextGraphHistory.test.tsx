@@ -106,3 +106,31 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
   expect(screen.getByTestId("view").textContent).toContain('"fit":false');
   expect(screen.getByText("two", { selector: "h2" })).toBeTruthy();
 });
+
+test("Back with no history names the source item and returns it", async () => {
+  const node = {
+    id: "id-1",
+    kind: "ticket" as const,
+    label: "Source work",
+    ticket_reference: "T-15",
+    state: null,
+    trashed: false,
+    activity_detail: false,
+  };
+  vi.mocked(client.contextGraphExpanded).mockResolvedValue({
+    center: "id-1",
+    nodes: [node],
+    edges: [],
+    omitted: false,
+    omitted_groups: [],
+    continuations: [],
+    hidden_details: false,
+    max_nodes: 100,
+    max_edges: 300,
+    max_work: 1000,
+  });
+  const onBack = vi.fn();
+  render(<ContextGraph origin="T-15" onBack={onBack} onOpen={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Back to T-15" }));
+  expect(onBack).toHaveBeenCalledWith(node);
+});

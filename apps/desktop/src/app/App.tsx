@@ -468,11 +468,12 @@ function AppContent() {
                         {...(workspaceGraphOpen && {
                           originLabel: "workspace graph",
                         })}
-                        onBack={() => {
+                        onBack={(origin) => {
                           setLocalGraphOrigin(null);
-                          setGraphOrigin(
-                            workspaceGraphOpen ? "__workspace__" : null,
-                          );
+                          if (workspaceGraphOpen)
+                            setGraphOrigin("__workspace__");
+                          else if (origin) openGraphItem(origin);
+                          else setGraphOrigin(null);
                         }}
                         onOpen={openGraphItem}
                       />

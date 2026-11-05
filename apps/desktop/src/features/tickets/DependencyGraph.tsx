@@ -152,7 +152,7 @@ function Toolbar({
       </Button>
       {offscreen > 0 && (
         <span className="graph-zoom" role="status">
-          {offscreen} off-screen
+          {offscreen} {offscreen === 1 ? "ticket" : "tickets"} off-screen
         </span>
       )}
     </Panel>
@@ -332,8 +332,11 @@ function Legend() {
 function TicketList({
   tickets,
   placeholder = "None",
+  projectOf,
 }: {
   tickets: { reference: string; title: string; status?: string }[] | null;
+  /** Names the project a ticket belongs to, when it is known. */
+  projectOf?: (reference: string) => string | undefined;
   /** Shown when there are none, or while they are still loading. */
   placeholder?: string;
 }) {
@@ -347,6 +350,9 @@ function TicketList({
           )}{" "}
           <span className="graph-node-reference">{ticket.reference}</span>{" "}
           {ticket.title}
+          {projectOf?.(ticket.reference) && (
+            <span className="graph-none"> · {projectOf(ticket.reference)}</span>
+          )}
         </li>
       ))}
     </ul>
@@ -361,8 +367,14 @@ export function SelectionPanel({
   onOpen,
   onBack,
   onCenter,
+  nodes,
+  version,
 }: {
   ticket: GraphTicket;
+  /** The drawn tickets, used to name the project of each listed ticket. */
+  nodes?: GraphTicket[];
+  /** Changes whenever the graph reloads, so the lists never show an older answer. */
+  version?: unknown;
   origin: string;
   projects: Project[];
   /** Without Plans the panel leaves out the Plan line. */
@@ -392,7 +404,7 @@ export function SelectionPanel({
     return () => {
       active = false;
     };
-  }, [ticket.reference]);
+  }, [ticket.reference, version]);
   const ready = loaded?.ticket.reference === ticket.reference ? loaded : null;
   const detail = ready?.ticket ?? null;
   const blockedBy = detail?.prerequisites ?? null;
@@ -404,6 +416,12 @@ export function SelectionPanel({
   const project = projects.find((item) => item.id === detail?.project_id);
   const plan = plans?.find((item) => item.id === detail?.plan_id);
   const placeholder = detail ? "None" : "Loading…";
+  const projectOf = (reference: string) =>
+    projects.find(
+      (item) =>
+        item.id ===
+        nodes?.find((node) => node.reference === reference)?.project_id,
+    )?.name;
   return (
     <aside className="graph-panel" aria-label="Selected ticket">
       <p className="graph-panel-status">
@@ -420,11 +438,13 @@ export function SelectionPanel({
       <TicketList
         tickets={blockedBy}
         placeholder={detail ? "None" : "Loading…"}
+        projectOf={projectOf}
       />
       <h4>Blocks</h4>
       <TicketList
         tickets={blocks ?? null}
         placeholder={ready ? "None" : "Loading…"}
+        projectOf={projectOf}
       />
       {ready?.blocks.next_offset != null && (
         <p className="graph-none">More tickets wait on this one.</p>
@@ -542,6 +562,8 @@ export default function DependencyGraph({
               origin={reference}
               projects={projects}
               plans={plans}
+              nodes={graph.nodes}
+              version={graph}
               onOpen={onOpen}
               onBack={onBack}
               onCenter={setCenter}

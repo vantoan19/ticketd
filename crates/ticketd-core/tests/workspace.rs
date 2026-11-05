@@ -502,7 +502,10 @@ fn dependency_cycle_error_names_the_path() {
         .add_dependency(&c.reference, &a.reference, None)
         .unwrap_err()
         .to_string();
-    assert!(message.contains("T-1 → T-2 → T-3"), "{message}");
+    assert_eq!(
+        message,
+        "T-3 can't block T-1: T-1 already reaches T-3 through T-2."
+    );
 }
 
 #[test]

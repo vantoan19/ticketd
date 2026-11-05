@@ -156,11 +156,12 @@ pub enum Error {
     ReviewSameTicket,
     #[error("{0} cannot block itself")]
     DependencySelf(String),
-    #[error("{blocker} can't block {dependent}: {path} already exists.")]
+    #[error("{blocker} can't block {dependent}: {detail}")]
     DependencyCycle {
         blocker: String,
         dependent: String,
-        path: String,
+        /// Says how the dependent already reaches the blocker, naming the loop once.
+        detail: String,
     },
     #[error("this Plan is archived; reactivate it to change it")]
     PlanArchived,

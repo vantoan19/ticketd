@@ -44,3 +44,29 @@ test.each([14, 49])("no two cards overlap with %i neighbours", (count) => {
     layoutContextGraph({ nodes, center: "hub", edges: [], positions: {} }).hub,
   ).toEqual(points.hub);
 });
+
+test("cards added to a placed map never cover existing cards", () => {
+  const existing = layoutContextGraph({
+    nodes: ["c", "a", "b", "d"],
+    edges: [],
+    positions: {},
+    center: "c",
+  });
+  const added = ["n1", "n2", "n3", "n4", "n5", "n6"];
+  const points = layoutContextGraph({
+    nodes: ["c", "a", "b", "d", ...added],
+    edges: added.map((id) => ({ source: "c", target: id })),
+    positions: existing,
+    center: "c",
+  });
+  const ids = Object.keys(points);
+  for (let i = 0; i < ids.length; i++)
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = points[ids[i]!]!;
+      const b = points[ids[j]!]!;
+      expect(
+        Math.abs(a.x - b.x) < CARD_WIDTH && Math.abs(a.y - b.y) < CARD_HEIGHT,
+        `${ids[i]}/${ids[j]}`,
+      ).toBe(false);
+    }
+});
