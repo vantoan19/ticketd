@@ -41,7 +41,11 @@ export function useWorkspaceChange(): number {
   return useContext(WorkspaceChangeContext);
 }
 
-/** Runs `callback` when workspace data changed while `enabled`, never on mount. */
+/**
+ * Runs `callback` when workspace data changed while `enabled`, never on mount. A change that
+ * happened while disabled is delivered once it is enabled again, so a view kept mounted but
+ * hidden catches up when it is shown.
+ */
 export function useOnWorkspaceChange(callback: () => void, enabled = true) {
   const version = useWorkspaceChange();
   const seen = useRef(version);
@@ -50,10 +54,8 @@ export function useOnWorkspaceChange(callback: () => void, enabled = true) {
     latest.current = callback;
   });
   useEffect(() => {
-    if (!enabled || seen.current === version) {
-      seen.current = version;
-      return;
-    }
+    if (!enabled) return;
+    if (seen.current === version) return;
     seen.current = version;
     latest.current();
   }, [version, enabled]);

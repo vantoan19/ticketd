@@ -221,9 +221,22 @@ function CodeFence(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
   const languageId = useId();
+  // The language field is an editing tool: it shows only while the caret is in this block.
+  const editing = useEditorSelector(
+    (current) => {
+      const at = current.selection?.anchor.path[0];
+      const path = current.api.findPath(props.element);
+      return at !== undefined && path !== undefined && path[0] === at;
+    },
+    [props.element],
+  );
   return (
     <PlateElement {...props} as="div">
-      <FieldGroup contentEditable={false}>
+      <FieldGroup
+        contentEditable={false}
+        className="code-language"
+        data-editing={editing}
+      >
         <Field orientation="horizontal">
           <FieldLabel htmlFor={languageId}>Code language</FieldLabel>
           <Input

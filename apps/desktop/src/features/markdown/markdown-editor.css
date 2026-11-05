@@ -33,13 +33,22 @@
   padding: 0;
 }
 /* Copy/source controls appear with the toolbar, not as a stray pair of icons on an idle editor. */
+/* visibility, not just opacity: hidden controls must not be clickable or focusable. */
 .editor-mode--inline {
   opacity: 0;
-  transition: opacity 120ms;
+  visibility: hidden;
+  transition:
+    opacity 120ms,
+    visibility 0s 120ms;
 }
 .markdown-editor:hover .editor-mode--inline,
 .markdown-editor:focus-within .editor-mode--inline {
   opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.rich-document .code-language[data-editing="false"]:not(:focus-within) {
+  display: none;
 }
 .rich-document {
   padding: 16px;

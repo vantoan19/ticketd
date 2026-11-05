@@ -744,7 +744,7 @@ it("says nothing is saved and explains a blocked Back to work while the conflict
   expect(close).not.toHaveBeenCalled();
   const notice = document.querySelector<HTMLElement>(".document-conflict")!;
   expect(document.activeElement).toBe(notice);
-  expect(notice.textContent).toContain("before leaving this Document");
+  expect(notice.textContent).toContain("Choose Reload or Save my draft first");
 });
 it("keeps Done in place through the pointer sequence that blurs the editor", () => {
   const close = vi.fn();
