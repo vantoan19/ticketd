@@ -59,6 +59,14 @@ pub(crate) fn get(connection: &Connection, id: &str) -> Result<Plan, Error> {
         .optional()?
         .ok_or_else(|| Error::PlanNotFound(id.into()))
 }
+/// Writes to an archived Plan are refused; reactivating it is the one change allowed.
+pub(crate) fn ensure_active(connection: &Connection, id: &str) -> Result<Plan, Error> {
+    let plan = get(connection, id)?;
+    if plan.archived {
+        return Err(Error::PlanArchived);
+    }
+    Ok(plan)
+}
 impl Workspace {
     pub fn create_plan(&mut self, name: &str) -> Result<Plan, Error> {
         let name = name.trim();
@@ -82,12 +90,15 @@ impl Workspace {
         if name == Some("") {
             return Err(Error::EmptyPlanName);
         }
-        get(&self.connection, id)?;
+        let current = get(&self.connection, id)?;
+        if current.archived && archived != Some(false) {
+            return Err(Error::PlanArchived);
+        }
         self.connection.execute("UPDATE plans SET name = COALESCE(?1, name), archived = COALESCE(?2, archived) WHERE id = ?3", params![name, archived, id])?;
         get(&self.connection, id)
     }
     pub fn set_plan_purpose(&mut self, id: &str, purpose: &str) -> Result<Plan, Error> {
-        get(&self.connection, id)?;
+        ensure_active(&self.connection, id)?;
         self.connection.execute(
             "UPDATE plans SET purpose = ?1 WHERE id = ?2",
             params![purpose, id],
@@ -198,7 +209,7 @@ impl Workspace {
         self.connection.execute_batch("SAVEPOINT plan_document")?;
         let result = (|| {
             crate::transaction_write_lock(&self.connection)?;
-            get(&self.connection, plan_id)?;
+            ensure_active(&self.connection, plan_id)?;
             let document = self.show_document(document_id)?;
             if present && document.trashed {
                 return Err(Error::DocumentTrashed(document_id.to_owned()));
@@ -237,7 +248,7 @@ impl Workspace {
         self.connection.execute_batch("SAVEPOINT plan_spec")?;
         let result = (|| {
             crate::transaction_write_lock(&self.connection)?;
-            get(&self.connection, plan_id)?;
+            ensure_active(&self.connection, plan_id)?;
             if let Some(id) = document_id {
                 self.keep_document(id)?;
                 self.connection.execute(

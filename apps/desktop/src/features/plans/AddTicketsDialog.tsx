@@ -38,8 +38,17 @@ export function AddTicketsDialog({
     if (!open) return;
     let active = true;
     const timer = window.setTimeout(() => {
-      client
-        .findTickets({
+      const text = query.trim();
+      // The core's search reads words, so a T-number is looked up directly.
+      const exact = /^t-?\d+$/i.test(text)
+        ? client.showTicket(`T-${text.replace(/\D+/g, "")}`).then(
+            (found) => [found],
+            () => [],
+          )
+        : Promise.resolve([] as Ticket[]);
+      void Promise.all([
+        exact,
+        client.findTickets({
           query,
           project: null,
           unlinked: false,
@@ -50,17 +59,26 @@ export function AddTicketsDialog({
           family: null,
           limit: 20,
           offset: 0,
-        })
-        .then(
-          (found) => {
-            if (!active) return;
-            setSearchError("");
-            setResults(found.filter((item) => item.plan_id !== plan.id));
-          },
-          (reason: unknown) => {
-            if (active) setSearchError(String(reason));
-          },
-        );
+        }),
+      ]).then(
+        ([named, found]) => {
+          if (!active) return;
+          setSearchError("");
+          const seen = new Set<string>();
+          setResults(
+            [...named, ...found].filter(
+              (item) =>
+                item.plan_id !== plan.id &&
+                !item.trashed &&
+                !seen.has(item.reference) &&
+                seen.add(item.reference),
+            ),
+          );
+        },
+        (reason: unknown) => {
+          if (active) setSearchError(String(reason));
+        },
+      );
     }, 150);
     return () => {
       active = false;
@@ -83,7 +101,7 @@ export function AddTicketsDialog({
           <span className="sr-only">Search tickets to add</span>
           <Input
             type="search"
-            placeholder="Search tickets to add"
+            placeholder="Search by title or T-number"
             autoComplete="off"
             value={query}
             onChange={(event) => {

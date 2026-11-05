@@ -204,6 +204,9 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Add purpose" })).toBeNull();
+  // Neither the row removal nor the per-group Add survive in an archived Plan.
+  expect(screen.queryByRole("button", { name: /^Remove T-1 from/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Add .* ticket$/ })).toBeNull();
   await waitFor(() =>
     expect(
       within(

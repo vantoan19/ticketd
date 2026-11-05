@@ -6,6 +6,9 @@ export const NODE_HEIGHT = 76;
 
 /** Widest rank drawn on one row; wider ranks wrap onto more rows. */
 export const MAX_PER_ROW = 8;
+/** Above this many linked tickets rows are narrower, so the graph stays readable. */
+export const DENSE_NODES = 20;
+export const DENSE_PER_ROW = 5;
 const COLUMN_GAP = 32;
 const ROW_GAP = 64;
 
@@ -41,15 +44,16 @@ export function layoutGraph(graph: DependencyGraph) {
       const { x, y } = layout.node(node.reference) as { x: number; y: number };
       ranks.set(y, [...(ranks.get(y) ?? []), { reference: node.reference, x }]);
     }
-    const wide = [...ranks.values()].some((rank) => rank.length > MAX_PER_ROW);
+    const perRow = linked.length > DENSE_NODES ? DENSE_PER_ROW : MAX_PER_ROW;
+    const wide = [...ranks.values()].some((rank) => rank.length > perRow);
     const all = [...ranks.values()].flat();
     const middle =
       (Math.min(...all.map((m) => m.x)) + Math.max(...all.map((m) => m.x))) / 2;
     let y = 0;
     for (const rank of [...ranks.entries()].sort(([a], [b]) => a - b)) {
       const members = rank[1].sort((a, b) => a.x - b.x);
-      for (let start = 0; start < members.length; start += MAX_PER_ROW) {
-        const row = members.slice(start, start + MAX_PER_ROW);
+      for (let start = 0; start < members.length; start += perRow) {
+        const row = members.slice(start, start + perRow);
         // Without a wide rank dagre's own alignment is kept. With one, every
         // rank is repacked around a shared center so narrow ranks stay under it.
         const left =
@@ -63,7 +67,7 @@ export function layoutGraph(graph: DependencyGraph) {
             y,
           }),
         );
-        const more = start + MAX_PER_ROW < members.length;
+        const more = start + perRow < members.length;
         y += NODE_HEIGHT + (more ? 32 : ROW_GAP);
       }
     }
@@ -195,14 +199,40 @@ export function focusGroup(graph: DependencyGraph, origin: string) {
   );
 }
 
+/** The ticket and the tickets directly linked to it. */
+function neighbourhood(graph: DependencyGraph, reference: string) {
+  const near = new Set([reference]);
+  for (const edge of graph.edges) {
+    if (edge.blocker === reference) near.add(edge.dependent);
+    if (edge.dependent === reference) near.add(edge.blocker);
+  }
+  return near;
+}
+
+/** The focus ticket if it is in the graph, else the one with most links. */
+function focusTicket(graph: DependencyGraph, focus: string | null) {
+  if (focus && graph.nodes.some((node) => node.reference === focus))
+    return focus;
+  const degree = new Map<string, number>();
+  for (const edge of graph.edges)
+    for (const reference of [edge.blocker, edge.dependent])
+      degree.set(reference, (degree.get(reference) ?? 0) + 1);
+  let best: string | null = null;
+  for (const node of byReference(graph.nodes))
+    if ((degree.get(node.reference) ?? 0) > (degree.get(best ?? "") ?? 0))
+      best = node.reference;
+  return best;
+}
+
 /**
  * Where a graph opens: everything when that stays readable, otherwise the
- * group around the opened ticket (or the largest one) at the readable zoom.
+ * neighbourhood of the focus ticket (the selected or opened one, else the most
+ * connected) at no less than the readable zoom, centred on that ticket.
  */
 export function openViewport(
   graph: DependencyGraph,
   positions: Map<string, { x: number; y: number }>,
-  origin: string,
+  focus: string | null,
   size: { width: number; height: number },
   readableZoom: number,
 ): Viewport | null {
@@ -210,8 +240,26 @@ export function openViewport(
   if (!all) return null;
   const whole = fitViewport(all, size, { minZoom: 0, maxZoom: 1 });
   if (whole.zoom >= readableZoom) return whole;
-  const group = boundsOf(positions, focusGroup(graph, origin)) ?? all;
-  return fitViewport(group, size, { minZoom: readableZoom, maxZoom: 1 });
+  const center = focusTicket(graph, focus);
+  const near = center ? neighbourhood(graph, center) : [];
+  const group = boundsOf(positions, near) ?? all;
+  const view = fitViewport(group, size, { minZoom: readableZoom, maxZoom: 1 });
+  const at = center ? positions.get(center) : undefined;
+  if (!at) return view;
+  // When the neighbourhood overflows the pane, keep the focus ticket in view.
+  const left = at.x * view.zoom + view.x;
+  const top = at.y * view.zoom + view.y;
+  const fits =
+    left >= 0 &&
+    left + NODE_WIDTH * view.zoom <= size.width &&
+    top >= 0 &&
+    top + NODE_HEIGHT * view.zoom <= size.height;
+  if (fits) return view;
+  return {
+    zoom: view.zoom,
+    x: size.width / 2 - (at.x + NODE_WIDTH / 2) * view.zoom,
+    y: size.height / 2 - (at.y + NODE_HEIGHT / 2) * view.zoom,
+  };
 }
 
 const referenceNumber = (reference: string) =>

@@ -34,6 +34,8 @@ function dependencyError(
 ): string {
   const text = String(reason);
   if (blocker === dependent) return `${dependent} cannot block itself.`;
+  // The core names the loop's path; keep it when it is there.
+  if (/close a loop/i.test(text)) return text.replace(/^Error:\s*/, "");
   if (/cycle/i.test(text))
     return `${dependent} already blocks ${blocker}, directly or through other tickets, so ${blocker} cannot also block it.`;
   if (/not found/i.test(text)) return `No ticket ${blocker} exists.`;
@@ -46,12 +48,14 @@ function Blockers({
   projects,
   refresh,
   onOpen,
+  archived,
 }: {
   member: GraphTicket;
   graph: DependencyGraph;
   projects: Project[];
   refresh: () => Promise<void>;
   onOpen: (reference: string) => void;
+  archived: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<Ticket | null>(null);
@@ -99,6 +103,12 @@ function Blockers({
     }
   }
   const visible = query.trim() ? search.results : [];
+  // Searching for the ticket itself would otherwise look like a broken search.
+  const selfSearch =
+    query.trim().toUpperCase() === member.reference ||
+    (query.trim().length > 2 &&
+      member.title.toLowerCase().includes(query.trim().toLowerCase()) &&
+      visible.length === 0);
   return (
     <div className="plan-blockers">
       {blockers.length === 0 ? (
@@ -122,15 +132,19 @@ function Blockers({
                     <span className="ticket-ref">{reference}</span>{" "}
                     {node?.title}
                   </button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={pending}
-                    aria-label={`Remove blocker ${reference} from ${member.reference}`}
-                    onClick={() => void change("remove_dependency", reference)}
-                  >
-                    Remove
-                  </Button>
+                  {!archived && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={pending}
+                      aria-label={`Remove blocker ${reference} from ${member.reference}`}
+                      onClick={() =>
+                        void change("remove_dependency", reference)
+                      }
+                    >
+                      Remove
+                    </Button>
+                  )}
                 </div>
                 {node && (
                   <p className="plan-note">
@@ -167,68 +181,80 @@ function Blockers({
           </ul>
         </>
       )}
-      <form className="plan-blocker-form" onSubmit={(event) => void add(event)}>
-        <Field data-invalid={error || search.error ? true : undefined}>
-          <FieldLabel htmlFor="plan-blocker">Add a blocker</FieldLabel>
-          {chosen ? (
-            <div className="link-ticket-chosen">
-              <StatusIcon status={chosen.status} size={14} decorative />
-              <span>
-                {chosen.reference} {chosen.title}
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setChosen(null);
-                  setError("");
-                }}
-              >
-                Change ticket
-              </Button>
-            </div>
-          ) : (
-            <>
-              <Input
-                id="plan-blocker"
-                value={query}
-                placeholder="Search by title, text or T-number"
-                autoComplete="off"
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setError("");
-                }}
-              />
-              {visible.length > 0 && (
-                <ul className="link-ticket-results" aria-label="Matches">
-                  {visible.map((item) => (
-                    <li key={item.reference}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setChosen(item);
-                          setError("");
-                        }}
-                      >
-                        <StatusIcon status={item.status} size={14} decorative />
-                        <span className="link-ticket-reference">
-                          {item.reference}
-                        </span>
-                        <span>{item.title}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-          <FieldError>{error || search.error}</FieldError>
-        </Field>
-        <Button type="submit" size="sm" disabled={pending || !chosen}>
-          Add blocker
-        </Button>
-      </form>
+      {!archived && (
+        <form
+          className="plan-blocker-form"
+          onSubmit={(event) => void add(event)}
+        >
+          <Field data-invalid={error || search.error ? true : undefined}>
+            <FieldLabel htmlFor="plan-blocker">Add a blocker</FieldLabel>
+            {chosen ? (
+              <div className="link-ticket-chosen">
+                <StatusIcon status={chosen.status} size={14} decorative />
+                <span>
+                  {chosen.reference} {chosen.title}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setChosen(null);
+                    setError("");
+                  }}
+                >
+                  Change ticket
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Input
+                  id="plan-blocker"
+                  value={query}
+                  placeholder="Search by title, text or T-number"
+                  autoComplete="off"
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setError("");
+                  }}
+                />
+                {visible.length > 0 && (
+                  <ul className="link-ticket-results" aria-label="Matches">
+                    {visible.map((item) => (
+                      <li key={item.reference}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setChosen(item);
+                            setError("");
+                          }}
+                        >
+                          <StatusIcon
+                            status={item.status}
+                            size={14}
+                            decorative
+                          />
+                          <span className="link-ticket-reference">
+                            {item.reference}
+                          </span>
+                          <span>{item.title}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+            <FieldError>{error || search.error}</FieldError>
+            {!chosen && selfSearch && !error && !search.error && (
+              <p className="plan-note">A ticket can’t block itself.</p>
+            )}
+          </Field>
+          <Button type="submit" size="sm" disabled={pending || !chosen}>
+            Add blocker
+          </Button>
+        </form>
+      )}
     </div>
   );
 }
@@ -241,6 +267,7 @@ export function PlanDependencies({
   refresh,
   onOpen,
   onClose,
+  archived = false,
 }: {
   id: string;
   revision: number;
@@ -249,6 +276,8 @@ export function PlanDependencies({
   onOpen: (reference: string) => void;
   /** Back to the member list. */
   onClose: () => void;
+  /** The Plan is archived, so its blockers can be read but not changed. */
+  archived?: boolean;
 }) {
   const [graph, setGraph] = useState<DependencyGraph | null>(null);
   const [error, setError] = useState("");
@@ -327,6 +356,12 @@ export function PlanDependencies({
                     ?.status !== "Done",
               ).length;
               const open = selected === member.reference;
+              const label =
+                count > 0
+                  ? `${count} open ${count === 1 ? "blocker" : "blockers"}`
+                  : archived
+                    ? "No blockers"
+                    : "Add blocker";
               return (
                 <li key={member.reference}>
                   <div className="plan-dependency-row">
@@ -339,13 +374,13 @@ export function PlanDependencies({
                       variant="outline"
                       size="sm"
                       aria-expanded={open}
-                      aria-label={`${member.reference}: ${count} open ${count === 1 ? "blocker" : "blockers"}`}
+                      aria-label={`${member.reference}: ${label}`}
                       onClick={() =>
                         setSelected(open ? null : member.reference)
                       }
                     >
                       <Link2 aria-hidden="true" />
-                      {count} open {count === 1 ? "blocker" : "blockers"}
+                      {label}
                     </Button>
                   </div>
                   {open && (
@@ -356,6 +391,7 @@ export function PlanDependencies({
                       projects={projects}
                       refresh={refresh}
                       onOpen={onOpen}
+                      archived={archived}
                     />
                   )}
                 </li>

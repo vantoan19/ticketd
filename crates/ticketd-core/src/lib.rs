@@ -156,8 +156,16 @@ pub enum Error {
     ReviewSameTicket,
     #[error("{0} cannot block itself")]
     DependencySelf(String),
-    #[error("{blocker} already depends on {dependent}, so this would create a cycle")]
-    DependencyCycle { blocker: String, dependent: String },
+    #[error(
+        "{blocker} cannot block {dependent}: {dependent} already blocks {blocker} through {path}, so this would close a loop"
+    )]
+    DependencyCycle {
+        blocker: String,
+        dependent: String,
+        path: String,
+    },
+    #[error("this Plan is archived; reactivate it to change it")]
+    PlanArchived,
     #[error("parent assignment would create a cycle or more than one level of subtickets")]
     InvalidHierarchy,
     #[error("tag name must not be empty")]
@@ -712,7 +720,7 @@ impl Workspace {
             projects::find(&transaction, id)?;
         }
         if let Some(id) = plan_id {
-            plans::get(&transaction, id)?;
+            plans::ensure_active(&transaction, id)?;
         }
         let id = Uuid::new_v4().to_string();
         transaction.execute(
@@ -769,7 +777,12 @@ impl Workspace {
         )?;
         if let Some(ref plan_id) = patch.plan_id {
             if let Some(id) = plan_id {
-                plans::get(&transaction, id)?;
+                if *plan_id == ticket.plan_id {
+                    plans::get(&transaction, id)?;
+                } else {
+                    // Moving a ticket out of an archived Plan stays allowed; moving in is not.
+                    plans::ensure_active(&transaction, id)?;
+                }
             }
             if *plan_id != ticket.plan_id {
                 transaction.execute(

@@ -117,7 +117,15 @@ export function LinkedWork({
   // matters) but they cannot be changed.
   const readOnly = work.ticket.trashed;
   const openContextGraph = useContext(ContextGraphNavigation);
-  const rows = work.rows.filter((row) => row.kind !== "subticket");
+  const listed = work.rows.filter((row) => row.kind !== "subticket");
+  // Blockers that still hold this ticket back come first within "Blocked by".
+  const blockers = listed
+    .filter((row) => row.kind === "blocked_by")
+    .sort((a, b) => Number(b.unresolved) - Number(a.unresolved));
+  let nextBlocker = 0;
+  const rows = listed.map((row) =>
+    row.kind === "blocked_by" ? blockers[nextBlocker++]! : row,
+  );
   // A duplicate closed by its source names a canonical issue that may not be a
   // local ticket; it is information and has no remove action.
   const external = externalDuplicateTarget(work.ticket);

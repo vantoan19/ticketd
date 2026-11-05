@@ -83,6 +83,45 @@ pub(crate) fn reaches(
     )?)
 }
 
+/// Reference chain `from -> ... -> to` following blocker-to-dependent edges,
+/// used to explain a refused cycle. Empty when `to` is unreachable.
+fn chain(connection: &Connection, from: &str, to: &str) -> Result<Vec<String>, Error> {
+    let mut previous: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut queue = std::collections::VecDeque::from([from.to_owned()]);
+    let mut statement = connection.prepare(
+        "SELECT dependent_id FROM dependencies WHERE blocker_id = ?1 ORDER BY dependent_id",
+    )?;
+    while let Some(current) = queue.pop_front() {
+        if current == to {
+            break;
+        }
+        let next = statement
+            .query_map([&current], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for id in next {
+            if id != from && !previous.contains_key(&id) {
+                previous.insert(id.clone(), current.clone());
+                queue.push_back(id);
+            }
+        }
+    }
+    let mut ids = vec![to.to_owned()];
+    while let Some(parent) = previous.get(ids.last().map_or("", String::as_str)) {
+        ids.push(parent.clone());
+    }
+    ids.reverse();
+    ids.into_iter()
+        .map(|id| {
+            connection
+                .query_row("SELECT number FROM tickets WHERE id = ?1", [id], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map(|n| format!("T-{n}"))
+                .map_err(Error::from)
+        })
+        .collect()
+}
+
 pub(crate) fn id(connection: &Connection, reference: &str) -> Result<String, Error> {
     let number = reference
         .strip_prefix("T-")
@@ -118,6 +157,7 @@ impl Workspace {
             return Err(Error::DependencyCycle {
                 blocker: blocker.into(),
                 dependent: dependent.into(),
+                path: chain(&tx, &dependent_id, &blocker_id)?.join(" → "),
             });
         }
         let changed = tx.execute(

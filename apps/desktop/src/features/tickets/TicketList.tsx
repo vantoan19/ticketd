@@ -51,7 +51,8 @@ export function TicketList({
    */
   grouping?: {
     counts: StatusCounts;
-    onAdd: (status: string, trigger: HTMLButtonElement) => void;
+    /** Omit to hide the per-group Add action (a read-only scope). */
+    onAdd?: (status: string, trigger: HTMLButtonElement) => void;
   };
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
@@ -89,17 +90,19 @@ export function TicketList({
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
                 </span>
-                <IconButton
-                  className="ticket-group-add"
-                  // Every group offers the same action; the Duplicate group's
-                  // opens the review that names the canonical ticket.
-                  label={`Add ${status} ticket`}
-                  onClick={(event) =>
-                    grouping?.onAdd(status, event.currentTarget)
-                  }
-                >
-                  <Plus aria-hidden="true" />
-                </IconButton>
+                {grouping?.onAdd && (
+                  <IconButton
+                    className="ticket-group-add"
+                    // Every group offers the same action; the Duplicate group's
+                    // opens the review that names the canonical ticket.
+                    label={`Add ${status} ticket`}
+                    onClick={(event) =>
+                      grouping.onAdd?.(status, event.currentTarget)
+                    }
+                  >
+                    <Plus aria-hidden="true" />
+                  </IconButton>
+                )}
               </li>
             );
           }

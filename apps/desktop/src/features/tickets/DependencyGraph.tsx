@@ -94,7 +94,7 @@ function TicketNode({ data }: NodeProps<Node<NodeData>>) {
 }
 const nodeTypes = { ticket: TicketNode };
 /** Smallest zoom that still reads; the graph opens no smaller than this. */
-const READABLE_ZOOM = 0.45;
+const READABLE_ZOOM = 0.7;
 /** Fit may zoom out this far so the whole graph is always visible. */
 const OVERVIEW_ZOOM = 0.2;
 
@@ -145,11 +145,13 @@ function OpenView({
   graph,
   positions,
   origin,
+  selected,
   readable,
 }: {
   graph: Graph;
   positions: Map<string, { x: number; y: number }>;
   origin: string;
+  selected: string | null;
   readable: boolean;
 }) {
   const { setViewport } = useReactFlow();
@@ -160,7 +162,13 @@ function OpenView({
     if (opened.current || !width || !height) return;
     opened.current = true;
     const view = readable
-      ? openViewport(graph, positions, origin, { width, height }, READABLE_ZOOM)
+      ? openViewport(
+          graph,
+          positions,
+          selected ?? origin,
+          { width, height },
+          READABLE_ZOOM,
+        )
       : (() => {
           const bounds = boundsOf(positions, positions.keys());
           return bounds
@@ -172,7 +180,16 @@ function OpenView({
             : null;
         })();
     if (view) void setViewport(view);
-  }, [graph, positions, origin, readable, width, height, setViewport]);
+  }, [
+    graph,
+    positions,
+    origin,
+    selected,
+    readable,
+    width,
+    height,
+    setViewport,
+  ]);
   return null;
 }
 
@@ -262,6 +279,7 @@ export function Canvas({
           graph={graph}
           positions={positions}
           origin={origin}
+          selected={selected}
           readable={readable}
         />
         <Toolbar positions={positions} />
