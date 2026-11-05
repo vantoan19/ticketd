@@ -70,8 +70,8 @@
 
 .document-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  gap: 48px;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  gap: 0 48px;
   padding: 12px 0 32px;
   align-items: start;
 }
@@ -229,8 +229,7 @@
   margin: 0 0 4px;
 }
 /* Connected items line up with their section label; long titles stop at two lines. */
-.document-rail [aria-label="Connected items"] li > button {
-  padding-inline: 0;
+.document-rail [aria-label="Connections"] li > button {
   justify-content: flex-start;
 }
 .document-rail .connected-label {
@@ -436,6 +435,95 @@
 }
 .document-rail .document-passage p {
   margin: 4px 0 12px;
+}
+
+/* The one header: breadcrumb back, save status, Read/Edit, pin and actions. */
+.document-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.document-bar .document-crumb {
+  color: var(--muted-foreground);
+}
+.document-crumb-sep {
+  color: var(--disabled-foreground);
+}
+.document-crumb-title {
+  min-width: 0;
+  padding-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-bar .document-actions {
+  gap: 8px;
+}
+.document-bar .document-status {
+  margin-left: 0;
+  font-size: 12px;
+}
+.document-title {
+  margin: 0;
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -1.28px;
+  overflow-wrap: anywhere;
+}
+.document-title .document-title-input {
+  height: 44px;
+  margin-left: -8px;
+  padding: 0 8px;
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -1.28px;
+}
+.document-rail {
+  background: var(--background);
+  border-radius: 8px;
+  padding: 24px 20px;
+  gap: 20px;
+}
+.document-rail h2 {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+.document-rail li > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: -8px;
+  padding: 6px 8px;
+}
+.document-rail li > button svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+.document-rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  box-shadow: 0 -1px 0 0 var(--border);
+}
+.document-rail-actions > button {
+  justify-content: flex-start;
+  margin-left: -8px;
+  color: var(--muted-foreground);
+}
+.document-shared-passage > p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 @media (max-width: 767px) {
   .documents-page {

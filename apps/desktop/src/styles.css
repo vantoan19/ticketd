@@ -1211,15 +1211,37 @@
 .mermaid-viewer {
   overflow: auto;
   max-height: 420px;
-  padding: 16px;
+  padding: 28px 16px;
+}
+.mermaid-block > .markdown-block-toolbar,
+.mermaid-expanded .markdown-block-toolbar {
+  gap: 2px;
+}
+.mermaid-block > .markdown-block-toolbar {
+  min-height: 36px;
+  padding: 0 4px 0 12px;
+  background: var(--recessed);
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.mermaid-block > .markdown-block-toolbar button {
+  height: 28px;
+  gap: 6px;
+  padding: 0 8px;
+}
+.mermaid-block > .markdown-block-toolbar button svg {
+  width: 14px;
+  height: 14px;
 }
 .mermaid-canvas {
   width: 100%;
   min-width: 1px;
 }
+.mermaid-canvas {
+  display: flex;
+  justify-content: center;
+}
 .mermaid-canvas > svg {
   display: block;
-  width: 100%;
   max-width: 100%;
   height: auto;
 }

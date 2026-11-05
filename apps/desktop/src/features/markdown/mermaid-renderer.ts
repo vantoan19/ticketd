@@ -37,7 +37,10 @@ export function renderDiagram(
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
-        theme: dark ? "dark" : "default",
+        theme: dark ? "dark" : "neutral",
+        themeVariables: {
+          fontFamily: "Geist, ui-sans-serif, system-ui, sans-serif",
+        },
         htmlLabels: false,
         maxTextSize: 20000,
         maxEdges: 500,
