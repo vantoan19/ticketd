@@ -3110,6 +3110,25 @@ fn unread_observation_delivers_reminders_once_across_reopen() {
 }
 
 #[test]
+fn snoozing_or_dismissing_a_delivered_reminder_marks_it_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let ticket = ws.create_ticket("Remember").unwrap();
+    ws.set_reminder(&ticket.reference, Some("2020-01-01T00:00:00Z"))
+        .unwrap();
+    assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 1);
+    ws.set_reminder(&ticket.reference, Some("2999-01-01T00:00:00Z"))
+        .unwrap();
+    assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 0);
+    ws.set_reminder(&ticket.reference, Some("2020-01-02T00:00:00Z"))
+        .unwrap();
+    assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 1);
+    ws.set_reminder(&ticket.reference, None).unwrap();
+    assert_eq!(ws.sidebar_counts().unwrap().unread_inbox, 0);
+    assert_eq!(ws.inbox(100, 0).unwrap().len(), 2);
+}
+
+#[test]
 fn retrying_a_delivered_reminder_does_not_create_another_occurrence() {
     use ticketd_core::WriteRequest;
     let dir = tempfile::tempdir().unwrap();

@@ -1382,3 +1382,9 @@
 .list-header h1 {
   order: -2;
 }
+
+/* A tooltip only labels; its positioning wrapper must not cover the controls
+   beside the trigger (it hid "Clear filters" after the search popover closed). */
+[data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
+  pointer-events: none;
+}

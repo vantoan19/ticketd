@@ -49,7 +49,7 @@ test("edges state direction in plain language and rows are one per relationship"
       { source: "p", target: "a", kind: "membership", explanation: null },
       byId,
     ),
-  ).toBe("T-1 is in plan Launch");
+  ).toBe("T-1 is in Plan Launch");
   const rows = connectionRows("b", {
     nodes,
     edges: [

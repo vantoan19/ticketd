@@ -91,6 +91,9 @@ A Document created as the supporting detail of an authored Activity. Its origina
 **Context graph**:
 A bounded view of explicit relationships among tickets, Documents, and Plans. Activities explain ticket-to-supporting-Document connections but are not separate graph nodes. Tags classify or color items without implying pairwise links or blocking dependencies.
 
+**Workspace graph**:
+The Context graph for the whole workspace, opened from the sidebar rather than from one ticket, Document, or Plan. It is bounded and explains any limit in the same way.
+
 **Editing agent**:
 The agent identified as the source of a write when supplied. This is descriptive attribution, not a verified identity or permission; absent attribution does not establish that a human made the change.
 

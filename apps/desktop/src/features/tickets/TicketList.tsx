@@ -143,8 +143,22 @@ export function TicketList({
                   } else if (event.key === "Enter") {
                     event.preventDefault();
                     onOpen(ticket.reference);
+                  } else if (
+                    event.key === " " &&
+                    selectable &&
+                    !selectionDisabled
+                  ) {
+                    // Space selects for bulk actions; Enter opens.
+                    event.preventDefault();
+                    onToggle(ticket.reference);
                   }
                 }}
+                onKeyUp={(event) => {
+                  // Stop the native Space-click that would open the ticket.
+                  if (event.key === " " && selectable && !selectionDisabled)
+                    event.preventDefault();
+                }}
+                aria-keyshortcuts={selectable ? "Space Enter" : undefined}
               >
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -233,7 +247,9 @@ function RowDetails({
               {state.kind !== "status" && (
                 <StatusDot tone={state.kind} size={10} />
               )}
-              {readinessLabel(state)}
+              <span className="ticket-row-state-label">
+                {readinessLabel(state)}
+              </span>
             </span>
           )
         )}

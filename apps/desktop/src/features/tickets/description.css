@@ -89,3 +89,8 @@
   padding-left: 12px;
   border-left: 2px solid var(--ring);
 }
+
+.ticket-save-error {
+  font-size: 14px;
+  line-height: 20px;
+}
