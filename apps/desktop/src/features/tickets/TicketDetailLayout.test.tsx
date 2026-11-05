@@ -280,3 +280,49 @@ test("Subtickets and Evidence own their add actions even when empty", async () =
     }),
   ).toBeTruthy();
 });
+
+test("showing another ticket starts its rail and document at the top", async () => {
+  const other: Ticket = { ...ticket, id: "2", reference: "T-2" };
+  const props = {
+    mention: null,
+    expanded: false,
+    onExpand: vi.fn(),
+    onReturn: vi.fn(),
+    setSelected: vi.fn(),
+    details: { "T-1": ticket, "T-2": other },
+    projects: [],
+    plans: [],
+    revision: 0,
+    refresh: vi.fn(async () => {}),
+    updateTicket: vi.fn(),
+    position: { index: 2, total: 11 },
+    onAdjacent: vi.fn(),
+  };
+  // jsdom never scrolls: store the offset so a reset is observable.
+  const offsets = new WeakMap<Element, number>();
+  vi.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(function (
+    this: Element,
+  ) {
+    return offsets.get(this) ?? 0;
+  });
+  vi.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (
+    this: Element,
+    value: number,
+  ) {
+    offsets.set(this, value);
+  });
+  const view = render(<TicketDetails {...props} selected="T-2" />);
+  await screen.findAllByRole("complementary", { hidden: true });
+  const scrollers = () => {
+    const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
+    return [
+      document.querySelector<HTMLElement>(".detail-scroll")!,
+      shown!.querySelector<HTMLElement>(".detail-document")!,
+      shown!.querySelector<HTMLElement>(".ticket-properties")!,
+    ];
+  };
+  for (const node of scrollers()) node.scrollTop = 120;
+  view.rerender(<TicketDetails {...props} selected="T-1" />);
+  for (const node of scrollers()) expect(node.scrollTop).toBe(0);
+  vi.restoreAllMocks();
+});

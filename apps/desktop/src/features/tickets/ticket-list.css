@@ -208,6 +208,10 @@
 .bulk-bar .ui-button {
   padding-inline: 8px;
 }
+/* Keeps the two outline triggers apart when the narrow rule drops the bar gap. */
+.bulk-bar .bulk-organize {
+  margin-inline-start: 4px;
+}
 .bulk-count {
   padding-inline: 6px;
   font-size: 14px;
