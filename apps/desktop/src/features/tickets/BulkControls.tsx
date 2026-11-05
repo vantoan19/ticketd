@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -38,7 +38,7 @@ export function BulkControls({
   projects: TicketWorkspace["projects"];
   plans: TicketWorkspace["plans"];
 }) {
-  const [tagsOpen, setTagsOpen] = useState(false);
+  const [tagMode, setTagMode] = useState<"add" | "remove" | null>(null);
   const [detailsFor, setDetailsFor] = useState<unknown>(null);
   const retry = useRef<HTMLButtonElement>(null);
   const failureNote = useRef<HTMLDivElement>(null);
@@ -54,9 +54,30 @@ export function BulkControls({
     if (notice) document.getElementById("tickets-heading")?.focus();
   }, [notice]);
   const count = selection.length;
+  // Esc clears the selection, unless a menu, dialog or text field has it.
+  useEffect(() => {
+    if (count === 0 || pending) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.isComposing) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.closest("input, textarea, select, [role=combobox]"))
+      )
+        return;
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
+      bulk.clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [count, pending, bulk]);
   const selectedTickets = visible.filter((ticket) =>
     selection.includes(ticket.reference),
   );
+  const inStatus = (status: string) =>
+    selectedTickets.filter((ticket) => ticket.status === status).length;
   const activePlans = plans.filter((item) => !item.archived);
   const inPlan = (id: string) =>
     selectedTickets.filter((ticket) => ticket.plan_id === id).length;
@@ -106,20 +127,39 @@ export function BulkControls({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top">
-              {directStatuses.map((status) => (
-                <DropdownMenuItem
-                  key={status}
-                  onSelect={() =>
-                    void bulk.applyStatus(
-                      status,
-                      `Set ${tickets(count)} to ${status}`,
-                    )
-                  }
-                >
-                  <StatusIcon status={status} decorative />
-                  {status}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuLabel className="bulk-menu-label">
+                Set status for {tickets(count)}
+              </DropdownMenuLabel>
+              {directStatuses.map((status) => {
+                const here = inStatus(status);
+                const all = here === count;
+                return (
+                  <DropdownMenuItem
+                    key={status}
+                    onSelect={() =>
+                      void bulk.applyStatus(
+                        status,
+                        `Set ${tickets(count)} to ${status}`,
+                      )
+                    }
+                  >
+                    <StatusIcon status={status} decorative />
+                    {status}
+                    {here > 0 && (
+                      <span className="bulk-menu-count">
+                        {all
+                          ? count === 2
+                            ? "both"
+                            : "all"
+                          : `${here} of ${count}`}
+                      </span>
+                    )}
+                    {all && (
+                      <Check className="bulk-status-check" aria-hidden="true" />
+                    )}
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
@@ -197,18 +237,27 @@ export function BulkControls({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setTagsOpen(true)}>
-                Add or remove tags…
+              <DropdownMenuItem onSelect={() => setTagMode("add")}>
+                Add tag…
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTagMode("remove")}>
+                Remove tag…
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <IconButton
-            label="Clear selection"
+          <span className="bulk-spacer" />
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Clear selection"
             disabled={pending}
             onClick={bulk.clearSelection}
           >
-            <X />
-          </IconButton>
+            Clear
+            <kbd className="bulk-kbd" aria-hidden="true">
+              Esc
+            </kbd>
+          </Button>
         </div>
       )}
       {pending && (
@@ -257,9 +306,10 @@ export function BulkControls({
         </p>
       )}
       <BulkTagDialog
-        open={tagsOpen}
-        onOpenChange={setTagsOpen}
+        open={tagMode !== null}
+        onOpenChange={(open) => !open && setTagMode(null)}
         count={count}
+        mode={tagMode ?? "add"}
         onApply={(mode, tag) =>
           organize(
             mode === "add" ? { add_tags: [tag] } : { remove_tags: [tag] },

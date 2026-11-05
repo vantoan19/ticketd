@@ -1004,19 +1004,78 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   openMenu("Organize selected tickets");
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Add or remove tags…" }),
-  );
+  expect(screen.queryByRole("menuitem", { name: /Add or remove/ })).toBeNull();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove tag…" }));
   await act(async () => {});
-  const dialog = screen.getByRole("dialog", {
-    name: "Add or remove tags",
-  });
+  const dialog = screen.getByRole("dialog", { name: "Remove tag" });
+  expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
   fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
+});
+
+test("Organize has a separate Add tag action", async () => {
+  const changes: unknown[] = [];
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    bulk_change: (args: { change: unknown }) => {
+      changes.push(args.change);
+      return [];
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  openMenu("Organize selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", { name: "Add tag" });
+  expect(
+    within(dialog).queryByRole("button", { name: "Remove tag" }),
+  ).toBeNull();
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+    target: { value: "new" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ add_tags: ["new"] }]);
+});
+
+test("the status menu counts tickets per status and checks the one all share", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1),
+      bulkTicket(2),
+      bulkTicket(3, { status: "Done" }),
+    ],
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Status of selected tickets");
+  expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
+  const todo = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(todo.textContent).toContain("both");
+  expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
+  expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-3" }));
+  openMenu("Status of selected tickets");
+  const mixed = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(mixed.textContent).toContain("2 of 3");
+  expect(mixed.querySelector("svg.bulk-status-check")).toBeNull();
+});
+
+test("Escape clears the selection and the bar shows the shortcut", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  expect(
+    screen.getByRole("button", { name: "Clear selection" }).textContent,
+  ).toContain("Esc");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test("shows attention for a reminder while another view is active and after reopening", async () => {
