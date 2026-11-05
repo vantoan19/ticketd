@@ -219,7 +219,11 @@ pub fn derive_heading(markdown: &str) -> Option<String> {
         pulldown_cmark::Options::ENABLE_STRIKETHROUGH | pulldown_cmark::Options::ENABLE_TASKLISTS,
     ) {
         match event {
-            Event::Text(text) | Event::Code(text) | Event::InlineMath(text) => {
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::Html(text)
+            | Event::InlineHtml(text) => {
                 line.push_str(&text);
             }
             Event::End(

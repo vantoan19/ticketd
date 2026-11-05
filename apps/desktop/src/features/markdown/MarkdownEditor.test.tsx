@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +17,18 @@ vi.mock("./MermaidDiagram", () => ({
 }));
 afterEach(cleanup);
 describe("Markdown draft editor", () => {
+  it("returns focus to the editor when a focus request is raised (D2)", async () => {
+    const onChange = vi.fn();
+    const view = render(<MarkdownEditor value="Draft" onChange={onChange} />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    expect(document.activeElement).not.toBe(editable);
+    view.rerender(
+      <MarkdownEditor value="Draft" onChange={onChange} focusRequest={1} />,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(editable));
+  });
   it("retains original source without emitting on mount, focus, blur or ordinary rerender", () => {
     const source =
       "###   Keep exact opening source\n\n- [x] Done\n\n3. Third\n";

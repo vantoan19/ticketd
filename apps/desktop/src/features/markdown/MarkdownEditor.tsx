@@ -62,6 +62,7 @@ import {
   deleteRow,
   deleteColumn,
 } from "@platejs/table";
+import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
@@ -440,7 +441,7 @@ function Toolbar({ visible }: { visible: boolean }) {
             <Link />
           </Button>
         </PopoverTrigger>
-        <PopoverContent>
+        <PopoverContent align="start" sideOffset={6} collisionPadding={12}>
           <p className="mb-2 text-xs text-muted-foreground">Link a Document</p>
           <DocumentPicker
             autoFocus
@@ -461,10 +462,26 @@ function Toolbar({ visible }: { visible: boolean }) {
               event.stopPropagation();
               const target = url.trim();
               if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(target)) {
-                upsertLink(editor, { url: target });
-                setUrl("");
-                setLinkOpen(false);
-                editor.tf.focus();
+                const collapsed = !editor.selection || editor.api.isCollapsed();
+                const documentId = /^ticketd:\/\/document\/([^/?#\s]+)$/i.exec(
+                  target,
+                )?.[1];
+                // A typed Document link reads as the Document's heading, not its raw URL.
+                void (async () => {
+                  let text: string | undefined;
+                  if (collapsed && documentId)
+                    text = await documents
+                      .show(documentId)
+                      .then((doc) => doc.heading)
+                      .catch(() => undefined);
+                  upsertLink(editor, {
+                    url: target,
+                    ...(text ? { text } : {}),
+                  });
+                  setUrl("");
+                  setLinkOpen(false);
+                  editor.tf.focus();
+                })();
               }
             }}
           >
@@ -627,6 +644,8 @@ export interface MarkdownEditorProps {
   autoFocus?: boolean;
   /** Shown while the rich editor is empty, e.g. "Write a thought…". */
   placeholder?: string;
+  /** Bump to return focus to the editor at its last caret (e.g. after a conflict action). */
+  focusRequest?: number;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -637,6 +656,7 @@ export function MarkdownEditor({
   label = "Markdown document",
   autoFocus = false,
   placeholder,
+  focusRequest = 0,
 }: MarkdownEditorProps) {
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
@@ -710,13 +730,29 @@ export function MarkdownEditor({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [autoFocus, readOnly, source, editor]);
+  // Slate drops its selection when focus leaves, so remember the last caret for outside changes.
+  const lastSelection = useRef<PlateEditor["selection"]>(null);
+  useEffect(() => {
+    if (!focusRequest || readOnly) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (source) {
+        container.current?.querySelector<HTMLElement>(".cm-content")?.focus();
+        return;
+      }
+      if (!editor.selection && lastSelection.current)
+        editor.tf.select(lastSelection.current);
+      editor.tf.focus();
+      container.current?.querySelector<HTMLElement>(".rich-document")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusRequest, readOnly, source, editor]);
   useEffect(() => {
     if (value === emitted.current) return;
     synchronizing.current = true;
     emitted.current = value;
     const next = document.value;
     previousMarkdown.current = writeMarkdown(next);
-    applyExternalValue(editor, next);
+    applyExternalValue(editor, next, lastSelection.current);
     synchronizing.current = false;
   }, [value, document, editor]);
   const choices = insertions.filter(([, title]) =>
@@ -883,6 +919,9 @@ export function MarkdownEditor({
         <Plate
           editor={editor}
           readOnly={readOnly}
+          onSelectionChange={({ selection }) => {
+            if (selection) lastSelection.current = selection;
+          }}
           onValueChange={({ value: next }: { value: Value }) => {
             if (readOnly || synchronizing.current) return;
             // Selection, focus and initialization never emit a write.

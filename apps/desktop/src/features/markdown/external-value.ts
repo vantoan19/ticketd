@@ -1,6 +1,8 @@
 import { TextApi, type Descendant, type Point, type Value } from "platejs";
 import type { PlateEditor } from "platejs/react";
 
+type Selection = NonNullable<PlateEditor["selection"]>;
+
 type Leaf = { path: number[]; length: number };
 
 function leaves(nodes: readonly Descendant[], path: number[] = []): Leaf[] {
@@ -55,20 +57,90 @@ export function mapOffset(before: string, after: string, offset: number) {
   return Math.min(offset, after.length - suffix);
 }
 
-/** Replaces the editor content with an outside change without moving the caret off its text. */
-export function applyExternalValue(editor: PlateEditor, next: Value) {
-  const selection = editor.selection;
-  const before = editor.children;
-  const anchor = selection ? offsetOf(before, selection.anchor) : null;
-  const focus = selection ? offsetOf(before, selection.focus) : null;
-  const beforeText = text(before);
-  editor.tf.setValue(next);
-  if (anchor === null || focus === null) return;
-  const afterText = text(editor.children);
-  const to = pointAt(editor.children, mapOffset(beforeText, afterText, anchor));
-  const from = pointAt(
-    editor.children,
-    mapOffset(beforeText, afterText, focus),
+function blockTexts(nodes: readonly Descendant[]) {
+  return nodes.map((node) => text([node]));
+}
+
+/** Maps a (block, offset) caret to the matching block of `after`, never leaving that block. */
+export function mapBlockCaret(
+  before: readonly string[],
+  after: readonly string[],
+  block: number,
+  offset: number,
+): { block: number; offset: number } {
+  let head = 0;
+  const shortest = Math.min(before.length, after.length);
+  while (head < shortest && before[head] === after[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < shortest - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  )
+    tail += 1;
+  if (block < head) return { block, offset };
+  if (block >= before.length - tail)
+    return { block: block + after.length - before.length, offset };
+  const target = Math.max(
+    0,
+    Math.min(block, after.length - 1, after.length - tail - 1),
   );
+  const mapped = mapOffset(before[block] ?? "", after[target] ?? "", offset);
+  return {
+    block: target,
+    offset: Math.min(mapped, (after[target] ?? "").length),
+  };
+}
+
+function caretOf(nodes: readonly Descendant[], point: Point) {
+  const block = point.path[0];
+  const node = block === undefined ? undefined : nodes[block];
+  if (block === undefined || !node) return null;
+  const inner = offsetOf([node], {
+    path: [0, ...point.path.slice(1)],
+    offset: point.offset,
+  });
+  return inner === null ? null : { block, offset: inner };
+}
+
+function pointIn(
+  nodes: readonly Descendant[],
+  caret: { block: number; offset: number },
+): Point | null {
+  const node = nodes[caret.block];
+  if (!node) return null;
+  const point = pointAt([node], caret.offset);
+  return point
+    ? { path: [caret.block, ...point.path.slice(1)], offset: point.offset }
+    : null;
+}
+
+/** Replaces the editor content with an outside change without moving the caret off its text. */
+export function applyExternalValue(
+  editor: PlateEditor,
+  next: Value,
+  remembered?: Selection | null,
+) {
+  const selection = editor.selection ?? remembered ?? null;
+  const before = editor.children;
+  const anchor = selection ? caretOf(before, selection.anchor) : null;
+  const focus = selection ? caretOf(before, selection.focus) : null;
+  const beforeBlocks = blockTexts(before);
+  editor.tf.setValue(next);
+  const afterBlocks = blockTexts(editor.children);
+  // Never leave the editor without a selection once it had one: fall back to the end.
+  const fallback = (): Point | null => {
+    const last = editor.children.length - 1;
+    return pointIn(editor.children, {
+      block: last,
+      offset: (afterBlocks[last] ?? "").length,
+    });
+  };
+  if (!anchor || !focus) return;
+  const map = (c: { block: number; offset: number }) => {
+    const m = mapBlockCaret(beforeBlocks, afterBlocks, c.block, c.offset);
+    return pointIn(editor.children, m) ?? fallback();
+  };
+  const to = map(anchor);
+  const from = map(focus);
   if (to && from) editor.tf.select({ anchor: to, focus: from });
 }

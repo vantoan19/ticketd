@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
-import { GraphLegend } from "./GraphLegend";
+import { GraphLegend, KindIcon } from "./GraphLegend";
 import {
   connectionRows,
   edgeLabels,
@@ -442,6 +442,7 @@ export function WorkspaceGraph({
       <ul className="context-graph-list">
         {graph?.nodes.map((node) => (
           <li key={node.id}>
+            <KindIcon kind={node.kind} />
             <button type="button" onClick={() => setSelected(node.id)}>
               {node.label}
               {node.trashed ? " (Trash)" : ""}
