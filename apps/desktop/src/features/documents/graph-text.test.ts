@@ -135,3 +135,41 @@ describe("map rules", () => {
     ).toBe("Update details");
   });
 });
+
+test("a passage differing from the title only by punctuation is not repeated", () => {
+  const nodes = new Map([
+    [
+      "a",
+      {
+        id: "a",
+        kind: "document",
+        label: "Dense shared reference",
+        state: null,
+        trashed: false,
+        activity_detail: false,
+      },
+    ],
+    [
+      "b",
+      {
+        id: "b",
+        kind: "ticket",
+        label: "Step",
+        state: null,
+        trashed: false,
+        activity_detail: false,
+      },
+    ],
+  ] as never) as Map<string, never>;
+  expect(
+    describeEdge(
+      {
+        source: "b",
+        target: "a",
+        kind: "mention",
+        explanation: "dense shared reference.",
+      } as never,
+      nodes,
+    ),
+  ).not.toContain("“");
+});

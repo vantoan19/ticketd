@@ -82,6 +82,16 @@ export function plainText(markdown: string): string {
     .trim();
 }
 
+/** Equal ignoring case and punctuation. */
+function sameWords(a: string, b: string): boolean {
+  const norm = (text: string) =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  return norm(a) === norm(b);
+}
+
 function name(node: GraphNode | undefined, fallback: string): string {
   if (!node) return fallback;
   return node.ticket_reference ?? node.label;
@@ -100,7 +110,7 @@ export function describeEdge(
     (node) =>
       node &&
       [node.label, node.ticket_reference ?? ""].some(
-        (text) => text && plainText(text) === passage,
+        (text) => text && sameWords(plainText(text), passage),
       ),
   );
   const quoted = passage && !repeats ? `: “${passage}”` : "";

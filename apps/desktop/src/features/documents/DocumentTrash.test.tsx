@@ -120,9 +120,9 @@ it("includes Activity details on request and keeps a selected detail", async () 
       target={null}
     />,
   );
-  fireEvent.click(screen.getByLabelText("Include Activity details"));
+  fireEvent.click(screen.getByLabelText("Include update details"));
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
-  expect(screen.getByText("Activity details · T-1")).toBeTruthy();
+  expect(screen.getByText("Update details · T-1")).toBeTruthy();
   fireEvent.click(
     await screen.findByRole("button", { name: "Keep in Documents" }),
   );

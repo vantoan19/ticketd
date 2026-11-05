@@ -80,7 +80,7 @@ export function DocumentPicker({
               <span className="document-picker-text">
                 <span className="truncate">{item.heading}</span>
                 {item.origin_ticket && (
-                  <small>{item.origin_ticket} · Activity details</small>
+                  <small>{item.origin_ticket} · Update details</small>
                 )}
               </span>
             </button>

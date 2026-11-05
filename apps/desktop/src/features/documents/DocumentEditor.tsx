@@ -840,7 +840,7 @@ export function DocumentEditor({
                         navigate(() => onOpenTicket?.(initial.origin_ticket!))
                       }
                     >
-                      {initial.origin_ticket} · Activity details
+                      {initial.origin_ticket} · Update details
                     </Button>
                   </dd>
                 </>

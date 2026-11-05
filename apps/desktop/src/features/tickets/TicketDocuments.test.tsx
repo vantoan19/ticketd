@@ -85,7 +85,7 @@ test("attaching Activity details from the picker links them without a separate k
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Add Document" }));
-  fireEvent.click(await screen.findByText("T-11 · Activity details"));
+  fireEvent.click(await screen.findByText("T-11 · Update details"));
   expect(invoke).toHaveBeenCalledWith("recent_documents", {
     offset: 0,
     includeSupport: true,
