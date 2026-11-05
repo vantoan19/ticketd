@@ -155,12 +155,12 @@
   height: 1px;
   box-shadow: 0 1px var(--border);
 }
+/* The diagram draws its own frame; the wrapper adds none, so Edit shows one border. */
 .diagram-editor {
-  box-shadow: var(--shadow-border);
-  padding: 12px;
-  border-radius: 6px;
+  padding: 0;
 }
 .diagram-editor summary {
+  padding-top: 8px;
   cursor: pointer;
   color: var(--muted-foreground);
 }

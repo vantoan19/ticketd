@@ -572,7 +572,39 @@ it("lists each connected item once and names Plans that use the Document as spec
   await screen.findByRole("button", { name: /T-4/ });
   expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Spec of Roadmap" })).toBeTruthy();
-  expect(screen.getByText("Spec of the Plan Roadmap")).toBeTruthy();
+  expect(
+    screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
+  ).toBeTruthy();
+});
+
+it("Edit shows the heading once: the title field holds it and the editor keeps the saved text", async () => {
+  const doc = {
+    id: "d1",
+    title: null,
+    heading: "Checkout spec",
+    body: "# Checkout spec\n\nSee the flow.",
+    created_at: "c",
+    updated_at: "u",
+    trashed: false,
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Checkout spec",
+  );
+  const editor = screen.getByLabelText("Your thought") as HTMLTextAreaElement;
+  expect(editor.value).toBe("See the flow.");
+  vi.mocked(documents.save).mockResolvedValue({
+    ...doc,
+    body: "# Checkout spec\n\nSee the new flow.",
+  });
+  fireEvent.change(editor, { target: { value: "See the new flow." } });
+  await waitFor(() =>
+    expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe(
+      "# Checkout spec\n\nSee the new flow.",
+    ),
+  );
 });
 
 const base = { id: "d1", created_at: "c", updated_at: "u", trashed: false };

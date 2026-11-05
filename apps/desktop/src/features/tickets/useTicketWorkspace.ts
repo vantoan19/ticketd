@@ -454,8 +454,14 @@ export function useTicketWorkspace(
     // sit beside it as "outside the current results", so entering or leaving
     // Trash starts without a selection.
     if ((next === "trash") !== trash) selectTicket(null);
-    // Another Plan opens on its own list, not on the previous Plan's open ticket.
-    if (planId && planId !== navigation.plan) setSelected(null);
+    // A new scope opens on its own list, not on a ticket left over from the
+    // previous one (it would sit full-width as "outside the current results").
+    if (
+      next !== navigation.kind ||
+      project !== navigation.project ||
+      planId !== navigation.plan
+    )
+      setSelected(null);
     setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");

@@ -59,6 +59,8 @@
   --group-hairline: #0000000d;
   --input: #00000014;
   --header-boundary: #0000001a;
+  /* Outlines and empty tracks of controls (switch, progress): 3:1 on the page. */
+  --control-boundary: #8f8f8f;
   --ring: #0072f5;
   --input-focus: #005fcc;
   --interactive: #0072f5;
@@ -139,6 +141,7 @@
   --group-hairline: #ffffff14;
   --input: #ffffff24;
   --header-boundary: #ffffff24;
+  --control-boundary: #6b6b6b;
   --error-surface: #2b1414;
   --error-foreground: #fecaca;
   --destructive: #fecaca;

@@ -451,7 +451,7 @@ export function RestoreDialog({
             <span className="restore-actions">
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 disabled={phase.name === "restoring"}
                 onClick={onClose}
               >

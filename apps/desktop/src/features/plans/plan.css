@@ -104,7 +104,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: 9999px;
-  background: var(--muted);
+  background: var(--control-boundary);
 }
 .plan-progress-bar > span {
   display: block;

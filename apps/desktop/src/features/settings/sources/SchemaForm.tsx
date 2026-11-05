@@ -21,11 +21,23 @@ function FieldNote({
   id,
   field,
   errors,
+  pending = "",
 }: {
   id: string;
   field: SchemaField;
   errors: string[];
+  /** Text typed into a selector but not yet added to it. */
+  pending?: string;
 }) {
+  const text = pending.trim();
+  const explained = text !== "" && errors.length > 0;
+  if (explained) {
+    const shape =
+      field.type === "multi_select" && field.format === "owner_name"
+        ? "is not a repository; expected owner/name, then press Enter to add it."
+        : "has not been added; press Enter to add it.";
+    errors = [`“${text}” ${shape}`];
+  }
   return (
     <>
       {field.help && (
@@ -35,7 +47,7 @@ function FieldNote({
       )}
       {errors.map((message) => (
         <p key={message} role="alert" className="settings-failure">
-          {field.label} {message}
+          {explained ? message : `${field.label} ${message}`}
         </p>
       ))}
     </>
@@ -257,7 +269,7 @@ function MultiSelectField({
           )}
         </div>
       )}
-      <FieldNote id={id} field={field} errors={errors} />
+      <FieldNote id={id} field={field} errors={errors} pending={query} />
     </div>
   );
 }
