@@ -79,7 +79,7 @@ test("shows outside blockers and edits dependencies through the shared workflow"
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: 1 blocker/ }),
+    await screen.findByRole("button", { name: /^T-1: 1 open blocker/ }),
   );
   expect(screen.getByText(/Todo, so it blocks until it is Done/)).toBeTruthy();
   fireEvent.click(
@@ -150,7 +150,7 @@ test("a rejected blocker is explained next to the form", async () => {
     />,
   );
   fireEvent.click(
-    await screen.findByRole("button", { name: /^T-1: 0 blockers/ }),
+    await screen.findByRole("button", { name: /^T-1: 0 open blockers/ }),
   );
   fireEvent.change(screen.getByLabelText("Add a blocker"), {
     target: { value: "Other" },
