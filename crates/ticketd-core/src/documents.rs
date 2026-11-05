@@ -100,7 +100,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
 
 // A Document's heading: its explicit title, else the originating Activity's brief (docs/mvp-spec.md),
 // else the first plain-text line of its body. `ticketd_heading` is registered on every workspace connection.
-pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), ticketd_heading(substr(d.body, 1, 4096)), 'Untitled')";
+pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_brief_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), ticketd_heading(substr(d.body, 1, 4096)), 'Untitled')";
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(

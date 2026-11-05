@@ -154,6 +154,10 @@ function AppContent() {
   const [documentReturn, setDocumentReturn] = useState<typeof view | null>(
     null,
   );
+  // What a reader opened from a ticket returns to, named for its Back button.
+  const [documentReturnLabel, setDocumentReturnLabel] = useState<string | null>(
+    null,
+  );
   const [creating, setCreating] = useState(false);
   // The status a group's Add action asked for; the sidebar's New ticket has none.
   const [createStatus, setCreateStatus] = useState<string | undefined>();
@@ -214,7 +218,14 @@ function AppContent() {
       >
         <DocumentNavigation.Provider
           value={(id) => {
-            if (view !== "documents") setDocumentReturn(view);
+            if (view !== "documents") {
+              setDocumentReturn(view);
+              setDocumentReturnLabel(
+                view === "tickets" && workspace.selected
+                  ? `Back to ${workspace.selected}`
+                  : null,
+              );
+            }
             setDocumentTarget({ id, key: Date.now() });
             setView("documents");
           }}
@@ -373,6 +384,10 @@ function AppContent() {
                       active={view === "documents"}
                       listRequest={documentListRequest}
                       target={documentTarget}
+                      backLabel={
+                        (documentReturn && documentReturnLabel) ||
+                        "Back to Documents"
+                      }
                       capture={capture}
                       currentTicket={
                         view === "tickets" ? workspace.selected : null

@@ -15,7 +15,7 @@ pub use context_graph::{
     WorkspaceGraph, WorkspaceGraphRequest,
 };
 mod document_links;
-pub use document_links::{ContextLink, DocumentBacklink, derive_heading};
+pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
 mod documents;
 pub use documents::{Document, DocumentPatch, DocumentSearchResult, DocumentSummary};
 mod duplicates;

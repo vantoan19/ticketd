@@ -16,15 +16,21 @@ import "./ticket-documents.css";
 
 type DocumentLink = Awaited<ReturnType<typeof documents.links>>[0][number];
 
+const sourceRank = (link: DocumentLink) =>
+  link.explicit ? 0 : link.activity_id ? 2 : 1;
+
 /** The Documents a ticket links to, with an Add action that links another by title. */
 export function TicketDocuments({
   ticket,
   revision,
   refresh,
+  onOpenUpdate,
 }: {
   ticket: Ticket;
   revision: number;
   refresh: () => Promise<void>;
+  /** Shows the update that mentions a Document. */
+  onOpenUpdate?: (activityId: string) => void;
 }) {
   const openDocument = useContext(DocumentNavigation);
   const [links, setLinks] = useState<DocumentLink[]>([]);
@@ -44,12 +50,13 @@ export function TicketDocuments({
       .links(ticket.id)
       .then(([outgoing]) => {
         if (!current) return;
-        // One row per Document; it is explicit if any of its links is.
+        // One row per Document, by its strongest source: attached, then
+        // mentioned in the description, then mentioned in an update.
         const byDocument = new Map<string, DocumentLink>();
         for (const link of outgoing) {
           if (link.target_kind !== "document") continue;
           const known = byDocument.get(link.target_id);
-          if (!known || (link.explicit && !known.explicit))
+          if (!known || sourceRank(link) < sourceRank(known))
             byDocument.set(link.target_id, link);
         }
         setLinks([...byDocument.values()]);
@@ -117,7 +124,7 @@ export function TicketDocuments({
                 >
                   <X aria-hidden="true" />
                 </button>
-              ) : (
+              ) : link.activity_id ? null : (
                 <IconButton
                   size="icon-xs"
                   className="ticket-documents-edit"
@@ -126,6 +133,16 @@ export function TicketDocuments({
                 >
                   <Pencil aria-hidden="true" />
                 </IconButton>
+              )}
+              {!link.explicit && link.activity_id && (
+                <button
+                  type="button"
+                  className="ticket-documents-source"
+                  title="Open the update that mentions this Document"
+                  onClick={() => onOpenUpdate?.(link.activity_id!)}
+                >
+                  From update
+                </button>
               )}
             </li>
           ))}
