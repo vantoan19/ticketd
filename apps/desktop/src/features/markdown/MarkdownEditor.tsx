@@ -667,6 +667,8 @@ export interface MarkdownEditorProps {
   focusLink?: string;
   /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
   paragraphAfterQuote?: boolean;
+  /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
+  persistentToolbar?: boolean;
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -680,6 +682,7 @@ export function MarkdownEditor({
   focusRequest = 0,
   focusLink,
   paragraphAfterQuote = false,
+  persistentToolbar = false,
 }: MarkdownEditorProps) {
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
@@ -1004,7 +1007,7 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar visible={active} />}
+          {!readOnly && <Toolbar visible={active || persistentToolbar} />}
           <PlateContent
             readOnly={readOnly}
             {...(placeholder ? { placeholder } : {})}

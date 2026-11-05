@@ -33,7 +33,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import { useContext, useRef, useState, type RefObject } from "react";
+import { useContext, useRef, type RefObject } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
@@ -120,8 +120,6 @@ export function WorkspaceSidebar({
   const newTrigger = useRef<HTMLButtonElement>(null);
   // Choosing an item moves focus on its own; dismissing the menu returns it to New.
   const chose = useRef(false);
-  // The tooltip must not outlive the choice: the menu item opens a modal over it.
-  const [hideNewTooltip, setHideNewTooltip] = useState(false);
   const openGraph = useContext(ContextGraphNavigation);
   const unread = (counts?.unread_inbox ?? 0) > 0;
   const archivedPlans = plans.filter((e) => e.archived).length;
@@ -134,13 +132,10 @@ export function WorkspaceSidebar({
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <strong>ticketd</strong>
-          <DropdownMenu
-            onOpenChange={(open) => open && setHideNewTooltip(false)}
-          >
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton
                 ref={newTrigger}
-                hideTooltip={hideNewTooltip}
                 className="new-ticket"
                 label="New ticket"
               >
@@ -157,7 +152,6 @@ export function WorkspaceSidebar({
               <DropdownMenuItem
                 onSelect={() => {
                   chose.current = true;
-                  setHideNewTooltip(true);
                   createTriggerRef.current = newTrigger.current;
                   setView("tickets");
                   // After the menu has closed, so it cannot take focus back.
@@ -169,7 +163,6 @@ export function WorkspaceSidebar({
               <DropdownMenuItem
                 onSelect={() => {
                   chose.current = true;
-                  setHideNewTooltip(true);
                   onCapture(newTrigger.current);
                 }}
               >

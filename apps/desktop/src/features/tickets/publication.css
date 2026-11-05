@@ -295,3 +295,18 @@
   color: var(--foreground);
   background: var(--surface);
 }
+
+/* An inline link in a rail note keeps the note's line box, and the note gets
+   room for the focus ring so it never touches the descenders above. */
+.rail-note:has(.rail-publish-link) {
+  line-height: 22px;
+}
+.rail-note .rail-publish-link {
+  display: inline;
+  height: auto;
+  min-height: 0;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  border-radius: 2px;
+}

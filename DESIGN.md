@@ -284,7 +284,7 @@ Group headings (Projects, Context, Plans) are 12px secondary-text labels in both
 - Status group headers use the recessed surface with hairlines above and below in both themes; the canvas surface read as a hole inside the elevated dark panel.
 - Tag pills use the shadow-boundary ring (`0 0 0 1px #FFFFFF24` in dark) so they keep their shape on dark surfaces; pane edges and inputs use the same boundary, and links use `--link-foreground` (`#52AEFF` in dark).
 - Sidebar section labels are 12px secondary labels in both themes.
-- Single-status views (a list narrowed to one status, such as Ready or an applied status filter) show one flat group under that status header rather than the full workflow-ordered set.
+- Single-status views (a list narrowed to one status, such as Ready or an applied status filter) render no group header (the list title already names the status) and show a one-line view description under the title, rather than the full workflow-ordered set of groups.
 - Option cards use a 2px selected edge instead of the 1px boundary used elsewhere, so the selection stays legible without a fill change.
 - The unlinked project choice is labeled "No project" (not "None" or "Unassigned") in project pickers, the sidebar, and ticket properties.
 
