@@ -916,7 +916,10 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
-      <div className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}>
+      <div
+        className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
+        data-persistent={persistentToolbar || undefined}
+      >
         <CopySourceButton
           compact
           source={value}

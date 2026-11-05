@@ -308,5 +308,11 @@
   font-size: inherit;
   line-height: inherit;
   vertical-align: baseline;
-  border-radius: 2px;
+  border-radius: 4px;
+}
+/* The ring hugs the padding box, so padding is the ring's offset from the
+   words beside it; the negative margin keeps the text where it was. */
+.rail-source .rail-note .ui-button.rail-publish-link {
+  padding: 2px 4px;
+  margin: 0 -4px;
 }

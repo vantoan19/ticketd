@@ -47,6 +47,11 @@
   visibility: visible;
   transition-delay: 0s;
 }
+/* A persistent toolbar (the capture dialog) keeps its copy/source pair too. */
+.editor-mode--inline[data-persistent] {
+  opacity: 1;
+  visibility: visible;
+}
 .rich-document .code-language[data-editing="false"]:not(:focus-within) {
   display: none;
 }

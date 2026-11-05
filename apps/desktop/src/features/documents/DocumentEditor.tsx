@@ -581,10 +581,11 @@ export function DocumentEditor({
       </Field>
     </FieldGroup>
   );
+  const isSaved = status === "Saved locally";
   const statusLine = (
     <span role="status" className="document-status">
-      {status === "Saved locally" && <Check aria-hidden="true" />}
-      {status}
+      {isSaved && <Check aria-hidden="true" />}
+      {capture && isSaved ? "Saved to Documents as you type" : status}
     </span>
   );
   const saveError = failed && (

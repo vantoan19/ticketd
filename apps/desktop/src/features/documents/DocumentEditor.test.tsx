@@ -76,6 +76,23 @@ it("disables Done with a stated reason until a thought is written", async () => 
       .disabled,
   ).toBe(false);
 });
+it("tells a capture it is saved to Documents once it has text", async () => {
+  vi.mocked(documents.save).mockResolvedValue({
+    id: "d1",
+    title: null,
+    body: "A thought",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
+  renderEditor(<DocumentEditor initial={null} onClose={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "A thought" },
+  });
+  const status = await screen.findByText("Saved to Documents as you type");
+  expect(status.querySelector("svg")).toBeTruthy();
+  expect(screen.queryByText("Saved locally")).toBeNull();
+});
 it("keeps a failed capture open and retries the same request before returning", async () => {
   vi.mocked(documents.save)
     .mockRejectedValueOnce("disk full")
@@ -100,7 +117,7 @@ it("keeps a failed capture open and retries the same request before returning", 
   expect(vi.mocked(documents.save).mock.calls[0]).toEqual(
     vi.mocked(documents.save).mock.calls[1],
   );
-  await screen.findByText("Saved locally");
+  await screen.findByText("Saved to Documents as you type");
   fireEvent.click(screen.getByText("Done"));
   expect(close).toHaveBeenCalledOnce();
 });
