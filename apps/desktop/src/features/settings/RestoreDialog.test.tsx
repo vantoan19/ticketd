@@ -102,6 +102,14 @@ test("the comparison names what will be replaced, current workspace first", asyn
   expect(headers).toEqual(["Replaces", "Current workspace", "This backup"]);
 });
 
+test("the review scrolls from the keyboard: its body is a focusable region", async () => {
+  const dialog = await openReview();
+  await within(dialog).findByText("Backup checked.");
+  const body = within(dialog).getByRole("region", { name: "Backup review" });
+  expect(body.tabIndex).toBe(0);
+  expect(within(body).getByRole("table")).toBeTruthy();
+});
+
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);

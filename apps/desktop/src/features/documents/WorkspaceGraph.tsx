@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { useKeepPaneScroll } from "./keep-scroll";
+import { useScrollFade } from "./scroll-fade";
 import { KindIcon } from "./GraphLegend";
 import {
   connectionRows,
@@ -67,6 +68,8 @@ export function WorkspaceGraph({
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
   const keepScroll = useKeepPaneScroll();
+  const fadeSelection = useScrollFade<HTMLDivElement>();
+  const fadeUnconnected = useScrollFade<HTMLDivElement>();
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
   const [tag, setTag] = useState("");
@@ -160,6 +163,30 @@ export function WorkspaceGraph({
         if (graphVersion.current !== version) {
           // Pages were loaded meanwhile; refresh those instead of replacing them.
           if (attempts > 0) await hydrate(attempts - 1);
+          return;
+        }
+        // Hydrating refreshes the items already shown and never adds new ones. If
+        // everything was loaded and the workspace now counts more, something was
+        // added meanwhile (the total is unaffected by a relationship filter, so
+        // that case is left alone): load the first page again around what is shown.
+        if (
+          !request.relationship &&
+          previous.next_cursor === null &&
+          previous.nodes.length < 100 &&
+          value.total > value.nodes.length
+        ) {
+          const page = await client.workspaceGraph({
+            ...request,
+            adjacency_limit: adjacencyLimit,
+            visible_ids: previous.nodes.map((node) => node.id),
+            hydrate_only: false,
+          });
+          if (!current || currentRequest.current !== request) return;
+          if (graphVersion.current !== version) {
+            if (attempts > 0) await hydrate(attempts - 1);
+            return;
+          }
+          setGraph(page);
           return;
         }
         setGraph({
@@ -432,6 +459,7 @@ export function WorkspaceGraph({
               <ContextGraphCanvas
                 nodes={nodes}
                 edges={edges}
+                loading={!graph}
                 selected={selected}
                 positions={positions}
                 onPositions={setPositions}
@@ -445,7 +473,7 @@ export function WorkspaceGraph({
             )}
             <aside className="context-graph-preview context-graph-preview-split">
               {/* Scrolls on its own, so a long selection never pushes the Not connected list out of the panel. */}
-              <div className="context-graph-preview-body">
+              <div ref={fadeSelection} className="context-graph-preview-body">
                 {(graph?.nodes.length ?? 0) > MAP_CARDS && (
                   <p>
                     The map shows the newest {MAP_CARDS} items; the list shows
@@ -466,6 +494,7 @@ export function WorkspaceGraph({
                 >
                   <strong>Not connected · {unconnected.length}</strong>
                   <div
+                    ref={fadeUnconnected}
                     className="context-graph-unconnected-list"
                     tabIndex={0}
                     aria-label="Not connected items"

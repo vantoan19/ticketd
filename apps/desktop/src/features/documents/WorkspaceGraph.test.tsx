@@ -360,3 +360,35 @@ test("items with no relationship leave the canvas for a Not connected list", asy
   );
   expect(await screen.findByRole("button", { name: "Open item" })).toBeTruthy();
 });
+
+test("an item created while the graph is open is added, not left counted but unseen", async () => {
+  const first = nodeOf("one", "T-1 · First");
+  const created = nodeOf("new", "Untitled");
+  vi.mocked(client.workspaceGraph)
+    .mockReset()
+    .mockImplementation((request) => {
+      // Hydration only refreshes the shown items, but the total already counts the new one.
+      if (request.hydrate_only)
+        return Promise.resolve({ ...graphOf([first], null), total: 2 });
+      if (request.visible_ids.length)
+        return Promise.resolve(graphOf([first, created], null));
+      return Promise.resolve(graphOf([first], null));
+    });
+  const props = {
+    active: true,
+    onBack: vi.fn(),
+    onFocus: vi.fn(),
+    onOpen: vi.fn(),
+  };
+  const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
+  await screen.findByText(/Showing 1 of 1 item/);
+  rerender(<WorkspaceGraph {...props} revision={1} />);
+  await screen.findByText(/Showing 2 of 2 items/);
+  expect(screen.getByText("2 items · 0 relationships")).toBeTruthy();
+  expect(
+    within(screen.getByRole("group", { name: "Not connected" })).getByRole(
+      "button",
+      { name: "Untitled" },
+    ),
+  ).toBeTruthy();
+});
