@@ -11,17 +11,21 @@ vi.mock("./ContextGraphCanvas", () => ({
   ContextGraphCanvas: ({
     positions,
     viewport,
+    fit,
+    centerOn,
     onPositions,
     onViewport,
   }: {
     positions: Record<string, { x: number; y: number }>;
     viewport: { x: number; y: number; zoom: number };
+    fit: boolean;
+    centerOn: string | null;
     onPositions: (p: Record<string, { x: number; y: number }>) => void;
     onViewport: (v: { x: number; y: number; zoom: number }) => void;
   }) => (
     <>
       <output data-testid="view">
-        {JSON.stringify({ positions, viewport })}
+        {JSON.stringify({ positions, viewport, fit, centerOn })}
       </output>
       <button
         onClick={() => {
@@ -79,6 +83,10 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
       [],
     ),
   );
+  // Center keeps the zoom and asks the canvas to centre the focused card.
+  expect(screen.getByTestId("view").textContent).toContain('"zoom":2');
+  expect(screen.getByTestId("view").textContent).toContain('"centerOn":"two"');
+  expect(screen.getByTestId("view").textContent).toContain('"fit":false');
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
@@ -94,5 +102,7 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
   expect(screen.getByTestId("view").textContent).toContain(
     '"x":5,"y":6,"zoom":2',
   );
-  expect(screen.getByRole("heading", { name: "two" })).toBeTruthy();
+  expect(screen.getByTestId("view").textContent).toContain('"centerOn":null');
+  expect(screen.getByTestId("view").textContent).toContain('"fit":false');
+  expect(screen.getByText("two", { selector: "h2" })).toBeTruthy();
 });

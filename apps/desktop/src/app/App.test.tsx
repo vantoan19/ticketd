@@ -1716,7 +1716,7 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open selected item" }));
   fireEvent.click(
     screen.getByRole("button", { name: "Back to context graph" }),
   );

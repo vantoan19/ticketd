@@ -365,7 +365,7 @@ export function WorkspaceGraph({
         graph && (
           <p role="status" className="context-graph-status">
             {relationship && graph.nodes.length === 0
-              ? "No connected items on this page"
+              ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
               : relationship
                 ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
                 : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}

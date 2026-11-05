@@ -14,11 +14,13 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
-import type { Point } from "./context-layout";
+import { CARD_HEIGHT, CARD_WIDTH, type Point } from "./context-layout";
 import "@xyflow/react/dist/style.css";
 
 /** Low enough that a dense neighbourhood fits whole instead of being clipped. */
 const MIN_ZOOM = 0.05;
+/** A small neighbourhood opens at a zoom where card text can be read. */
+const READABLE_ZOOM = 0.6;
 
 export function ContextGraphCanvas({
   nodes,
@@ -32,6 +34,8 @@ export function ContextGraphCanvas({
   onError,
   fit = false,
   onFitted,
+  centerId,
+  centerOn = null,
 }: {
   nodes: { id: string; label: string }[];
   edges: Edge[];
@@ -45,15 +49,21 @@ export function ContextGraphCanvas({
   /** Ask the canvas to fit all items once positions exist; reported by onFitted. */
   fit?: boolean;
   onFitted?: () => void;
+  /** The item the layout puts in the middle. */
+  centerId?: string | undefined;
+  /** Ask the canvas to centre the viewport on this card at the current zoom; reported by onFitted. */
+  centerOn?: string | null;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
   const onErrorRef = useRef(onError);
+  const centerIdRef = useRef(centerId);
   useEffect(() => {
+    centerIdRef.current = centerId;
     positionsRef.current = positions;
     onPositionsRef.current = onPositions;
     onErrorRef.current = onError;
-  }, [positions, onPositions, onError]);
+  }, [centerId, positions, onPositions, onError]);
   const topology = JSON.stringify({
     nodes: nodes.map((node) => node.id).sort(),
     edges: edges
@@ -100,7 +110,11 @@ export function ContextGraphCanvas({
     };
     worker.postMessage({
       id,
-      request: { ...request, positions: positionsRef.current },
+      request: {
+        ...request,
+        center: centerIdRef.current,
+        positions: positionsRef.current,
+      },
     });
     return () => {
       currentGeneration.current++;
@@ -112,10 +126,15 @@ export function ContextGraphCanvas({
   useEffect(() => {
     onFittedRef.current = onFitted;
   }, [onFitted]);
+  const nodeCount = nodes.length;
+  const nodeCountRef = useRef(nodeCount);
+  useEffect(() => {
+    nodeCountRef.current = nodeCount;
+  }, [nodeCount]);
   const placed = nodes.some((node) => positions[node.id]);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (!fit || !placed || !ready) return;
+    if ((!fit && !centerOn) || !placed || !ready) return;
     // Fit only once React Flow has measured every card; fitting earlier centres
     // each card's corner instead of its middle.
     let frame = 0;
@@ -128,29 +147,65 @@ export function ContextGraphCanvas({
         frame = window.requestAnimationFrame(attempt);
         return;
       }
-      void instance.current?.fitView({
-        padding: 0.2,
-        duration: 200,
-        minZoom: MIN_ZOOM,
-      });
+      const target = centerOn ? positions[centerOn] : undefined;
+      if (centerOn && target && instance.current) {
+        // Centre on the card's middle without changing the zoom.
+        void instance.current.setCenter(
+          target.x + CARD_WIDTH / 2,
+          target.y + CARD_HEIGHT / 2,
+          { zoom: instance.current.getZoom(), duration: 200 },
+        );
+      } else {
+        void instance.current?.fitView({
+          padding: 0.2,
+          duration: 200,
+          // A small map opens readable and may overflow; a dense one fits whole.
+          minZoom: nodeCount <= 14 ? READABLE_ZOOM : MIN_ZOOM,
+        });
+      }
       onFittedRef.current?.();
     };
     frame = window.requestAnimationFrame(attempt);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit, placed, ready, positions]);
-  // Labels crowd a dense map, so a line names itself only while hovered or
-  // when it touches the selected item.
+  }, [fit, centerOn, placed, ready, positions, nodeCount]);
+  // Fit again when the panel is resized, so the map never stays clipped.
+  const container = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = container.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    let first = true;
+    let timer = 0;
+    const observer = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(
+        () =>
+          void instance.current?.fitView({
+            padding: 0.2,
+            duration: 200,
+            minZoom: nodeCountRef.current <= 14 ? READABLE_ZOOM : MIN_ZOOM,
+          }),
+        150,
+      );
+    });
+    observer.observe(element);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, []);
+  // Labels crowd a dense map, so a line names itself only while hovered; the
+  // item list states every connection in words.
   const [hovered, setHovered] = useState<string | null>(null);
   const shownEdges = useMemo(
     () =>
       edges.map((edge) =>
-        edge.id === hovered ||
-        (selected !== null &&
-          (edge.source === selected || edge.target === selected))
-          ? edge
-          : { ...edge, label: undefined },
+        edge.id === hovered ? edge : { ...edge, label: undefined },
       ),
-    [edges, hovered, selected],
+    [edges, hovered],
   );
   const flowNodes = useMemo<Node[]>(
     () =>
@@ -161,6 +216,7 @@ export function ContextGraphCanvas({
           position: positions[node.id]!,
           data: { label: node.label },
           ariaLabel: node.label,
+          style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
           selected: node.id === selected,
         })),
     [nodes, positions, selected],
@@ -177,6 +233,7 @@ export function ContextGraphCanvas({
   }
   return (
     <div
+      ref={container}
       className="context-graph-canvas"
       aria-label="Connections canvas"
       onKeyDown={selectFromKey}
@@ -196,6 +253,8 @@ export function ContextGraphCanvas({
         viewport={viewport}
         onViewportChange={onViewport}
         nodesDraggable={false}
+        // The Connected items list is the keyboard path to every card.
+        nodesFocusable={false}
         edgesFocusable={false}
       >
         <Background />
