@@ -191,12 +191,47 @@ export function ContextGraphCanvas({
     const y = Math.min(...points.map((p) => p.y));
     const right = Math.max(...points.map((p) => p.x)) + CARD_WIDTH;
     const bottom = Math.max(...points.map((p) => p.y)) + CARD_HEIGHT;
+    // The cards that were in view before this change must not be pushed out of it.
+    const view = viewportRef.current;
+    const visible = [...before]
+      .filter((id) => positions[id])
+      .map((id) => positions[id]!)
+      .filter((p) => {
+        const left = p.x * view.zoom + view.x;
+        const top = p.y * view.zoom + view.y;
+        return (
+          left + CARD_WIDTH * view.zoom > 0 &&
+          left < element.clientWidth &&
+          top + CARD_HEIGHT * view.zoom > 0 &&
+          top < element.clientHeight
+        );
+      });
+    const keep = visible.length
+      ? {
+          x: Math.min(...visible.map((p) => p.x)),
+          y: Math.min(...visible.map((p) => p.y)),
+          width:
+            Math.max(...visible.map((p) => p.x)) +
+            CARD_WIDTH -
+            Math.min(...visible.map((p) => p.x)),
+          height:
+            Math.max(...visible.map((p) => p.y)) +
+            CARD_HEIGHT -
+            Math.min(...visible.map((p) => p.y)),
+        }
+      : undefined;
     const next = panToInclude(
-      viewportRef.current,
+      view,
       { width: element.clientWidth, height: element.clientHeight },
       { x, y, width: right - x, height: bottom - y },
+      24,
+      keep,
     );
-    if (next.x !== viewportRef.current.x || next.y !== viewportRef.current.y)
+    if (
+      next.x !== viewportRef.current.x ||
+      next.y !== viewportRef.current.y ||
+      next.zoom !== viewportRef.current.zoom
+    )
       void instance.current.setViewport(next, { duration: 200 });
   }, [positions, nodes, fit, centerOn, ready]);
   // Fit again when the panel is resized, so the map never stays clipped.

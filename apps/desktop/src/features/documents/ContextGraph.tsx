@@ -49,6 +49,8 @@ export function ContextGraph({
   const [history, setHistory] = useState<
     {
       center: string;
+      /** What Back names: the item that was centred when the view was left. */
+      label: string;
       selected: string | null;
       includeDetails: boolean;
       expandedIds: string[];
@@ -138,6 +140,11 @@ export function ContextGraph({
       ...entries,
       {
         center,
+        label:
+          graph?.nodes.find((node) => node.id === graph.center)
+            ?.ticket_reference ??
+          centerLabel ??
+          "previous item",
         selected,
         includeDetails,
         expandedIds,
@@ -286,7 +293,7 @@ export function ContextGraph({
       <div className="context-graph-toolbar">
         <Button variant="ghost" onClick={back}>
           {history.length
-            ? "Back"
+            ? `Back to ${history.at(-1)!.label}`
             : `Back to ${originLabel ?? originNode?.ticket_reference ?? originNode?.label ?? "source"}`}
         </Button>
         {centerLabel && (
@@ -317,13 +324,6 @@ export function ContextGraph({
       </div>
       {error && <p role="alert">{error}</p>}
       {layoutError && <p role="alert">{layoutError}</p>}
-      {groupSummary && neighbours > 12 && (
-        <p className="context-graph-groups">
-          {groupSummary}
-          {tooDense &&
-            " · Too many connections for a map; use the list or center on an item."}
-        </p>
-      )}
       {!showMap && preview && (
         <div className="context-graph-strip">
           <span>{kindNames[preview.kind]}</span>
@@ -382,6 +382,13 @@ export function ContextGraph({
           </aside>
         </div>
       )}
+      {groupSummary && neighbours > 12 && (
+        <p className="context-graph-groups">
+          {groupSummary}
+          {tooDense &&
+            " · Too many connections for a map; use the list or center on an item."}
+        </p>
+      )}
       <div className="context-graph-toolbar">
         <GraphLegend />
       </div>
@@ -390,7 +397,9 @@ export function ContextGraph({
           Showing {graph.nodes.length}{" "}
           {graph.nodes.length === 1 ? "item" : "items"} · {graph.edges.length}{" "}
           {graph.edges.length === 1 ? "connection" : "connections"}
-          {hiddenDetails ? " · update details hidden" : ""}
+          {hiddenDetails
+            ? " · update details hidden; tick Include update details to show them"
+            : ""}
           {moreExists && !canLoadMore
             ? " · View limit reached; center on an item to explore further"
             : ""}
@@ -412,18 +421,6 @@ export function ContextGraph({
                 }
               >
                 Load more
-              </Button>
-            </>
-          )}
-          {hiddenDetails && (
-            <>
-              {" "}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIncludeDetails(true)}
-              >
-                Show update details
               </Button>
             </>
           )}
@@ -476,6 +473,7 @@ export function ContextGraph({
               <Button
                 variant="outline"
                 size="sm"
+                aria-label={`Load more ${group.title}`}
                 onClick={() =>
                   setShownPerKind((value) => ({
                     ...value,
@@ -483,7 +481,7 @@ export function ContextGraph({
                   }))
                 }
               >
-                Load {Math.min(GROUP_PAGE, group.nodes.length - limit)} more
+                Load more
               </Button>
             )}
           </div>
