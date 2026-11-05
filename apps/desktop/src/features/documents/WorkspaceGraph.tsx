@@ -444,7 +444,7 @@ export function WorkspaceGraph({
             {relationship && graph.nodes.length === 0
               ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
               : relationship
-                ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"}`
+                ? `Showing ${graph.nodes.length} connected ${graph.nodes.length === 1 ? "item" : "items"} of ${graph.total}`
                 : `Showing ${graph.nodes.length} of ${graph.total} ${graph.total === 1 ? "item" : "items"}`}{" "}
             · {connectionSummary(graph)}
             {graph.omitted_groups.length > 0 && adjacencyLimit < 12 && (
@@ -472,9 +472,7 @@ export function WorkspaceGraph({
                   disabled={loadingPage}
                   onClick={() => void more()}
                 >
-                  {graph.nodes.length >= 100 || pagesLoaded >= 4
-                    ? "Next page"
-                    : "Load more"}
+                  Load more
                 </Button>
               </>
             )}

@@ -98,6 +98,33 @@ describe("map rules", () => {
       zoom: 1,
     });
   });
+  it("keeps the cards already in view fully visible when panning to new ones", () => {
+    const view = { x: 0, y: 0, zoom: 1 };
+    const size = { width: 500, height: 400 };
+    const keep = { x: 24, y: 24, width: 100, height: 50 };
+    // Both fit: pan only as far as needed to show the new card too.
+    expect(
+      panToInclude(
+        view,
+        size,
+        { x: 24, y: 300, width: 100, height: 50 },
+        24,
+        keep,
+      ),
+    ).toEqual(view);
+    // Both fit only when zooming out: the zoom drops, the top row stays visible.
+    const out = panToInclude(
+      view,
+      size,
+      { x: 24, y: 500, width: 100, height: 50 },
+      24,
+      keep,
+    );
+    expect(out.zoom).toBeLessThan(1);
+    expect(out.zoom).toBeGreaterThanOrEqual(0.6);
+    expect(24 * out.zoom + out.y).toBeGreaterThanOrEqual(24);
+    expect(550 * out.zoom + out.y).toBeLessThanOrEqual(400 - 24);
+  });
   it("words an attached Document without a quote and skips empty state parts", () => {
     const nodes = new Map([
       [

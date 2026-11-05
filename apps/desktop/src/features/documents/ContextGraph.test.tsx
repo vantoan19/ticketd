@@ -74,7 +74,7 @@ test("previews a connection and focuses it only on request", async () => {
       [],
     ),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to T-1 · First" }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "T-1",

@@ -93,7 +93,7 @@ test("Back restores selection, coordinates, viewport and expansion request", asy
   expect(screen.getByTestId("view").textContent).toContain('"zoom":2');
   expect(screen.getByTestId("view").textContent).toContain('"centerOn":"two"');
   expect(screen.getByTestId("view").textContent).toContain('"fit":false');
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Back to / }));
   await waitFor(() =>
     expect(client.contextGraphExpanded).toHaveBeenLastCalledWith(
       "one",
@@ -183,7 +183,7 @@ test("Back to a centre that opened as a map and grew past the list limit keeps t
       [],
     ),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Back to / }));
   await screen.findByRole("button", { name: "Show list" });
   expect(screen.getByTestId("view")).toBeTruthy();
 });

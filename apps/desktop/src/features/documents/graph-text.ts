@@ -213,29 +213,61 @@ export function centerZoom(current: number): number {
 
 /**
  * The smallest pan (zoom unchanged) that brings `rect`, in flow coordinates, inside a view of
- * `size` pixels, or the same viewport when it already fits. Existing cards never move.
+ * `size` pixels, or the same viewport when it already fits. With `keep` (the cards now in view),
+ * those stay fully visible too: when all of it cannot fit, the zoom drops (never below
+ * readable) instead of clipping a card.
  */
 export function panToInclude(
   viewport: { x: number; y: number; zoom: number },
   size: { width: number; height: number },
   rect: { x: number; y: number; width: number; height: number },
   margin = 24,
+  keep?: { x: number; y: number; width: number; height: number },
 ): { x: number; y: number; zoom: number } {
+  // Cards already in view must stay fully visible, so the pan covers them too.
+  if (keep) {
+    const x = Math.min(rect.x, keep.x);
+    const y = Math.min(rect.y, keep.y);
+    rect = {
+      x,
+      y,
+      width: Math.max(rect.x + rect.width, keep.x + keep.width) - x,
+      height: Math.max(rect.y + rect.height, keep.y + keep.height) - y,
+    };
+  }
+  let zoom = viewport.zoom;
+  let zoomed = false;
+  if (keep) {
+    // Everything that must stay visible does not fit at this zoom: zoom out, but
+    // never below readable.
+    const need = Math.min(
+      (size.width - 2 * margin) / rect.width,
+      (size.height - 2 * margin) / rect.height,
+    );
+    if (need < zoom) {
+      zoom = Math.max(need, READABLE_ZOOM);
+      zoomed = true;
+    }
+  }
   const shift = (
     start: number,
     length: number,
     view: number,
     offset: number,
   ) => {
-    const from = start * viewport.zoom + offset;
-    const to = (start + length) * viewport.zoom + offset;
+    if (zoomed) {
+      const slack = Math.max(0, view - 2 * margin - length * zoom);
+      return margin + slack / 2 - start * zoom;
+    }
+    const from = start * zoom + offset;
+    const to = (start + length) * zoom + offset;
     if (to - from + 2 * margin > view) return offset + margin - from;
     if (from < margin) return offset + margin - from;
     if (to > view - margin) return offset + view - margin - to;
     return offset;
   };
   return {
-    ...viewport,
+    zoom,
     x: shift(rect.x, rect.width, size.width, viewport.x),
     y: shift(rect.y, rect.height, size.height, viewport.y),
   };

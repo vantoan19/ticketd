@@ -114,9 +114,43 @@ test("a very dense neighbourhood stays a list and groups rows by relationship", 
   expect(
     screen.queryByRole("button", { name: "Center on Ticket 10" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Load 10 more" }));
+  fireEvent.click(screen.getByRole("button", { name: "Load more Mentions" }));
   expect(
     screen.getByRole("button", { name: "Center on Ticket 10" }),
   ).toBeTruthy();
 });
+test("the group summary sits below the map so the canvas never moves", async () => {
+  const many = Array.from({ length: 14 }, (_, i) => node(`n${i}`, `Item ${i}`));
+  vi.mocked(client.contextGraphExpanded)
+    .mockReset()
+    .mockResolvedValue(graph(many));
+  render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Show map" }));
+  const canvas = screen.getByText("Canvas");
+  const summary = screen.getByText(/Mentions 13/, { selector: "p" });
+  expect(
+    canvas.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+test("Back names the item it returns to, and hidden details have one control", async () => {
+  vi.mocked(client.contextGraphExpanded)
+    .mockReset()
+    .mockImplementation(async (center) => ({
+      ...(center === "b"
+        ? graph([node("b", "B"), node("a", "A")])
+        : graph([node("a", "A"), node("b", "B")])),
+      hidden_details: true,
+    }));
+  render(<ContextGraph origin="a" onBack={vi.fn()} onOpen={vi.fn()} />);
+  await screen.findByText("Centered on A");
+  expect(
+    screen.queryByRole("button", { name: "Show update details" }),
+  ).toBeNull();
+  expect(screen.getByText(/update details hidden/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Center on B" }));
+  await screen.findByText("Centered on B");
+  expect(screen.getByRole("button", { name: "Back to A" })).toBeTruthy();
+});
+
 afterEach(cleanup);
