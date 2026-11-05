@@ -279,11 +279,14 @@ The sidebar sits on the canvas surface, top to bottom:
 
 Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
-### Approved dark-theme deviations
+### Approved deviations from the base design
 
 - Status group headers use the recessed surface with hairlines above and below in both themes; the canvas surface read as a hole inside the elevated dark panel.
 - Tag pills use the shadow-boundary ring (`0 0 0 1px #FFFFFF24` in dark) so they keep their shape on dark surfaces; pane edges and inputs use the same boundary, and links use `--link-foreground` (`#52AEFF` in dark).
 - Sidebar section labels are 12px secondary labels in both themes.
+- Single-status views (a list narrowed to one status, such as Ready or an applied status filter) show one flat group under that status header rather than the full workflow-ordered set.
+- Option cards use a 2px selected edge instead of the 1px boundary used elsewhere, so the selection stays legible without a fill change.
+- The unlinked project choice is labeled "No project" (not "None" or "Unassigned") in project pickers, the sidebar, and ticket properties.
 
 ### List anatomy
 

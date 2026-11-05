@@ -416,6 +416,15 @@ export function Documents({
                   icon={<Trash2 />}
                   title="Trash is empty"
                   description="Documents you move to Trash wait here until you restore them."
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setView("all")}
+                    >
+                      Browse Documents
+                    </Button>
+                  }
                 />
               )
             )}

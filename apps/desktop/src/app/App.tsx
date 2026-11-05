@@ -384,6 +384,7 @@ function AppContent() {
                         plans={plans}
                         archived={view === "archived-plans"}
                         onOpen={(id) => scope("all", "all", id)}
+                        onBrowsePlans={() => setView("plans")}
                         refresh={refresh}
                       />
                     )}
