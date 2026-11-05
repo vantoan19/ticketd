@@ -116,10 +116,12 @@
 }
 .linked-work-remove {
   opacity: 0;
+  pointer-events: none;
 }
 .linked-work-row:hover .linked-work-remove,
 .linked-work-row:focus-within .linked-work-remove {
   opacity: 1;
+  pointer-events: auto;
 }
 /* Narrow: the kind becomes a small heading over its group of rows. */
 @container (max-width: 520px) {
@@ -211,6 +213,7 @@
 @media (hover: none), (max-width: 767px) {
   .linked-work-remove {
     opacity: 1;
+    pointer-events: auto;
   }
   @container (max-width: 260px) {
     .linked-work-title {

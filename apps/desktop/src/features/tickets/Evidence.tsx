@@ -23,6 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { workspaceClient } from "@/lib/api/workspace";
 import { formatDateTime } from "@/lib/format";
 import { useCopy } from "@/components/ui/use-copy";
 import "./evidence.css";
@@ -255,6 +256,23 @@ export function Evidence({
                 </span>
               </span>
               <span className="evidence-item-actions">
+                {/^https:\/\/\S+$/.test(item.value) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    aria-label={`Open ${item.name}`}
+                    onClick={() =>
+                      void workspaceClient
+                        .openLink(item.value)
+                        .catch(() =>
+                          setError("Could not open the link. Copy it instead."),
+                        )
+                    }
+                  >
+                    Open
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

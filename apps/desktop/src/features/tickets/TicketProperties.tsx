@@ -170,6 +170,8 @@ export function TicketProperties({
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  // Leaving Duplicate drops its link, so the chosen status waits for a yes.
+  const [leaving, setLeaving] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [vocabularyError, setVocabularyError] = useState("");
@@ -283,6 +285,10 @@ export function TicketProperties({
               // Duplicate needs a canonical ticket, so it opens the review.
               if (status === "Duplicate") {
                 setDuplicateOpen(true);
+                return;
+              }
+              if (ticket.status === "Duplicate" && ticket.duplicate_of) {
+                setLeaving(status);
                 return;
               }
               void save("Status", () =>
@@ -403,6 +409,51 @@ export function TicketProperties({
           onOpen={onOpenNote}
         />
       )}
+      <Dialog
+        open={leaving !== null}
+        onOpenChange={(open) => {
+          if (!open) setLeaving(null);
+        }}
+      >
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            statusTrigger.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Remove the duplicate link?</DialogTitle>
+            <DialogDescription>
+              This removes the duplicate link to {ticket.duplicate_of}.
+              Continue?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="settings-actions">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                const status = leaving;
+                setLeaving(null);
+                if (status)
+                  void save("Status", () =>
+                    client.changeTicket(ticket.reference, { status }),
+                  );
+              }}
+            >
+              Change status
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setLeaving(null)}
+            >
+              Keep duplicate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
         <DialogContent
           className="duplicate-dialog"
