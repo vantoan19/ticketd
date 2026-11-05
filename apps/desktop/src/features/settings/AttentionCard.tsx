@@ -5,6 +5,7 @@ import {
   setPreference,
   usePreferences,
 } from "@/lib/preferences";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 
@@ -112,12 +113,19 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
           {failure}
         </p>
       )}
-      <p className="settings-hint settings-footer">
-        Follows and reminders belong to the person on this computer.{" "}
-        <button type="button" className="settings-link" onClick={onOpenInbox}>
+      <div className="settings-footer-row">
+        <p className="settings-hint">
+          Follows and reminders belong to the person on this computer.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onOpenInbox}
+        >
           Open the Attention inbox
-        </button>
-      </p>
+        </Button>
+      </div>
     </SettingsCard>
   );
 }

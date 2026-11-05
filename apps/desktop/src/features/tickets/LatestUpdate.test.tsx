@@ -26,7 +26,7 @@ test("shows the reported brief and opens its exact Activity", async () => {
   render(<LatestUpdate reference="T-1" active revision={0} onOpen={open} />);
   await screen.findByText("Review complete: details");
   expect(screen.getByText(/Agent/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Open update" }));
+  fireEvent.click(screen.getByRole("button", { name: "Go to update" }));
   expect(open).toHaveBeenCalledWith("a-1");
 });
 

@@ -280,7 +280,7 @@ test("a trashed ticket's rail says why it cannot be published", async () => {
     },
   });
   rail(ticket({ trashed: true }));
-  await screen.findByText("Restore this ticket from the trash to publish it.");
+  await screen.findByText(/Restore this ticket from the trash to publish it\./);
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
 });
 
@@ -633,7 +633,7 @@ test("connecting the source in Settings makes a local ticket publishable without
   );
   const { rerender } = render(view([{ ...githubEntry, saved: null }]));
   // Not connected: the rail says why, and offers nothing.
-  await screen.findByText("Connect GitHub in Settings to publish.");
+  await screen.findByRole("button", { name: "Connect GitHub" });
   expect(screen.queryByRole("button", { name: /Publish to/ })).toBeNull();
   // The person connects the source and returns: the same ticket now shows Publish.
   connected = true;

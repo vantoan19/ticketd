@@ -543,9 +543,7 @@ test("a local child explains its independent ownership when its parent belongs t
       parent: { reference: "T-2", title: "Parent", trashed: false },
     }),
   );
-  expect(
-    screen.getByText("Created in ticketd. Everything here is editable."),
-  ).toBeTruthy();
+  expect(screen.getByText(/^Created in ticketd\./)).toBeTruthy();
   expect(
     await screen.findByText(
       /belongs to GitHub; this ticket stays local unless you publish it on its own/,

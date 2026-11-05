@@ -65,18 +65,23 @@ export function LocalPublication({
         />
       </>
     );
-  if (!preview) return null;
+  // The origin and what to do about it read as one sentence with an inline action.
+  const lead = "Created in ticketd.";
+  if (!preview) return <small className="rail-note">{lead}</small>;
   if (preview.eligibility.kind === "eligible")
     return (
       <>
-        <Button
-          variant="link"
-          size="sm"
-          className="rail-publish-link"
-          onClick={() => setPublishing(true)}
-        >
-          Publish to {preview.provider_name}…
-        </Button>
+        <small className="rail-note">
+          {lead}{" "}
+          <Button
+            variant="link"
+            size="sm"
+            className="rail-publish-link"
+            onClick={() => setPublishing(true)}
+          >
+            Publish to {preview.provider_name}…
+          </Button>
+        </small>
         {publishing && target && (
           <PublishDialog
             ticket={ticket}
@@ -90,14 +95,21 @@ export function LocalPublication({
   // The core states why, and what to do about it; the rail only shows it.
   return (
     <small className="rail-note">
-      {publicationReason(preview)}
-      {preview.eligibility.reason === "source_not_connected" && (
+      {lead}{" "}
+      {preview.eligibility.reason === "source_not_connected" ? (
         <>
-          {" "}
-          <Button variant="link" size="sm" onClick={activity.openSettings}>
-            Settings
-          </Button>
+          <Button
+            variant="link"
+            size="sm"
+            className="rail-publish-link"
+            onClick={activity.openSettings}
+          >
+            Connect {preview.provider_name}
+          </Button>{" "}
+          to publish it.
         </>
+      ) : (
+        publicationReason(preview)
       )}
     </small>
   );

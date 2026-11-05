@@ -179,10 +179,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.latest-update-text:not([data-expanded]) {
+/* The rail shows a two-line excerpt; Activity holds the full entry. */
+.latest-update-text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 .latest-update small {
@@ -197,4 +198,14 @@ aside.ticket-properties [data-slot="select-trigger"][data-disabled] {
 }
 aside.ticket-properties :disabled svg {
   color: var(--secondary-foreground);
+}
+
+/* Follow is a labeled switch, not a button that changes its own name. */
+.rail-follow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: 14px;
+  line-height: 20px;
 }

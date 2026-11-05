@@ -94,3 +94,32 @@
   font-size: 14px;
   line-height: 20px;
 }
+
+/* The Edit button appears over the description's corner on hover or focus. */
+.description-reading {
+  position: relative;
+}
+.description-reading .description-document {
+  margin-top: 12px;
+  border-radius: 8px;
+}
+.description-reading:hover .description-document,
+.description-reading:focus-within .description-document {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.description-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  opacity: 0;
+}
+.description-reading:hover .description-edit,
+.description-reading:focus-within .description-edit {
+  opacity: 1;
+}
+@media (hover: none) {
+  .description-edit {
+    opacity: 1;
+  }
+}

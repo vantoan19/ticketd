@@ -9,6 +9,7 @@ import {
   Inbox as InboxIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Popover,
   PopoverContent,
@@ -349,14 +350,10 @@ export function Follow({
   }
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-pressed={following}
-        onClick={() => void toggle()}
-      >
-        {following ? "Following" : "Follow"}
-      </Button>
+      <label className="rail-follow">
+        <Switch checked={following} onCheckedChange={() => void toggle()} />
+        Follow
+      </label>
       {error && <p role="alert">{error}</p>}
     </>
   );
