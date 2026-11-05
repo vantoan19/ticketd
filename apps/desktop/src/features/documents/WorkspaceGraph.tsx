@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
-import { GraphLegend, KindIcon } from "./GraphLegend";
+import { KindIcon } from "./GraphLegend";
 import {
   connectionRows,
+  cardParts,
   edgeLabels,
   flowEdges,
   kindNames,
@@ -12,13 +13,9 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Picker } from "@/components/ui/picker";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
 import {
   client,
   type WorkspaceGraph as Graph,
@@ -31,8 +28,18 @@ import "./context-graph.css";
 const ALL = "__all__";
 /** Most cards the map draws, so their text stays readable at the zoom it opens on. */
 const MAP_CARDS = 12;
-/** Up to 12 cards fit whole at any window width; labels stay legible down to this zoom. */
-const MAP_MIN_ZOOM = 0.55;
+const RELATIONSHIPS = [
+  "blocks",
+  "membership",
+  "document",
+  "mention",
+  "attached",
+  "activity",
+  "support",
+  "subticket",
+  "related",
+  "discovered",
+];
 const NO_POSITIONS: Record<string, Point> = {};
 
 /** Connections among the shown items, or the item's own total when only one is shown. */
@@ -170,25 +177,53 @@ export function WorkspaceGraph({
     () => (graph?.nodes ?? []).slice(0, MAP_CARDS),
     [graph],
   );
-  const nodes = useMemo(
-    () =>
-      mapNodes.map((node) => ({
-        id: node.id,
-        label: `${kindNames[node.kind].toUpperCase()} · ${node.label}${node.trashed ? " (Trash)" : ""}`,
-      })),
-    [mapNodes],
-  );
-  const edges = useMemo(() => {
+  const shownEdges = useMemo(() => {
     const shown = new Set(mapNodes.map((node) => node.id));
-    return flowEdges(
-      (graph?.edges ?? []).filter(
-        (edge) => shown.has(edge.source) && shown.has(edge.target),
-      ),
+    return (graph?.edges ?? []).filter(
+      (edge) => shown.has(edge.source) && shown.has(edge.target),
     );
   }, [graph, mapNodes]);
+  // Items with no relationship among the shown ones would only take canvas
+  // space; they are listed beside the map instead.
+  const [connected, unconnected] = useMemo(() => {
+    const linked = new Set(shownEdges.flatMap((e) => [e.source, e.target]));
+    return [
+      mapNodes.filter((node) => linked.has(node.id)),
+      mapNodes.filter((node) => !linked.has(node.id)),
+    ];
+  }, [mapNodes, shownEdges]);
+  const nodes = useMemo(
+    () =>
+      connected.map((node) => ({
+        id: node.id,
+        label: `${node.label}${node.trashed ? " (Trash)" : ""}`,
+        ...cardParts(node),
+      })),
+    [connected],
+  );
+  const edges = useMemo(() => flowEdges(shownEdges), [shownEdges]);
+  const [knownTags, setKnownTags] = useState<string[]>([]);
+  useEffect(() => {
+    let current = true;
+    void Promise.resolve()
+      .then(() => client.searchTags(""))
+      .then((tags) => {
+        if (current) setKnownTags(tags);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [revision]);
   const preview = graph?.nodes.find((node) => node.id === selected);
   const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, Infinity);
   const filtered = !!(search || kind || tag || relationship);
+  const relationshipCount = graph?.edges.length ?? 0;
+  function refine(change: () => void) {
+    change();
+    setAdjacencyLimit(3);
+    setPagesLoaded(1);
+  }
   function clearFilters() {
     setSearch("");
     setKind("");
@@ -249,14 +284,29 @@ export function WorkspaceGraph({
   };
   const previewPanel = preview ? (
     <>
-      <p>{kindNames[preview.kind]}</p>
-      <h2>{preview.label}</h2>
-      <p>
-        {stateLine(preview)}
-        {graph?.node_tags[preview.id]
-          ? ` · Tag: ${graph.node_tags[preview.id]}`
-          : ""}
-      </p>
+      <p className="context-graph-eyebrow">Selected</p>
+      <div className="context-graph-selected">
+        <span className="context-graph-selected-kind">
+          <KindIcon kind={preview.kind} />
+          {cardParts(preview).ref || kindNames[preview.kind]}
+        </span>
+        <h2>{cardParts(preview).title}</h2>
+        <p>
+          {[
+            stateLine(preview),
+            graph?.node_tags[preview.id]
+              ? `Tag: ${graph.node_tags[preview.id]}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      </div>
+      {connectionRows(preview.id, graph!).map((row) => (
+        <p key={row.key} className="context-graph-connection">
+          <strong>{edgeLabels[row.kind] ?? row.kind}</strong> · {row.text}
+        </p>
+      ))}
       {(graph?.connection_counts?.[preview.id] ?? 0) > 0 && (
         <p>
           {graph?.connection_counts?.[preview.id]}{" "}
@@ -266,6 +316,7 @@ export function WorkspaceGraph({
           in total
         </p>
       )}
+      <span className="context-graph-grow" />
       <Button onClick={() => onOpen(preview)}>Open item</Button>
       <Button variant="outline" onClick={() => onFocus(preview.id)}>
         Context graph
@@ -274,118 +325,96 @@ export function WorkspaceGraph({
   ) : (
     <p>Select an item to preview it.</p>
   );
+  const tagOptions = [...new Set([...(tag ? [tag] : []), ...knownTags])].map(
+    (value) => ({ value, label: value }),
+  );
   return (
     <section className="context-graph-page" aria-label="Workspace graph">
       <div className="context-graph-heading">
         <h1>Workspace graph</h1>
-        <Button variant="ghost" onClick={onBack}>
+        {graph && (
+          <span className="context-graph-scope">
+            {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
+            {relationshipCount}{" "}
+            {relationshipCount === 1 ? "relationship" : "relationships"}
+          </span>
+        )}
+        <span className="context-graph-grow" />
+        <Button variant="ghost" size="sm" onClick={onBack}>
           Back
         </Button>
+        {!!graph?.nodes.length && (
+          <SegmentedControl
+            aria-label="View"
+            value={showMap ? "graph" : "list"}
+            onValueChange={(value) => setMapChoice(value === "graph")}
+            options={[
+              { value: "graph", label: "Graph" },
+              { value: "list", label: "List" },
+            ]}
+          />
+        )}
       </div>
       <div className="context-graph-toolbar">
-        <label>
-          Search{" "}
-          <input
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setAdjacencyLimit(3);
-              setPagesLoaded(1);
-            }}
-          />
-        </label>
-        <div className="context-graph-select">
-          <span id="graph-kind-label">Item type</span>
-          <Select
-            value={kind || ALL}
-            onValueChange={(value) => {
-              setKind(value === ALL ? "" : value);
-              setAdjacencyLimit(3);
-              setPagesLoaded(1);
-            }}
-          >
-            <SelectTrigger size="sm" aria-labelledby="graph-kind-label">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All</SelectItem>
-              <SelectItem value="ticket">Tickets</SelectItem>
-              <SelectItem value="document">Documents</SelectItem>
-              <SelectItem value="plan">Plans</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <label>
-          Tag{" "}
-          <input
-            value={tag}
-            onChange={(event) => {
-              setTag(event.target.value);
-              setAdjacencyLimit(3);
-              setPagesLoaded(1);
-            }}
-          />
-        </label>
-        <div className="context-graph-select">
-          <span id="graph-relationship-label">Relationship</span>
-          <Select
-            value={relationship || ALL}
-            onValueChange={(value) => {
-              setRelationship(value === ALL ? "" : value);
-              setAdjacencyLimit(3);
-              setPagesLoaded(1);
-            }}
-          >
-            <SelectTrigger size="sm" aria-labelledby="graph-relationship-label">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All</SelectItem>
-              {[
-                "blocks",
-                "membership",
-                "document",
-                "mention",
-                "attached",
-                "activity",
-                "support",
-                "subticket",
-                "related",
-                "discovered",
-              ].map((value) => (
-                <SelectItem key={value} value={value}>
-                  {edgeLabels[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <label>
-          <input
-            type="checkbox"
-            checked={includeDetails}
-            onChange={(event) => {
-              setIncludeDetails(event.target.checked);
-              setAdjacencyLimit(3);
-              setPagesLoaded(1);
-            }}
-          />{" "}
-          Include update details
-        </label>
+        <input
+          className="context-graph-search"
+          type="search"
+          aria-label="Search"
+          placeholder="Find a ticket, Document or Plan"
+          value={search}
+          onChange={(event) => refine(() => setSearch(event.target.value))}
+        />
+        <Picker
+          label="Type"
+          value={kind || ALL}
+          onValueChange={(value) =>
+            refine(() => setKind(value === ALL ? "" : value))
+          }
+          options={[
+            { value: ALL, label: "All" },
+            { value: "ticket", label: "Tickets" },
+            { value: "document", label: "Documents" },
+            { value: "plan", label: "Plans" },
+          ]}
+        />
+        <Picker
+          label="Relationship"
+          value={relationship || ALL}
+          onValueChange={(value) =>
+            refine(() => setRelationship(value === ALL ? "" : value))
+          }
+          options={[
+            { value: ALL, label: "All" },
+            ...RELATIONSHIPS.map((value) => ({
+              value,
+              label: edgeLabels[value] ?? value,
+            })),
+          ]}
+        />
+        <Picker
+          label="Tag"
+          value={tag || ALL}
+          onValueChange={(value) =>
+            refine(() => setTag(value === ALL ? "" : value))
+          }
+          options={[{ value: ALL, label: "Any" }, ...tagOptions]}
+        />
         {filtered && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters
           </Button>
         )}
-        {!!graph?.nodes.length && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMapChoice(!showMap)}
-          >
-            {showMap ? "Show list" : "Show map"}
-          </Button>
-        )}
+        <span className="context-graph-grow" />
+        <label className="context-graph-switch">
+          <Switch
+            aria-label="Include update details"
+            checked={includeDetails}
+            onCheckedChange={(checked) =>
+              refine(() => setIncludeDetails(checked))
+            }
+          />
+          Update details
+        </label>
       </div>
       {error && <p role="alert">{error}</p>}
       {showMap ? (
@@ -402,8 +431,27 @@ export function WorkspaceGraph({
               onSelect={setSelected}
               onError={setError}
               fit={fit}
-              minFitZoom={MAP_MIN_ZOOM}
               onFitted={() => setFit(false)}
+              overlay={
+                unconnected.length > 0 && (
+                  <div
+                    className="context-graph-unconnected"
+                    role="group"
+                    aria-label="Not connected"
+                  >
+                    <strong>Not connected · {unconnected.length}</strong>
+                    {unconnected.map((node) => (
+                      <button
+                        key={node.id}
+                        type="button"
+                        onClick={() => setSelected(node.id)}
+                      >
+                        {node.label}
+                      </button>
+                    ))}
+                  </div>
+                )
+              }
             />
           )}
           <aside className="context-graph-preview">
@@ -423,9 +471,6 @@ export function WorkspaceGraph({
       ) : (
         <aside className="context-graph-strip">{previewPanel}</aside>
       )}
-      <div className="context-graph-toolbar">
-        <GraphLegend />
-      </div>
       {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
         <p role="status" className="context-graph-status">
           {filtered ? "No items match these filters." : "Nothing to show yet."}{" "}

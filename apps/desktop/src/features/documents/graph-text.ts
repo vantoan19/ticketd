@@ -18,6 +18,21 @@ export const edgeLabels: Record<string, string> = {
   discovered: "Discovered",
 };
 
+/** Short names written on the line itself; the lists below spell each connection out. */
+export const edgeLineLabels: Record<string, string> = {
+  blocks: "blocks",
+  membership: "in Plan",
+  document: "document of",
+  spec: "spec of",
+  mention: "mentions",
+  attached: "attached",
+  activity: "update mentions",
+  support: "update cites",
+  subticket: "parent of",
+  related: "related",
+  discovered: "discovered",
+};
+
 /**
  * Four line styles, each with its own dash and colour so they differ without
  * relying on either alone: rules (blocks), plan structure, work hierarchy and
@@ -146,15 +161,17 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     id: `${index}`,
     source: edge.source,
     target: edge.target,
-    label: edgeLabels[edge.kind] ?? edge.kind,
+    label: edgeLineLabels[edge.kind] ?? edge.kind,
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
     markerEnd: {
       type: MarkerType.ArrowClosed,
       color: edgeStyle(edge.kind).color,
     },
-    // Straight lines between card centres never loop around a card.
-    type: "straight",
+    // Orthogonal routes leave and enter at card borders, so a line bends around
+    // cards instead of running under them.
+    type: "smoothstep",
+    pathOptions: { borderRadius: 8, offset: 24 },
     style: {
       strokeWidth: edgeStyle(edge.kind).width,
       stroke: edgeStyle(edge.kind).color,
@@ -163,6 +180,22 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
         : {}),
     },
   }));
+}
+
+/** The parts a map card shows: a reference, a title and a "Ticket · Todo" caption. */
+export function cardParts(node: GraphNode): {
+  ref: string;
+  title: string;
+  caption: string;
+} {
+  const match = /^(\S+-\d+) · (.*)$/.exec(node.label);
+  const ref = node.ticket_reference ?? match?.[1] ?? "";
+  const title = match && match[1] === ref ? match[2]! : node.label;
+  return {
+    ref,
+    title: node.trashed ? `${title} (Trash)` : title,
+    caption: [kindNames[node.kind], node.state].filter(Boolean).join(" · "),
+  };
 }
 
 /** Connections touching a node, one row per relationship between the same pair. */
