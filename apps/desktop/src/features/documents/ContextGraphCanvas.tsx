@@ -457,28 +457,30 @@ export function ContextGraphCanvas({
         }
         onKeyDown={selectFromKey}
       >
-        <ReactFlow
-          nodes={flowNodes}
-          onNodesChange={rememberSizes}
-          edges={shownEdges}
-          minZoom={MIN_ZOOM}
-          proOptions={{ hideAttribution: true }}
-          nodeTypes={NODE_TYPES}
-          edgeTypes={EDGE_TYPES}
-          onNodeClick={(_, node) => onSelect(node.id)}
-          onInit={(value) => {
-            instance.current = value;
-            setReady(true);
-          }}
-          viewport={viewport}
-          onViewportChange={onViewport}
-          nodesDraggable={false}
-          // The Connected items list is the keyboard path to every card.
-          nodesFocusable={false}
-          edgesFocusable={false}
-        >
-          <Background />
-        </ReactFlow>
+        <div className="context-graph-flow">
+          <ReactFlow
+            nodes={flowNodes}
+            onNodesChange={rememberSizes}
+            edges={shownEdges}
+            minZoom={MIN_ZOOM}
+            proOptions={{ hideAttribution: true }}
+            nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
+            onNodeClick={(_, node) => onSelect(node.id)}
+            onInit={(value) => {
+              instance.current = value;
+              setReady(true);
+            }}
+            viewport={viewport}
+            onViewportChange={onViewport}
+            nodesDraggable={false}
+            // The Connected items list is the keyboard path to every card.
+            nodesFocusable={false}
+            edgesFocusable={false}
+          >
+            <Background />
+          </ReactFlow>
+        </div>
         <div className="context-graph-zoom" role="group" aria-label="Zoom">
           <button
             type="button"

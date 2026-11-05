@@ -11,7 +11,7 @@
   min-height: 0;
 }
 .documents-page {
-  padding: 24px 32px;
+  padding: 24px var(--page-gutter);
   overflow: auto;
 }
 .documents-page {
@@ -22,7 +22,6 @@
 .documents-list-view {
   width: 100%;
   max-width: 936px;
-  margin: 0 auto;
 }
 .documents-list-view h1 {
   font-size: 24px;
