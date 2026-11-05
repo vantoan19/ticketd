@@ -62,6 +62,7 @@ import {
   deleteRow,
   deleteColumn,
 } from "@platejs/table";
+import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
@@ -382,7 +383,12 @@ function Toolbar({
     >
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onMouseDown={(event) => event.preventDefault()}
+          >
             <Plus data-icon="inline-start" />
             Insert
           </Button>
@@ -425,7 +431,13 @@ function Toolbar({
       ))}
       <Popover open={linkOpen} onOpenChange={setLinkOpen}>
         <PopoverTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" aria-label="Link">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label="Link"
+            onMouseDown={(event) => event.preventDefault()}
+          >
             <Link />
           </Button>
         </PopoverTrigger>
@@ -435,7 +447,7 @@ function Toolbar({
             onSubmit={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              if (/^(https?:|mailto:|\/|#)/i.test(url)) {
+              if (/^(https?:|mailto:|ticketd:\/\/|\/|#)/i.test(url)) {
                 upsertLink(editor, { url });
                 setLinkOpen(false);
                 editor.tf.focus();
@@ -445,11 +457,27 @@ function Toolbar({
             <label htmlFor="rich-link-url">Link URL</label>
             <Input
               id="rich-link-url"
+              placeholder="https://… or ticketd://…"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
             />
             <Button type="submit">Apply link</Button>
           </form>
+          <p className="my-2 text-xs text-muted-foreground">
+            Or link a Document
+          </p>
+          <DocumentPicker
+            autoFocus={false}
+            onPick={(picked) => {
+              const collapsed = !editor.selection || editor.api.isCollapsed();
+              upsertLink(editor, {
+                url: `ticketd://document/${picked.id}`,
+                ...(collapsed ? { text: picked.heading } : {}),
+              });
+              setLinkOpen(false);
+              editor.tf.focus();
+            }}
+          />
         </PopoverContent>
       </Popover>
       <Button
@@ -511,7 +539,12 @@ function Toolbar({
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onMouseDown={(event) => event.preventDefault()}
+          >
             Table
           </Button>
         </DropdownMenuTrigger>

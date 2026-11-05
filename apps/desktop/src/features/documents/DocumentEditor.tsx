@@ -7,6 +7,13 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { DocumentPicker } from "@/features/tickets/DocumentPicker";
+import { documentLinkMarkdown } from "./document-link";
 import { documents, type Document } from "./api";
 import { DocumentNavigation, PlanNavigation } from "./navigation";
 
@@ -102,7 +109,7 @@ export function DocumentEditor({
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
   const [writing, setWriting] = useState(initial === null);
-  const [linkTarget, setLinkTarget] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [creatingFromDocument, setCreatingFromDocument] = useState(false);
   const [links, setLinks] = useState<
@@ -753,36 +760,31 @@ export function DocumentEditor({
           )}
           {writing && (
             <>
-              <Field>
-                <FieldLabel htmlFor="link-target">Link target</FieldLabel>
-                <Input
-                  id="link-target"
-                  placeholder="Ticket reference or Document ID"
-                  disabled={locked}
-                  value={linkTarget}
-                  onChange={(event) => setLinkTarget(event.target.value)}
-                />
-              </Field>
-              <Button
-                disabled={locked || !linkTarget.trim()}
-                variant="outline"
-                onClick={() =>
-                  void documents
-                    .linkMarkdown(linkTarget.trim())
-                    .then((link) => {
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button disabled={locked} variant="outline">
+                    Link a Document
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start">
+                  <DocumentPicker
+                    exclude={[initial.id]}
+                    onPick={(picked) => {
+                      const link = documentLinkMarkdown(
+                        picked.id,
+                        picked.heading,
+                      );
                       const next = draft.current.body
                         ? `${draft.current.body}\n\n${link}`
                         : link;
                       draft.current = { ...draft.current, body: next };
                       setBody(next);
-                      setLinkTarget("");
                       setLinkError("");
-                    })
-                    .catch((error: unknown) => setLinkError(String(error)))
-                }
-              >
-                Insert link
-              </Button>
+                      setPickerOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
             </>
           )}
           {linkError && <p role="alert">{linkError}</p>}
