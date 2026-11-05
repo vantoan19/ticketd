@@ -550,32 +550,35 @@ export function TicketProperties({
               </span>
             ))}
           </div>
-          <PropertyPicker
-            compact
-            align="end"
-            readOnly={ticket.trashed}
-            icon={Tag}
-            label="Tags"
-            value={ticket.tags.length ? "Edit tags" : "Add tags"}
-            disabled={disabled}
-            allowCreate
-            onSearch={setTagQuery}
-            choices={[...new Set([...vocabulary, ...ticket.tags])].map(
-              (tag) => ({
-                value: tag,
-                label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
-              }),
-            )}
-            onChoose={(tag) =>
-              void save("Tags", () =>
-                client.changeTag(
-                  ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
-                  ticket.reference,
-                  tag,
-                ),
-              )
-            }
-          />
+          {ticket.trashed ? (
+            !ticket.tags.length && <span className="rail-none">No tags</span>
+          ) : (
+            <PropertyPicker
+              compact
+              align="end"
+              icon={Tag}
+              label="Tags"
+              value={ticket.tags.length ? "Edit tags" : "Add tags"}
+              disabled={disabled}
+              allowCreate
+              onSearch={setTagQuery}
+              choices={[...new Set([...vocabulary, ...ticket.tags])].map(
+                (tag) => ({
+                  value: tag,
+                  label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
+                }),
+              )}
+              onChoose={(tag) =>
+                void save("Tags", () =>
+                  client.changeTag(
+                    ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
+                    ticket.reference,
+                    tag,
+                  ),
+                )
+              }
+            />
+          )}
         </>,
       )}
       {vocabularyError && !ticket.trashed && (

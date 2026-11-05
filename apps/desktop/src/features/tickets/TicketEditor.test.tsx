@@ -643,3 +643,15 @@ test("unsaved text survives a reload and is checked against the stored text", as
   expect(screen.getByText(/saved title changed/)).toBeTruthy();
   expect(screen.getByText("Agent title")).toBeTruthy();
 });
+
+test("clicking the description text does not start editing; the Edit button does", () => {
+  render(
+    <TicketEditor
+      ticket={{ ...initial, body: "Some **text**" }}
+      onSaved={vi.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByText("Some"));
+  expect(screen.getByRole("button", { name: "Edit description" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Done editing" })).toBeNull();
+});
