@@ -212,6 +212,26 @@ export function Activity({
       setError("Could not save the unpublished update on this device.");
     }
   }
+  // Write the draft once more as the page goes away, so a quick quit keeps it.
+  useEffect(() => {
+    const flush = () => {
+      try {
+        if (hasDraft(savedRef.current))
+          localStorage.setItem(
+            draftKey(ticketId),
+            JSON.stringify(savedRef.current),
+          );
+      } catch {
+        /* The draft stays in memory. */
+      }
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+    };
+  }, [ticketId]);
   function clearDraft() {
     updateDraft({ brief: "", details: null, support: "" });
     try {
@@ -583,6 +603,7 @@ export function Activity({
               </FieldLabel>
               <LazyMarkdownEditor
                 label="Details"
+                placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."
                 value={details}
                 onChange={setDetails}
                 readOnly={pending}
@@ -641,7 +662,10 @@ export function Activity({
               preserved; saving will replace the saved content.
             </p>
           )}
-          <div className="activity-actions">
+          <div
+            className="activity-actions"
+            data-sticky={(!edit && showDetails) || undefined}
+          >
             {!edit && !showDetails && (
               <Button
                 type="button"
@@ -679,8 +703,9 @@ export function Activity({
                 <span
                   className="activity-muted"
                   title="Draft kept on this device"
+                  aria-label="Draft kept on this device"
                 >
-                  Draft kept on this device
+                  Draft kept
                 </span>
               )}
               {edit ? (
@@ -705,13 +730,23 @@ export function Activity({
                     setComposing(false);
                   }}
                 >
-                  Discard draft
+                  {hasDraft(saved) ? "Discard draft" : "Cancel"}
                 </Button>
+              )}
+              {!pending && !hasVisibleText(draftText) && (
+                <span id={`post-hint-${ticketId}`} className="activity-muted">
+                  Write an update to post.
+                </span>
               )}
               <Button
                 type="submit"
                 size="sm"
                 disabled={pending || !hasVisibleText(draftText)}
+                aria-describedby={
+                  !pending && !hasVisibleText(draftText)
+                    ? `post-hint-${ticketId}`
+                    : undefined
+                }
               >
                 {pending ? "Saving…" : edit ? "Save update" : "Post update"}
               </Button>

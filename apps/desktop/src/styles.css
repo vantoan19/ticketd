@@ -499,7 +499,7 @@
 .sidebar-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
 .sidebar-footer {
   flex: none;
@@ -607,8 +607,11 @@
   background: var(--accent);
   color: var(--foreground);
 }
+/* The lists scroll between the fixed top entries and the footer; the floor keeps
+   Workspace graph reachable on a short window. */
 .sidebar-scroll {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 120px;
   overflow-y: auto;
 }
 .sidebar-heading {

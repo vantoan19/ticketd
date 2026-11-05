@@ -51,3 +51,36 @@
 .editor-body:focus-visible {
   outline: 2px solid var(--ring);
 }
+.description-none {
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.editor-conflict {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+.editor-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.conflict-block {
+  margin-top: 12px;
+}
+.conflict-block-label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.conflict-draft {
+  padding-left: 12px;
+  border-left: 2px solid var(--ring);
+}

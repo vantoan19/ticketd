@@ -862,5 +862,5 @@ test("restores the whole draft, brief, details and attached Document, from one o
   );
   expect(await screen.findByText("Attached: Investigation")).toBeTruthy();
   expect(await screen.findByText("Brief")).toBeTruthy();
-  expect(screen.getByText("Draft kept on this device")).toBeTruthy();
+  expect(screen.getByText("Draft kept")).toBeTruthy();
 });

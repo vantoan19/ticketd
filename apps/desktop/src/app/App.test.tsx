@@ -78,6 +78,19 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
+async function openNewTicket(
+  trigger = screen.getByRole("button", { name: "New" }),
+) {
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "New ticket" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 test("refreshes clean content and preserves a draft when saved content changes", async () => {
   vi.useFakeTimers();
   let saved = {
@@ -149,8 +162,9 @@ test("refreshes clean content and preserves a draft when saved content changes",
     "value",
     "My draft",
   );
-  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Reload saved content" }));
+  expect(screen.getByText(/saved title changed/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Use saved text" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
     "value",
     "Another change",
@@ -165,7 +179,7 @@ test("refreshes clean content and preserves a draft when saved content changes",
   await act(async () => {
     await vi.advanceTimersByTimeAsync(100);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  fireEvent.click(screen.getByRole("button", { name: "Keep my draft" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(500);
   });
@@ -397,9 +411,12 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     await vi.advanceTimersByTimeAsync(0);
   });
   for (const name of ["New ticket", "Create your first ticket"]) {
-    const trigger = screen.getByRole("button", { name });
+    const trigger = screen.getByRole("button", {
+      name: name === "New ticket" ? "New" : name,
+    });
     trigger.focus();
-    fireEvent.click(trigger);
+    if (name === "New ticket") await openNewTicket(trigger);
+    else fireEvent.click(trigger);
     expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
     expect(document.activeElement).toBe(
       screen.getByRole("textbox", { name: "Title" }),
@@ -584,7 +601,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: "Desktop app" }));
-  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  await openNewTicket();
   fireEvent.change(screen.getByLabelText("Title"), {
     target: { value: "Draft ticket" },
   });
@@ -610,7 +627,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
-  fireEvent.click(screen.getAllByRole("button", { name: /new ticket/i })[0]!);
+  await openNewTicket();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
     screen.getByRole("textbox", { name: "Description source" }),
@@ -879,7 +896,7 @@ test("names the ticket the core rejected and offers no Retry that cannot succeed
   fireEvent.click(screen.getByRole("menuitem", { name: "Done" }));
   await act(async () => {});
   const alert = screen.getByRole("alert");
-  expect(alert.textContent).toBe(
+  expect(alert.querySelector(".bulk-error-text")?.textContent).toBe(
     "Nothing changed. T-2 could not be updated: T-2 is trashed.",
   );
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();

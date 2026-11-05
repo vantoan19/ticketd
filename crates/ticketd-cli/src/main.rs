@@ -746,10 +746,10 @@ enum ActivityCommand {
     /// Append an activity, reading --file - from stdin
     Add {
         reference: String,
-        /// The brief: a short update that reads on its own (plain text or Markdown)
+        /// The brief: a short update that reads on its own. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
-        /// Read the brief from a file (- reads stdin)
+        /// Read the brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
         #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
         /// Name of the agent posting this activity, shown beside it
@@ -769,10 +769,10 @@ enum ActivityCommand {
     Edit {
         reference: String,
         id: String,
-        /// The new brief text; it replaces the stored brief
+        /// The new brief text; it replaces the stored brief. It is Markdown, so write \* and \_ (or wrap in backticks) to keep a literal * or _
         #[arg(long, conflicts_with = "file")]
         brief: Option<String>,
-        /// Read the new brief from a file (- reads stdin)
+        /// Read the new brief from a file (- reads stdin). The text is Markdown: escape \* and \_ (or use backticks) to keep them literal
         #[arg(long, visible_alias = "brief-file")]
         file: Option<String>,
         /// Name of the agent making this edit, shown beside the activity

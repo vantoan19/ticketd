@@ -161,11 +161,15 @@ export function TicketPage({
                 <>
                   <p className="description-heading">Description</p>
                   <div className="markdown-preview description-document">
-                    <MarkdownDocument
-                      source={ticket.body}
-                      select={select}
-                      revision={revision}
-                    />
+                    {ticket.body.trim() ? (
+                      <MarkdownDocument
+                        source={ticket.body}
+                        select={select}
+                        revision={revision}
+                      />
+                    ) : (
+                      <p className="description-none">No description.</p>
+                    )}
                   </div>
                 </>
               )}
@@ -201,24 +205,28 @@ export function TicketPage({
             composeKey={composeKey}
           />
         )}
-        {active && !ticket.trashed && noEvidence && noSubtickets && (
+        {active && !ticket.trashed && (noSubtickets || noEvidence) && (
           <div className="detail-quiet-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => work.openLink("subticket")}
-            >
-              <Plus aria-hidden="true" />
-              Link subticket
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setComposeKey((value) => value + 1)}
-            >
-              <Plus aria-hidden="true" />
-              Add evidence
-            </Button>
+            {noSubtickets && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => work.openLink("subticket")}
+              >
+                <Plus aria-hidden="true" />
+                Link subticket
+              </Button>
+            )}
+            {noEvidence && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setComposeKey((value) => value + 1)}
+              >
+                <Plus aria-hidden="true" />
+                Add evidence
+              </Button>
+            )}
           </div>
         )}
         {active && (

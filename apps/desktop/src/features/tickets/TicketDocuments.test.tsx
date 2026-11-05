@@ -67,3 +67,48 @@ test("unlinking removes only an explicit reference and a mention offers Edit des
   expect(edit).toHaveBeenCalled();
   window.removeEventListener("ticketd:edit-description", edit);
 });
+
+test("attaching Activity details from the picker keeps them as a Document", async () => {
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command === "document_context_links") return Promise.resolve([[], []]);
+    if (command === "recent_documents")
+      return Promise.resolve([
+        { id: "d9", heading: "Trace", origin_ticket: "T-11" },
+      ]);
+    if (command === "keep_document")
+      return Promise.resolve({
+        id: "d9",
+        title: null,
+        body: "",
+        created_at: "",
+        updated_at: "",
+        trashed: false,
+      });
+    return Promise.resolve(null);
+  });
+  render(
+    <TicketDocuments
+      ticket={ticket}
+      revision={0}
+      refresh={() => Promise.resolve()}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Add Document" }));
+  fireEvent.click(await screen.findByText("T-11 · Activity details"));
+  expect(invoke).toHaveBeenCalledWith("recent_documents", {
+    offset: 0,
+    includeSupport: true,
+  });
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("set_ticket_document", {
+      reference: "T-1",
+      documentId: "d9",
+      present: true,
+      requestId: expect.any(String),
+    }),
+  );
+  expect(invoke).toHaveBeenCalledWith("keep_document", {
+    id: "d9",
+    requestId: expect.any(String),
+  });
+});

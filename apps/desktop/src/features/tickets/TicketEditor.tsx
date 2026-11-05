@@ -25,6 +25,67 @@ export type Mention = {
   key: number;
 };
 type Content = Pick<Ticket, "title" | "body">;
+
+/**
+ * An unsaved title or description draft, with the saved text it was written
+ * against, so a reload can tell whether the stored ticket changed meanwhile.
+ */
+type StoredDraft = Content & { baseTitle: string; baseBody: string };
+const draftKey = (id: string) => `ticketd:ticket-draft:${id}`;
+
+function storeDraft(id: string, draft: Content, saved: Content) {
+  try {
+    if (draft.title === saved.title && draft.body === saved.body)
+      localStorage.removeItem(draftKey(id));
+    else
+      localStorage.setItem(
+        draftKey(id),
+        JSON.stringify({
+          ...draft,
+          baseTitle: saved.title,
+          baseBody: saved.body,
+        } satisfies StoredDraft),
+      );
+  } catch {
+    /* A draft that cannot be kept on this device is still kept in the editor. */
+  }
+}
+
+/** The editor's starting text: the ticket, plus any draft left behind on this device. */
+function restore(ticket: Ticket): { draft: Content; saved: Content } {
+  const current = { title: ticket.title, body: ticket.body };
+  try {
+    const raw = localStorage.getItem(draftKey(ticket.id));
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    if (typeof value === "object" && value !== null) {
+      const stored = value as Partial<StoredDraft>;
+      const titleDirty =
+        typeof stored.title === "string" &&
+        typeof stored.baseTitle === "string" &&
+        stored.title !== stored.baseTitle;
+      const bodyDirty =
+        typeof stored.body === "string" &&
+        typeof stored.baseBody === "string" &&
+        stored.body !== stored.baseBody;
+      return {
+        draft: {
+          title: titleDirty ? (stored.title ?? current.title) : current.title,
+          body: bodyDirty ? (stored.body ?? current.body) : current.body,
+        },
+        // Judge the draft against the text it was written over.
+        saved: {
+          title: titleDirty
+            ? (stored.baseTitle ?? current.title)
+            : current.title,
+          body: bodyDirty ? (stored.baseBody ?? current.body) : current.body,
+        },
+      };
+    }
+  } catch {
+    /* Start from the ticket. */
+  }
+  return { draft: current, saved: current };
+}
 export function TicketEditor({
   ticket,
   onSaved,
@@ -41,10 +102,8 @@ export function TicketEditor({
   /** A description passage the person navigated here to read; null once they move on. */
   mention?: Mention | null;
 }) {
-  const [draft, setDraft] = useState<Content>({
-    title: ticket.title,
-    body: ticket.body,
-  });
+  const [restored] = useState(() => restore(ticket));
+  const [draft, setDraft] = useState<Content>(restored.draft);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const title = titleRef.current;
@@ -71,10 +130,26 @@ export function TicketEditor({
       document.fonts?.removeEventListener("loadingdone", fitTitle);
     };
   }, [draft.title]);
-  const [saved, setSaved] = useState<Content>({
-    title: ticket.title,
-    body: ticket.body,
-  });
+  const [saved, setSaved] = useState<Content>(restored.saved);
+  const [confirmSaved, setConfirmSaved] = useState(false);
+  // Keep the unsaved text on this device, and write it once more as the page goes away.
+  const ticketId = ticket.id;
+  const latest = useRef({ draft, saved });
+  useEffect(() => {
+    latest.current = { draft, saved };
+    storeDraft(ticketId, draft, saved);
+  }, [draft, saved, ticketId]);
+  useEffect(() => {
+    const flush = () => {
+      storeDraft(ticketId, latest.current.draft, latest.current.saved);
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+    };
+  }, [ticketId]);
   // "idle" until something is saved, so an untouched ticket doesn't say "Saved".
   const [state, setState] = useState<"idle" | "saved" | "pending" | "failed">(
     "idle",
@@ -120,6 +195,9 @@ export function TicketEditor({
   // The renderer sees the body without its byte order mark, and the core counts
   // chars; the mark needs UTF-16 offsets into that same text.
   const rendered = withoutBom(draft.body);
+  const titleConflict =
+    draft.title !== saved.title && ticket.title !== saved.title;
+  const bodyConflict = draft.body !== saved.body && ticket.body !== saved.body;
   const span = shown
     ? charSpanToUtf16(rendered, {
         start: shown.mention.start,
@@ -249,38 +327,85 @@ export function TicketEditor({
     retry,
   ]);
 
+  function adoptSaved() {
+    setDraft({ title: ticket.title, body: ticket.body });
+    setSaved({ title: ticket.title, body: ticket.body });
+    setConfirmSaved(false);
+    setState("saved");
+  }
+  const conflict = externalChange && dirty;
+  const draftHasText =
+    (titleConflict && draft.title.trim() !== "") ||
+    (bodyConflict && draft.body.trim() !== "");
+  const notice = conflict && (
+    <div role="status" className="editor-conflict">
+      <p>
+        {titleConflict && bodyConflict
+          ? "The saved title and description changed while you were editing."
+          : titleConflict
+            ? "The saved title changed while you were editing."
+            : "The saved description changed while you were editing."}{" "}
+        Your unsaved draft is kept until you choose.
+      </p>
+      {titleConflict && (
+        <p>
+          Saved title: <strong>{ticket.title}</strong>
+        </p>
+      )}
+      {confirmSaved ? (
+        <div className="editor-conflict-actions">
+          <span>Discard your unsaved draft?</span>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => adoptSaved()}
+          >
+            Discard draft
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            onClick={() => setConfirmSaved(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <div className="editor-conflict-actions">
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() =>
+              draftHasText ? setConfirmSaved(true) : adoptSaved()
+            }
+          >
+            Use saved text
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => {
+              setSaved({ title: ticket.title, body: ticket.body });
+              setState("pending");
+            }}
+          >
+            Keep my draft
+          </Button>
+        </div>
+      )}
+    </div>
+  );
   function edit(next: Content) {
     setDraft(next);
     setState("pending");
   }
   return (
     <div className="ticket-editor">
-      {externalChange && dirty && (
-        <p role="status">
-          Saved content changed.{" "}
-          <button
-            type="button"
-            className="underline"
-            onClick={() => {
-              setDraft({ title: ticket.title, body: ticket.body });
-              setSaved({ title: ticket.title, body: ticket.body });
-              setState("saved");
-            }}
-          >
-            Reload saved content
-          </button>{" "}
-          <button
-            type="button"
-            className="underline"
-            onClick={() => {
-              setSaved({ title: ticket.title, body: ticket.body });
-              setState("pending");
-            }}
-          >
-            Save my draft
-          </button>
-        </p>
-      )}
+      {titleConflict && !bodyConflict && notice}
       <label className="editor-title">
         <span className="sr-only">Title</span>
         <textarea
@@ -307,6 +432,7 @@ export function TicketEditor({
           aria-atomic="true"
           className="sr-only"
         />
+        {bodyConflict && notice}
         <div className="description-heading">
           <span id={`body-${ticket.id}`}>Description</span>
           {editingBody ? (
@@ -333,6 +459,27 @@ export function TicketEditor({
             </Button>
           ) : null}
         </div>
+        {bodyConflict && (
+          <div className="conflict-block">
+            <p className="conflict-block-label">Saved text</p>
+            <div className="markdown-preview description-document">
+              {ticket.body.trim() ? (
+                <MarkdownDocument
+                  source={withoutBom(ticket.body)}
+                  select={select}
+                  revision={revision}
+                />
+              ) : (
+                <p className="description-none">No description.</p>
+              )}
+            </div>
+          </div>
+        )}
+        {bodyConflict && (
+          <p className="conflict-block-label conflict-block">
+            Your unsaved draft
+          </p>
+        )}
         {bodyMode !== "unopened" && (
           <div hidden={!editingBody}>
             <LazyMarkdownEditor
@@ -347,7 +494,7 @@ export function TicketEditor({
           (draft.body ? (
             <div
               ref={documentRef}
-              className="markdown-preview description-document"
+              className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
               onClick={(event) => {
                 const target = event.target;
                 if (
