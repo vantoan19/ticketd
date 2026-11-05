@@ -30,7 +30,30 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
-const remarkPlugins = [remarkGfm, references];
+type MdNode = { type: string; value?: string; children?: MdNode[] };
+/**
+ * Raw HTML is never rendered, but it is not dropped either: `<tag>` written in a brief
+ * or Document reads as the literal text the person typed.
+ */
+function htmlAsText() {
+  const walk = (parent: MdNode) => {
+    if (!parent.children) return;
+    parent.children = parent.children.map((child) => {
+      if (child.type !== "html") {
+        walk(child);
+        return child;
+      }
+      const text: MdNode = { type: "text", value: child.value ?? "" };
+      return parent.type === "paragraph" ||
+        parent.type === "heading" ||
+        parent.type === "tableCell"
+        ? text
+        : { type: "paragraph", children: [text] };
+    });
+  };
+  return (tree: MdNode) => walk(tree);
+}
+const remarkPlugins = [remarkGfm, references, htmlAsText];
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
@@ -285,7 +308,6 @@ export function MarkdownDocument({
               urlTransform={(url) =>
                 url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
               }
-              skipHtml
               components={components}
             >
               {source}

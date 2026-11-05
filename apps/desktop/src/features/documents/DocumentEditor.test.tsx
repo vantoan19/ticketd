@@ -723,3 +723,38 @@ it("shows a derived heading once in the reader", () => {
   expect(screen.getAllByText("Meeting notes")).toHaveLength(1);
   expect(screen.getByText("Agenda")).toBeTruthy();
 });
+it("says nothing is saved and explains a blocked Back to work while the conflict notice is up", async () => {
+  vi.useFakeTimers();
+  const close = vi.fn();
+  vi.mocked(documents.save).mockRejectedValueOnce("offline");
+  outside({ ...stored, body: "Outside" });
+  renderEditor(<DocumentEditor initial={stored} onClose={close} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed" },
+  });
+  await tick(2400);
+  expect(screen.getByRole("status").textContent).toContain(
+    "Not saved — changed elsewhere",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Back to work" }));
+  expect(close).not.toHaveBeenCalled();
+  const notice = document.querySelector<HTMLElement>(".document-conflict")!;
+  expect(document.activeElement).toBe(notice);
+  expect(notice.textContent).toContain("before leaving this Document");
+});
+it("keeps Done in place through the pointer sequence that blurs the editor", () => {
+  const close = vi.fn();
+  renderEditor(<DocumentEditor initial={null} onClose={close} />);
+  const done = screen.getByRole("button", { name: "Done" });
+  const editor = screen.getByLabelText("Your thought");
+  editor.focus();
+  fireEvent.pointerDown(done);
+  fireEvent.mouseDown(done);
+  editor.blur();
+  expect(screen.getByRole("button", { name: "Done" })).toBe(done);
+  fireEvent.pointerUp(done);
+  fireEvent.mouseUp(done);
+  fireEvent.click(done);
+  expect(close).toHaveBeenCalledOnce();
+});

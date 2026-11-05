@@ -32,6 +32,12 @@ function relativeDate(value: string | undefined) {
     ...(sameYear ? {} : { year: "numeric" }),
   });
 }
+/** A one-line thought is its own heading and snippet; show it once. */
+function sameText(a: string, b: string) {
+  const norm = (text: string) =>
+    text.replace(/\s+/g, " ").replace(/…$/, "").trim().toLowerCase();
+  return norm(a) === norm(b);
+}
 /** Wrap case-insensitive occurrences of `query` in <mark>. */
 function highlight(text: string, query: string) {
   const needle = query.trim();
@@ -61,6 +67,7 @@ export function Documents({
   onOpenPlan,
   target,
   onDocumentClose,
+  listRequest,
 }: {
   capture: boolean;
   active: boolean;
@@ -71,6 +78,8 @@ export function Documents({
   onOpenPlan: (id: string) => void;
   target: { id: string; key: number } | null;
   onDocumentClose?: () => void;
+  /** Changes when the sidebar asks for the list while a reader is open. */
+  listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
   const [recent, setRecent] = useState<DocumentSummary[]>([]);
@@ -209,7 +218,7 @@ export function Documents({
                   Activity details · {doc.origin_ticket}
                 </p>
               )}
-              {doc.snippet && (
+              {doc.snippet && !sameText(doc.snippet, doc.heading) && (
                 <p className="document-snippet">
                   {highlight(doc.snippet, mark)}
                 </p>
@@ -543,6 +552,7 @@ export function Documents({
               .catch((e: unknown) => setError(String(e)))
           }
           onOpenDocument={open}
+          closeRequest={listRequest ?? 0}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {
             setSelected(null);

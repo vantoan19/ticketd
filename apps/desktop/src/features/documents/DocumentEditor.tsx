@@ -105,6 +105,7 @@ export function DocumentEditor({
   active = true,
   pinned = false,
   onTogglePin,
+  closeRequest = 0,
   children,
 }: {
   initial: Document | null;
@@ -119,6 +120,8 @@ export function DocumentEditor({
   /** Reader header pin toggle; omitted when the host cannot pin. */
   pinned?: boolean;
   onTogglePin?: () => void;
+  /** Bumped by the host (sidebar "Documents") to ask the reader to save and return to the list. */
+  closeRequest?: number;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
   const [writing, setWriting] = useState(initial === null);
@@ -319,10 +322,7 @@ export function DocumentEditor({
           if (reconcile(latest)) {
             setStatus("Saved locally");
             void save();
-          } else {
-            setFailed(false);
-            setStatus("Not saved");
-          }
+          } else setFailed(false);
           return;
         } catch {
           /* Fall through to the ordinary failure below. */
@@ -370,6 +370,7 @@ export function DocumentEditor({
       // A resolved or merged outside change always clears the notice.
       externalRef.current = null;
       setExternal(null);
+      setBlockedLeaving(false);
     };
     if (
       next.title === saved.current.title &&
@@ -414,6 +415,7 @@ export function DocumentEditor({
       externalRef.current = next;
       externalRevision.current = document.updated_at;
       setExternal(next);
+      setStatus("Not saved — changed elsewhere");
       return false;
     }
     // Nothing unsaved is at risk: refresh silently, keeping any unrelated dirty field.
@@ -457,25 +459,43 @@ export function DocumentEditor({
   }, active);
   // While the conflict notice is up, clicks that would leave or Trash the Document are
   // ignored (not queued), so they cannot fire later after the person resolves it.
+  const noticeRef = useRef<HTMLDivElement>(null);
+  const [blockedLeaving, setBlockedLeaving] = useState(false);
+  const blockWhileConflicted = () => {
+    if (!externalRef.current) return false;
+    setBlockedLeaving(true);
+    noticeRef.current?.focus();
+    return true;
+  };
   const navigate = (action: () => void) => {
-    if (externalRef.current) return;
+    if (blockWhileConflicted()) return;
     afterSave.current = action;
     closeRequested.current = true;
     void save();
   };
+  const requestCloseRef = useRef(() => {});
   const requestClose = () => {
-    if (externalRef.current) return;
+    if (blockWhileConflicted()) return;
     afterSave.current = null;
     closeRequested.current = true;
     void save();
   };
+  useEffect(() => {
+    requestCloseRef.current = requestClose;
+  });
   const startTransition = (next: { trashed: boolean; requestId: string }) => {
-    if (externalRef.current) return;
+    if (blockWhileConflicted()) return;
     transition.current = next;
     // Restore doesn't wait for the draft: it can't be saved while in Trash.
     if (trashedRef.current) void finishTransition();
     else void save();
   };
+  const seenCloseRequest = useRef(closeRequest);
+  useEffect(() => {
+    if (closeRequest === seenCloseRequest.current) return;
+    seenCloseRequest.current = closeRequest;
+    requestCloseRef.current();
+  }, [closeRequest]);
   const toggleTrash = () =>
     startTransition({ trashed: !trashed, requestId: crypto.randomUUID() });
   const retry = () => {
@@ -537,18 +557,6 @@ export function DocumentEditor({
   return (
     <DocumentSurface capture={capture} onClose={requestClose}>
       <div className="document-main">
-        {trashed && (
-          <div role="status" className="document-trash-banner">
-            <span>In Trash</span>
-            <Button
-              variant="outline"
-              disabled={transitioning}
-              onClick={toggleTrash}
-            >
-              Restore
-            </Button>
-          </div>
-        )}
         <header>
           {initial ? (
             <>
@@ -609,6 +617,18 @@ export function DocumentEditor({
             </>
           )}
         </header>
+        {trashed && (
+          <div role="status" className="document-trash-banner">
+            <span>In Trash</span>
+            <Button
+              variant="outline"
+              disabled={transitioning}
+              onClick={toggleTrash}
+            >
+              Restore
+            </Button>
+          </div>
+        )}
         {initial && (
           <div className="document-mode" aria-label="Document mode">
             <Button
@@ -643,12 +663,20 @@ export function DocumentEditor({
           </p>
         )}
         {external && (
-          <div role="alert" className="document-conflict">
+          <div
+            role="alert"
+            className="document-conflict"
+            ref={noticeRef}
+            tabIndex={-1}
+          >
             <p>
-              Saved content changed while you were editing. Reload saved content
-              to discard your draft, or save my draft to replace the saved
-              content with it.
+              Saved content changed while you were editing. Choose “Reload saved
+              content” to discard your draft, or “Save my draft” to replace the
+              saved content with it.
             </p>
+            {blockedLeaving && (
+              <p>Choose one of these before leaving this Document.</p>
+            )}
             <div className="document-conflict-actions">
               <Button
                 variant="outline"
@@ -659,6 +687,7 @@ export function DocumentEditor({
                   pending.current = null;
                   externalRef.current = null;
                   setExternal(null);
+                  setBlockedLeaving(false);
                   setTitle(external.title);
                   setBody(external.body);
                   setSuggestion(null);
@@ -676,6 +705,7 @@ export function DocumentEditor({
                   pending.current = null;
                   externalRef.current = null;
                   setExternal(null);
+                  setBlockedLeaving(false);
                   void save();
                 }}
               >
@@ -818,71 +848,73 @@ export function DocumentEditor({
             </>
           )}
           {linkError && <p role="alert">{linkError}</p>}
-          <section aria-label="Connected items">
-            <h2>Connected items</h2>
-            {links.some((group) => group.length === 100) && (
-              <p>Showing the first 100 items in each direction.</p>
-            )}
-            <ul>
-              {connected.map((item) => (
-                <li key={`${item.kind}-${item.id}`}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      if (item.kind === "document")
-                        navigate(() => onOpenDocument?.(item.id));
-                      else if (item.kind === "ticket")
-                        navigate(() => onOpenTicket?.(item.label));
-                      else if (item.kind === "plan")
-                        navigate(() => onOpenPlan?.(item.id));
-                    }}
-                  >
-                    <ConnectedLabel item={item} />
-                    {item.trashed ? " (Trash)" : ""}
-                  </Button>
-                  <p className="document-direction">
-                    {item.to && item.from
-                      ? "Links to and linked from"
-                      : item.to
-                        ? "Links to"
-                        : item.kind === "plan" && item.passages.length === 0
-                          ? "Uses this Document as its spec"
-                          : "Linked from"}
-                  </p>
-                  {item.passages.map((passage) => (
-                    <DocumentNavigation.Provider
-                      key={passage}
-                      value={
-                        onOpenDocument
-                          ? (id) => navigate(() => onOpenDocument(id))
-                          : null
-                      }
+          {connected.length > 0 && (
+            <section aria-label="Connected items">
+              <h2>Connected items</h2>
+              {links.some((group) => group.length === 100) && (
+                <p>Showing the first 100 items in each direction.</p>
+              )}
+              <ul>
+                {connected.map((item) => (
+                  <li key={`${item.kind}-${item.id}`}>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        if (item.kind === "document")
+                          navigate(() => onOpenDocument?.(item.id));
+                        else if (item.kind === "ticket")
+                          navigate(() => onOpenTicket?.(item.label));
+                        else if (item.kind === "plan")
+                          navigate(() => onOpenPlan?.(item.id));
+                      }}
                     >
-                      <PlanNavigation.Provider
+                      <ConnectedLabel item={item} />
+                      {item.trashed ? " (Trash)" : ""}
+                    </Button>
+                    <p className="document-direction">
+                      {item.to && item.from
+                        ? "Links to and linked from"
+                        : item.to
+                          ? "Links to"
+                          : item.kind === "plan" && item.passages.length === 0
+                            ? "Uses this Document as its spec"
+                            : "Linked from"}
+                    </p>
+                    {item.passages.map((passage) => (
+                      <DocumentNavigation.Provider
+                        key={passage}
                         value={
-                          onOpenPlan
-                            ? (id) => navigate(() => onOpenPlan(id))
+                          onOpenDocument
+                            ? (id) => navigate(() => onOpenDocument(id))
                             : null
                         }
                       >
-                        <div className="document-passage">
-                          <MarkdownDocument
-                            source={passage}
-                            select={
-                              onOpenTicket
-                                ? (reference) =>
-                                    navigate(() => onOpenTicket(reference))
-                                : undefined
-                            }
-                          />
-                        </div>
-                      </PlanNavigation.Provider>
-                    </DocumentNavigation.Provider>
-                  ))}
-                </li>
-              ))}
-            </ul>
-          </section>
+                        <PlanNavigation.Provider
+                          value={
+                            onOpenPlan
+                              ? (id) => navigate(() => onOpenPlan(id))
+                              : null
+                          }
+                        >
+                          <div className="document-passage">
+                            <MarkdownDocument
+                              source={passage}
+                              select={
+                                onOpenTicket
+                                  ? (reference) =>
+                                      navigate(() => onOpenTicket(reference))
+                                  : undefined
+                              }
+                            />
+                          </div>
+                        </PlanNavigation.Provider>
+                      </DocumentNavigation.Provider>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section aria-label="Create ticket">
             {!creatingFromDocument && (
               <Button

@@ -66,7 +66,13 @@ function AppContent() {
       document.getElementById("sidebar-settings")?.focus();
     }
   }, [view]);
+  const [documentListRequest, setDocumentListRequest] = useState(0);
   const openView = (next: typeof view) => {
+    if (next === "documents" && view === "documents") {
+      // Sidebar "Documents" inside a reader returns to the list, not to where the reader came from.
+      setDocumentReturn(null);
+      setDocumentListRequest((count) => count + 1);
+    }
     if (next === "settings" && view !== "settings") {
       setViewBeforeSettings(view);
       setSettingsSection("appearance");
@@ -365,6 +371,7 @@ function AppContent() {
                   >
                     <Documents
                       active={view === "documents"}
+                      listRequest={documentListRequest}
                       target={documentTarget}
                       capture={capture}
                       currentTicket={

@@ -136,3 +136,12 @@ test("marks a linked Document that is in the Trash", async () => {
     await screen.findByRole("button", { name: "Old (Trash)" }),
   ).toBeTruthy();
 });
+
+test("shows a typed <tag> as literal text instead of dropping it", () => {
+  const { container } = render(
+    <MarkdownDocument source={"Use the <config> value\n\n<div>block</div>"} />,
+  );
+  expect(container.textContent).toContain("Use the <config> value");
+  expect(container.textContent).toContain("<div>block</div>");
+  expect(container.querySelector("config, .markdown-document div")).toBeNull();
+});
