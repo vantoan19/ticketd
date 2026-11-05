@@ -26,7 +26,7 @@ import { fileManagerName } from "@/lib/platform";
 import {
   homeRelative,
   nameFromFolder,
-  splitPath,
+  splitPathMiddle,
 } from "@/features/projects/paths";
 import "./projects.css";
 
@@ -56,12 +56,19 @@ function ticketsLabel(count: TicketCount | undefined) {
   return `${count.total} ${noun} · ${count.open} open`;
 }
 
-/** A path on one line: "~/src/…/billing-api", with the full path on hover. */
+/** A path on one line: "/private/…/8b654d0c/repo-api", with the full path on hover. */
 function PathText({ path }: { path: string }) {
-  const { head, tail } = splitPath(homeRelative(path));
+  const { lead, middle, tail } = splitPathMiddle(homeRelative(path));
   return (
     <span className="path-text" title={path}>
-      {head && <span className="path-head">{head}</span>}
+      {lead && <span className="path-lead">{lead}</span>}
+      {middle && (
+        // Right-to-left puts the ellipsis at the start of the shrinking part;
+        // the inner span keeps the characters in reading order.
+        <span className="path-middle">
+          <bdo dir="ltr">{middle}</bdo>
+        </span>
+      )}
       <span className="path-tail">{tail}</span>
     </span>
   );
@@ -228,12 +235,15 @@ export function Projects({
   loading,
   onChange,
   onOpenTickets,
+  onShowUnassigned,
 }: {
   projects: Project[];
   loading: boolean;
   onChange: () => Promise<void>;
   /** Shows that project's tickets. */
   onOpenTickets?: (project: Project) => void;
+  /** Opens the tickets that belong to no project. */
+  onShowUnassigned?: () => void;
 }) {
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   // Drafts survive closing a dialog; a successful save discards them.
@@ -251,6 +261,7 @@ export function Projects({
   } | null>(null);
   const [removeError, setRemoveError] = useState("");
   const [counts, setCounts] = useState<Record<string, TicketCount>>({});
+  const [unassigned, setUnassigned] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -263,6 +274,19 @@ export function Projects({
           setCounts((old) => ({ ...old, [item.id]: { total: c.total, open } }));
         })
         .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [projects]);
+
+  useEffect(() => {
+    let active = true;
+    void client
+      .countTickets({ ...COUNT_FILTER, project: null, unlinked: true })
+      .then((c) => {
+        if (active) setUnassigned(c.total);
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -382,6 +406,20 @@ export function Projects({
         each checkout lets the command line infer the project from the folder
         you are in.
       </p>
+      {unassigned > 0 && onShowUnassigned && (
+        <p className="projects-unassigned">
+          {unassigned} {unassigned === 1 ? "ticket has" : "tickets have"} no
+          project.{" "}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={onShowUnassigned}
+          >
+            Show {unassigned === 1 ? "it" : "them"}
+          </Button>
+        </p>
+      )}
       {loading ? (
         <p className="projects-empty settings-hint">Loading projects…</p>
       ) : projects.length === 0 ? (

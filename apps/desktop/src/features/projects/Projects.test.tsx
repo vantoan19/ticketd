@@ -189,3 +189,27 @@ test("opens the tickets of a project from its card", () => {
   );
   expect(onOpenTickets).toHaveBeenCalledWith(project);
 });
+
+test("says how many tickets have no project and shows them", async () => {
+  vi.spyOn(client, "countTickets").mockImplementation(
+    async (filter) =>
+      ({
+        total: filter.unlinked ? 4 : 1,
+        done: 0,
+        canceled: 0,
+        duplicate: 0,
+      }) as Awaited<ReturnType<typeof client.countTickets>>,
+  );
+  const onShowUnassigned = vi.fn();
+  render(<Projects {...props} onShowUnassigned={onShowUnassigned} />);
+  expect(await screen.findByText(/4 tickets have no project/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show them" }));
+  expect(onShowUnassigned).toHaveBeenCalled();
+});
+
+test("a long checkout path keeps all its text for the middle to truncate", () => {
+  const long =
+    "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
+  render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
+  expect(screen.getByTitle(long).textContent).toBe(long);
+});

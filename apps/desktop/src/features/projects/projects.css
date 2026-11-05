@@ -114,7 +114,7 @@
   line-height: 16px;
   color: var(--muted-foreground);
 }
-/* One line: the folder name stays, the leading folders shrink with an ellipsis. */
+/* One line: the root and the last two folders stay; the folders between shrink. */
 .path-text {
   display: flex;
   min-width: 0;
@@ -125,10 +125,21 @@
   white-space: nowrap;
   user-select: text;
 }
-.path-head {
+.path-lead {
+  flex: none;
+}
+/* The part between the root and the last folders gives way, ellipsis first. */
+.path-middle {
   min-width: 0;
   overflow: hidden;
+  direction: rtl;
   text-overflow: ellipsis;
+}
+.projects-unassigned {
+  margin: 0 0 16px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
 }
 .path-tail {
   flex: none;

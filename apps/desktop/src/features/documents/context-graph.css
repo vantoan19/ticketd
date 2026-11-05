@@ -612,6 +612,15 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+.context-graph-preview-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+}
+.context-graph-strip .context-graph-preview-actions {
+  flex-direction: row;
+}
 /* The list is never squeezed to a part-row; the selection above it gives way instead. */
 .context-graph-preview-split .context-graph-unconnected {
   flex: none;

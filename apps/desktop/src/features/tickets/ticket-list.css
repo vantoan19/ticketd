@@ -219,19 +219,22 @@
 .bulk-clear-icon {
   display: none;
 }
-/* Narrow list (the default width is ~387pt, the floor 360pt): this block
-   follows the base rules so it wins. Clear becomes an icon, the Esc hint
-   and the menu chevrons go, and Select all shortens, so every control fits
+/* Narrow list (the default width is ~387pt, the floor 360pt): these blocks
+   follow the base rules so they win. Below 480pt Select all shortens; below
+   440pt Clear becomes an icon and the Esc hint goes, so every control fits
    one 48pt row. */
-@container (max-width: 440px) {
-  .bulk-kbd,
-  .bulk-clear-text,
-  .bulk-long,
-  .bulk-bar .ui-button svg[data-icon="inline-end"] {
+@container (width < 480px) {
+  .bulk-long {
     display: none;
   }
   .bulk-short {
     display: inline;
+  }
+}
+@container (width < 440px) {
+  .bulk-kbd,
+  .bulk-clear-text {
+    display: none;
   }
   .bulk-clear-icon {
     display: block;
@@ -327,6 +330,21 @@
   .ticket-rows li:hover .ticket-row-action,
   .ticket-rows li:focus-within .ticket-row-action {
     opacity: 1;
+  }
+  /* The action floats over the trailing edge instead of reserving a column,
+     so the time stays on that edge in every list. It takes the time's place
+     only while it is shown. */
+  .ticket-rows li:has(.ticket-row-action) {
+    position: relative;
+  }
+  .ticket-row-action {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+  .ticket-rows li:hover:has(.ticket-row-action) .ticket-row-time,
+  .ticket-rows li:focus-within:has(.ticket-row-action) .ticket-row-time {
+    opacity: 0;
   }
 }
 /* Reveal selection without moving the identifier or title columns. */
