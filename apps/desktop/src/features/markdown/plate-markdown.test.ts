@@ -143,4 +143,9 @@ describe("typed text is stored as typed", () => {
     const stored = writeMarkdown(p("*line*"));
     expect(readMarkdown(stored).value).toEqual(p("*line*"));
   });
+  it("does not escape the colon of a typed URL", () => {
+    expect(writeMarkdown(p("See https://example.org/x now"))).toBe(
+      "See https://example.org/x now",
+    );
+  });
 });

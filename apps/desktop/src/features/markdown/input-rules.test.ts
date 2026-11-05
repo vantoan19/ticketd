@@ -1,5 +1,6 @@
 import { createPlateEditor } from "platejs/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { documents } from "@/features/documents/api";
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { BulletedListRules } from "@platejs/list-classic";
 import { ListPlugin } from "@platejs/list-classic/react";
@@ -12,6 +13,10 @@ import {
 } from "./input-rules";
 import { linkPluginOptions } from "./link-options";
 import { writeMarkdown } from "./plate-markdown";
+
+vi.mock("@/features/documents/api", () => ({
+  documents: { show: vi.fn(() => Promise.reject(new Error("offline"))) },
+}));
 
 const richPlugins = [
   ListPlugin.configure({
@@ -69,5 +74,16 @@ describe("typed Markdown input rules", () => {
   it("leaves other targets as typed", () => {
     const editor = typing("", [..."[x](javascript:alert)"]);
     expect(JSON.stringify(editor.children)).not.toContain('"type":"a"');
+  });
+  it("labels an unlabelled Document link with the Document heading", async () => {
+    vi.mocked(documents.show).mockResolvedValueOnce({
+      heading: "Plan notes",
+    } as never);
+    const editor = typing("", [..."[](ticketd://document/abc)"]);
+    await vi.waitFor(() =>
+      expect(writeMarkdown(editor.children)).toBe(
+        "[Plan notes](ticketd://document/abc)",
+      ),
+    );
   });
 });
