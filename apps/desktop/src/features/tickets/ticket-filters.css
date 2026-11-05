@@ -31,3 +31,78 @@
 .filters-content [data-slot="field"] {
   gap: 8px;
 }
+.filters-head,
+.filters-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.filters-head h2 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.filter-section h3 {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.toggle-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter-hint {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+}
+.filters-foot {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.parent-search ul {
+  margin-top: 4px;
+  list-style: none;
+  padding: 0;
+}
+.parent-search li button {
+  width: 100%;
+  justify-content: flex-start;
+}
+.header-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+.header-search input {
+  flex: 1;
+  height: 32px;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.header-search-count {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.list-header:has(.header-search) > :not(.list-controls) {
+  display: none;
+}
+.list-header:has(.header-search) .list-controls {
+  flex: 1;
+}

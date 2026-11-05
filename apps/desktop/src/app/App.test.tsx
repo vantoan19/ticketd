@@ -368,9 +368,12 @@ test("retains project drafts and clears filters when navigating scopes", async (
   );
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   expect(
     screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
@@ -561,17 +564,24 @@ test("clears additional filters while preserving the selected Plan", async () =>
   });
   fireEvent.click(screen.getByRole("button", { name: "Launch" }));
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
-  expect(screen.getByRole("button", { name: "Remove Tag: bug" })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
+  expect(
+    screen.getByRole("button", { name: "Remove Status: Todo" }),
+  ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
       name: "Clear filters",
     }),
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Remove Status: Todo" }),
+  ).toBeNull();
 });
 
 test("removes one filter chip and shows the query when nothing matches", async () => {
@@ -580,6 +590,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans" || command === "list_projects") return [];
       if (command === "find_tickets") return [];
+      if (command === "search_tags") return ["bug", "ui"];
       return bridgeDefault(command, args);
     },
   );
@@ -592,14 +603,25 @@ test("removes one filter chip and shows the query when nothing matches", async (
     target: { value: "zebra" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug, ui" },
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
   });
+  const filters = within(
+    screen.getByRole("dialog", { name: "Ticket filters" }),
+  );
+  fireEvent.click(filters.getByRole("button", { name: "bug" }));
+  fireEvent.click(filters.getByRole("button", { name: "ui" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(screen.getByText("No matching tickets")).toBeTruthy();
   expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Nothing matches.*in All tickets with the current filters/,
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
   expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();
@@ -608,6 +630,37 @@ test("removes one filter chip and shows the query when nothing matches", async (
   );
   expect(screen.queryByText("zebra", { selector: "q" })).toBeNull();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
+test("a filter applies live, counts N of M, and Done closes the panel", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { filter?: { status: string | null } }) => {
+      if (command === "count_tickets")
+        return {
+          ...(bridgeDefault(command) as object),
+          total: args?.filter?.status ? 3 : 7,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
+  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(screen.getByLabelText("Active filters").textContent).toContain(
+    "3 of 7",
+  );
+  expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
+  // The Done status chip shares the name; the footer button comes last.
+  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
+  expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -703,9 +756,12 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   const row = screen.getByRole("button", { name: /First/ });
   fireEvent.click(row);
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });

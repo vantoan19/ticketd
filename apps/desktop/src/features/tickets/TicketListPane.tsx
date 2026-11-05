@@ -64,6 +64,7 @@ export function TicketListPane({
     trash,
     tickets,
     counts,
+    scopeTotal,
     total,
     grouped,
     selected,
@@ -169,6 +170,9 @@ export function TicketListPane({
     setOffset,
     navigation,
     clearFilters,
+    scopeName,
+    total,
+    scopeTotal,
   };
   return (
     <section
@@ -286,27 +290,37 @@ export function TicketListPane({
               ) : filtered ? (
                 <>
                   <strong>No matching tickets</strong>
-                  {query ? (
-                    <p>
-                      Nothing matches <q>{query}</q>
-                      {tags || status || availability || family || plan
-                        ? " with the current filters"
-                        : ""}
-                      .
-                    </p>
-                  ) : (
-                    <p>Nothing matches the current filters.</p>
-                  )}
-                  <Button variant="outline" onClick={clearFilters}>
-                    {query &&
-                    !tags &&
-                    !status &&
-                    !availability &&
-                    !family &&
-                    !plan
-                      ? "Clear search"
-                      : "Clear filters"}
-                  </Button>
+                  <p>
+                    {query ? (
+                      <>
+                        Nothing matches <q>{query}</q> in {scopeName}
+                        {tags || status || availability || family || plan
+                          ? " with the current filters"
+                          : ""}
+                        .
+                      </>
+                    ) : (
+                      "Nothing matches the current filters."
+                    )}
+                  </p>
+                  <div className="plan-empty-actions">
+                    {query && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setQuery("");
+                          setOffset(0);
+                        }}
+                      >
+                        Clear search
+                      </Button>
+                    )}
+                    {(tags || status || availability || family || plan) && (
+                      <Button variant="outline" onClick={clearFilters}>
+                        Clear filters
+                      </Button>
+                    )}
+                  </div>
                 </>
               ) : planScope ? (
                 <>
