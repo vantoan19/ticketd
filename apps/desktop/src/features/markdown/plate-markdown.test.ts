@@ -92,3 +92,55 @@ describe("Markdown writing keeps text as typed", () => {
     expect(writeMarkdown(readMarkdown(brief).value)).toBe(brief);
   });
 });
+
+describe("typed text is stored as typed", () => {
+  const p = (...texts: string[]) =>
+    texts.map((text) => ({ type: "p", children: [{ text }] }));
+  const cases: Array<[string, string[], string]> = [
+    [
+      "mid-line number and period",
+      ["Fixed 5. first line"],
+      "Fixed 5. first line",
+    ],
+    [
+      "intraword underscores",
+      ["_under_score_ and a_b_c"],
+      "_under_score\\_ and a_b_c",
+    ],
+    ["intraword underscores only", ["snake_case_name"], "snake_case_name"],
+    [
+      "angle brackets that are not HTML",
+      ["a < b and 3 > 2"],
+      "a < b and 3 > 2",
+    ],
+    ["checkbox-like brackets", ["done [x] later"], "done [x] later"],
+    // CommonMark reads 2*3*4 as emphasis, so the single backslash is the minimum that round-trips.
+    ["star between digits", ["2*3*4"], "2*3\\*4"],
+    ["leading spaces in a paragraph", ["  hello"], "hello"],
+    ["leading space after heading marker", ["DRAFT"], "DRAFT"],
+    [
+      "Enter twice makes no extra blank lines",
+      ["one", "", "two"],
+      "one\n\ntwo",
+    ],
+    ["trailing empty paragraph", ["one", ""], "one"],
+  ];
+  for (const [name, texts, expected] of cases)
+    it(name, () => {
+      const value = p(...texts);
+      const stored = writeMarkdown(value);
+      expect(stored).toBe(expected);
+      expect(stored).not.toContain("&#x20;");
+      expect(writeMarkdown(readMarkdown(stored).value)).toBe(stored);
+    });
+  it("heading with leading space does not store an entity", () => {
+    const stored = writeMarkdown([
+      { type: "h1", children: [{ text: " DRAFT" }] },
+    ]);
+    expect(stored).toBe("# DRAFT");
+  });
+  it("literal asterisk emphasis characters stay literal when they round trip", () => {
+    const stored = writeMarkdown(p("*line*"));
+    expect(readMarkdown(stored).value).toEqual(p("*line*"));
+  });
+});

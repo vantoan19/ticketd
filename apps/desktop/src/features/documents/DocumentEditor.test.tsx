@@ -19,6 +19,8 @@ vi.mock("./api", () => ({
     links: vi.fn().mockResolvedValue([[], []]),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),
+    recent: vi.fn(),
+    search: vi.fn(),
   },
 }));
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
@@ -174,10 +176,10 @@ it("suggests only the current ticket and lets it be removed before capture", asy
   await waitFor(() => expect(documents.save).toHaveBeenCalled());
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Thought");
 });
-it("inserts a validated link into the draft", async () => {
-  vi.mocked(documents.linkMarkdown).mockResolvedValue(
-    "[T-4](ticketd://ticket/T-4)",
-  );
+it("inserts a link to a Document chosen by title into the draft", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "d9", heading: "Release plan" } as never,
+  ]);
   render(
     <DocumentEditor
       initial={{
@@ -192,14 +194,12 @@ it("inserts a validated link into the draft", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
-  fireEvent.change(screen.getByLabelText("Link target"), {
-    target: { value: "T-4" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Insert link" }));
+  fireEvent.click(screen.getByRole("button", { name: "Link a Document" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Release plan" }));
   await waitFor(() =>
     expect(
       (screen.getByLabelText("Your thought") as HTMLTextAreaElement).value,
-    ).toBe("[T-4](ticketd://ticket/T-4)"),
+    ).toBe("[Release plan](ticketd://document/d9)"),
   );
 });
 it("opens a connected ticket after saving a document draft", async () => {

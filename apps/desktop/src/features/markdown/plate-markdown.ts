@@ -270,6 +270,28 @@ function phrasing(nodes: Descendant[]): PhrasingContent[] {
   });
 }
 
+/** Leading and trailing spaces in a line are not Markdown content; remark would store them as `&#x20;`. */
+function trimEdges(nodes: PhrasingContent[]): PhrasingContent[] {
+  const result = [...nodes];
+  const first = result[0];
+  if (first?.type === "text") {
+    const value = first.value.replace(/^[ \t]+/, "");
+    if (value) result[0] = { ...first, value };
+    else result.shift();
+  }
+  const last = result[result.length - 1];
+  if (last?.type === "text") {
+    const value = last.value.replace(/[ \t]+$/, "");
+    if (value) result[result.length - 1] = { ...last, value };
+    else result.pop();
+  }
+  return result;
+}
+
+const isBlank = (node: TElement) =>
+  node.type === "p" &&
+  node.children.every((child) => TextApi.isText(child) && !child.text.trim());
+
 function block(node: TElement, diagrams: string[]): RootContent {
   const children = () =>
     node.children
@@ -279,7 +301,7 @@ function block(node: TElement, diagrams: string[]): RootContent {
     return {
       type: "heading",
       depth: Number(node.type[1]) as 1 | 2 | 3 | 4 | 5 | 6,
-      children: phrasing(node.children),
+      children: trimEdges(phrasing(node.children)),
     };
   switch (node.type) {
     case "blockquote":
@@ -345,7 +367,10 @@ function block(node: TElement, diagrams: string[]): RootContent {
           })),
       };
     default:
-      return { type: "paragraph", children: phrasing(node.children) };
+      return {
+        type: "paragraph",
+        children: trimEdges(phrasing(node.children)),
+      };
   }
 }
 
@@ -354,7 +379,10 @@ export function writeMarkdown(value: Value): string {
   const diagrams: string[] = [];
   const tree: Root = {
     type: "root",
-    children: value.map((node) => block(node, diagrams)),
+    // Empty paragraphs (Enter pressed twice) are spacing, not content.
+    children: value
+      .filter((node) => !isBlank(node))
+      .map((node) => block(node, diagrams)),
   };
   relaxed = false;
   let result = lenient.stringify(tree);

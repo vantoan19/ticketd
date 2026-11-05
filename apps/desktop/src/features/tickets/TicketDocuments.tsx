@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/popover";
 import { client, type Ticket } from "@/lib/api/client";
 import { DocumentPicker } from "./DocumentPicker";
+import { documentLinkMarkdown } from "@/features/documents/document-link";
 import { RailSection } from "./RailSection";
 import "./ticket-documents.css";
 
@@ -56,7 +57,7 @@ export function TicketDocuments({
     setOpen(false);
     setError("");
     try {
-      const line = `[${heading.replace(/[[\]]/g, "")}](ticketd://document/${id})`;
+      const line = documentLinkMarkdown(id, heading);
       const body = ticket.body.trimEnd();
       const result = await client.changeTicket(ticket.reference, {
         body: body ? `${body}\n\n${line}\n` : `${line}\n`,

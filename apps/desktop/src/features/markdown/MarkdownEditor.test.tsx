@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   act,
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -228,5 +229,16 @@ describe("Formatting toolbar", () => {
     expect(screen.getByRole("button", { name: "Bold" })).toBeTruthy();
     fireEvent.blur(editable);
     expect(screen.queryByRole("button", { name: "Bold" })).toBeNull();
+  });
+  it("keeps editor focus on pointer down for the Link button", () => {
+    render(<MarkdownEditor value="" onChange={vi.fn()} />);
+    fireEvent.focus(
+      screen.getByRole("textbox", { name: "Markdown document rich text" }),
+    );
+    const down = createEvent.mouseDown(
+      screen.getByRole("button", { name: "Link" }),
+    );
+    fireEvent(screen.getByRole("button", { name: "Link" }), down);
+    expect(down.defaultPrevented).toBe(true);
   });
 });
