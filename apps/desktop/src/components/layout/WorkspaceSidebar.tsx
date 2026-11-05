@@ -78,7 +78,7 @@ export function WorkspaceSidebar({
   /** The workspace graph covers the current view; only its entry is active. */
   workspaceGraphOpen?: boolean;
   onCapture: () => void;
-  counts: SidebarCounts;
+  counts: SidebarCounts | null;
   setView: (view: View) => void;
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
@@ -94,7 +94,7 @@ export function WorkspaceSidebar({
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
   const openGraph = useContext(ContextGraphNavigation);
-  const unread = counts.unread_inbox > 0;
+  const unread = (counts?.unread_inbox ?? 0) > 0;
   const archivedPlans = plans.filter((e) => e.archived).length;
   return (
     <Sidebar
@@ -153,7 +153,7 @@ export function WorkspaceSidebar({
               <SidebarMenuButton
                 isActive={view === "inbox"}
                 aria-label={
-                  unread ? `Inbox, ${counts.unread_inbox} unread` : "Inbox"
+                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
                 }
                 onClick={() => setView("inbox")}
               >
@@ -161,7 +161,7 @@ export function WorkspaceSidebar({
                 {unread && (
                   <span className="sidebar-count" aria-hidden="true">
                     <StatusDot tone="unread" />
-                    {counts.unread_inbox}
+                    {counts?.unread_inbox}
                   </span>
                 )}
               </SidebarMenuButton>
@@ -177,7 +177,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
-                {counts.total !== undefined && (
+                {counts?.total !== undefined && (
                   <SidebarCount value={counts.total} />
                 )}
               </SidebarMenuButton>
@@ -188,7 +188,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("ready")}
               >
                 <CirclePlay size={16} /> Ready
-                <SidebarCount value={counts.ready} />
+                {counts && <SidebarCount value={counts.ready} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -197,7 +197,7 @@ export function WorkspaceSidebar({
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
-                <SidebarCount value={counts.in_progress} />
+                {counts && <SidebarCount value={counts.in_progress} />}
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

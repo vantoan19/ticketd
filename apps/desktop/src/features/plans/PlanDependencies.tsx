@@ -59,6 +59,11 @@ function Blockers({
   const blockers = graph.edges
     .filter((edge) => edge.dependent === member.reference)
     .map((edge) => edge.blocker);
+  const dependents = graph.edges
+    .filter((edge) => edge.blocker === member.reference)
+    .flatMap((edge) =>
+      graph.nodes.filter((node) => node.reference === edge.dependent),
+    );
   const search = useTicketSearch(
     query,
     !chosen,
@@ -139,6 +144,25 @@ function Blockers({
             );
           })}
         </ul>
+      )}
+      {dependents.length > 0 && (
+        <>
+          <p className="plan-note">Blocks</p>
+          <ul aria-label={`Tickets blocked by ${member.reference}`}>
+            {dependents.map((item) => (
+              <li key={item.reference}>
+                <div className="plan-blocker-main">
+                  <StatusIcon status={item.status} size={14} decorative />
+                  <button type="button" onClick={() => onOpen(item.reference)}>
+                    <span className="ticket-ref">{item.reference}</span>{" "}
+                    {item.title}
+                    {item.boundary && " · Outside Plan"}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
       <form className="plan-blocker-form" onSubmit={(event) => void add(event)}>
         <Field data-invalid={error || search.error ? true : undefined}>
@@ -284,14 +308,20 @@ export function PlanDependencies({
           )}
           {outside > 0 && (
             <p className="plan-callout" role="status">
-              {outside} outside-Plan {outside === 1 ? "ticket" : "tickets"}{" "}
-              shown dashed · not included in the {total} member tickets
+              {graph.outside_total && graph.outside_total > outside
+                ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
+                : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
+              · not included in the {total} member tickets
             </p>
           )}
           <ul className="plan-dependency-rows" aria-label="Plan tickets">
             {members.map((member) => {
+              // Only blockers that are not Done still hold the ticket back.
               const count = graph.edges.filter(
-                (edge) => edge.dependent === member.reference,
+                (edge) =>
+                  edge.dependent === member.reference &&
+                  graph.nodes.find((node) => node.reference === edge.blocker)
+                    ?.status !== "Done",
               ).length;
               const open = selected === member.reference;
               return (

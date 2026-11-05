@@ -83,6 +83,12 @@ export function TicketListPane({
     plan: string;
     name: string;
   } | null>(null);
+  // The Undo offer is short-lived: it must not linger after the ticket is re-added.
+  useEffect(() => {
+    if (!removed) return;
+    const timer = window.setTimeout(() => setRemoved(null), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [removed]);
   const planScope = !trash && navigation.plan ? navigation.plan : "";
   const scopedPlan = plans.find((item) => item.id === planScope);
   const planState = usePlanView(planScope, revision, refresh);

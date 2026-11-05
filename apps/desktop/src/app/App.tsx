@@ -65,11 +65,7 @@ export function App() {
     id: string;
     key: number;
   } | null>(null);
-  const [counts, setCounts] = useState<SidebarCounts>({
-    unread_inbox: 0,
-    ready: 0,
-    in_progress: 0,
-  });
+  const [counts, setCounts] = useState<SidebarCounts | null>(null);
   useEffect(() => {
     let active = true;
     const poll = () =>
@@ -358,7 +354,6 @@ export function App() {
                       active={view === "documents"}
                       target={documentTarget}
                       capture={capture}
-                      onCapture={() => setCapture(true)}
                       currentTicket={
                         view === "tickets" ? workspace.selected : null
                       }

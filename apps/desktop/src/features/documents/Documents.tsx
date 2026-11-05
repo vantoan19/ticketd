@@ -76,7 +76,11 @@ export function Documents({
   const [pins, setPins] = useState<DocumentSummary[]>([]);
   const [trash, setTrash] = useState<DocumentSummary[]>([]);
   const [trashOffset, setTrashOffset] = useState(0);
-  const [showTrash, setShowTrash] = useState(false);
+  const [view, setView] = useState<"recent" | "all" | "trash">("recent");
+  const showTrash = view === "trash";
+  const [all, setAll] = useState<DocumentSummary[]>([]);
+  const [allOffset, setAllOffset] = useState(0);
+  const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
   const [tags, setTags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
@@ -106,9 +110,8 @@ export function Documents({
       })
       .catch((e: unknown) => setError(String(e)));
   }, [recentOffset, pinOffset, includeSupport]);
-  useEffect(() => {
-    if (!active || !showTrash) return;
-    const load = () =>
+  const loadTrash = useCallback(
+    () =>
       void documents
         .trash(trashOffset)
         .then((items) => {
@@ -116,11 +119,30 @@ export function Documents({
           setTrashLoaded(true);
           setError("");
         })
+        .catch((e: unknown) => setError(String(e))),
+    [trashOffset],
+  );
+  useEffect(() => {
+    if (!active || !showTrash) return;
+    loadTrash();
+    const timer = window.setInterval(loadTrash, 5000);
+    return () => window.clearInterval(timer);
+  }, [active, showTrash, loadTrash]);
+  useEffect(() => {
+    if (!active || view !== "all") return;
+    const load = () =>
+      void documents
+        .all(allOffset, includeSupport)
+        .then((items) => {
+          setAll(items);
+          setAllLoaded(true);
+          setError("");
+        })
         .catch((e: unknown) => setError(String(e)));
     load();
     const timer = window.setInterval(load, 5000);
     return () => window.clearInterval(timer);
-  }, [active, showTrash, trashOffset]);
+  }, [active, view, allOffset, includeSupport]);
   useEffect(() => {
     if (target)
       void Promise.all([documents.open(target.id), documents.tags(target.id)])
@@ -173,7 +195,7 @@ export function Documents({
       })
       .catch((e: unknown) => setError(String(e)));
   };
-  const list = (items: DocumentSummary[], mark = "") => (
+  const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
     <ul className="document-list">
       {items.map((doc) => {
         const pinned = pins.some((p) => p.id === doc.id);
@@ -221,19 +243,38 @@ export function Documents({
                 {date}
               </time>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
-              onClick={() =>
-                void documents
-                  .pin(doc.id, !pinned)
-                  .then(refresh)
-                  .catch((e: unknown) => setError(String(e)))
-              }
-            >
-              <Pin fill={pinned ? "currentColor" : "none"} />
-            </Button>
+            {inTrash ? (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Restore ${doc.heading}`}
+                onClick={() =>
+                  void documents
+                    .setTrashed(doc.id, false, crypto.randomUUID())
+                    .then(() => {
+                      loadTrash();
+                      refresh();
+                    })
+                    .catch((e: unknown) => setError(String(e)))
+                }
+              >
+                Restore
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`${pinned ? "Unpin" : "Pin"} ${doc.heading}`}
+                onClick={() =>
+                  void documents
+                    .pin(doc.id, !pinned)
+                    .then(refresh)
+                    .catch((e: unknown) => setError(String(e)))
+                }
+              >
+                <Pin fill={pinned ? "currentColor" : "none"} />
+              </Button>
+            )}
           </li>
         );
       })}
@@ -254,20 +295,22 @@ export function Documents({
         {error && <p role="alert">{error}</p>}
         <div className="documents-toolbar">
           <div className="documents-tabs">
-            <Button
-              variant={showTrash ? "ghost" : "secondary"}
-              aria-pressed={!showTrash}
-              onClick={() => setShowTrash(false)}
-            >
-              Recently opened
-            </Button>
-            <Button
-              variant={showTrash ? "secondary" : "ghost"}
-              aria-pressed={showTrash}
-              onClick={() => setShowTrash(true)}
-            >
-              Trash
-            </Button>
+            {(
+              [
+                ["recent", "Recently opened"],
+                ["all", "All"],
+                ["trash", "Trash"],
+              ] as const
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                variant={view === value ? "secondary" : "ghost"}
+                aria-pressed={view === value}
+                onClick={() => setView(value)}
+              >
+                {label}
+              </Button>
+            ))}
             {!showTrash && (
               <label className="documents-include">
                 <input
@@ -277,6 +320,7 @@ export function Documents({
                     setIncludeSupport(e.target.checked);
                     setOffset(0);
                     setRecentOffset(0);
+                    setAllOffset(0);
                   }}
                 />{" "}
                 Include Activity details
@@ -288,17 +332,19 @@ export function Documents({
               <label htmlFor="document-search" className="sr-only">
                 Search Documents
               </label>
-              <Search aria-hidden="true" />
-              <Input
-                id="document-search"
-                ref={searchInput}
-                placeholder="Search titles and content…"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setOffset(0);
-                }}
-              />
+              <div className="documents-search-field">
+                <Search aria-hidden="true" />
+                <Input
+                  id="document-search"
+                  ref={searchInput}
+                  placeholder="Search titles and content…"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setOffset(0);
+                  }}
+                />
+              </div>
               {filter.trim() && (
                 <span className="documents-tag-filter">
                   Tag: {filter}
@@ -333,13 +379,12 @@ export function Documents({
         </div>
         {showTrash ? (
           <section>
-            <h2>Trash</h2>
             {!trashLoaded ? (
               <p role="status">Loading Trash…</p>
             ) : (
               trash.length === 0 && <p>Trash is empty.</p>
             )}
-            {list(trash)}
+            {list(trash, "", true)}
             {(trashOffset > 0 || trash.length >= 50) && (
               <div className="document-pagination">
                 <Button
@@ -399,7 +444,7 @@ export function Documents({
           </section>
         ) : (
           <>
-            {(pins.length > 0 || pinOffset > 0) && (
+            {view === "recent" && (pins.length > 0 || pinOffset > 0) && (
               <section>
                 <h2>Pinned</h2>
                 {list(pins)}
@@ -421,42 +466,73 @@ export function Documents({
                 )}
               </section>
             )}
-            <section>
-              <h2>Recently opened</h2>
-              {!browseLoaded ? (
-                <p role="status">Loading Documents…</p>
-              ) : (
-                recent.length === 0 &&
-                recentOffset === 0 && (
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyDescription>
-                        Your captured thoughts will appear here.
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )
-              )}
-              {list(recent.filter((doc) => !pins.some((p) => p.id === doc.id)))}
-              {(recentOffset > 0 || recent.length >= 50) && (
-                <div className="document-pagination">
-                  <Button
-                    disabled={recentOffset === 0}
-                    onClick={() =>
-                      setRecentOffset(Math.max(0, recentOffset - 50))
-                    }
-                  >
-                    Previous recent
-                  </Button>
-                  <Button
-                    disabled={recent.length < 50}
-                    onClick={() => setRecentOffset(recentOffset + 50)}
-                  >
-                    Next recent
-                  </Button>
-                </div>
-              )}
-            </section>
+            {view === "all" ? (
+              <section>
+                <h2>All documents</h2>
+                {!allLoaded ? (
+                  <p role="status">Loading Documents…</p>
+                ) : (
+                  all.length === 0 &&
+                  allOffset === 0 && <p>No Documents yet.</p>
+                )}
+                {list(all)}
+                {(allOffset > 0 || all.length >= 50) && (
+                  <div className="document-pagination">
+                    <Button
+                      disabled={allOffset === 0}
+                      onClick={() => setAllOffset(Math.max(0, allOffset - 50))}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      disabled={all.length < 50}
+                      onClick={() => setAllOffset(allOffset + 50)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <section>
+                <h2>Recently opened</h2>
+                {!browseLoaded ? (
+                  <p role="status">Loading Documents…</p>
+                ) : (
+                  recent.length === 0 &&
+                  recentOffset === 0 && (
+                    <Empty>
+                      <EmptyHeader>
+                        <EmptyDescription>
+                          Your captured thoughts will appear here.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  )
+                )}
+                {list(
+                  recent.filter((doc) => !pins.some((p) => p.id === doc.id)),
+                )}
+                {(recentOffset > 0 || recent.length >= 50) && (
+                  <div className="document-pagination">
+                    <Button
+                      disabled={recentOffset === 0}
+                      onClick={() =>
+                        setRecentOffset(Math.max(0, recentOffset - 50))
+                      }
+                    >
+                      Previous recent
+                    </Button>
+                    <Button
+                      disabled={recent.length < 50}
+                      onClick={() => setRecentOffset(recentOffset + 50)}
+                    >
+                      Next recent
+                    </Button>
+                  </div>
+                )}
+              </section>
+            )}
           </>
         )}
       </div>
@@ -465,6 +541,13 @@ export function Documents({
           key={selected.id}
           initial={selected}
           active={active}
+          pinned={pins.some((p) => p.id === selected.id)}
+          onTogglePin={() =>
+            void documents
+              .pin(selected.id, !pins.some((p) => p.id === selected.id))
+              .then(refresh)
+              .catch((e: unknown) => setError(String(e)))
+          }
           onOpenDocument={open}
           {...(openGraph ? { onOpenGraph: openGraph } : {})}
           onOpenPlan={(id) => {

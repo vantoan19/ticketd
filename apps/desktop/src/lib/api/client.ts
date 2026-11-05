@@ -245,6 +245,7 @@ export const graphSchema = z.object({
   omitted_edges: z.boolean(),
   truncated: z.boolean(),
   total_members: z.number().nullable().optional(),
+  outside_total: z.number().nullable().optional(),
 });
 export type DependencyGraph = z.infer<typeof graphSchema>;
 const readinessSchema = z.enum(["ready", "blocked", "no_ready_state"]);

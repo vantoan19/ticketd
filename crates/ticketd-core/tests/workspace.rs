@@ -4309,6 +4309,7 @@ fn plan_dependency_graph_includes_external_blockers_without_changing_scope() {
             .any(|n| n.reference == waiting.reference && n.boundary)
     );
     assert_eq!(graph.total_members, Some(2));
+    assert_eq!(graph.outside_total, Some(2));
     workspace
         .remove_dependency(&member.reference, &waiting.reference, None)
         .unwrap();

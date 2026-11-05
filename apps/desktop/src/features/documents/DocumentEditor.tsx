@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Check, X } from "lucide-react";
+import { ArrowLeft, Check, MoreHorizontal, Pin, X } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -88,6 +95,8 @@ export function DocumentEditor({
   onOpenPlan,
   onOpenGraph,
   active = true,
+  pinned = false,
+  onTogglePin,
   children,
 }: {
   initial: Document | null;
@@ -99,6 +108,9 @@ export function DocumentEditor({
   onOpenGraph?: (id: string) => void;
   /** False while the Documents view is hidden: stop polling for outside changes. */
   active?: boolean;
+  /** Reader header pin toggle; omitted when the host cannot pin. */
+  pinned?: boolean;
+  onTogglePin?: () => void;
   children?: ReactNode | ((state: { trashed: boolean }) => ReactNode);
 }) {
   const [writing, setWriting] = useState(initial === null);
@@ -545,6 +557,34 @@ export function DocumentEditor({
                   <ArrowLeft aria-hidden="true" />
                 </Button>
                 <span>Document</span>
+                <div className="document-actions">
+                  {onTogglePin && (
+                    <IconButton
+                      label={pinned ? "Unpin Document" : "Pin Document"}
+                      aria-pressed={pinned}
+                      onClick={onTogglePin}
+                    >
+                      <Pin fill={pinned ? "currentColor" : "none"} />
+                    </IconButton>
+                  )}
+                  {!trashed && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton
+                          label="Document actions"
+                          disabled={transitioning}
+                        >
+                          <MoreHorizontal />
+                        </IconButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" sideOffset={4}>
+                        <DropdownMenuItem onSelect={toggleTrash}>
+                          Move to Trash
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
               </div>
               <h1>{heading}</h1>
             </>
@@ -685,15 +725,6 @@ export function DocumentEditor({
         {!initial && saveError}
         <footer>
           {capture && statusLine}
-          {initial && !trashed && (
-            <Button
-              variant="outline"
-              disabled={transitioning}
-              onClick={toggleTrash}
-            >
-              Move to Trash
-            </Button>
-          )}
           <Button
             variant={capture ? "default" : "outline"}
             onClick={requestClose}
@@ -850,6 +881,8 @@ export function DocumentEditor({
                 </li>
               ))}
             </ul>
+          </section>
+          <section aria-label="Create ticket">
             {!creatingFromDocument && (
               <Button
                 variant="outline"

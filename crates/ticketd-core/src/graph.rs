@@ -42,6 +42,9 @@ pub struct DependencyGraph {
     pub truncated: bool,
     /// For a Plan graph, every non-trashed member, shown or not.
     pub total_members: Option<usize>,
+    /// For a Plan graph, every distinct ticket outside the Plan that is linked to a member
+    /// (within the work budget), drawn or not.
+    pub outside_total: Option<usize>,
 }
 
 impl Workspace {
@@ -157,6 +160,7 @@ impl Workspace {
             omitted_edges,
             truncated: omitted_neighbors || omitted_edges,
             total_members: None,
+            outside_total: None,
         })
     }
     /// A bounded Plan scope, including prerequisites just outside that scope.
@@ -181,6 +185,7 @@ impl Workspace {
         ids.truncate(MAX_NODES);
         let members = ids.clone();
         let mut boundaries = BTreeSet::new();
+        let mut outside_seen = BTreeSet::new();
         let mut candidates = BTreeSet::new();
         let mut incomplete = false;
         let quota = MAX_WORK / (members.len().max(1) * 2);
@@ -228,6 +233,7 @@ impl Workspace {
                         omitted_neighbors = true;
                         continue;
                     }
+                    outside_seen.insert(neighbor.clone());
                     if boundaries.len() == MAX_OUTSIDE {
                         omitted_neighbors = true;
                         continue;
@@ -272,6 +278,7 @@ impl Workspace {
             omitted_edges,
             truncated: omitted_neighbors || omitted_edges,
             total_members: Some(total_members),
+            outside_total: Some(outside_seen.len()),
         })
     }
 }

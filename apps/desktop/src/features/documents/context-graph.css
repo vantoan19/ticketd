@@ -172,3 +172,8 @@
   margin: 0 0 16px;
   color: var(--muted-foreground);
 }
+.context-graph-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
