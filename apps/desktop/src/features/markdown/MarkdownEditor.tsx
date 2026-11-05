@@ -3,6 +3,7 @@ import {
   useId,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -380,7 +381,13 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({ visible }: { visible: boolean }) {
+function Toolbar({
+  visible,
+  floating,
+}: {
+  visible: boolean;
+  floating: boolean;
+}) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -413,9 +420,11 @@ function Toolbar({ visible }: { visible: boolean }) {
   ] as const;
   return (
     // Never `hidden`: a collapsed toolbar would move everything below it, so a first click
-    // on Post/Done/Retry (which blurs the editor) would land on the wrong element.
+    // on Post/Done/Retry (which blurs the editor) would land on the wrong element. A toolbar that
+    // appears only on focus floats above the frame instead of holding an empty band inside it.
     <div
       className="rich-toolbar"
+      data-floating={floating || undefined}
       data-visible={visible}
       aria-hidden={!visible}
       inert={!visible}
@@ -1010,11 +1019,25 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar visible={active || persistentToolbar} />}
+          {!readOnly && (
+            <Toolbar
+              visible={active || persistentToolbar}
+              floating={!persistentToolbar}
+            />
+          )}
           <PlateContent
             readOnly={readOnly}
-            // Only while the document is empty: Slate's own check can lag a trailing blank paragraph.
-            {...(placeholder && value.trim() === "" ? { placeholder } : {})}
+            // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
+            // inside the editable, so native input (autocorrect, dictation) could keep it beside
+            // typed text or fold it into what is saved. Only while the document is empty.
+            {...(placeholder && value.trim() === ""
+              ? {
+                  "data-empty": "",
+                  style: {
+                    "--editor-placeholder": JSON.stringify(placeholder),
+                  } as CSSProperties,
+                }
+              : {})}
             aria-label={`${label} rich text`}
             role={slash ? "combobox" : "textbox"}
             aria-autocomplete={slash ? "list" : undefined}

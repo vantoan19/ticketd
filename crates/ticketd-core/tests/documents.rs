@@ -776,6 +776,28 @@ fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ()
 }
 
 #[test]
+fn snippet_leaves_out_the_repeated_heading_and_the_capture_placeholder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let derived = workspace
+        .create_document(None, "Checkout idea for retries\n\nWrite a thought…")
+        .unwrap();
+    let titled = workspace
+        .create_document(Some("Retries"), "Retries\n\nBackoff matters")
+        .unwrap();
+    let rows = workspace.all_documents_page(50, 0, false).unwrap();
+    let snippet = |id: &str| {
+        rows.iter()
+            .find(|row| row.id == id)
+            .unwrap()
+            .snippet
+            .clone()
+    };
+    assert_eq!(snippet(&derived.id), "");
+    assert_eq!(snippet(&titled.id), "Backoff matters");
+}
+
+#[test]
 fn snippets_keep_literal_characters_and_drop_table_syntax() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

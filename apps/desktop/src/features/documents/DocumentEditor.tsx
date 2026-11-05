@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { client } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
@@ -1160,8 +1161,11 @@ const ticketSummaries = new Map<string, { title: string; status: string }>();
 /** Tickets show their status and title beside the reference; Plans using this Document read "Spec of …". */
 function ConnectedLabel({ item }: { item: Connection }) {
   const [, refresh] = useState(0);
+  const [unresolved, setUnresolved] = useState(false);
   const ticket =
     item.kind === "ticket" ? ticketSummaries.get(item.label) : undefined;
+  // A ticket whose summary is still on its way shows a skeleton, not a generic icon and a bare reference.
+  const loading = item.kind === "ticket" && !ticket && !unresolved;
   useEffect(() => {
     if (item.kind !== "ticket" || ticketSummaries.has(item.label)) return;
     let current = true;
@@ -1173,7 +1177,9 @@ function ConnectedLabel({ item }: { item: Connection }) {
         });
         if (current) refresh((n) => n + 1);
       },
-      () => {},
+      () => {
+        if (current) setUnresolved(true);
+      },
     );
     return () => {
       current = false;
@@ -1191,6 +1197,11 @@ function ConnectedLabel({ item }: { item: Connection }) {
       {item.kind === "ticket" ? (
         ticket ? (
           <StatusIcon status={ticket.status} decorative />
+        ) : loading ? (
+          <Skeleton
+            aria-hidden="true"
+            className="size-4 shrink-0 rounded-full"
+          />
         ) : (
           <CircleDashed aria-hidden="true" />
         )
@@ -1202,6 +1213,7 @@ function ConnectedLabel({ item }: { item: Connection }) {
       <span className="connected-label" title={shown}>
         {shown}
       </span>
+      {loading && <Skeleton aria-hidden="true" className="h-3 w-24 shrink-0" />}
     </>
   );
 }

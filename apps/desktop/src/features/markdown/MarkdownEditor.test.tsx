@@ -312,6 +312,23 @@ describe("Toolbar layout and links", () => {
     expect(toolbar?.getAttribute("data-visible")).toBe("false");
     expect(toolbar?.hasAttribute("inert")).toBe(true);
   });
+  it("floats a focus-only toolbar above the frame but keeps a persistent one in it (L6)", () => {
+    const idle = render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    expect(
+      idle.container
+        .querySelector(".rich-toolbar")
+        ?.hasAttribute("data-floating"),
+    ).toBe(true);
+    idle.unmount();
+    const kept = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} persistentToolbar />,
+    );
+    expect(
+      kept.container
+        .querySelector(".rich-toolbar")
+        ?.hasAttribute("data-floating"),
+    ).toBe(false);
+  });
   it("offers one row of essentials and keeps the rest in More", () => {
     render(<MarkdownEditor value="text" onChange={vi.fn()} />);
     fireEvent.focus(
@@ -341,16 +358,17 @@ describe("Toolbar layout and links", () => {
         />
       );
     };
-    const view = render(<Harness />);
+    render(<Harness />);
     const editable = screen.getByRole("textbox", {
       name: "Markdown document rich text",
     });
     Object.defineProperty(editable, "isContentEditable", { value: true });
-    await waitFor(() =>
-      expect(
-        view.container.querySelectorAll("[data-slate-placeholder]"),
-      ).toHaveLength(1),
+    await waitFor(() => expect(editable.hasAttribute("data-empty")).toBe(true));
+    expect(editable.style.getPropertyValue("--editor-placeholder")).toBe(
+      '"Write a thought…"',
     );
+    // The hint is never text inside the editable, so native input cannot keep or save it.
+    expect(editable.textContent).not.toContain("Write a thought");
     editable.focus();
     fireEvent(
       editable,
@@ -362,9 +380,7 @@ describe("Toolbar layout and links", () => {
       expect(editable.textContent).toContain("Checkout idea for retries"),
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(
-      view.container.querySelectorAll("[data-slate-placeholder]"),
-    ).toHaveLength(0);
+    expect(editable.hasAttribute("data-empty")).toBe(false);
   });
   it("hides the placeholder beside content that has no text (K10)", async () => {
     const view = render(
@@ -375,8 +391,6 @@ describe("Toolbar layout and links", () => {
       />,
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(
-      view.container.querySelectorAll("[data-slate-placeholder]"),
-    ).toHaveLength(0);
+    expect(view.container.querySelector("[data-empty]")).toBeNull();
   });
 });
