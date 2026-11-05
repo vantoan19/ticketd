@@ -599,7 +599,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(screen.getByText("No matching tickets")).toBeTruthy();
-  expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
+  expect(screen.getByText(/Nothing matches “zebra”/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
   expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
   expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();

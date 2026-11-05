@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, Link2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ArrowLeft, Layers, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -315,7 +316,13 @@ export function PlanDependencies({
       </header>
       {error && <p role="alert">{error}</p>}
       {!graph && !error && <p role="status">Loading dependencies…</p>}
-      {graph && members.length === 0 && <p>No tickets in this Plan.</p>}
+      {graph && members.length === 0 && (
+        <EmptyState
+          icon={<Layers />}
+          title="No tickets in this Plan"
+          description="Add tickets to the Plan to see how they depend on each other."
+        />
+      )}
       {graph && members.length > 0 && (
         <>
           <div className="plan-graph-canvas">

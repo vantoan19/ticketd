@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { FileText } from "lucide-react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import { Input } from "@/components/ui/input";
@@ -88,9 +89,17 @@ export function DocumentPicker({
         ))}
       </ul>
       {results !== null && shown.length === 0 && !error && (
-        <p className="document-picker-empty" role="status">
-          {query.trim() ? "No Documents match." : "No Documents yet."}
-        </p>
+        <EmptyState
+          inline
+          role="status"
+          icon={<FileText />}
+          title={query.trim() ? "No Documents match" : "No Documents yet"}
+          description={
+            query.trim()
+              ? "Try a different search."
+              : "Documents you create appear here."
+          }
+        />
       )}
     </div>
   );

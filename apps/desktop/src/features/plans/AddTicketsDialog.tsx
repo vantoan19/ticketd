@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Search, SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -121,7 +122,12 @@ export function AddTicketsDialog({
           </p>
         )}
         {results && results.length === 0 && !searchError && !done && (
-          <p className="plan-note">No tickets to add match this search.</p>
+          <EmptyState
+            inline
+            icon={<SearchX />}
+            title="No tickets to add"
+            description="Nothing matches this search."
+          />
         )}
         <ul className="plan-add-results" aria-label="Tickets to add">
           {(results ?? []).map((ticket) => {

@@ -8,7 +8,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
+import {
+  Folder,
+  Layers,
+  Lock,
+  Tag,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -274,6 +281,13 @@ export function TicketProperties({
       data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
     >
+      {ticket.trashed && (
+        <p role="note" className="rail-trash-note">
+          <Trash2 aria-hidden="true" />
+          <span>In Trash. Restore it to edit; its relationships are kept.</span>
+          <Lock aria-label="Locked while in Trash" role="img" />
+        </p>
+      )}
       {property(
         "Status",
         <>

@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Plus, RefreshCw, X } from "lucide-react";
+import {
+  AlertCircle,
+  Layers,
+  Plus,
+  RefreshCw,
+  SearchX,
+  Ticket as TicketIcon,
+  Trash2,
+  X,
+} from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -270,34 +280,45 @@ export function TicketListPane({
             </p>
           )}
           {queryError ? (
-            <div className="empty-state" role="alert">
-              <strong>Could not load tickets</strong>
-              <p>Try refreshing the current view.</p>
-              <Button variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
+            <EmptyState
+              role="alert"
+              icon={<AlertCircle />}
+              title="Could not load tickets"
+              description="Try refreshing the current view."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refresh()}
+                >
+                  Retry
+                </Button>
+              }
+            />
           ) : loading && tickets.length === 0 ? (
             <TicketRowsSkeleton />
           ) : tickets.length === 0 ? (
-            <div className="empty-state">
-              {trash ? (
-                <p>No tickets in trash.</p>
-              ) : filtered ? (
-                <>
-                  <strong>No matching tickets</strong>
-                  {query ? (
-                    <p>
-                      Nothing matches <q>{query}</q>
-                      {tags || status || availability || family || plan
-                        ? " with the current filters"
-                        : ""}
-                      .
-                    </p>
-                  ) : (
-                    <p>Nothing matches the current filters.</p>
-                  )}
-                  <Button variant="outline" onClick={clearFilters}>
+            trash ? (
+              <EmptyState
+                icon={<Trash2 />}
+                title="Trash is empty"
+                description="Trashed tickets wait here until you restore them."
+              />
+            ) : filtered ? (
+              <EmptyState
+                icon={<SearchX />}
+                title="No matching tickets"
+                description={
+                  query
+                    ? `Nothing matches “${query}”${
+                        tags || status || availability || family || plan
+                          ? " with the current filters"
+                          : ""
+                      }.`
+                    : "Nothing matches the current filters."
+                }
+                action={
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
                     {query &&
                     !tags &&
                     !status &&
@@ -307,48 +328,63 @@ export function TicketListPane({
                       ? "Clear search"
                       : "Clear filters"}
                   </Button>
-                </>
-              ) : planScope ? (
-                <>
-                  <strong>No tickets in this Plan</strong>
-                  <p>Start with a new ticket, or bring in existing ones.</p>
+                }
+              />
+            ) : planScope ? (
+              <EmptyState
+                icon={<Layers />}
+                title="No tickets in this Plan"
+                description="Start with a new ticket, or bring in existing ones."
+                action={
                   <div className="plan-empty-actions">
-                    <Button onClick={(event) => onCreate(event.currentTarget)}>
+                    <Button
+                      size="sm"
+                      onClick={(event) => onCreate(event.currentTarget)}
+                    >
                       <Plus data-icon="inline-start" /> Create ticket
                     </Button>
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => planState.setAdding(true)}
                     >
                       Add existing tickets
                     </Button>
                   </div>
-                </>
-              ) : navigation.project !== "all" ||
-                navigation.plan ||
-                navigation.kind !== "all" ? (
-                <>
-                  <strong>No tickets in this scope</strong>
-                  <p>Create a ticket or choose another view.</p>
+                }
+              />
+            ) : navigation.project !== "all" ||
+              navigation.plan ||
+              navigation.kind !== "all" ? (
+              <EmptyState
+                icon={<TicketIcon />}
+                title="No tickets in this scope"
+                description="Create a ticket or choose another view."
+                action={
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={(event) => onCreate(event.currentTarget)}
                   >
                     Create ticket
                   </Button>
-                </>
-              ) : (
-                <>
-                  <strong>Your workspace is ready</strong>
-                  <p>
-                    Create your first ticket to start keeping track of work.
-                  </p>
-                  <Button onClick={(event) => onCreate(event.currentTarget)}>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<TicketIcon />}
+                title="Your workspace is ready"
+                description="Create your first ticket to start keeping track of work."
+                action={
+                  <Button
+                    size="sm"
+                    onClick={(event) => onCreate(event.currentTarget)}
+                  >
                     <Plus data-icon="inline-start" /> Create your first ticket
                   </Button>
-                </>
-              )}
-            </div>
+                }
+              />
+            )
           ) : (
             <>
               {showBulk && bulk.selection.length > 0 && (

@@ -23,6 +23,7 @@ export function EmptyState({
   footnote,
   inline = false,
   className,
+  role,
 }: {
   icon: ReactNode;
   title: string;
@@ -32,12 +33,14 @@ export function EmptyState({
   footnote?: ReactNode;
   inline?: boolean;
   className?: string;
+  role?: "alert" | "status";
 }) {
   if (inline)
     return (
       <div
         data-slot="empty-state"
         data-inline="true"
+        role={role}
         className={cn(
           "flex items-center gap-3 rounded-lg bg-(--recessed) px-3.5 py-3 text-sm text-muted-foreground shadow-(--shadow-border-base) [&_svg]:size-4 [&_svg]:shrink-0",
           className,
@@ -54,6 +57,7 @@ export function EmptyState({
   return (
     <Empty
       data-slot="empty-state"
+      role={role}
       className={cn("gap-3 p-6 md:p-6", className)}
     >
       <EmptyHeader>

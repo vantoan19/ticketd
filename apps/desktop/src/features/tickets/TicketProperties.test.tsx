@@ -194,3 +194,36 @@ test("changing the status of a duplicate asks before removing its link", async (
     ),
   );
 });
+
+test("a trashed ticket's rail says it is locked", () => {
+  bridge.invoke.mockResolvedValue([]);
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-1",
+        title: "Ticket",
+        body: "",
+        status: "Todo",
+        tags: [],
+        project_id: null,
+        plan_id: null,
+        trashed: true,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+      }}
+      projects={[]}
+      plans={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  expect(screen.getByRole("note").textContent).toMatch(
+    /In Trash\. Restore it to edit/,
+  );
+  expect(
+    screen.getByRole("img", { name: "Locked while in Trash" }),
+  ).toBeTruthy();
+});
