@@ -353,6 +353,7 @@ export function PlanDependencies({
                   <Button
                     variant="outline"
                     size="sm"
+                    aria-expanded={selected === members[0]?.reference}
                     onClick={() => setSelected(members[0]?.reference ?? null)}
                   >
                     Add blocker…
