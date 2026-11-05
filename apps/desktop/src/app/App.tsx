@@ -19,6 +19,7 @@ import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
 import { useThemeSync } from "@/lib/preferences";
+import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
@@ -54,6 +55,7 @@ function AppContent() {
   const [settingsSection, setSettingsSection] =
     useState<SettingsCardKey>("appearance");
   useThemeSync();
+  useInputModality();
   // Settings replaces the sidebar; Back to tickets returns to the view it left.
   const [viewBeforeSettings, setViewBeforeSettings] =
     useState<typeof view>("tickets");
@@ -388,6 +390,7 @@ function AppContent() {
                   {view === "inbox" && graphOrigin === null && (
                     <Inbox
                       revision={revision}
+                      onBrowse={() => setView("tickets")}
                       select={(reference, noteId) => {
                         setInboxTarget(
                           noteId
