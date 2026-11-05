@@ -125,6 +125,10 @@ export function TicketList({
           const index = ordered.indexOf(ticket);
           return (
             <li key={ticket.id}>
+              {!selectable && (
+                // Keeps rows aligned with lists that have a selection column.
+                <span className="ticket-select" aria-hidden="true" />
+              )}
               {selectable && (
                 <label className="ticket-select">
                   <input

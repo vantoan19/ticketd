@@ -171,12 +171,23 @@
   background: var(--popover);
   box-shadow: 0 -1px 0 0 var(--border);
 }
+.bulk-controls {
+  container-type: inline-size;
+}
 .bulk-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-height: 48px;
   padding: 0 8px 0 12px;
+}
+/* Narrow list: drop the key hint so Clear keeps its label; if it still does
+   not fit, the bar wraps rather than clipping a control. */
+@container (max-width: 440px) {
+  .bulk-kbd {
+    display: none;
+  }
 }
 .bulk-spacer {
   flex: 1;
@@ -418,19 +429,33 @@
 .ticket-row-contextual {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  max-height: 20px;
   overflow: hidden;
 }
-.ticket-row-contextual .ticket-row-tags {
-  display: contents;
+/* Priority when the line is tight: the state keeps its words, the context and
+   tags shrink with an ellipsis and never to nothing. */
+.ticket-row-contextual .ticket-row-state {
+  flex: 0 0 auto;
 }
 .ticket-row-contextual .ticket-row-context {
-  flex: none;
-  max-width: 100%;
+  flex: 0 1 auto;
+  min-width: 6ch;
+}
+.ticket-row-contextual .ticket-row-tags {
+  display: flex;
+  flex: 0 100 auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 4ch;
+  height: auto;
+}
+.ticket-row-contextual .ticket-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* The context item carries its type icon: layers for a Plan, a folder for a
    project, so the two names are never mistaken for each other. */
@@ -458,4 +483,12 @@
   padding: 4px 12px;
   color: var(--muted-foreground);
   font-size: 12px;
+}
+
+.list-description {
+  margin: 0;
+  padding: 8px 20px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
 }

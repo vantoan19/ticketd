@@ -163,6 +163,12 @@ export function TicketListPane({
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
+  const singleStatusNote =
+    navigation.kind === "ready"
+      ? "Todo tickets with nothing left to wait on."
+      : navigation.kind === "progress"
+        ? "Tickets someone is working on right now."
+        : null;
   const filterProps = {
     query,
     setQuery,
@@ -227,6 +233,9 @@ export function TicketListPane({
             />
           )}
         </div>
+      )}
+      {singleStatusNote && (
+        <p className="list-description">{singleStatusNote}</p>
       )}
       {scopedPlan && (
         <div className="plan-view-switch">
