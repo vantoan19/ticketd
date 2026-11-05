@@ -524,3 +524,13 @@
     padding: 20px 16px;
   }
 }
+.document-subtitle {
+  margin: -8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.document-title .document-title-input {
+  background: transparent;
+  box-shadow: none;
+}

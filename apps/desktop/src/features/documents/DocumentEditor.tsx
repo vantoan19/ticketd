@@ -89,12 +89,16 @@ const plain = (text: string) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 /** A derived heading repeats the body's first line; the reader shows it once, as the heading. */
 function withoutDerivedHeading(body: string, title: string, heading?: string) {
-  if (title.trim() || !heading) return body;
+  const explicit = title.trim();
+  if (!explicit && !heading) return body;
   const lines = body.split("\n");
   const first = lines.findIndex((line) => line.trim());
   const line = first < 0 ? "" : (lines[first] ?? "");
-  const want = plain(heading);
+  // An explicit title is the heading; a body H1 that only repeats it is not shown twice.
+  if (explicit && !/^#{1,6}\s/.test(line)) return body;
+  const want = plain(explicit || heading || "");
   if (!want || !plain(line).startsWith(want.slice(0, 120))) return body;
+  if (explicit && plain(line.replace(/^#{1,6}\s+/, "")) !== want) return body;
   return lines
     .slice(first + 1)
     .join("\n")
@@ -553,9 +557,7 @@ export function DocumentEditor({
       aria-label={capture ? "Optional title" : "Title"}
       className={capture ? undefined : "document-title-input"}
       placeholder={
-        capture
-          ? "Add a title (optional)"
-          : (initial.origin_brief?.trim() ?? "") || "Untitled"
+        capture ? "Add a title (optional)" : "Add a title (optional)"
       }
       readOnly={locked}
       value={title}
@@ -596,6 +598,9 @@ export function DocumentEditor({
     </div>
   );
   const connected = groupConnections(links);
+  const planSpec = connected.find(
+    (item) => item.kind === "plan" && item.passages.length === 0,
+  );
   const sharing = new Map<string, number>();
   for (const item of connected)
     for (const passage of item.passages)
@@ -719,6 +724,9 @@ export function DocumentEditor({
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
+        {initial && planSpec && (
+          <p className="document-subtitle">Spec of the Plan {planSpec.label}</p>
+        )}
         {suggestion && (
           <p>
             Connected to {suggestion}{" "}
@@ -815,7 +823,7 @@ export function DocumentEditor({
                 draft.current = { ...draft.current, body: value };
                 setBody(value);
               }}
-              label="Your thought"
+              label={capture ? "Your thought" : "Document"}
               {...(capture ? { placeholder: "Write a thought…" } : {})}
               readOnly={locked}
               autoFocus={capture}

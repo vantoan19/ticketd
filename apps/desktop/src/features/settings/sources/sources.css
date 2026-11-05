@@ -166,6 +166,12 @@
   padding: 0;
   box-shadow: none;
 }
+.source-chip-input:has(> input[aria-invalid="true"]) {
+  box-shadow: 0 0 0 1px var(--destructive);
+}
+.source-chip-input > input[aria-invalid="true"] {
+  box-shadow: none;
+}
 .source-chip-input > input:focus-visible {
   outline: none;
 }

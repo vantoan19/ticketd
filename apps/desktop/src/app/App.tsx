@@ -375,6 +375,10 @@ function AppContent() {
                         projects={projects}
                         loading={loading}
                         onChange={refresh}
+                        onOpenTickets={(item) => {
+                          navigate({});
+                          scope("all", item.id);
+                        }}
                       />
                     </div>
                   }

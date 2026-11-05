@@ -162,7 +162,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           </DialogHeader>
           {zoomControls}
           {diagram}
-          <CopySourceButton label="Copy source" source={source} />
+          <CopySourceButton label="Copy source" icon source={source} />
         </DialogContent>
       </Dialog>
     </section>
