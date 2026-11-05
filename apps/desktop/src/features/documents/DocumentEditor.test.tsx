@@ -570,22 +570,61 @@ const tick = (ms: number) =>
   act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
-it("clears the conflict notice once a later poll merges the outside change", async () => {
+it("clears the conflict notice once the outside change is undone", async () => {
   vi.useFakeTimers();
+  vi.mocked(documents.save).mockRejectedValueOnce("offline");
   vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "Typed" });
+  outside({ ...stored, body: "Outside" });
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed" },
+  });
+  await tick(2400);
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  vi.mocked(documents.version).mockResolvedValue(["undone", false]);
+  vi.mocked(documents.show).mockResolvedValue(stored);
+  await tick(2000);
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed again" },
+  });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls.length).toBeGreaterThan(1);
+});
+it("refreshes silently when an outside change arrives and nothing is unsaved", async () => {
+  vi.useFakeTimers();
   outside({ ...stored, body: "Outside" });
   render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Write" }));
   const editor = screen.getByLabelText("Your thought");
   editor.focus();
   await tick(2000);
-  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
-  editor.blur();
-  await tick(2000);
   expect(screen.queryByText(/Saved content changed/)).toBeNull();
-  fireEvent.change(editor, { target: { value: "Typed" } });
+  expect(editor).toHaveProperty("value", "Outside");
+});
+it("sends the loaded revision and keeps the draft when the save is stale", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockRejectedValueOnce(
+    "document 'd1' was changed elsewhere since it was loaded",
+  );
+  outside({ ...stored, body: "Via CLI", updated_at: "later" });
+  render(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Write" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed" },
+  });
   await tick(400);
-  expect(documents.save).toHaveBeenCalledOnce();
+  expect(vi.mocked(documents.save).mock.calls[0]?.[4]).toBe("now");
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  expect(screen.getByLabelText("Your thought")).toHaveProperty(
+    "value",
+    "Typed",
+  );
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, body: "Typed" });
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  await tick(0);
+  expect(vi.mocked(documents.save).mock.calls[1]?.[4]).toBe("later");
 });
 it("drops a failed Trash request instead of replaying it on the next autosave", async () => {
   vi.useFakeTimers();
@@ -659,4 +698,18 @@ it("does not report a conflict after saving a whitespace-only title", async () =
   });
   await tick(400);
   expect(documents.save).toHaveBeenCalledTimes(2);
+});
+it("shows a derived heading once in the reader", () => {
+  render(
+    <DocumentEditor
+      initial={{
+        ...stored,
+        heading: "Meeting notes",
+        body: "# Meeting notes\n\nAgenda",
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getAllByText("Meeting notes")).toHaveLength(1);
+  expect(screen.getByText("Agenda")).toBeTruthy();
 });

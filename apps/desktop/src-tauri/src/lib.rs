@@ -162,6 +162,7 @@ fn save_document(
     title: Option<String>,
     body: Option<String>,
     title_changed: bool,
+    expected_updated_at: Option<String>,
     request_id: String,
 ) -> Result<Document, String> {
     let request = match id {
@@ -170,6 +171,7 @@ fn save_document(
             patch: DocumentPatch {
                 title: title_changed.then_some(title),
                 body,
+                expected_updated_at,
             },
         },
         None => WriteRequest::CreateDocument {

@@ -58,6 +58,10 @@ pub struct DocumentPatch {
     )]
     pub title: Option<Option<String>>,
     pub body: Option<String>,
+    /// The `updated_at` the caller last saw. When present and stale the change is rejected, so
+    /// an editor's autosave cannot silently overwrite a change made elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_updated_at: Option<String>,
 }
 
 fn present_title<'de, D: serde::Deserializer<'de>>(
@@ -441,6 +445,11 @@ impl Workspace {
         }
         self.connection.execute_batch("SAVEPOINT change_document")?;
         let result = (|| {
+            if let Some(expected) = &patch.expected_updated_at
+                && *expected != self.show_document(id)?.updated_at
+            {
+                return Err(Error::DocumentChanged(id.to_owned()));
+            }
             let body_to_index = patch.body.clone();
             let changes = match (patch.title, patch.body) {
             (Some(title), Some(body)) => self.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,

@@ -52,15 +52,20 @@ function DocumentDate({ value }: { value: string }) {
   );
 }
 type Snapshot = { title: string; body: string; suggestion: string | null };
-function documentHasEditorFocus() {
-  return (
-    document.activeElement instanceof HTMLElement &&
-    Boolean(
-      document.activeElement.closest(
-        "input, textarea, [contenteditable=true], .cm-content",
-      ),
-    )
-  );
+const plain = (text: string) =>
+  text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+/** A derived heading repeats the body's first line; the reader shows it once, as the heading. */
+function withoutDerivedHeading(body: string, title: string, heading?: string) {
+  if (title.trim() || !heading) return body;
+  const lines = body.split("\n");
+  const first = lines.findIndex((line) => line.trim());
+  const line = first < 0 ? "" : (lines[first] ?? "");
+  const want = plain(heading);
+  if (!want || !plain(line).startsWith(want.slice(0, 120))) return body;
+  return lines
+    .slice(first + 1)
+    .join("\n")
+    .replace(/^\s*\n/, "");
 }
 /** The core stores a whitespace-only title as NULL; the saved baseline must match what it stored. */
 const storedTitle = (title: string) => (title.trim() ? title : "");
@@ -71,6 +76,8 @@ type Pending = {
   titleChanged: boolean;
   requestId: string;
   snapshot: Snapshot;
+  /** The stored revision this save was based on; the core rejects it if that moved on. */
+  revision: string | null;
 };
 export function DocumentEditor({
   initial,
@@ -157,6 +164,9 @@ export function DocumentEditor({
   const id = useRef(initial?.id ?? null);
   const pending = useRef<Pending | null>(null);
   const saving = useRef(false);
+  // `updated_at` of the stored Document as last loaded or saved here.
+  const revision = useRef<string | null>(initial?.updated_at ?? null);
+  const externalRevision = useRef<string | null>(null);
   const lastVersion = useRef<string | null>(
     initial ? `${initial.updated_at}|${initial.trashed}` : null,
   );
@@ -240,6 +250,7 @@ export function DocumentEditor({
       titleChanged,
       requestId: crypto.randomUUID(),
       snapshot,
+      revision: revision.current,
     };
     pending.current = request;
     saving.current = true;
@@ -251,9 +262,11 @@ export function DocumentEditor({
         request.title,
         request.body,
         request.titleChanged,
+        request.revision,
         request.requestId,
       );
       id.current = result.id;
+      revision.current = result.updated_at;
       lastVersion.current = `${result.updated_at}|${result.trashed}`;
       setSavedDocument(result);
       saved.current = {
@@ -277,6 +290,24 @@ export function DocumentEditor({
       closeRequested.current = false;
       afterSave.current = null;
       transition.current = null;
+      if (String(error).includes("changed elsewhere") && id.current) {
+        // The stored Document moved on since it was loaded: keep the draft and let
+        // the conflict notice decide. If nothing differs, retry on the new revision.
+        try {
+          const latest = await documents.show(id.current);
+          pending.current = null;
+          if (reconcile(latest)) {
+            setStatus("Saved locally");
+            void save();
+          } else {
+            setFailed(false);
+            setStatus("Not saved");
+          }
+          return;
+        } catch {
+          /* Fall through to the ordinary failure below. */
+        }
+      }
       setFailed(true);
       setFailedTrash(false);
       setFailureDetail(String(error));
@@ -291,6 +322,99 @@ export function DocumentEditor({
     const timer = window.setTimeout(() => void saveRef.current(), 400);
     return () => window.clearTimeout(timer);
   }, [title, body, suggestion]);
+  /**
+   * Fold the stored Document into the editor. Returns true when it was settled (nothing
+   * to resolve, or merged without touching the draft) and false when an outside change
+   * conflicts with unsaved edits and the notice is showing.
+   */
+  const reconcile = (document: Document) => {
+    applyTrashed(document.trashed);
+    setSavedDocument(document);
+    const currentSuggestion = saved.current.suggestion;
+    const link = currentSuggestion
+      ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})`
+      : "";
+    const hasLink = Boolean(
+      currentSuggestion &&
+      (document.body === link || document.body.endsWith(`\n\n${link}`)),
+    );
+    const next: Snapshot = {
+      title: document.title ?? "",
+      body: hasLink
+        ? document.body.slice(0, -link.length).replace(/\n\n$/, "")
+        : document.body,
+      suggestion: hasLink ? currentSuggestion : null,
+    };
+    const settle = () => {
+      revision.current = document.updated_at;
+      // A resolved or merged outside change always clears the notice.
+      externalRef.current = null;
+      setExternal(null);
+    };
+    if (
+      next.title === saved.current.title &&
+      next.body === saved.current.body
+    ) {
+      settle();
+      return true;
+    }
+    const titleDirty = storedTitle(draft.current.title) !== saved.current.title;
+    const bodyDirty =
+      draft.current.body !== saved.current.body ||
+      draft.current.suggestion !== saved.current.suggestion;
+    const conflict =
+      (titleDirty && next.title !== saved.current.title) ||
+      (bodyDirty &&
+        (next.body !== saved.current.body ||
+          next.suggestion !== saved.current.suggestion));
+    if (conflict || pending.current) {
+      // Preserve unrelated saved-field changes when the person chooses to
+      // save over a conflicting field.
+      if (titleDirty || bodyDirty) {
+        if (!titleDirty) {
+          draft.current = { ...draft.current, title: next.title };
+          saved.current = { ...saved.current, title: next.title };
+          setTitle(next.title);
+        }
+        if (!bodyDirty) {
+          draft.current = {
+            ...draft.current,
+            body: next.body,
+            suggestion: next.suggestion,
+          };
+          saved.current = {
+            ...saved.current,
+            body: next.body,
+            suggestion: next.suggestion,
+          };
+          setBody(next.body);
+          setSuggestion(next.suggestion);
+        }
+      }
+      externalRef.current = next;
+      externalRevision.current = document.updated_at;
+      setExternal(next);
+      return false;
+    }
+    // Nothing unsaved is at risk: refresh silently, keeping any unrelated dirty field.
+    draft.current = {
+      title: titleDirty ? draft.current.title : next.title,
+      body: bodyDirty ? draft.current.body : next.body,
+      suggestion: bodyDirty ? draft.current.suggestion : next.suggestion,
+    };
+    saved.current = next;
+    settle();
+    if (!titleDirty) setTitle(next.title);
+    if (!bodyDirty) {
+      setBody(next.body);
+      setSuggestion(next.suggestion);
+    }
+    return true;
+  };
+  const reconcileRef = useRef(reconcile);
+  useEffect(() => {
+    reconcileRef.current = reconcile;
+  });
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => {
@@ -306,97 +430,8 @@ export function DocumentEditor({
           const document = await documents.show(polled);
           if (saving.current) return;
           // Remembered only once resolved: a deferred conflict must be re-checked next poll.
-          const resolved = () => {
+          if (reconcileRef.current(document))
             lastVersion.current = version.join("|");
-          };
-          applyTrashed(document.trashed);
-          setSavedDocument(document);
-          const currentSuggestion = saved.current.suggestion;
-          const link = currentSuggestion
-            ? `[${currentSuggestion}](ticketd://ticket/${currentSuggestion})`
-            : "";
-          const hasLink = Boolean(
-            currentSuggestion &&
-            (document.body === link || document.body.endsWith(`\n\n${link}`)),
-          );
-          const next: Snapshot = {
-            title: document.title ?? "",
-            body: hasLink
-              ? document.body.slice(0, -link.length).replace(/\n\n$/, "")
-              : document.body,
-            suggestion: hasLink ? currentSuggestion : null,
-          };
-          if (
-            next.title === saved.current.title &&
-            next.body === saved.current.body
-          ) {
-            // The outside change was undone or already matches: nothing to resolve.
-            resolved();
-            if (externalRef.current) {
-              externalRef.current = null;
-              setExternal(null);
-            }
-            return;
-          }
-          const editing = documentHasEditorFocus();
-          const titleDirty =
-            storedTitle(draft.current.title) !== saved.current.title;
-          const bodyDirty =
-            draft.current.body !== saved.current.body ||
-            draft.current.suggestion !== saved.current.suggestion;
-          const conflict =
-            (titleDirty && next.title !== saved.current.title) ||
-            (bodyDirty &&
-              (next.body !== saved.current.body ||
-                next.suggestion !== saved.current.suggestion));
-          if (
-            conflict ||
-            (editing && !titleDirty && !bodyDirty) ||
-            pending.current
-          ) {
-            // Preserve unrelated saved-field changes when the person chooses to
-            // save over a conflicting field.
-            if (titleDirty || bodyDirty) {
-              if (!titleDirty) {
-                draft.current = { ...draft.current, title: next.title };
-                saved.current = { ...saved.current, title: next.title };
-                setTitle(next.title);
-              }
-              if (!bodyDirty) {
-                draft.current = {
-                  ...draft.current,
-                  body: next.body,
-                  suggestion: next.suggestion,
-                };
-                saved.current = {
-                  ...saved.current,
-                  body: next.body,
-                  suggestion: next.suggestion,
-                };
-                setBody(next.body);
-                setSuggestion(next.suggestion);
-              }
-            }
-            externalRef.current = next;
-            setExternal(next);
-            return;
-          }
-          const merged = {
-            title: titleDirty ? draft.current.title : next.title,
-            body: bodyDirty ? draft.current.body : next.body,
-            suggestion: bodyDirty ? draft.current.suggestion : next.suggestion,
-          };
-          saved.current = next;
-          draft.current = merged;
-          // Merging resolves any earlier conflict notice; leaving it would block saving.
-          resolved();
-          externalRef.current = null;
-          setExternal(null);
-          if (!titleDirty) setTitle(merged.title);
-          if (!bodyDirty) {
-            setBody(merged.body);
-            setSuggestion(merged.suggestion);
-          }
         })
         .catch(() => {});
     }, 2000);
@@ -573,6 +608,7 @@ export function DocumentEditor({
                 variant="outline"
                 onClick={() => {
                   saved.current = external;
+                  revision.current = externalRevision.current;
                   draft.current = external;
                   pending.current = null;
                   externalRef.current = null;
@@ -590,6 +626,7 @@ export function DocumentEditor({
                 variant="outline"
                 onClick={() => {
                   saved.current = external;
+                  revision.current = externalRevision.current;
                   pending.current = null;
                   externalRef.current = null;
                   setExternal(null);
@@ -611,6 +648,7 @@ export function DocumentEditor({
                 setBody(value);
               }}
               label="Your thought"
+              {...(capture ? { placeholder: "Write a thought…" } : {})}
               readOnly={locked}
               autoFocus={capture}
             />
@@ -628,7 +666,11 @@ export function DocumentEditor({
                 }
               >
                 <MarkdownDocument
-                  source={body}
+                  source={withoutDerivedHeading(
+                    body,
+                    title,
+                    savedDocument?.heading,
+                  )}
                   select={
                     onOpenTicket
                       ? (reference) => navigate(() => onOpenTicket(reference))

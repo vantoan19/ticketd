@@ -16,6 +16,7 @@ fn document_fields_survive_restart_and_edits_do_not_change_recent_order() {
             DocumentPatch {
                 title: None,
                 body: Some("Updated".into()),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -186,6 +187,7 @@ fn document_references_are_indexed_in_both_directions_and_updated_with_markdown(
             DocumentPatch {
                 title: None,
                 body: Some("Removed".into()),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -245,6 +247,7 @@ fn search_tracks_edits_and_organization_survives_restart() {
             DocumentPatch {
                 title: Some(Some("Changed".into())),
                 body: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -339,7 +342,8 @@ fn trash_and_restore_preserve_document_across_restart_and_backup() {
                 &doc.id,
                 DocumentPatch {
                     title: None,
-                    body: Some("lost".into())
+                    body: Some("lost".into()),
+                    ..Default::default()
                 }
             )
             .is_err()
@@ -391,6 +395,7 @@ fn document_reference_cycles_are_allowed_without_implying_ticket_relationships()
             DocumentPatch {
                 title: None,
                 body: Some(format!("[second](ticketd://document/{})", second.id)),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -810,4 +815,30 @@ fn source_document_link_uses_the_documents_heading() {
         ticket.body,
         format!("[Launch notes](ticketd://document/{})", document.id)
     );
+}
+
+#[test]
+fn stale_expected_revision_rejects_a_document_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let doc = workspace.create_document(None, "Original").unwrap();
+    let patch = |body: &str, expected: &str| DocumentPatch {
+        body: Some(body.into()),
+        expected_updated_at: Some(expected.into()),
+        ..Default::default()
+    };
+    workspace
+        .change_document(&doc.id, patch("Elsewhere", &doc.updated_at))
+        .unwrap();
+    // Sleep past the millisecond clock so the revision visibly moves.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let current = workspace.show_document(&doc.id).unwrap();
+    workspace
+        .change_document(&doc.id, patch("Fresh", &current.updated_at))
+        .unwrap();
+    let error = workspace
+        .change_document(&doc.id, patch("Stale", &current.updated_at))
+        .unwrap_err();
+    assert!(error.to_string().contains("changed elsewhere"));
+    assert_eq!(workspace.show_document(&doc.id).unwrap().body, "Fresh");
 }

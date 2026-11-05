@@ -97,6 +97,7 @@ export const documents = {
     title: string | null,
     body: string | null,
     titleChanged: boolean,
+    expectedUpdatedAt: string | null,
     requestId: string,
   ) =>
     schema.parse(
@@ -105,6 +106,7 @@ export const documents = {
         title,
         body,
         titleChanged,
+        expectedUpdatedAt,
         requestId,
       }),
     ),
