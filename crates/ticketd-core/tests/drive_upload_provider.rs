@@ -97,7 +97,7 @@ fn blob_upload_uses_reserved_identity_chunks_and_transient_pinned_session_only()
 }
 
 #[test]
-fn unsafe_sessions_conflicts_expiry_and_cancellation_never_change_id_or_delete_remote_content() {
+fn unsafe_sessions_conflicts_and_expiry_never_change_id_or_delete_remote_content() {
     for (status, location, expected_puts) in [
         (200, "https://attacker.example/steal", 0),
         (409, "", 0),
@@ -156,4 +156,42 @@ fn unsafe_sessions_conflicts_expiry_and_cancellation_never_change_id_or_delete_r
             "same-id"
         );
     }
+}
+
+#[test]
+fn cancellation_after_an_acknowledged_chunk_stops_sending_without_remote_compensation() {
+    let http=Http{requests:Mutex::new(vec![]),responses:Mutex::new(vec![response(200,r#"{"access_token":"access"}"#,vec![]),response(200,"",vec![("location".into(),"https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=session".into())]),response(308,"",vec![("Range".into(),"bytes=0-262143".into())])])};
+    let operation = DriveUploadOperation {
+        request_id: "cancel".into(),
+        attachment_id: "attachment".into(),
+        remote_file_id: Some("reserved".into()),
+        request: DriveUploadRequest {
+            destination: DriveUploadDestination {
+                connection_id: "connection".into(),
+                folder_id: "folder".into(),
+                resource_key: None,
+            },
+            filename: "trace.log".into(),
+            size_bytes: 262149,
+            sha256: "digest".into(),
+        },
+        state: DriveUploadState::Uncertain,
+        provenance: None,
+    };
+    let error = GoogleDrive::new("connection", &Vault, &http)
+        .upload_blob(
+            &operation,
+            &mut Cursor::new(vec![1u8; 262149]),
+            &mut |copied, _| copied == 0,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, DriveErrorKind::Cancelled);
+    let requests = http.requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[2].body.len(), 262144);
+    assert!(
+        requests
+            .iter()
+            .all(|r| !matches!(r.method, "DELETE" | "PATCH"))
+    );
 }

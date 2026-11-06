@@ -108,7 +108,10 @@ impl Workspace {
                 |r| r.get(0),
             )
             .optional()?;
-        let id = previous.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let uploading:Option<String>=tx.query_row("SELECT attachment_id FROM drive_upload_operations WHERE json_extract(operation,'$.remote_file_id')=?1 AND json_extract(operation,'$.request.destination.connection_id')=?2",params![file_id,connection_id],|r|r.get(0)).optional()?;
+        let id = previous
+            .or(uploading)
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator) VALUES (?1, ?2, ?2, ?3, 'external_reference', ?4)", params![id, metadata.name, metadata.size_bytes, format!("drive:{connection_id}:{file_id}")])?;
         tx.execute("INSERT INTO drive_references(attachment_id, connection_id, file_id, metadata) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(attachment_id) DO UPDATE SET metadata=excluded.metadata", params![id, connection_id, file_id, serde_json::to_string(&metadata)?])?;
         tx.execute(

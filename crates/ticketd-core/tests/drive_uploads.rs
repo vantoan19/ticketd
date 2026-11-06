@@ -183,7 +183,12 @@ impl DriveUploadProvider for Provider {
             operation_id: Some(operation.attachment_id.clone()),
             parent_ids: vec!["folder".into()],
         });
-        progress(bytes.len() as u64, bytes.len() as u64);
+        if !progress(bytes.len() as u64, bytes.len() as u64) {
+            return Err(DriveError::new(
+                DriveErrorKind::Cancelled,
+                "canceled after provider completion; remote file remains",
+            ));
+        }
         if self.fail_after {
             return Err(DriveError::new(
                 DriveErrorKind::Offline,
@@ -192,6 +197,61 @@ impl DriveUploadProvider for Provider {
         }
         Ok(())
     }
+}
+#[allow(clippy::unwrap_used)] // Controlled external metadata fixture.
+impl AttachmentProvider for Provider {
+    fn metadata(&self, _: &str, _: Option<&str>) -> Result<DriveMetadata, DriveError> {
+        Ok(self
+            .uploaded
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .metadata
+            .clone())
+    }
+}
+
+#[test]
+fn selecting_a_completed_item_during_registration_recovery_keeps_the_upload_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let provider = Provider::default();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TRIGGER fail_registration BEFORE INSERT ON drive_references BEGIN SELECT RAISE(ABORT,'disk failure'); END;").unwrap();
+    assert!(
+        workspace
+            .upload_drive_bytes(
+                "selection-race",
+                "trace.log",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .is_err()
+    );
+    let reserved = workspace
+        .drive_upload("selection-race")
+        .unwrap()
+        .attachment_id;
+    faults
+        .execute_batch("DROP TRIGGER fail_registration")
+        .unwrap();
+    let selected = workspace
+        .reference_drive_file(CONNECTION, "reserved-file", None, &provider)
+        .unwrap();
+    assert_eq!(selected.id, reserved);
+    assert_eq!(
+        workspace
+            .check_drive_upload("selection-race", &provider)
+            .unwrap()
+            .state,
+        DriveUploadState::Completed
+    );
+    assert_eq!(workspace.attachments(10, 0).unwrap().len(), 1);
+    assert_eq!(provider.ids.lock().unwrap().len(), 1);
 }
 
 #[test]
