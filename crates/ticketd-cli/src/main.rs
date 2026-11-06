@@ -26,6 +26,12 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Read or change the workspace's per-file upload limit (default 100 MiB); existing snapshots stay unchanged
+    Limit {
+        /// Positive byte bound, enforced while copying actual bytes
+        #[arg(long)]
+        bytes: Option<u64>,
+    },
     /// Store an immutable local snapshot; --request-id makes a lost response safe to retry
     Add {
         path: String,
@@ -1875,6 +1881,14 @@ fn attachment_command(
     command: AttachmentCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
     Ok(match command {
+        AttachmentCommand::Limit { bytes } => {
+            if let Some(bytes) = bytes {
+                workspace.set_attachment_upload_limit(bytes)?;
+            }
+            serde_json::to_string(
+                &serde_json::json!({ "limit_bytes": workspace.attachment_upload_limit()?, "default_bytes": ticketd_core::DEFAULT_ATTACHMENT_LIMIT }),
+            )?
+        }
         AttachmentCommand::Add {
             path,
             ticket,

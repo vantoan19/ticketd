@@ -745,7 +745,7 @@ query decisions are recorded in ADR 0007.
 ## 17. Local file attachments
 
 An Attachment is a reusable file identity within one workspace. Upload any regular
-file up to 100 MiB into managed local storage, independently of its ticket
+file within the workspace upload limit (100 MiB per file by default) into managed local storage, independently of its ticket
 association. Preserve the original bytes, filename, size, and a separate display
 name. New uploads create new identities; moving or deleting the source file does
 not affect a completed snapshot. Local use works offline.
@@ -772,6 +772,21 @@ autosave or explicit-submit behavior. Failed saves retain the draft and complete
 files. Closing the picker before upload completion leaves the file available
 without inserting it.
 
+Capture multiple files through native selection, file drop or screenshot paste
+in the shared editor, including source mode. Each file has independent progress,
+Cancel and Retry. Successful links appear at the caret in original selection
+order, including when an earlier failed file is retried. Pending and failed rows
+are never canonical attachment links. Closing abandons insertion while selected
+uploads continue; completed bytes remain reusable. The desktop keeps pending
+upload identities and screenshot bytes in workspace-scoped local recovery storage
+across reloads. Recovered rows require explicit Retry at a newly chosen caret;
+Dismiss removes only capture recovery, never a completed snapshot or reference.
+This storage is separate from saved content and recoverable content drafts.
+
+Settings > Attachments changes the per-file upload limit immediately for future
+uploads. The core checks actual copied bytes, including a source that grows while
+copying. Previously completed uploads remain replayable after the limit changes.
+
 Canonical links use `ticketd://attachment/<workspace-id>/<attachment-id>`.
 Resolution is restricted to the owning workspace. Authored labels are literal
 content, independent of the file's display name. Reading, focusing, and changing
@@ -786,6 +801,8 @@ The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
 Failed association reports the completed Attachment ID for explicit reuse.
+`attachment limit [--bytes <positive-byte-count>]` reads or changes the same
+workspace upload limit; rejection explains the current bound and recovery command.
 
 Publication checks the exact outgoing description in the core before creating a
 remote issue, including retries after a failed or resolved attempt. Workspace-only

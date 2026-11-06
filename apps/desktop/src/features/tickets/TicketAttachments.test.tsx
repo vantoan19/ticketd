@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IDBFactory } from "fake-indexeddb";
 import {
   act,
   cleanup,
@@ -7,14 +8,22 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { TicketAttachments } from "./TicketAttachments";
 import type { Ticket } from "@/lib/api/client";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {
+    onmessage = () => {};
+  },
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
+});
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -29,7 +38,13 @@ test.each(["close", "navigate"])(
       complete = resolve;
     });
     vi.mocked(invoke).mockImplementation(async (command) =>
-      command === "import_attachment" ? stored : [],
+      command === "attachment_workspace_id"
+        ? "workspace-test"
+        : command === "attachment_upload_limit"
+          ? 104857600
+          : command === "import_attachment"
+            ? stored
+            : [],
     );
     const view = render(
       <TicketAttachments
@@ -39,7 +54,7 @@ test.each(["close", "navigate"])(
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
-    fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith(
         "import_attachment",
@@ -72,6 +87,8 @@ test("the rail uploads through the native picker, then associates the stored sna
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let linked = false;
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments") return linked ? [file] : [];
     if (command === "import_attachment") return file;
     if (command === "set_ticket_attachment") {
@@ -84,14 +101,15 @@ test("the rail uploads through the native picker, then associates the stored sna
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
-  fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await screen.findByRole("button", { name: "Trace" });
   expect(open).toHaveBeenCalledWith(
-    expect.objectContaining({ directory: false, multiple: false }),
+    expect.objectContaining({ directory: false, multiple: true }),
   );
   expect(invoke).toHaveBeenCalledWith("import_attachment", {
     source: "C:/trace.log",
     requestId: expect.any(String),
+    progress: expect.anything(),
   });
   expect(invoke).toHaveBeenCalledWith("set_ticket_attachment", {
     reference: "T-1",
@@ -106,6 +124,8 @@ test("a failed association retains the completed upload and retry links the same
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let attempts = 0;
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments") return attempts > 1 ? [file] : [];
     if (command === "import_attachment") return file;
     if (command === "set_ticket_attachment") {
@@ -118,7 +138,7 @@ test("a failed association retains the completed upload and retry links the same
     <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
-  fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await screen.findByText(/Stored as f1/);
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByRole("button", { name: "Trace" });

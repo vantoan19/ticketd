@@ -4,6 +4,8 @@
   "description": "Main window; may reveal a file in the file manager, open ticketd's GitHub pages and linked GitHub issues, show native save and open dialogs, and follow the Light or Dark choice for the title bar and window color, and send system notifications for due reminders, with no filesystem or shell access.",
   "windows": ["main"],
   "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "opener:allow-reveal-item-in-dir",
     "core:window:allow-set-theme",
     "core:window:allow-set-background-color",

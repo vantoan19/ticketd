@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IDBFactory } from "fake-indexeddb";
 import {
   act,
   cleanup,
@@ -7,11 +8,19 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { AttachmentLink } from "./AttachmentLink";
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {
+    onmessage = () => {};
+  },
+}));
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
+});
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 afterEach(() => {
   cleanup();
@@ -28,6 +37,8 @@ const file = {
 
 test("shared picker selects Drive references without changing local upload destination", async () => {
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-test-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
       return { configured: true, message: "Ready to select files" };
     if (command === "select_drive_files")
@@ -51,6 +62,8 @@ test("shared picker selects Drive references without changing local upload desti
 
 test("native references offer Open in Drive and describe current content without byte export", async () => {
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-test-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "resolve_attachment_uri") return file;
     if (command === "drive_reference")
       return {
@@ -85,6 +98,8 @@ test("native references offer Open in Drive and describe current content without
 test("mixed insertion results retain failed identity and retry before the later successful file", async () => {
   const second = { ...file, id: "drive-2", display_name: "Current sheet" };
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-test-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
       return { configured: true, message: "Ready" };
     if (command === "select_drive_files")
@@ -117,6 +132,8 @@ test("mixed insertion results retain failed identity and retry before the later 
 test("closing during browser selection cancels the operation and late results never insert", async () => {
   let finish: (value: unknown) => void = () => {};
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-test-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
       return { configured: true, message: "Ready" };
     if (command === "select_drive_files")

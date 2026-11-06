@@ -741,6 +741,9 @@ impl Workspace {
         if version < 48 {
             embedded_attachments::migrate(&transaction)?;
         }
+        if version < 49 {
+            attachments::migrate_upload_settings(&transaction)?;
+        }
         if version < 51 {
             drive::migrate(&transaction)?;
         }

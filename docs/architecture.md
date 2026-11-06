@@ -52,7 +52,7 @@ Implementation evidence. Storage kinds are `local_snapshot` and `external_refere
 there is no remote deletion operation.
 
 Snapshots live in `<database-path>.attachments/<attachment-id>/bytes/` beside
-the workspace database. Core upload validates a regular file and the 100 MiB
+the workspace database. Core upload validates a regular file and the workspace upload
 bound, writes into a temporary directory, syncs bytes and a recovery manifest,
 then publishes the directory before committing metadata and a replayable result
 in SQLite. A file lock serializes uploads and recovery across processes. A
@@ -60,6 +60,25 @@ completed manifest survives database failure; listing, inspection, or retry
 reconciles it without copying source bytes again. Incomplete staging directories
 are never exposed as valid attachments. Ticket association is a separate
 retryable transaction, so failed or abandoned insertion retains the upload.
+
+Schema 49 stores the per-file upload limit in `attachment_upload_settings`, with
+a 100 MiB default. Core progress callbacks report actual copied bytes in bounded
+64 KiB chunks and can cancel before directory publication. Screenshot byte
+capture shares the same staging, byte bounds and recovery/commit path; its
+request equality includes the filename and SHA-256 digest. Completed operations
+replay before checking the current limit or reopening a deleted source.
+Tauri translates a binary screenshot IPC payload and progress channel; it owns
+only cancellation signals, not storage policy. Native drops are scoped to the
+active editor/picker bounds using physical-to-logical coordinates.
+
+The desktop upload queue records source paths or clipboard File blobs and original
+operation IDs in IndexedDB, scoped by the core workspace identity, before copying.
+Completed uploads and canonical references remain core-owned. Recovering a queue
+does not insert into another editor automatically: Retry is explicit at the new
+caret. Successful insertion dismisses its capture record; Dismiss discards only
+capture recovery and never deletes stored bytes. This local capture journal is
+outside workspace backups and is separate from content-draft retention. A broken
+or unavailable journal blocks new capture rather than silently losing retry IDs.
 
 Upload and ordinary write request IDs share the existing workspace-wide replay
 namespace. Exact source path and supplied display name define upload request
