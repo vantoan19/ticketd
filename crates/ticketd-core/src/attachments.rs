@@ -28,6 +28,13 @@ pub(crate) fn migrate_upload_settings(connection: &Connection) -> Result<(), Err
 #[serde(rename_all = "snake_case")]
 pub enum AttachmentKind {
     LocalSnapshot,
+    ExternalReference,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttachmentOpenTarget {
+    LocalPath(PathBuf),
+    ExternalUrl(String),
 }
 
 /// A reusable file identity, separate from Documents and Implementation evidence.
@@ -36,9 +43,10 @@ pub struct Attachment {
     pub id: String,
     pub display_name: String,
     pub original_filename: String,
-    pub size_bytes: u64,
+    /// Always known for local snapshots; providers may omit a native file's size.
+    pub size_bytes: Option<u64>,
     pub kind: AttachmentKind,
-    /// Relative to this workspace's managed attachment directory.
+    /// A local relative path or opaque provider locator; never a credential.
     pub locator: String,
 }
 
@@ -229,7 +237,7 @@ impl Workspace {
             id: id.clone(),
             display_name: display_name.into(),
             original_filename,
-            size_bytes,
+            size_bytes: Some(size_bytes),
             kind: AttachmentKind::LocalSnapshot,
         };
         let completed = CompletedUpload {
@@ -337,7 +345,7 @@ impl Workspace {
     /// Includes completed uploads whose insertion was abandoned; never deletes bytes.
     pub fn attachments(&self, limit: u32, offset: u32) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
-        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
+        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator, kind FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
         Ok(stmt
             .query_map(params![limit.min(1000), offset], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -347,7 +355,7 @@ impl Workspace {
     pub fn ticket_attachments(&self, reference: &str) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
         let ticket_id = relationships::id(&self.connection, reference)?;
-        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
+        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator, a.kind FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
         Ok(stmt
             .query_map([ticket_id], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -362,7 +370,7 @@ impl Workspace {
         // Recover before the savepoint; the retryable write adapter recovers before BEGIN.
         let attachment = read_attachment(&self.connection, id)?;
         if present {
-            self.validate_attachment_bytes(&attachment)?;
+            validate_attachment_reference(&self.connection, &attachment)?;
         }
         let tx = self.connection.savepoint()?;
         crate::transaction_write_lock(&tx)?;
@@ -402,7 +410,7 @@ impl Workspace {
             return Err(Error::Attachment("choose a new attachment identity".into()));
         }
         let replacement = read_attachment(&self.connection, replacement_id)?;
-        self.validate_attachment_bytes(&replacement)?;
+        validate_attachment_reference(&self.connection, &replacement)?;
         let tx = self.connection.savepoint()?;
         crate::transaction_write_lock(&tx)?;
         let ticket_id = relationships::id(&tx, reference)?;
@@ -433,6 +441,27 @@ impl Workspace {
     }
 
     /// Explicit native-open support. Adapters must never open a file automatically.
+    pub fn attachment_open_target(&self, id: &str) -> Result<AttachmentOpenTarget, Error> {
+        let file = self.attachment(id)?;
+        match file.kind {
+            AttachmentKind::LocalSnapshot => Ok(AttachmentOpenTarget::LocalPath(
+                self.attachment_open_path(id)?,
+            )),
+            AttachmentKind::ExternalReference => {
+                let reference = self.drive_reference(id)?;
+                if !crate::drive::safe_web_url(&reference.metadata.web_url) {
+                    return Err(Error::Attachment(
+                        "invalid Drive viewer URL; select the file again".into(),
+                    ));
+                }
+                Ok(AttachmentOpenTarget::ExternalUrl(
+                    reference.metadata.web_url,
+                ))
+            }
+        }
+    }
+
+    /// Local-only compatibility seam; external content uses attachment_open_target.
     pub fn attachment_open_path(&self, id: &str) -> Result<PathBuf, Error> {
         let attachment = self.attachment(id)?;
         let extension = Path::new(&attachment.original_filename)
@@ -480,7 +509,7 @@ impl Workspace {
             .unwrap_or(Path::new("."));
         let mut output = tempfile::NamedTempFile::new_in(parent)?;
         let copied = std::io::copy(&mut source, &mut output)?;
-        if copied != attachment.size_bytes {
+        if Some(copied) != attachment.size_bytes {
             return Err(Error::Attachment(
                 "stored bytes changed while exporting; retry after restoring the snapshot".into(),
             ));
@@ -537,7 +566,7 @@ fn copy_upload(
 }
 
 pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attachment, Error> {
-    connection.query_row("SELECT id, display_name, original_filename, size_bytes, locator FROM attachments WHERE id=?1", [id], attachment_row).optional()?
+    connection.query_row("SELECT id, display_name, original_filename, size_bytes, locator, kind FROM attachments WHERE id=?1", [id], attachment_row).optional()?
         .ok_or_else(|| Error::Attachment(format!("'{id}' was not found; use attachment list to find a workspace attachment ID")))
 }
 
@@ -548,7 +577,17 @@ fn attachment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Attachment> {
         original_filename: row.get(2)?,
         size_bytes: row.get(3)?,
         locator: row.get(4)?,
-        kind: AttachmentKind::LocalSnapshot,
+        kind: match row.get::<_, String>(5)?.as_str() {
+            "local_snapshot" => AttachmentKind::LocalSnapshot,
+            "external_reference" => AttachmentKind::ExternalReference,
+            value => {
+                return Err(rusqlite::Error::FromSqlConversionFailure(
+                    5,
+                    rusqlite::types::Type::Text,
+                    format!("unknown attachment kind: {value}").into(),
+                ));
+            }
+        },
     })
 }
 
@@ -588,4 +627,28 @@ pub(crate) fn attachment_directory(connection: &Connection) -> Result<PathBuf, E
     let mut path = std::ffi::OsString::from(path);
     path.push(".attachments");
     Ok(PathBuf::from(path))
+}
+
+pub(crate) fn validate_attachment_reference(
+    connection: &Connection,
+    attachment: &Attachment,
+) -> Result<(), Error> {
+    match attachment.kind {
+        AttachmentKind::LocalSnapshot => {
+            validate_attachment_bytes(connection, attachment)?;
+        }
+        AttachmentKind::ExternalReference => {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM drive_references WHERE attachment_id=?1)",
+                [&attachment.id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                return Err(Error::Attachment(
+                    "Drive reference metadata is incomplete; select the file again".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

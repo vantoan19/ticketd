@@ -128,6 +128,58 @@ fn cli_authored_markdown_tracks_workspace_scoped_inline_references() {
 }
 
 #[test]
+fn independent_cli_reuses_authorized_drive_identity_without_desktop_or_snapshot_bytes() {
+    use ticketd_core::drive::{AttachmentProvider, DriveError, DriveMetadata};
+    struct Provider;
+    impl AttachmentProvider for Provider {
+        fn metadata(&self, id: &str, _: Option<&str>) -> Result<DriveMetadata, DriveError> {
+            Ok(DriveMetadata {
+                id: id.into(),
+                name: "Current sheet".into(),
+                mime_type: "application/vnd.google-apps.spreadsheet".into(),
+                size_bytes: None,
+                web_url: format!("https://docs.google.com/spreadsheets/d/{id}/edit"),
+                resource_key: None,
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace =
+        ticketd_core::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let connection = "a6172e56-e552-4002-af87-ac647ea703d9";
+    let file = workspace
+        .reference_drive_file(connection, "sheet-123", None, &Provider)
+        .unwrap();
+    drop(workspace);
+    let ticket = run(dir.path(), &["create", "Reuse current content"]);
+    let reference = ticket["reference"].as_str().unwrap();
+    run(dir.path(), &["attachment", "link", &file.id, reference]);
+    assert_eq!(
+        run(dir.path(), &["attachment", "drive-info", &file.id])["metadata"]["mime_type"],
+        "application/vnd.google-apps.spreadsheet"
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "inspect", &file.id])["kind"],
+        "external_reference"
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "list", "--ticket", reference])[0]["id"],
+        file.id
+    );
+    assert!(
+        run(dir.path(), &["attachment", "uri", &file.id])
+            .as_str()
+            .unwrap()
+            .starts_with("ticketd://attachment/")
+    );
+    run(dir.path(), &["attachment", "detach", &file.id, reference]);
+    assert_eq!(
+        run(dir.path(), &["attachment", "inspect", &file.id])["id"],
+        file.id
+    );
+}
+
+#[test]
 fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("draft.txt");

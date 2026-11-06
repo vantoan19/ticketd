@@ -1,3 +1,4 @@
+import { DrivePicker } from "./DrivePicker";
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { File as FileIcon, Upload } from "lucide-react";
@@ -49,7 +50,7 @@ export function AttachmentPicker({
   capture?: { sources: CaptureSource[] } | undefined;
   single?: boolean;
 }) {
-  const [tab, setTab] = useState<"upload" | "existing">("upload");
+  const [tab, setTab] = useState<"upload" | "existing" | "drive">("upload");
   const [recent, setRecent] = useState<Attachment[]>([]);
   const [id, setId] = useState("");
   const [rows, setRows] = useState<UploadAttempt[]>([]);
@@ -326,7 +327,7 @@ export function AttachmentPicker({
         <DialogHeader>
           <DialogTitle>Attach file</DialogTitle>
           <DialogDescription>
-            Attach local snapshots or reuse an existing workspace file.
+            Upload, reuse a workspace file, or select a Google Drive reference.
           </DialogDescription>
         </DialogHeader>
         <SegmentedControl
@@ -336,6 +337,7 @@ export function AttachmentPicker({
           options={[
             { value: "upload", label: "Upload", disabled: busy },
             { value: "existing", label: "Existing files", disabled: busy },
+            { value: "drive", label: "Google Drive", disabled: busy },
           ]}
         />
         {tab === "upload" ? (
@@ -473,6 +475,14 @@ export function AttachmentPicker({
               saving fails. Retry keeps the original upload identity.
             </p>
           </>
+        ) : tab === "drive" ? (
+          open && (
+            <DrivePicker
+              single={single}
+              onComplete={() => changeOpen(false)}
+              onPick={onPick}
+            />
+          )
         ) : (
           <div className="attachment-existing">
             <Label htmlFor="reuse-attachment-id">Attachment ID</Label>
@@ -503,7 +513,10 @@ export function AttachmentPicker({
                     <span>
                       {file.display_name}
                       <small>
-                        {formatSize(file.size_bytes)} · {file.id}
+                        {file.kind === "external_reference"
+                          ? "Google Drive · External reference"
+                          : formatSize(file.size_bytes)}{" "}
+                        · {file.id}
                       </small>
                     </span>
                   </button>

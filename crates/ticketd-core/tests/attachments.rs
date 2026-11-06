@@ -27,7 +27,7 @@ fn upload_limit_is_workspace_configuration_and_applies_to_actual_bytes() {
     let stored = workspace
         .import_attachment("growing", &source, None)
         .unwrap();
-    assert_eq!(stored.size_bytes, 8);
+    assert_eq!(stored.size_bytes, Some(8));
     workspace.set_attachment_upload_limit(1).unwrap();
     std::fs::remove_file(&source).unwrap();
     assert_eq!(
@@ -147,7 +147,7 @@ fn snapshots_survive_source_deletion_reopen_and_detaching_one_ticket() {
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.attachment(&file.id).unwrap(), file);
     assert_eq!(file.original_filename, "trace.bin");
-    assert_eq!(file.size_bytes, 5);
+    assert_eq!(file.size_bytes, Some(5));
     assert_eq!(
         workspace
             .import_attachment("upload-1", &source, Some("Diagnostic trace"))

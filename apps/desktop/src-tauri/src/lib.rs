@@ -2,6 +2,7 @@
 mod attachment_commands;
 mod attachment_media;
 mod cli_status;
+mod drive_commands;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
@@ -1396,6 +1397,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 attachment_media::handle(request, responder);
             },
         )
+        .manage(drive_commands::DrivePickerOperations::default())
         .manage(Refresher(std::sync::Arc::clone(&coordinator)))
         .setup(move |_| {
             start_periodic_refresh(coordinator);
@@ -1414,6 +1416,10 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            drive_commands::drive_configuration,
+            drive_commands::drive_reference,
+            drive_commands::select_drive_files,
+            drive_commands::cancel_drive_selection,
             attachment_commands::import_attachment,
             attachment_commands::capture_attachment,
             attachment_commands::cancel_attachment_upload,

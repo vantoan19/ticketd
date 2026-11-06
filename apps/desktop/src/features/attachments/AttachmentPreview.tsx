@@ -14,6 +14,7 @@ import {
   type PreviewInfo,
 } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
+import { DriveReferenceDetails } from "./DriveReferenceDetails";
 import { formatSize } from "./format-size";
 import "./attachment-preview.css";
 
@@ -162,7 +163,8 @@ export function AttachmentPreview({
       })
       .catch(() => {});
   }
-  const available = info?.status === "available" && !failed;
+  const external = file?.kind === "external_reference";
+  const available = !external && info?.status === "available" && !failed;
   return (
     <Dialog
       open
@@ -175,10 +177,12 @@ export function AttachmentPreview({
           <div className="attachment-preview-heading">
             <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
             <DialogDescription>
-              Local snapshot
-              {file
+              {external
+                ? "Google Drive · External reference"
+                : "Local snapshot"}
+              {file?.size_bytes != null
                 ? ` · ${formatSize(file.size_bytes)}`
-                : " · File in its owning workspace"}
+                : ""}
             </DialogDescription>
           </div>
           <div className="attachment-preview-file-actions">
@@ -190,16 +194,18 @@ export function AttachmentPreview({
                   onClick={() => void action(() => attachments.open(file.id))}
                 >
                   <ExternalLink aria-hidden="true" />
-                  Open file
+                  {external ? "Open in Drive" : "Open file"}
                 </Button>
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => void action(() => attachments.export(file))}
-                >
-                  <Download aria-hidden="true" />
-                  Export file
-                </Button>
+                {!external && (
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void action(() => attachments.export(file))}
+                  >
+                    <Download aria-hidden="true" />
+                    Export file
+                  </Button>
+                )}
               </>
             )}
           </div>
@@ -255,12 +261,22 @@ export function AttachmentPreview({
             {file && (
               <>
                 <dl className="attachment-metadata">
-                  <dt>Type</dt>
-                  <dd>{info?.media_type ?? "File"}</dd>
-                  <dt>Size</dt>
-                  <dd>{formatSize(file.size_bytes)}</dd>
-                  <dt>Storage</dt>
-                  <dd>Local snapshot</dd>
+                  {external ? (
+                    <DriveReferenceDetails id={file.id} />
+                  ) : (
+                    <>
+                      <dt>Type</dt>
+                      <dd>{info?.media_type ?? "File"}</dd>
+                      {file.size_bytes != null && (
+                        <>
+                          <dt>Size</dt>
+                          <dd>{formatSize(file.size_bytes)}</dd>
+                        </>
+                      )}
+                      <dt>Storage</dt>
+                      <dd>Local snapshot</dd>
+                    </>
+                  )}
                 </dl>
                 {info && (
                   <section className="attachment-preview-usage">
@@ -326,7 +342,7 @@ export function AttachmentPreview({
               </>
             )}
             {error && <p role="alert">{error}</p>}
-            {info?.can_open === false && (
+            {!external && info?.can_open === false && (
               <small className="attachment-hint">
                 Open is unavailable for this file. Export preserves its bytes
                 when available; choose an application explicitly.
@@ -337,7 +353,9 @@ export function AttachmentPreview({
         </div>
         <footer className="attachment-preview-footer">
           <p className="attachment-hint">
-            Local snapshot · Removing a link keeps this file in your workspace.
+            {external
+              ? "Removing a link keeps this external reference in your workspace."
+              : "Local snapshot · Removing a link keeps this file in your workspace."}
           </p>
           <div className="attachment-actions">
             <Button variant="ghost" onClick={close}>

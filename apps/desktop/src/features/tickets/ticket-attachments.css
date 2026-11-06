@@ -113,3 +113,22 @@
   max-height: 260px;
   overflow: auto;
 }
+
+.attachment-drive-connection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.attachment-drive-notice {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  font-size: var(--text-caption);
+}
+.attachment-existing p {
+  overflow-wrap: anywhere;
+}

@@ -8,7 +8,7 @@ use rusqlite::OptionalExtension;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{Attachment, Error, Workspace};
+use crate::{Attachment, AttachmentKind, Error, Workspace};
 
 /// Independent of a configurable upload limit: WebViews buffer protocol responses.
 pub const MAX_PREVIEW_BYTES: u64 = 100 * 1024 * 1024;
@@ -106,7 +106,7 @@ impl Workspace {
             ),
             Err(error) => (error.status, None, Some(error.message)),
         };
-        let can_open = self.attachment_open_path(id).is_ok();
+        let can_open = self.attachment_open_target(id).is_ok();
         Ok(AttachmentPreview {
             attachment,
             status,
@@ -164,7 +164,8 @@ impl Workspace {
 
     fn open_media(&self, attachment: &Attachment) -> Result<AttachmentMedia, SnapshotFailure> {
         let (_, mut file) = open_snapshot(&self.connection, attachment)?;
-        if attachment.size_bytes > MAX_PREVIEW_BYTES {
+        let length = file.metadata().map_err(snapshot_io)?.len();
+        if length > MAX_PREVIEW_BYTES {
             return Err(SnapshotFailure {
                 status: PreviewStatus::TooLarge,
                 message:
@@ -197,7 +198,7 @@ impl Workspace {
         Ok(AttachmentMedia {
             file,
             media_type,
-            length: attachment.size_bytes,
+            length,
         })
     }
 }
@@ -371,6 +372,15 @@ pub(crate) fn open_snapshot(
     connection: &rusqlite::Connection,
     attachment: &Attachment,
 ) -> Result<(PathBuf, File), SnapshotFailure> {
+    if attachment.kind != AttachmentKind::LocalSnapshot {
+        return Err(SnapshotFailure {
+            status: PreviewStatus::Unsupported,
+            message:
+                "Current source content · No local snapshot. Open this external reference in Drive."
+                    .into(),
+        });
+    }
+
     let invalid = || {
         SnapshotFailure { status: PreviewStatus::Unavailable, message: "Invalid managed snapshot locator or filesystem link; preserve the file and repair its metadata.".into() }
     };
@@ -409,7 +419,7 @@ pub(crate) fn open_snapshot(
     }
     let file = File::open(&canonical_path).map_err(snapshot_io)?;
     let metadata = file.metadata().map_err(snapshot_io)?;
-    if !metadata.is_file() || metadata.len() != attachment.size_bytes {
+    if !metadata.is_file() || Some(metadata.len()) != attachment.size_bytes {
         return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are incomplete. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
     }
     Ok((canonical_path, file))

@@ -282,12 +282,19 @@ pub async fn export_attachment(id: String, destination: String) -> Result<(), St
 
 #[tauri::command]
 pub fn open_attachment(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let path = open_workspace()
-        .and_then(|w| w.attachment_open_path(&id))
+    let target = open_workspace()
+        .and_then(|workspace| workspace.attachment_open_target(&id))
         .map_err(|e| e.to_string())?;
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    match target {
+        ticketd_core::AttachmentOpenTarget::LocalPath(path) => app
+            .opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| e.to_string()),
+        ticketd_core::AttachmentOpenTarget::ExternalUrl(url) => app
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| "could not open this file in Drive".into()),
+    }
 }
 
 #[tauri::command]
