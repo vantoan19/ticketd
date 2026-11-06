@@ -41,17 +41,27 @@
 .backlink-heading {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 8px;
+  gap: 0 6px;
   font-size: var(--text-ui);
   line-height: 20px;
 }
 .backlink-heading strong {
   font-weight: 500;
 }
-.backlink-where {
+.backlink-ref {
   color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-weight: 500;
+  line-height: 20px;
+}
+.backlink-where::before {
+  content: "· ";
+}
+.backlink-where {
+  color: var(--secondary-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
 }
 .mention-passage {
   display: -webkit-box;
@@ -68,7 +78,9 @@
   margin-top: 4px;
 }
 .mention-passage mark {
-  background: transparent;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: var(--muted);
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: 500;
 }

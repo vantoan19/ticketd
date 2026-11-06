@@ -62,37 +62,39 @@ export function LatestUpdate({
             {progressBrief(update.brief.text)}
             {update.brief.truncated && "…"}
           </p>
-          <small>
-            {update.editing_agent && <>Agent: {update.editing_agent} · </>}
-            <time
-              tabIndex={0}
-              dateTime={update.reported_at}
-              title={formatDateTime(update.reported_at)}
+          <div className="latest-update-meta">
+            <small>
+              {update.editing_agent && <>{update.editing_agent} · </>}
+              <time
+                tabIndex={0}
+                dateTime={update.reported_at}
+                title={formatDateTime(update.reported_at)}
+              >
+                {relativeDateTime(update.reported_at, now)}
+              </time>
+              {update.updated_at !== update.reported_at && (
+                <>
+                  {" "}
+                  · Edited{" "}
+                  <time
+                    tabIndex={0}
+                    dateTime={update.updated_at}
+                    title={formatDateTime(update.updated_at)}
+                  >
+                    {formatDateTime(update.updated_at)}
+                  </time>
+                </>
+              )}
+            </small>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onOpen?.(update.activity_id)}
             >
-              {relativeDateTime(update.reported_at, now)}
-            </time>
-            {update.updated_at !== update.reported_at && (
-              <>
-                {" "}
-                · Edited{" "}
-                <time
-                  tabIndex={0}
-                  dateTime={update.updated_at}
-                  title={formatDateTime(update.updated_at)}
-                >
-                  {formatDateTime(update.updated_at)}
-                </time>
-              </>
-            )}
-          </small>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpen?.(update.activity_id)}
-          >
-            Go to update
-            <ArrowDown data-icon="inline-end" aria-hidden="true" />
-          </Button>
+              Go to update
+              <ArrowDown data-icon="inline-end" aria-hidden="true" />
+            </Button>
+          </div>
         </div>
       ) : (
         <small className="rail-note">No update reported</small>

@@ -130,7 +130,15 @@ export function TicketPage({
           )}
         </>
       ) : (
-        "Local ticket"
+        <span>
+          Local ticket
+          {ticket.updated_at && (
+            <span title={formatDateTime(ticket.updated_at)}>
+              {" "}
+              · updated {relativeDateTime(ticket.updated_at, now)}
+            </span>
+          )}
+        </span>
       )}
     </p>
   );
@@ -166,7 +174,7 @@ export function TicketPage({
                 />
               ) : (
                 <>
-                  <p className="description-heading">Description</p>
+                  <p className="sr-only">Description</p>
                   <div className="markdown-preview description-document">
                     {ticket.body.trim() ? (
                       <MarkdownDocument

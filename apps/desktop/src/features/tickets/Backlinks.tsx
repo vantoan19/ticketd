@@ -132,10 +132,13 @@ export function Backlinks({
               className="backlink-source"
               onClick={() => openDocument?.(link.source_id)}
             >
-              <strong>
-                {link.source_label}
-                {link.source_trashed ? " (Trash)" : ""}
-              </strong>
+              <span className="backlink-heading">
+                <strong>
+                  {link.source_label}
+                  {link.source_trashed ? " (Trash)" : ""}
+                </strong>
+                <span className="backlink-where">Document</span>
+              </span>
               <span className="mention-passage">
                 <EmphasizedPassage
                   text={plainPassage(link.passage)}
@@ -164,13 +167,13 @@ export function Backlinks({
               }
             >
               <span className="backlink-heading">
-                <strong>{link.source_reference}</strong>
-                <span>{link.source_title}</span>
-              </span>
-              <span className="backlink-where">
-                {link.activity_id
-                  ? `Update${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
-                  : "Description"}
+                <span className="backlink-ref">{link.source_reference}</span>
+                <strong>{link.source_title}</strong>
+                <span className="backlink-where">
+                  {link.activity_id
+                    ? `Update${noteDates[link.activity_id] ? ` · ${formatDateTime(noteDates[link.activity_id] ?? "")}` : ""}`
+                    : "Description"}
+                </span>
               </span>
               <span className="mention-passage">
                 <EmphasizedPassage
