@@ -24,6 +24,13 @@ pub struct DriveConfiguration {
     configured: bool,
     message: String,
 }
+
+#[tauri::command]
+pub fn drive_reference(id: String) -> Result<ticketd_core::drive::DriveReference, String> {
+    open_workspace()
+        .and_then(|w| w.drive_reference(&id))
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 pub fn drive_configuration() -> DriveConfiguration {
     match DesktopOAuthClient::from_environment() {

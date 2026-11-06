@@ -1397,6 +1397,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             drive_commands::drive_configuration,
+            drive_commands::drive_reference,
             drive_commands::select_drive_files,
             drive_commands::cancel_drive_selection,
             attachment_commands::import_attachment,

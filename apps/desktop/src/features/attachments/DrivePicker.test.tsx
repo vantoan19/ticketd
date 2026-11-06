@@ -52,6 +52,18 @@ test("shared picker selects Drive references without changing local upload desti
 test("native references offer Open in Drive and describe current content without byte export", async () => {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "resolve_attachment_uri") return file;
+    if (command === "drive_reference")
+      return {
+        connection_id: "connection",
+        metadata: {
+          id: "doc-1",
+          name: "Current plan",
+          mime_type: "application/vnd.google-apps.document",
+          size_bytes: null,
+          web_url: "https://docs.google.com/document/d/doc-1/edit",
+          resource_key: null,
+        },
+      };
     return undefined;
   });
   render(
@@ -61,6 +73,8 @@ test("native references offer Open in Drive and describe current content without
   );
   fireEvent.click(screen.getByRole("button", { name: "My label" }));
   expect(await screen.findByText(/Current source content/)).toBeTruthy();
+  expect(await screen.findByText("Google Docs")).toBeTruthy();
+  expect(screen.getByText("Size unavailable")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Export file" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open in Drive" }));
   await waitFor(() =>

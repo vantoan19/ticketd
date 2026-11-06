@@ -14,6 +14,7 @@ import type { Ticket } from "@/lib/api/client";
 import { RailSection } from "./RailSection";
 import "./ticket-attachments.css";
 import { formatSize } from "@/features/attachments/format-size";
+import { DriveReferenceDetails } from "@/features/attachments/DriveReferenceDetails";
 
 export function TicketAttachments({
   ticket,
@@ -137,6 +138,9 @@ export function TicketAttachments({
           {selected && (
             <>
               <dl className="attachment-metadata">
+                {selected.kind === "external_reference" && (
+                  <DriveReferenceDetails id={selected.id} />
+                )}
                 <dt>Original filename</dt>
                 <dd>{selected.original_filename}</dd>
                 {selected.kind === "local_snapshot" && (

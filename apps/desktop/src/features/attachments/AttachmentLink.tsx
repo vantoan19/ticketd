@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { formatSize } from "./format-size";
+import { DriveReferenceDetails } from "./DriveReferenceDetails";
 
 /** An inline authored label. Metadata is resolved only after an explicit action. */
 export function AttachmentLink({
@@ -69,6 +70,9 @@ export function AttachmentLink({
                 </p>
               )}
               <dl className="attachment-metadata">
+                {file.kind === "external_reference" && (
+                  <DriveReferenceDetails id={file.id} />
+                )}
                 <dt>Original filename</dt>
                 <dd>{file.original_filename}</dd>
                 {file.kind === "local_snapshot" && (

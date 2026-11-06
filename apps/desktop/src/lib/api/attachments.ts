@@ -11,8 +11,23 @@ const attachmentSchema = z.object({
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
+const driveReferenceSchema = z.object({
+  connection_id: z.string(),
+  metadata: z.object({
+    id: z.string(),
+    name: z.string(),
+    mime_type: z.string(),
+    size_bytes: z.number().nonnegative().nullable(),
+    web_url: z.string(),
+    resource_key: z.string().nullable(),
+  }),
+});
+export type DriveReference = z.infer<typeof driveReferenceSchema>;
 
 export const attachments = {
+  async driveInfo(id: string) {
+    return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
+  },
   async driveConfiguration() {
     return z
       .object({ configured: z.boolean(), message: z.string() })
