@@ -612,6 +612,14 @@ export function TicketEditor({
               >
                 <MarkdownDocument
                   source={rendered}
+                  onChange={(body) =>
+                    edit({
+                      ...draft,
+                      body: draft.body.startsWith("\uFEFF")
+                        ? `\uFEFF${body}`
+                        : body,
+                    })
+                  }
                   select={select}
                   revision={revision}
                   mention={mark}

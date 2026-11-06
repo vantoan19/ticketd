@@ -41,6 +41,7 @@ export function AttachmentPicker({
   capture,
   ticketReference = null,
   purpose = "insert",
+  single = false,
 }: {
   open: boolean;
   ticketReference?: string | null | undefined;
@@ -52,6 +53,7 @@ export function AttachmentPicker({
     beforeId?: string,
   ) => Promise<void>;
   capture?: { sources: CaptureSource[] } | undefined;
+  single?: boolean;
 }) {
   const [tab, setTab] = useState<"upload" | "existing" | "drive">("upload");
   const [id, setId] = useState("");
@@ -61,6 +63,7 @@ export function AttachmentPicker({
   const [error, setError] = useState("");
   const [limit, setLimit] = useState<number | null>(null);
   const insertion = useRef(0);
+  const reuseRequests = useRef(new Map<string, string>());
   const running = useRef(false);
   const pick = useRef(onPick);
   const dropTarget = useRef<HTMLDivElement>(null);
@@ -211,6 +214,12 @@ export function AttachmentPicker({
     }
   }
   async function enqueue(sources: CaptureSource[]) {
+    if (single && sources.length > 1) {
+      setError(
+        "Choose one file to replace this reference. No files were uploaded.",
+      );
+      return;
+    }
     let journal: UploadRecovery | null;
     try {
       journal = await loadRecovery();
@@ -276,7 +285,7 @@ export function AttachmentPicker({
     const currentInsertion = insertion.current;
     setError("");
     try {
-      const sources = await attachments.chooseFile();
+      const sources = await attachments.chooseFile(!single);
       if (insertion.current === currentInsertion) enqueue(sources);
     } catch (reason) {
       setError(String(reason));
@@ -289,7 +298,11 @@ export function AttachmentPicker({
       const currentInsertion = insertion.current;
       const file = await attachments.inspect(attachmentId.trim());
       if (insertion.current !== currentInsertion) return;
-      await onPick(file, crypto.randomUUID());
+      const requestId =
+        reuseRequests.current.get(file.id) ?? crypto.randomUUID();
+      reuseRequests.current.set(file.id, requestId);
+      await onPick(file, requestId);
+      reuseRequests.current.delete(file.id);
       if (insertion.current === currentInsertion) changeOpen(false);
     } catch (reason) {
       setError(String(reason));
@@ -347,7 +360,7 @@ export function AttachmentPicker({
                   : `Up to ${formatSize(limit)} per file`}
               </p>
               <Button disabled={busy} onClick={() => void choose()}>
-                Choose files
+                {single ? "Choose file" : "Choose files"}
               </Button>
               <small>Destination: Local workspace</small>
             </div>
@@ -463,7 +476,11 @@ export function AttachmentPicker({
           </>
         ) : tab === "drive" ? (
           open && (
-            <DrivePicker onComplete={() => changeOpen(false)} onPick={onPick} />
+            <DrivePicker
+              single={single}
+              onComplete={() => changeOpen(false)}
+              onPick={onPick}
+            />
           )
         ) : (
           <div className="attachment-existing">
@@ -482,6 +499,7 @@ export function AttachmentPicker({
               </Button>
             </div>
             <ExistingAttachments
+              single={single}
               ticketReference={ticketReference}
               onBusyChange={setBusy}
               onDone={() => {

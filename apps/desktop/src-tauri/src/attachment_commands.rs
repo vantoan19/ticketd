@@ -2,6 +2,19 @@ use tauri_plugin_opener::OpenerExt;
 use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
+#[tauri::command]
+pub async fn attachment_preview(
+    workspace: String,
+    id: String,
+) -> Result<ticketd_core::AttachmentPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_preview(&workspace, &id))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 use std::{
     collections::HashMap,
     sync::{
@@ -269,6 +282,28 @@ pub fn set_ticket_attachment(
         WriteResult::Ticket(ticket) => Ok(ticket),
         _ => Err("Unexpected attachment association result".into()),
     }
+}
+
+#[tauri::command]
+pub fn replace_ticket_attachment(
+    reference: String,
+    previous_id: String,
+    replacement_id: String,
+    request_id: String,
+) -> Result<(), String> {
+    open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::ReplaceTicketAttachment {
+                    reference,
+                    previous_id,
+                    replacement_id,
+                },
+            )
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

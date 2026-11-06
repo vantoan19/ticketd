@@ -159,6 +159,38 @@ test("a completed reuse cannot close a newer insertion session", async () => {
   expect(closed).not.toHaveBeenCalled();
 });
 
+test("replacement mode selects one existing file before changing a reference", async () => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "search_attachments")
+      return ["first.txt", "second.txt"].map((name) => ({
+        attachment: file(name),
+        related: false,
+        usage: {
+          eligible: true,
+          legacy_drafts_pending: false,
+          protections: [],
+        },
+      }));
+    if (command === "inspect_attachment")
+      return file((args as { id: string }).id);
+    throw new Error(`Unexpected ${command}`);
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  render(
+    <AttachmentPicker open single onOpenChange={() => {}} onPick={picked} />,
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select first.txt" }),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Select second.txt" }));
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
+  await waitFor(() => expect(picked).toHaveBeenCalledOnce());
+  expect(picked.mock.calls[0]?.[0]).toEqual(file("second.txt"));
+});
+
 test("interrupted uploads recover original identities after remount and stay isolated by workspace", async () => {
   let workspace = "first-workspace";
   const requests: string[] = [];
@@ -255,12 +287,11 @@ test("mixed batches insert successes in selection order and retry the original f
       ([, args]) => (args as Record<string, unknown>)?.source === "C:/bad.txt",
     )?.[1];
   fails = false;
-  fireEvent.click(
-    within(screen.getByRole("listitem", { name: "bad.txt" })).getByRole(
-      "button",
-      { name: "Retry" },
-    ),
-  );
+  const retry = within(
+    screen.getByRole("listitem", { name: "bad.txt" }),
+  ).getByRole("button", { name: "Retry" });
+  await waitFor(() => expect(retry.hasAttribute("disabled")).toBe(false));
+  fireEvent.click(retry);
   await waitFor(() => expect(picked.mock.calls).toHaveLength(3));
   expect(picked).toHaveBeenLastCalledWith(
     file("bad.txt"),

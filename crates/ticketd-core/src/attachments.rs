@@ -399,6 +399,47 @@ impl Workspace {
         validate_attachment_bytes(&self.connection, attachment)
     }
 
+    /// Replace just one direct association, retaining both immutable snapshots and all other uses.
+    pub(crate) fn replace_ticket_attachment(
+        &mut self,
+        reference: &str,
+        previous_id: &str,
+        replacement_id: &str,
+    ) -> Result<Ticket, Error> {
+        if previous_id == replacement_id {
+            return Err(Error::Attachment("choose a new attachment identity".into()));
+        }
+        let replacement = read_attachment(&self.connection, replacement_id)?;
+        validate_attachment_reference(&self.connection, &replacement)?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        let ticket_id = relationships::id(&tx, reference)?;
+        let trashed: bool = tx.query_row(
+            "SELECT trashed FROM tickets WHERE id=?1",
+            [&ticket_id],
+            |row| row.get(0),
+        )?;
+        if trashed {
+            return Err(Error::Trashed(reference.into()));
+        }
+        let selected: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2)", params![ticket_id, previous_id], |row| row.get(0))?;
+        if !selected {
+            return Err(Error::Attachment(
+                "this association changed; select the reference again before replacing it".into(),
+            ));
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO ticket_attachments(ticket_id, attachment_id) VALUES (?1, ?2)",
+            params![ticket_id, replacement_id],
+        )?;
+        tx.execute(
+            "DELETE FROM ticket_attachments WHERE ticket_id=?1 AND attachment_id=?2",
+            params![ticket_id, previous_id],
+        )?;
+        tx.commit()?;
+        self.show_ticket(reference)
+    }
+
     /// Explicit native-open support. Adapters must never open a file automatically.
     pub fn attachment_open_target(&self, id: &str) -> Result<AttachmentOpenTarget, Error> {
         let file = self.attachment(id)?;
@@ -458,14 +499,16 @@ impl Workspace {
     /// Export stored bytes without overwriting an existing destination or leaving partial output.
     pub fn export_attachment(&self, id: &str, destination: impl AsRef<Path>) -> Result<(), Error> {
         let attachment = self.attachment(id)?;
-        let source = self.validate_attachment_bytes(&attachment)?;
+        let (_, mut source) =
+            crate::attachment_previews::open_snapshot(&self.connection, &attachment)
+                .map_err(|error| Error::Attachment(error.message))?;
         let destination = destination.as_ref();
         let parent = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let mut output = tempfile::NamedTempFile::new_in(parent)?;
-        let copied = std::io::copy(&mut File::open(source)?, &mut output)?;
+        let copied = std::io::copy(&mut source, &mut output)?;
         if Some(copied) != attachment.size_bytes {
             return Err(Error::Attachment(
                 "stored bytes changed while exporting; retry after restoring the snapshot".into(),
@@ -571,35 +614,12 @@ pub(crate) fn validate_attachment_bytes(
     connection: &Connection,
     attachment: &Attachment,
 ) -> Result<PathBuf, Error> {
-    if attachment.kind == AttachmentKind::ExternalReference {
-        return Err(Error::Attachment("this is an external reference to current Drive content, not stored original bytes; open it in Drive".into()));
-    }
-    if Uuid::parse_str(&attachment.id).is_err()
-        || Path::new(&attachment.original_filename).file_name()
-            != Some(std::ffi::OsStr::new(&attachment.original_filename))
-        || attachment.locator != format!("{}/bytes/{}", attachment.id, attachment.original_filename)
-    {
-        return Err(Error::Attachment(
-            "invalid managed snapshot locator; preserve the file and repair its metadata".into(),
-        ));
-    }
-    let path = attachment_directory(connection)?.join(&attachment.locator);
-    match fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() && Some(metadata.len()) == attachment.size_bytes => {
-            Ok(path)
-        }
-        Ok(_) => Err(Error::Attachment(format!(
-            "stored bytes for '{}' are incomplete; restore them from a complete backup or choose a new attachment",
-            attachment.display_name
-        ))),
-        Err(error) => Err(Error::Attachment(format!(
-            "cannot read stored bytes for '{}' ({}): {error}; restore the snapshot or choose a new attachment",
-            attachment.display_name, attachment.id
-        ))),
-    }
+    crate::attachment_previews::open_snapshot(connection, attachment)
+        .map(|(path, _)| path)
+        .map_err(|error| Error::Attachment(error.message))
 }
 
-fn attachment_directory(connection: &Connection) -> Result<PathBuf, Error> {
+pub(crate) fn attachment_directory(connection: &Connection) -> Result<PathBuf, Error> {
     let path = connection
         .path()
         .filter(|p| !p.is_empty())

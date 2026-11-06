@@ -25,6 +25,11 @@ pub enum WriteRequest {
         attachment_id: String,
         present: bool,
     },
+    ReplaceTicketAttachment {
+        reference: String,
+        previous_id: String,
+        replacement_id: String,
+    },
     CreateTicketFromDocument {
         id: String,
         title: String,
@@ -339,6 +344,15 @@ impl Workspace {
                 &reference,
                 &attachment_id,
                 present,
+            )?),
+            WriteRequest::ReplaceTicketAttachment {
+                reference,
+                previous_id,
+                replacement_id,
+            } => WriteResult::Ticket(self.replace_ticket_attachment(
+                &reference,
+                &previous_id,
+                &replacement_id,
             )?),
             WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
                 self.create_ticket_from_document_following(&id, &title, follow)?,

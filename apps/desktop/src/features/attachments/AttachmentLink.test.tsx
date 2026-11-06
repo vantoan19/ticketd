@@ -12,13 +12,26 @@ afterEach(() => {
 
 test("reading keeps authored attachment text inline and resolves only on explicit inspection", async () => {
   const uri = "ticketd://attachment/owning-workspace/file-1";
-  vi.mocked(invoke).mockResolvedValue({
+  const file = {
     id: "file-1",
     display_name: "Renamed trace",
     original_filename: "trace.log",
     size_bytes: 12,
-    kind: "local_snapshot",
+    kind: "local_snapshot" as const,
     locator: "file-1/bytes/trace.log",
+  };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "owning-workspace";
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "unsupported",
+        media_type: null,
+        message: "Preview unavailable for this format.",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return file;
   });
   render(
     <MarkdownDocument source={`Before [My custom label](${uri}) after.`} />,

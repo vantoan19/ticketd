@@ -66,9 +66,13 @@ mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
 mod attachment_library;
+mod attachment_previews;
 mod attachment_retention;
 pub use attachment_library::{AttachmentQuery, AttachmentSearchResult, AttachmentState};
 mod attachments;
+pub use attachment_previews::{
+    AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+};
 pub mod drive;
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};

@@ -83,6 +83,64 @@ const file = {
   locator: "f1/bytes/trace.log",
 };
 
+test("a direct preview replaces only its selected ticket association through the atomic operation", async () => {
+  const replacement = { ...file, id: "new-file", display_name: "New trace" };
+  let replaced = false;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "ticket_attachments")
+      return replaced ? [replacement] : [file];
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "missing",
+        media_type: null,
+        message: "Stored bytes are missing",
+        can_open: false,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    if (command === "search_attachments")
+      return [replacement].map((attachment) => ({
+        attachment,
+        related: false,
+        usage: {
+          eligible: true,
+          legacy_drafts_pending: false,
+          protections: [],
+        },
+      }));
+    if (command === "inspect_attachment") return replacement;
+    if (command === "replace_ticket_attachment") {
+      replaced = true;
+      return null;
+    }
+    return null;
+  });
+  render(
+    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
+  await screen.findByText("The local file could not be found");
+  fireEvent.click(screen.getByRole("button", { name: "Choose a replacement" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select New trace" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
+  await screen.findByRole("button", { name: "New trace" });
+  expect(invoke).toHaveBeenCalledWith("replace_ticket_attachment", {
+    reference: "T-1",
+    previousId: "f1",
+    replacementId: "new-file",
+    requestId: expect.any(String),
+  });
+  expect(invoke).not.toHaveBeenCalledWith(
+    "set_ticket_attachment",
+    expect.anything(),
+  );
+});
+
 test("the rail uploads through the native picker, then associates the stored snapshot", async () => {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let linked = false;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Attachment } from "@/lib/api/attachments";
@@ -12,12 +12,15 @@ export function ExistingAttachments({
   onPick,
   onDone,
   onBusyChange,
+  single = false,
 }: {
   ticketReference: string | null;
   onPick: (file: Attachment, requestId: string) => Promise<void>;
   onDone: () => void;
   onBusyChange: (busy: boolean) => void;
+  single?: boolean;
 }) {
+  const choiceName = useId();
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<
@@ -39,6 +42,10 @@ export function ExistingAttachments({
     offset,
   );
   async function insert() {
+    if (single && selected.length !== 1) {
+      setFailure("Choose one file to replace this reference.");
+      return;
+    }
     setBusy(true);
     onBusyChange(true);
     setFailure("");
@@ -73,7 +80,11 @@ export function ExistingAttachments({
         }}
       />
       {loading && <p role="status">Loading files…</p>}
-      <div className="attachment-existing-results">
+      <div
+        className="attachment-existing-results"
+        role={single ? "radiogroup" : undefined}
+        aria-label={single ? "Existing file choice" : undefined}
+      >
         {[true, false].map((related) => {
           const group = files.filter((row) => row.related === related);
           return (
@@ -102,7 +113,8 @@ export function ExistingAttachments({
                           </small>
                         </span>
                         <input
-                          type="checkbox"
+                          type={single ? "radio" : "checkbox"}
+                          name={single ? choiceName : undefined}
                           aria-label={`Select ${file.display_name}`}
                           disabled={busy}
                           checked={selected.some(
@@ -112,7 +124,7 @@ export function ExistingAttachments({
                             setSelected((rows) =>
                               event.target.checked
                                 ? [
-                                    ...rows,
+                                    ...(single ? [] : rows),
                                     { file, requestId: crypto.randomUUID() },
                                   ]
                                 : rows.filter((row) => row.file.id !== file.id),
