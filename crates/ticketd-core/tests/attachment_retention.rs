@@ -133,7 +133,7 @@ fn recovery_backup_is_complete_and_failed_replacement_preserves_the_previous_dra
     let faults = rusqlite::Connection::open(&path).unwrap();
     faults.execute_batch("CREATE TABLE reject_commit (id TEXT REFERENCES tickets(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER reject_draft AFTER UPDATE ON attachment_drafts BEGIN INSERT INTO reject_commit VALUES ('missing'); END;").unwrap();
     assert!(w.release_draft(&draft.owner, draft.revision).is_err());
-    assert_eq!(w.draft_retentions().unwrap(), [draft.clone()]);
+    assert_eq!(w.draft_retentions().unwrap(), std::slice::from_ref(&draft));
     assert!(!w.attachment_usage(&file.id).unwrap().eligible);
     faults
         .execute_batch("DROP TRIGGER reject_draft; DROP TABLE reject_commit;")
