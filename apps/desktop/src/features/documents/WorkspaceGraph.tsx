@@ -417,9 +417,9 @@ export function WorkspaceGraph({
         {labelledConnections(preview.id, graph!).map((row) => (
           <div key={row.label}>
             <dt>{row.label}</dt>
-            {row.items.map((item) => (
-              <dd key={item.id}>{item.text}</dd>
-            ))}
+            <dd title={row.items.map((item) => item.text).join(", ")}>
+              {row.items.map((item) => item.text).join(", ")}
+            </dd>
           </div>
         ))}
       </dl>

@@ -434,7 +434,7 @@ test("lists No project after the named projects and shows a quiet hint with noth
     "No project",
   ]);
   expect(screen.queryByText("Unlinked")).toBeNull();
-  expect(screen.getByText("Select a ticket to read it here.")).toBeTruthy();
+  expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
 });
 
 test("changing the scope drops an open ticket that is outside it", async () => {

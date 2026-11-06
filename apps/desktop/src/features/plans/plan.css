@@ -499,7 +499,25 @@
 
 /* The Plan actions menu is 237px wide, rows 30px (board E). */
 .plan-actions-menu {
-  width: 237px;
+  width: 235px;
+  padding: 6px;
+  font-size: var(--text-code);
+}
+/* Frame E: 30px rows with 8px inset, 14px icons, and a hairline that runs edge to edge. */
+.plan-actions-menu [data-slot="dropdown-menu-item"] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: var(--text-code);
+  line-height: 20px;
+}
+.plan-actions-menu [data-slot="dropdown-menu-item"] svg:not([class*="size-"]) {
+  width: 14px;
+  height: 14px;
+}
+.plan-actions-menu [data-slot="dropdown-menu-separator"] {
+  height: 1px;
+  margin: 6px -6px;
 }
 .plan-actions [aria-expanded="true"] {
   background: var(--accent);
@@ -544,6 +562,7 @@
 }
 .plan-dependencies-card [data-slot="empty-content"] .ui-button {
   gap: 6px;
+  font-size: var(--text-code);
 }
 .plan-dependencies-card [data-slot="empty-content"] .ui-button svg {
   width: 14px;
@@ -551,8 +570,7 @@
   stroke-width: 1.75;
 }
 .plan-dependencies-card [data-slot="empty-icon"] svg {
-  stroke: var(--muted-foreground);
-  stroke-width: 1.75;
+  stroke: var(--secondary-foreground);
 }
 .plan-dependencies-key-box {
   outline: none;
@@ -565,7 +583,7 @@
 }
 .plan-summary {
   min-height: 28px;
-  gap: 8px 14px;
+  gap: 8px 16px;
 }
 .plan-documents {
   gap: 0;
@@ -578,5 +596,5 @@
 }
 .plan-counts {
   flex-wrap: nowrap;
-  gap: 4px 14px;
+  gap: 4px 16px;
 }

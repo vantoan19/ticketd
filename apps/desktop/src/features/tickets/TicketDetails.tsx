@@ -140,7 +140,7 @@ export function TicketDetails({
         )}
         {selected === null && (
           <div className="detail-empty">
-            <p>Select a ticket to read it here.</p>
+            <p>Select a ticket to read it here</p>
             <p className="detail-empty-hint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open

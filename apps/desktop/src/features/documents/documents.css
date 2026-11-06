@@ -583,8 +583,10 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
+/* One quoted line: Both from “See T-1 and T-3.” */
 .document-rail .document-passage-caption {
   margin: 4px 0 0;
+  display: block;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
@@ -656,4 +658,33 @@
 }
 .document-rail .document-tags:empty {
   display: none;
+}
+
+.document-rail .document-passage-caption .document-passage,
+.document-rail .document-passage-caption .document-passage * {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+/* Rail rows sit 4px apart, as the label sits 4px above its first row (frame F). */
+.document-workspace .document-rail ul {
+  margin: 0;
+}
+.document-workspace .document-rail li {
+  margin: 0 0 4px;
+}
+.document-workspace .document-rail li:last-child {
+  margin-bottom: 0;
+}
+/* Frame F-2: a bordered 36px row, 8px radius, 10px between glyph and label. */
+.document-workspace .document-body .diagram-editor {
+  margin-top: 13px;
+}
+.document-workspace .document-body .diagram-editor summary {
+  gap: 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--foreground) 14%, transparent);
 }

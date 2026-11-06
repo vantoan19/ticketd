@@ -23,6 +23,7 @@ export function MermaidDiagram({ source }: { source: string }) {
   const [showSource, setShowSource] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [zoom, setZoom] = useState(100);
+  const [attempt, setAttempt] = useState(0);
   const sourceId = useId();
   useEffect(() => {
     let active = true;
@@ -43,9 +44,23 @@ export function MermaidDiagram({ source }: { source: string }) {
     return () => {
       active = false;
     };
-  }, [source, dark]);
+  }, [source, dark, attempt]);
   const current =
     result?.source === source && result.dark === dark ? result : null;
+  const unpainted = !current || Boolean(current.error);
+  // A window that was hidden while the diagram rendered paints it when shown again.
+  useEffect(() => {
+    if (!unpainted) return;
+    const retry = () => {
+      if (document.visibilityState !== "hidden") setAttempt((n) => n + 1);
+    };
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      document.removeEventListener("visibilitychange", retry);
+    };
+  }, [unpainted]);
   const sourceVisible = showSource || Boolean(current?.error);
   const zoomControls = (
     <div className="markdown-block-toolbar">

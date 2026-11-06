@@ -621,7 +621,12 @@ export function DocumentEditor({
   // every other connection is a mention, listed once.
   const isAttachment = (item: (typeof connected)[number]) =>
     item.kind === "plan" && item.passages.length === 0;
-  const mentions = connected.filter((item) => !isAttachment(item));
+  // Reference order (T-1 before T-3), not the order the links were recorded in.
+  const mentions = connected
+    .filter((item) => !isAttachment(item))
+    .sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { numeric: true }),
+    );
   const attachments = connected.filter(isAttachment);
   const attachmentLabel = planSpec ? "Spec of" : "Supporting Document of";
   const passages = [
@@ -967,14 +972,16 @@ export function DocumentEditor({
               <ul>{mentions.map((item) => connectionRow(item))}</ul>
               {passages.length > 0 && (
                 <div className="document-passage-caption">
-                  <p>
+                  <span>
                     {passages.length === 1 && mentions.length > 1
                       ? mentions.length === 2
                         ? "Both from"
                         : "All from"
-                      : "From"}
-                  </p>
+                      : "From"}{" "}
+                    “
+                  </span>
                   {passages.map((passage) => passageView(passage))}
+                  <span aria-hidden="true">”</span>
                 </div>
               )}
             </section>
