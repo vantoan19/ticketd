@@ -206,7 +206,11 @@ test.each(["rich", "source"])(
       expect(changed.mock.lastCall?.[0]).toContain("[last.txt]"),
     );
     fails = false;
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retry = screen.getByRole("button", { name: "Retry" });
+    await waitFor(() =>
+      expect((retry as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(retry);
     await waitFor(() =>
       expect(changed.mock.lastCall?.[0]).toBe(
         "Before [first.txt](ticketd://attachment/workspace-1/first.txt)[bad.txt](ticketd://attachment/workspace-1/bad.txt)[last.txt](ticketd://attachment/workspace-1/last.txt)after",
@@ -353,6 +357,9 @@ test("inserts a stored file at the rich caret without rewriting on focus or mode
     ),
   );
   const saved = changed.mock.lastCall?.[0];
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Attach file" })).toBeNull(),
+  );
   const count = changed.mock.calls.length;
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
