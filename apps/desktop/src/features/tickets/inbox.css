@@ -158,6 +158,8 @@
   height: 20px;
   stroke-width: 1.75;
   color: var(--muted-foreground);
+  /* 1px high: the glyph sat 1px low in the tile (board J). */
+  transform: translateY(-1px);
 }
 .inbox [data-slot="empty-state"] .ui-button {
   font-size: var(--text-code);

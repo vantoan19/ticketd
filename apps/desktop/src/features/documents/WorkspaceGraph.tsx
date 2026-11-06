@@ -1,4 +1,4 @@
-import { ArrowLeft, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -18,7 +18,6 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { ListHeader } from "@/components/ui/list-header";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -66,7 +65,6 @@ function connectionSummary(graph: Graph): string {
 export function WorkspaceGraph({
   active,
   revision,
-  onBack,
   onFocus,
   onOpen,
 }: {
@@ -524,9 +522,6 @@ export function WorkspaceGraph({
           </Button>
         )}
         <span className="context-graph-grow" />
-        <IconButton label="Back" onClick={onBack}>
-          <ArrowLeft />
-        </IconButton>
         <label className="context-graph-switch">
           <Switch
             aria-label="Include update details"

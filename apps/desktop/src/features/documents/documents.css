@@ -231,6 +231,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  line-height: 20px;
 }
 @media (max-width: 767px) {
   .document-workspace {
@@ -526,7 +527,7 @@
   }
 }
 .document-subtitle {
-  margin: -8px 0 0;
+  margin: -12px 0 8px;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
@@ -596,6 +597,7 @@
 }
 /* The Document's body is plain text, not a bordered card. */
 .document-workspace .document-body .markdown-editor {
+  margin-top: 6px;
   background: transparent;
   box-shadow: none;
 }
@@ -680,7 +682,7 @@
 }
 /* Frame F-2: a bordered 36px row, 8px radius, 10px between glyph and label. */
 .document-workspace .document-body .diagram-editor {
-  margin-top: 13px;
+  margin-top: 25px;
 }
 .document-workspace .document-body .diagram-editor summary {
   gap: 10px;

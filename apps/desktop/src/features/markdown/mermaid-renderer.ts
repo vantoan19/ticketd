@@ -62,18 +62,21 @@ export function renderDiagram(
     try {
       mermaid.initialize({
         startOnLoad: false,
+        look: "classic",
+        layout: "dagre",
         securityLevel: "strict",
         theme: dark ? "dark" : "neutral",
         themeVariables: {
           fontFamily: "Geist, ui-sans-serif, system-ui, sans-serif",
+          fontSize: "14px",
           // White boxes with a grey outline and a grey line (board F).
           ...(dark
             ? {}
             : {
                 primaryColor: "#ffffff",
                 mainBkg: "#ffffff",
-                nodeBorder: "#bdbdbd",
-                primaryBorderColor: "#bdbdbd",
+                nodeBorder: "#cccccc",
+                primaryBorderColor: "#cccccc",
                 lineColor: "#4d4d4d",
               }),
         },
@@ -81,11 +84,21 @@ export function renderDiagram(
         maxTextSize: 20000,
         maxEdges: 500,
         suppressErrorRendering: true,
-        flowchart: { htmlLabels: false },
+        // 40 px boxes on a 76 px pitch (board F).
+        flowchart: {
+          htmlLabels: false,
+          padding: 11,
+          rankSpacing: 36,
+          minNodeWidth: 108,
+          nodeSpacing: 50,
+          useMaxWidth: false,
+        },
         secure: [
           "secure",
           "securityLevel",
           "startOnLoad",
+          "look",
+          "layout",
           "maxTextSize",
           "maxEdges",
           "suppressErrorRendering",
