@@ -352,6 +352,9 @@ fn restore_review_requires_the_workspace_identity_and_reference_index() {
         "attachment_workspace",
         "embedded_attachments",
         "embedded_activity_delete",
+        "attachment_drafts",
+        "attachment_draft_references",
+        "attachment_draft_cutover",
     ] {
         let backup = dir.path().join(format!("without-{object}.sqlite3"));
         workspace.backup(&backup).unwrap();

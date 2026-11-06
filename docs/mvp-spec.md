@@ -814,6 +814,36 @@ Failed association reports the completed Attachment ID for explicit reuse.
 `attachment limit [--bytes <positive-byte-count>]` reads or changes the same
 workspace upload limit; rejection explains the current bound and recovery command.
 
+Recoverable ticket/new-ticket, Document/capture, and authored-update brief/details
+drafts retain their files across navigation, restart, failed saves/submissions,
+editor mode changes and external-refresh conflict choices. Draft recovery does
+not publish an Activity or Document. Successful save, explicit discard or
+replacement updates only that recovery owner; independent rich/source Undo and
+Document conflict Reload Undo keep separate protection. Removing a reference or
+releasing recovery never deletes bytes. No inactivity expiry or automatic
+unreferenced-file deletion applies.
+
+`attachment usage <id>` explains direct, inline, draft, Undo and Trash protections
+and reports advisory cleanup eligibility. Trashed tickets/Documents and hidden
+Activity details remain uses; deleting an Activity removes its brief use while
+preserving its supporting Document and its files. Cleanup must check eligibility
+again when it executes.
+
+For an upgraded workspace with existing attachments, review recoverable drafts
+from every desktop profile before allowing cleanup. Startup imports the current
+profile's drafts without claiming other profiles are empty. Confirm **All desktop
+profiles reviewed** or run `attachment complete-draft-migration
+--all-profiles-reviewed` after importing/reviewing them. Until then usage reports
+`legacy_drafts_pending: true`; inspection, export and authoring remain available.
+Fresh workspaces and attachment-free upgrades need no desktop review.
+Distinct old profile drafts are preserved separately when their recovery keys
+collide; `attachment recovery-drafts` inspects their private recovery payloads
+without publishing them.
+After reviewing or recovering a payload, `attachment release-recovery <owner>
+--revision <revision> --discard-recovery` explicitly discards only that owner and
+protection. This also resolves conservative Undo protection left by an interrupted
+editor shutdown; attachment bytes and other owners remain intact.
+
 Publication checks the exact outgoing description in the core before creating a
 remote issue, including retries after a failed or resolved attempt. Workspace-only
 attachment links block publication, with affected URIs, known display names, and

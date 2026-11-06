@@ -66,9 +66,11 @@ mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
 mod attachment_previews;
+mod attachment_retention;
 mod attachments;
 pub use attachment_previews::{AttachmentMedia, AttachmentPreview, PreviewStatus};
 mod embedded_attachments;
+pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{Attachment, AttachmentKind, DEFAULT_ATTACHMENT_LIMIT};
 mod change_token;
 pub use activities::{
@@ -79,7 +81,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 49;
+pub const FORMAT_VERSION: i64 = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -740,6 +742,9 @@ impl Workspace {
         }
         if version < 49 {
             attachments::migrate_upload_settings(&transaction)?;
+        }
+        if version < 50 {
+            attachment_retention::migrate(&transaction, version > 0)?;
         }
         transaction.commit()?;
         Ok(())

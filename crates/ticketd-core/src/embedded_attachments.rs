@@ -29,7 +29,7 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn workspace_id(tx: &Connection) -> Result<String, Error> {
+pub(crate) fn workspace_id(tx: &Connection) -> Result<String, Error> {
     Ok(tx.query_row(
         "SELECT id FROM attachment_workspace WHERE singleton=1",
         [],

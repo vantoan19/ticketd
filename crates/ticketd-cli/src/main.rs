@@ -53,6 +53,23 @@ enum AttachmentCommand {
     },
     /// Inspect a workspace attachment by stable ID
     Inspect { id: String },
+    /// Explain saved, Trash, draft and Undo protections (eligibility is advisory)
+    Usage { id: String },
+    /// Finish legacy draft migration only after importing/reviewing every desktop profile
+    CompleteDraftMigration {
+        #[arg(long, required = true)]
+        all_profiles_reviewed: bool,
+    },
+    /// Inspect private recovery payloads, including preserved drafts from other profiles
+    RecoveryDrafts,
+    /// Discard one reviewed recovery payload/protection, retaining attachment bytes
+    ReleaseRecovery {
+        owner: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long, required = true)]
+        discard_recovery: bool,
+    },
     /// Print the workspace-scoped URI to use in canonical Markdown links
     Uri { id: String },
     /// Reuse an existing attachment on another ticket
@@ -1908,6 +1925,21 @@ fn attachment_command(
             None => workspace.attachments(limit, offset)?,
         })?,
         AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
+        AttachmentCommand::Usage { id } => {
+            serde_json::to_string(&workspace.attachment_usage(&id)?)?
+        }
+        AttachmentCommand::CompleteDraftMigration {
+            all_profiles_reviewed: _,
+        } => {
+            workspace.complete_draft_cutover()?;
+            serde_json::json!({"legacy_drafts_pending":false}).to_string()
+        }
+        AttachmentCommand::RecoveryDrafts => serde_json::to_string(&workspace.draft_retentions()?)?,
+        AttachmentCommand::ReleaseRecovery {
+            owner,
+            revision,
+            discard_recovery: _,
+        } => serde_json::to_string(&workspace.release_draft(&owner, revision)?)?,
         AttachmentCommand::Uri { id } => serde_json::to_string(&workspace.attachment_uri(&id)?)?,
         AttachmentCommand::Link { id, ticket } => {
             serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?

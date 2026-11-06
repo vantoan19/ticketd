@@ -48,6 +48,32 @@ const progressSchema = z.object({
 export type UploadProgress = z.infer<typeof progressSchema>;
 export type CaptureSource = string | File;
 
+const draftRetentionSchema = z.object({
+  owner: z.string(),
+  kind: z.enum(["draft", "undo"]),
+  revision: z.number().int().nonnegative(),
+  payload: z.unknown().nullable(),
+  markdown: z.array(z.string()),
+});
+export type DraftRetention = z.infer<typeof draftRetentionSchema>;
+
+export const draftRetention = {
+  async cutoverPending() {
+    return z.boolean().parse(await invoke("draft_cutover_pending"));
+  },
+  async completeCutover() {
+    await invoke("complete_draft_cutover");
+  },
+  async list() {
+    return z
+      .array(draftRetentionSchema)
+      .parse(await invoke("draft_retentions"));
+  },
+  async retain(draft: DraftRetention) {
+    return draftRetentionSchema.parse(await invoke("retain_draft", { draft }));
+  },
+};
+
 export const attachments = {
   async preview(workspace: string, id: string) {
     return previewSchema.parse(
@@ -56,6 +82,22 @@ export const attachments = {
   },
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;
+  },
+  async usage(id: string) {
+    return z
+      .object({
+        eligible: z.boolean(),
+        legacy_drafts_pending: z.boolean(),
+        protections: z.array(
+          z.object({
+            kind: z.string(),
+            owner: z.string(),
+            ticket_id: z.string().nullable(),
+            trashed: z.boolean(),
+          }),
+        ),
+      })
+      .parse(await invoke("attachment_usage", { id }));
   },
   async workspaceId() {
     return z

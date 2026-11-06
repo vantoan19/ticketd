@@ -79,6 +79,12 @@ test("preserves a note draft on a failed save and prevents repeated submissions"
   fireEvent.submit(
     screen.getByRole("button", { name: "Saving…" }).closest("form")!,
   );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      "add_activity_with_details",
+      expect.anything(),
+    ),
+  );
   rejectSave(new Error("Database busy"));
   await waitFor(() =>
     expect(screen.getByRole("alert").textContent).toContain("Database busy"),
