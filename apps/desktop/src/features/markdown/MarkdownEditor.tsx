@@ -860,6 +860,7 @@ export function MarkdownEditor({
       if (!view)
         throw new Error("Reopen this editor to insert the stored file.");
       const { from, to } = pending.source ?? view.state.selection.main;
+      // Source insertion may be inside a GFM table; a filename pipe must stay in its cell.
       const link = writeMarkdown([
         {
           type: "p",
@@ -867,7 +868,7 @@ export function MarkdownEditor({
             { type: "a", url: uri, children: [{ text: file.display_name }] },
           ],
         },
-      ]);
+      ]).replaceAll("|", "\\|");
       view.dispatch({
         changes: { from, to, insert: link },
         selection: { anchor: from + link.length },

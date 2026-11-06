@@ -12,6 +12,7 @@ import { afterEach, beforeAll, afterAll, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { EditorView } from "@codemirror/view";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -194,5 +195,48 @@ test("source insertion reuses a stored identity while preserving image syntax an
   expect(invoke).not.toHaveBeenCalledWith(
     "set_ticket_attachment",
     expect.anything(),
+  );
+});
+
+test("source insertion inside a table escapes filename pipes without adding a column", async () => {
+  const original = "| File |\n| --- |\n| before after |";
+  const changed = vi.fn();
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_uri"
+      ? uri
+      : { ...file, display_name: "trace | final" },
+  );
+  function Draft() {
+    const [value, setValue] = useState(original);
+    return (
+      <MarkdownEditor
+        persistentToolbar
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          changed(next);
+        }}
+      />
+    );
+  }
+  render(<Draft />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const source = screen.getByRole("textbox", {
+    name: "Markdown document source",
+  });
+  // Set the external editor widget's selection; jsdom has no native caret navigation.
+  EditorView.findFromDOM(source)?.dispatch({
+    selection: { anchor: original.indexOf("after") },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Attachment ID" }), {
+    target: { value: file.id },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Reuse ID" }));
+  await waitFor(() =>
+    expect(changed).toHaveBeenLastCalledWith(
+      `| File |\n| --- |\n| before [trace \\| final](${uri})after |`,
+    ),
   );
 });
