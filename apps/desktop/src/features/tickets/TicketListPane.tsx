@@ -165,9 +165,7 @@ export function TicketListPane({
       ? "Todo tickets with nothing left to wait on."
       : navigation.kind === "progress"
         ? "Tickets someone is working on right now."
-        : status
-          ? `${status} tickets.`
-          : null;
+        : null;
   const filterProps = {
     query,
     setQuery,
@@ -425,10 +423,10 @@ export function TicketListPane({
                 }}
                 selected={selected}
                 readyView={navigation.kind === "ready"}
+                // A status filter keeps its group header (board C); only the
+                // dedicated Ready and In progress views drop it.
                 singleStatus={
-                  navigation.kind === "ready" ||
-                  navigation.kind === "progress" ||
-                  Boolean(status)
+                  navigation.kind === "ready" || navigation.kind === "progress"
                 }
                 {...(grouped &&
                   counts && {

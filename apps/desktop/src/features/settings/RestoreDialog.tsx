@@ -279,7 +279,7 @@ export function RestoreDialog({
           <DialogDescription>
             {done
               ? "The workspace now matches the backup."
-              : "Check what you're restoring. Nothing changes until you replace the workspace."}
+              : "Check what this backup contains. Nothing changes until you confirm."}
           </DialogDescription>
         </div>
 
@@ -294,7 +294,10 @@ export function RestoreDialog({
             <Database aria-hidden="true" />
             <span className="restore-file-text">
               <code aria-label="Chosen backup file">{name}</code>
-              <span aria-label="Backup folder">{folder}</span>
+              <span>
+                <span aria-label="Backup folder">{folder}</span>
+                {valid ? " · integrity checked" : ""}
+              </span>
             </span>
             {!done && (
               <Button
@@ -461,7 +464,7 @@ export function RestoreDialog({
             <span className="restore-actions">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 disabled={phase.name === "restoring"}
                 onClick={onClose}
               >

@@ -63,7 +63,7 @@ export function MarkDuplicateDialog({
         // Escape keeps the typed search and chosen ticket for when it reopens.
         onOpenChange={change}
         title={`Mark ${chosen.reference} as a duplicate`}
-        description={`Choose the canonical ticket for ${chosen.reference} and review its dependencies.`}
+        description={`${chosen.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
         onDone={() => {
           onMarked?.(chosen.reference);
           finish();

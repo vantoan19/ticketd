@@ -325,6 +325,8 @@ export function Duplicates({
             : "Mark duplicate"
       }
       blockedReason={blockedReason}
+      width={713}
+      footerNote="Nothing changes until you apply."
       onSubmit={() => void apply()}
       onCancel={() => {
         canonicalDrafts.delete(ticket.reference);
@@ -475,7 +477,6 @@ export function Duplicates({
                   Any dependency changes you apply now stay as they are.
                 </p>
               )}
-              <p className="duplicate-note">Nothing changes until you apply.</p>
             </div>
             {stale && (
               <div role="alert" className="duplicate-stale">

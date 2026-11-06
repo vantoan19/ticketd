@@ -133,7 +133,7 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
     await screen.findByRole("option", { name: "Mark as duplicate…" }),
   );
   expect(
-    await screen.findByRole("heading", { name: "Mark as duplicate" }),
+    await screen.findByRole("heading", { name: "Mark T-1 as a duplicate" }),
   ).toBeTruthy();
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",

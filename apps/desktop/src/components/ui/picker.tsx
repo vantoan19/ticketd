@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   Select,
   SelectContent,
@@ -17,26 +18,32 @@ export function Picker<T extends string>({
   onValueChange,
   options,
   disabled,
+  icon,
+  stacked = false,
 }: {
   label: string;
   value: T;
   onValueChange: (value: T) => void;
   options: { value: T; label: string }[];
   disabled?: boolean;
+  /** Leading icon inside the control. */
+  icon?: ReactNode;
+  /** A form field: the label sits above a 40px control that shows the icon and the value. */
+  stacked?: boolean;
 }) {
   const current = options.find((o) => o.value === value)?.label ?? value;
-  return (
+  const select = (
     <Select
       value={value}
       onValueChange={(next) => onValueChange(next as T)}
       {...(disabled !== undefined && { disabled })}
     >
       <SelectTrigger
-        size="sm"
-        className="ui-picker"
+        size={stacked ? "default" : "sm"}
+        className={stacked ? "ui-picker ui-picker-field" : "ui-picker"}
         aria-label={`${label}: ${current}`}
       >
-        <span className="text-muted-foreground">{label}</span>
+        {icon ?? <span className="text-muted-foreground">{label}</span>}
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -47,5 +54,13 @@ export function Picker<T extends string>({
         ))}
       </SelectContent>
     </Select>
+  );
+  return stacked ? (
+    <div className="flex min-w-0 flex-col gap-2">
+      <span aria-hidden="true">{label}</span>
+      {select}
+    </div>
+  ) : (
+    select
   );
 }

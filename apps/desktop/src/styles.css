@@ -1535,12 +1535,12 @@ html[data-theme="dark"][data-input="pointer"]
 }
 
 /* The New ticket dialog grows by the docked editor toolbar on focus. Its top
-   edge is anchored at a fixed offset so it never moves, and the body scrolls
+   edge is anchored at a fixed offset so it never moves (board D: 112px), and the body scrolls
    inside a viewport-bound dialog so the growth never pushes the footer off. */
 .ui-dialog:has(.create-form) {
-  top: 24px;
+  top: 112px;
   translate: -50% 0;
-  max-height: calc(100dvh - 48px);
+  max-height: calc(100dvh - 112px - 16px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
