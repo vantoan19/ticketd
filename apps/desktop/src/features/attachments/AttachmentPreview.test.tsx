@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 // @vitest-environment jsdom
 import {
   act,
@@ -180,3 +181,36 @@ test("a failed image retains metadata and explicit actions, with retry instead o
     expect(invoke).toHaveBeenCalledWith("open_attachment", { id: file.id }),
   );
 });
+
+test.each(["image/png", "video/mp4"])(
+  "Strict Mode restores %s sources after its effect cleanup rehearsal",
+  async (mime) => {
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "attachment_workspace_id"
+        ? "workspace"
+        : {
+            attachment: file,
+            status: "available",
+            media_type: mime,
+            message: null,
+            can_open: true,
+            usage: { total: 0, entries: [], legacy_drafts_pending: false },
+          },
+    );
+    const view = render(
+      <StrictMode>
+        <AttachmentPreview target={{ id: file.id }} onClose={() => {}} />
+      </StrictMode>,
+    );
+    const element = mime.startsWith("image")
+      ? await screen.findByRole("img", { name: "Screenshot" })
+      : await screen.findByLabelText("Screenshot", { selector: "video" });
+    expect(element.getAttribute("src")).toContain(
+      "attachment-media://localhost/workspace/file-1",
+    );
+    view.unmount();
+    expect(element.hasAttribute("src")).toBe(false);
+  },
+);

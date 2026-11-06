@@ -50,6 +50,9 @@ function Media({
   useEffect(() => {
     const element = media.current;
     const picture = image.current;
+    // Strict Mode rehearses cleanup/setup; restore sources on each setup too.
+    picture?.setAttribute("src", url);
+    element?.setAttribute("src", url);
     return () => {
       picture?.removeAttribute("src");
       if (!element) return;
@@ -57,7 +60,7 @@ function Media({
       element.removeAttribute("src");
       element.load();
     };
-  }, []);
+  }, [url]);
   if (mime.startsWith("image/"))
     return (
       <img ref={image} src={url} alt={file.display_name} onError={onError} />
