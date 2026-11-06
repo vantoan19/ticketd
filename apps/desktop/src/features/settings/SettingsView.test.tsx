@@ -14,6 +14,9 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { client } from "@/lib/api/client";
 import { notificationClient } from "@/lib/api/notifications";
 import { cliClient } from "@/lib/api/cli";
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(104857600),
+}));
 
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: {
@@ -109,6 +112,7 @@ test("the section list only offers sections that have cards", () => {
     "Appearance",
     "Attention",
     "Location",
+    "Attachments",
     "Backups",
     "Export",
     "Command line",

@@ -7,11 +7,22 @@ use std::{
 use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{Error, Ticket, Workspace, WriteRequest, WriteResult, relationships};
 
 pub const DEFAULT_ATTACHMENT_LIMIT: u64 = 100 * 1024 * 1024;
+
+pub(crate) fn migrate_upload_settings(connection: &Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS attachment_upload_settings (id INTEGER PRIMARY KEY CHECK(id = 1), limit_bytes INTEGER NOT NULL CHECK(limit_bytes > 0));
+         INSERT OR IGNORE INTO attachment_upload_settings VALUES (1, 104857600);",
+    )?;
+    crate::change_token::migrate(connection)?;
+    connection.pragma_update(None, "user_version", 49)?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +62,28 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 }
 
 impl Workspace {
+    pub fn attachment_upload_limit(&self) -> Result<u64, Error> {
+        Ok(self.connection.query_row(
+            "SELECT limit_bytes FROM attachment_upload_settings WHERE id=1",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Applies to future copies, not completed outcomes replayed by request ID.
+    pub fn set_attachment_upload_limit(&self, bytes: u64) -> Result<(), Error> {
+        if bytes == 0 || bytes >= i64::MAX as u64 {
+            return Err(Error::Attachment(
+                "upload limit must be between 1 and 9223372036854775806 bytes".into(),
+            ));
+        }
+        self.connection.execute(
+            "UPDATE attachment_upload_settings SET limit_bytes=?1 WHERE id=1",
+            [bytes],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn attachment_directory(&self) -> Result<PathBuf, Error> {
         attachment_directory(&self.connection)
     }
@@ -63,19 +96,94 @@ impl Workspace {
         source: impl AsRef<Path>,
         display_name: Option<&str>,
     ) -> Result<Attachment, Error> {
+        self.import_attachment_with_progress(request_id, source, display_name, |_, _| true)
+    }
+
+    /// Reports actual copied bytes. Returning false cancels before publication;
+    /// a completed snapshot is always retained and safely replayable.
+    pub fn import_attachment_with_progress(
+        &mut self,
+        request_id: &str,
+        source: impl AsRef<Path>,
+        display_name: Option<&str>,
+        progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<Attachment, Error> {
         let source = source.as_ref();
         let source_text = source
             .to_str()
             .ok_or_else(|| Error::Attachment("file path must be valid Unicode".into()))?;
+        let request = serde_json::to_string(&WriteRequest::ImportAttachment {
+            source: source_text.into(),
+            display_name: display_name.map(str::to_owned),
+        })?;
+        let filename = source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Error::Attachment("file must have a Unicode filename".into()))?;
+        self.import_snapshot(
+            request_id,
+            &request,
+            filename,
+            display_name,
+            || {
+                let input = File::open(source)?;
+                let metadata = input.metadata()?;
+                if !metadata.is_file() {
+                    return Err(Error::Attachment("choose a regular file".into()));
+                }
+                Ok((input, metadata.len()))
+            },
+            progress,
+        )
+    }
+
+    /// Capture clipboard/drop bytes through the same bounded, recoverable snapshot workflow.
+    /// The content digest is part of request equality; raw bytes are not stored in outcomes.
+    pub fn import_attachment_bytes(
+        &mut self,
+        request_id: &str,
+        filename: &str,
+        bytes: &[u8],
+        progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<Attachment, Error> {
+        let request = serde_json::to_string(&serde_json::json!({
+            "operation": "capture_attachment", "filename": filename,
+            "sha256": format!("{:x}", Sha256::digest(bytes)),
+        }))?;
+        self.import_snapshot(
+            request_id,
+            &request,
+            filename,
+            None,
+            || Ok((std::io::Cursor::new(bytes), bytes.len() as u64)),
+            progress,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // Both adapters share one publication and recovery boundary.
+    fn import_snapshot<R: Read>(
+        &mut self,
+        request_id: &str,
+        request: &str,
+        filename: &str,
+        display_name: Option<&str>,
+        input: impl FnOnce() -> Result<(R, u64), Error>,
+        mut progress: impl FnMut(u64, u64) -> bool,
+    ) -> Result<Attachment, Error> {
         if request_id.trim().is_empty() {
             return Err(Error::Attachment(
                 "supply a nonempty upload request ID for safe retry".into(),
             ));
         }
-        let request = serde_json::to_string(&WriteRequest::ImportAttachment {
-            source: source_text.into(),
-            display_name: display_name.map(str::to_owned),
-        })?;
+        if filename.is_empty()
+            || filename == "."
+            || filename == ".."
+            || filename.contains(['/', '\\', ':', '\0'])
+        {
+            return Err(Error::Attachment(
+                "supply a filename without directories or drive/stream syntax".into(),
+            ));
+        }
         let root = self.attachment_directory()?;
         fs::create_dir_all(&root)?;
         let _upload_lock = lock_uploads(&root)?;
@@ -97,20 +205,12 @@ impl Workspace {
                 _ => Err(Error::RequestConflict(request_id.into())),
             };
         }
-        let mut input = File::open(source)?;
-        if !input.metadata()?.is_file() {
-            return Err(Error::Attachment("choose a regular file".into()));
+        let (mut input, total) = input()?;
+        let limit = self.attachment_upload_limit()?;
+        if total > limit {
+            return Err(upload_limit_error(limit));
         }
-        if input.metadata()?.len() > DEFAULT_ATTACHMENT_LIMIT {
-            return Err(Error::Attachment(
-                "file exceeds the 100 MiB upload limit".into(),
-            ));
-        }
-        let original_filename = source
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| Error::Attachment("file must have a Unicode filename".into()))?
-            .to_owned();
+        let original_filename = filename.to_owned();
         let display_name = display_name.unwrap_or(&original_filename);
         if display_name.trim().is_empty() {
             return Err(Error::Attachment("display name must not be empty".into()));
@@ -121,15 +221,7 @@ impl Workspace {
             .tempdir_in(&root)?;
         fs::create_dir(staged.path().join("bytes"))?;
         let mut output = File::create(staged.path().join("bytes").join(&original_filename))?;
-        let size_bytes = std::io::copy(
-            &mut Read::by_ref(&mut input).take(DEFAULT_ATTACHMENT_LIMIT + 1),
-            &mut output,
-        )?;
-        if size_bytes > DEFAULT_ATTACHMENT_LIMIT {
-            return Err(Error::Attachment(
-                "file exceeds the 100 MiB upload limit".into(),
-            ));
-        }
+        let size_bytes = copy_upload(&mut input, &mut output, limit, total, &mut progress)?;
         output.sync_all()?;
         drop(output);
         let attachment = Attachment {
@@ -142,7 +234,7 @@ impl Workspace {
         };
         let completed = CompletedUpload {
             request_id: request_id.into(),
-            request,
+            request: request.into(),
             attachment: attachment.clone(),
         };
         let mut manifest = File::create(staged.path().join(".ticketd-upload.json"))?;
@@ -359,6 +451,45 @@ impl Workspace {
             })?;
         sync_directory(parent)?;
         Ok(())
+    }
+}
+
+fn upload_limit_error(limit: u64) -> Error {
+    let bound = if limit.is_multiple_of(1_048_576) {
+        format!("{} MiB ({limit} bytes)", limit / 1_048_576)
+    } else {
+        format!("{limit} bytes")
+    };
+    Error::Attachment(format!(
+        "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
+    ))
+}
+
+fn copy_upload(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    limit: u64,
+    total: u64,
+    progress: &mut impl FnMut(u64, u64) -> bool,
+) -> Result<u64, Error> {
+    let mut copied = 0;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        if !progress(copied, total) {
+            return Err(Error::Attachment(
+                "upload canceled before completion; retry the same operation to resume safely"
+                    .into(),
+            ));
+        }
+        let count = input.take(limit - copied + 1).read(&mut buffer)?;
+        if count == 0 {
+            return Ok(copied);
+        }
+        copied += count as u64;
+        if copied > limit {
+            return Err(upload_limit_error(limit));
+        }
+        output.write_all(&buffer[..count])?;
     }
 }
 
