@@ -44,12 +44,11 @@
 }
 .settings-nav-heading {
   margin: 0 12px 4px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  letter-spacing: -0.28px;
-  line-height: 20px;
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: 16px;
   /* Text, so it needs the secondary-text role, not the disabled gray. */
-  color: var(--foreground);
+  color: var(--muted-foreground);
 }
 
 /* The shell stacks the section list above the content on narrow windows. */
@@ -477,4 +476,19 @@
 
 .settings-page [data-slot="segmented-control"] [role="radio"] {
   min-height: 32px;
+}
+
+.workspace-location {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.workspace-location .workspace-path {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

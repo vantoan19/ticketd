@@ -197,6 +197,7 @@ export function Inbox({
       >
         <SegmentedControl
           aria-label="Show"
+          compact
           value={filter}
           onValueChange={changeFilter}
           options={[
@@ -270,6 +271,7 @@ export function Inbox({
         ))}
         {entries.length === 0 && filter === "all" && !error && (
           <EmptyState
+            className="pb-20"
             icon={<InboxIcon />}
             title="Nothing in your Inbox"
             description="Changes on tickets you follow, and reminders that come due, appear here."

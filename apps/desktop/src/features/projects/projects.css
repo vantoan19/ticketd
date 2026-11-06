@@ -2,6 +2,7 @@
 .projects-column {
   width: 100%;
   max-width: 880px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -136,10 +137,18 @@
   text-overflow: ellipsis;
 }
 .projects-unassigned {
-  margin: 0 0 16px;
+  margin: 0;
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
+}
+.projects-unassigned button {
+  height: auto;
+  padding: 0;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--ring, #0072f5);
+  text-underline-offset: 3px;
 }
 .path-tail {
   flex: none;
@@ -185,6 +194,7 @@
   color: var(--muted-foreground);
 }
 .project-card-footer code {
+  flex: none;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -212,4 +222,7 @@
 }
 .projects-empty {
   margin-top: 16px;
+}
+.project-open-tickets {
+  color: var(--muted-foreground);
 }

@@ -50,6 +50,11 @@ const COUNT_FILTER = {
   offset: 0,
 };
 
+/** "d5b4cc0e…669eae": the ends of an ID, enough to recognise it. */
+function truncateId(id: string) {
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-6)}` : id;
+}
+
 function ticketsLabel(count: TicketCount | undefined) {
   if (!count) return "";
   const noun = count.total === 1 ? "ticket" : "tickets";
@@ -406,20 +411,6 @@ export function Projects({
         each checkout lets the command line infer the project from the folder
         you are in.
       </p>
-      {unassigned > 0 && onShowUnassigned && (
-        <p className="projects-unassigned">
-          {unassigned} {unassigned === 1 ? "ticket has" : "tickets have"} no
-          project.{" "}
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            onClick={onShowUnassigned}
-          >
-            Show {unassigned === 1 ? "it" : "them"}
-          </Button>
-        </p>
-      )}
       {loading ? (
         <p className="projects-empty settings-hint">Loading projects…</p>
       ) : projects.length === 0 ? (
@@ -447,8 +438,9 @@ export function Projects({
                   {onOpenTickets && (
                     <Button
                       type="button"
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
+                      className="project-open-tickets"
                       aria-label={`Open tickets of ${item.name}`}
                       onClick={() => onOpenTickets(item)}
                     >
@@ -522,7 +514,7 @@ export function Projects({
                 </div>
                 <div className="project-card-footer">
                   <span>Project ID</span>
-                  <code title={item.id}>{item.id}</code>
+                  <code title={item.id}>{truncateId(item.id)}</code>
                   <CopyIcon
                     label={`Copy project ID of ${item.name}`}
                     text={item.id}
@@ -536,6 +528,20 @@ export function Projects({
             </li>
           ))}
         </ul>
+      )}
+      {unassigned > 0 && onShowUnassigned && (
+        <p className="projects-unassigned">
+          {unassigned} {unassigned === 1 ? "ticket has" : "tickets have"} no
+          project.{" "}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            onClick={onShowUnassigned}
+          >
+            Show {unassigned === 1 ? "it" : "them"}
+          </Button>
+        </p>
       )}
       <DialogShell
         open={dialog?.kind === "project"}

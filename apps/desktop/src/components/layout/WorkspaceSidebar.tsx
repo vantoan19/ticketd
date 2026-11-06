@@ -233,7 +233,10 @@ export function WorkspaceSidebar({
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
-            <div className="sidebar-heading">
+            <div
+              className="sidebar-heading"
+              data-active={view === "projects" || undefined}
+            >
               Projects{" "}
               <ManageMenu
                 label="Manage projects"

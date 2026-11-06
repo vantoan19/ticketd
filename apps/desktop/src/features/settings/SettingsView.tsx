@@ -17,6 +17,8 @@ import {
   type WorkspaceInfo,
 } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { homeRelative } from "@/features/projects/paths";
 import { APP_VERSION } from "@/lib/app-version";
 import {
   setPreference,
@@ -195,7 +197,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
     ["Projects", String(info.projects)],
     ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],
-    ["Workspace format version", String(info.format_version)],
+    ["Format version", String(info.format_version)],
   ];
   return (
     <SettingsCard id="location" title="Location">
@@ -210,19 +212,17 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
       )}
       {info && facts && (
         <>
-          <p className="workspace-path" aria-label="Workspace path">
-            {info.path}
-          </p>
-          <div className="settings-actions">
-            <Button
+          <div className="workspace-location">
+            <p className="workspace-path" aria-label="Workspace path">
+              {homeRelative(info.path)}
+            </p>
+            <IconButton
               type="button"
-              variant="outline"
-              size="sm"
+              label="Copy path"
               onClick={() => void copyPath(info.path)}
             >
               <Copy aria-hidden="true" />
-              Copy path
-            </Button>
+            </IconButton>
             <Button
               type="button"
               variant="outline"
@@ -331,12 +331,10 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     }
   }
   return (
-    <SettingsCard id="backups" title="Backups">
-      <p className="settings-hint">
-        A backup is a complete copy of the workspace, checked for integrity
-        after it is saved. It never replaces an existing file.
-      </p>
-      <div className="settings-actions">
+    <SettingsCard
+      id="backups"
+      title="Backups"
+      actions={
         <Button
           type="button"
           size="sm"
@@ -352,7 +350,12 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             "Back up now…"
           )}
         </Button>
-      </div>
+      }
+    >
+      <p className="settings-hint">
+        A backup is a complete copy of the workspace, checked for integrity
+        after it is saved. It never replaces an existing file.
+      </p>
       <div className="backup-status" role="group" aria-label="Last backup">
         {last ? (
           <>
@@ -382,7 +385,10 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             </div>
           </>
         ) : (
-          <p className="settings-hint">No backup has been made yet.</p>
+          <p className="settings-hint">
+            No backups yet. Your first one will be listed here with its date and
+            size.
+          </p>
         )}
       </div>
       {failure && (

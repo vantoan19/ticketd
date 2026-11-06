@@ -671,6 +671,14 @@
   font-weight: 500;
   line-height: 16px;
 }
+/* The Projects page is open: its heading reads as the selected row. */
+.sidebar-heading[data-active] {
+  height: 28px;
+  padding-left: 4px;
+  border-radius: 6px;
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
 .sidebar-heading button {
   display: grid;
   place-items: center;

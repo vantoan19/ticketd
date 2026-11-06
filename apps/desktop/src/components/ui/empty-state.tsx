@@ -58,9 +58,9 @@ export function EmptyState({
     <Empty
       data-slot="empty-state"
       role={role}
-      className={cn("gap-3 p-6 md:p-6", className)}
+      className={cn("gap-3 p-6 text-wrap md:p-6", className)}
     >
-      <EmptyHeader>
+      <EmptyHeader className="max-w-[380px] gap-1">
         <EmptyMedia variant="icon" className="mb-0 rounded-lg">
           <span aria-hidden="true" className="contents">
             {icon}
@@ -69,11 +69,11 @@ export function EmptyState({
         <EmptyTitle className="text-sm font-medium tracking-normal">
           {title}
         </EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
+        <EmptyDescription className="text-wrap">{description}</EmptyDescription>
       </EmptyHeader>
       {action && <EmptyContent>{action}</EmptyContent>}
       {footnote && (
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3">
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground [&_svg]:size-3">
           {footnote}
         </p>
       )}
