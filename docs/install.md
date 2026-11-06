@@ -28,6 +28,61 @@ Uninstall the desktop through the OS or package manager and remove the copied
 CLI executable. The workspace is stored separately in the user's application-data
 directory and is retained. Keep a backup before uninstalling or upgrading.
 
+## Agent CLI skill
+
+The CLI contains an offline operating guide, matching the executable's version:
+
+```sh
+ticketd skills get
+ticketd skills list
+ticketd skills get writes
+```
+
+`get` prints Markdown; `list` returns JSON with the CLI version and guide names.
+Topic guides cover tickets, context (Documents, Activities, and Plans), writes,
+sources, and workspace operations. Command-specific `--help` remains the argument
+reference. All `skills` commands work without opening, creating, or migrating the
+ticket workspace.
+
+Install the small discovery skill into an explicit directory. From a project
+checkout, choose the harness you use:
+
+```sh
+ticketd skills install .agents/skills/ticketd
+ticketd skills install .claude/skills/ticketd
+```
+
+The first location is for Codex, the second for Claude Code. For a personal
+installation shared across projects, use the same paths under your home directory.
+For example, in PowerShell:
+
+```powershell
+ticketd skills install "$env:USERPROFILE/.agents/skills/ticketd"
+ticketd skills install "$env:USERPROFILE/.claude/skills/ticketd"
+```
+
+In a POSIX shell, use `~/.agents/skills/ticketd` or `~/.claude/skills/ticketd`.
+Other harnesses can use the same portable `SKILL.md` in their skill directory,
+or load the guide directly with `ticketd skills get`.
+
+Re-running installation is harmless when the file is identical. If it differs,
+the command reports a conflict and leaves it intact. Review the existing file,
+then pass `--replace` to refresh it from this executable. Only `SKILL.md` is
+managed; adjacent files and project instructions are preserved. Restart or reload
+the harness if needed to discover an installed skill. Keep `ticketd` on that
+harness's PATH or supply its absolute executable path.
+
+The skill teaches CLI operations. It does not select a tracker, automatically
+create tickets, or impose a work lifecycle. If useful, add this capability pointer
+to your project's instructions:
+
+```text
+When interacting with ticketd, use the ticketd skill or load `ticketd skills get`.
+```
+
+Users and their other skills decide which work belongs in ticketd and how to
+organize it. Installing this skill does not change those choices.
+
 ## Signing and distribution
 
 The manual build workflow uploads unsigned artifacts for inspection and does not
