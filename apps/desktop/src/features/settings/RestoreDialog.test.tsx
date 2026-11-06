@@ -249,7 +249,7 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   ]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Show safety backups" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Safety backups/ }));
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText(safety)).toBeTruthy();
   expect(within(region).getByText("Before a restore")).toBeTruthy();
@@ -285,7 +285,7 @@ test("Show safety backups lists pre-migration and safety copies with their times
     },
   ]);
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
-  fireEvent.click(screen.getByRole("button", { name: "Show safety backups" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Safety backups/ }));
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText("/w/a.safety-1.sqlite3")).toBeTruthy();
   expect(within(region).getByText("Before an upgrade")).toBeTruthy();

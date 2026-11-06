@@ -271,7 +271,7 @@ export function Inbox({
         ))}
         {entries.length === 0 && filter === "all" && !error && (
           <EmptyState
-            className="pb-20"
+            className="p-0 pb-8 md:p-0 md:pb-8"
             icon={<InboxIcon />}
             title="Nothing in your Inbox"
             description="Changes on tickets you follow, and reminders that come due, appear here."

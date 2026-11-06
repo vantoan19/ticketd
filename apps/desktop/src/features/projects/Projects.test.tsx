@@ -94,9 +94,10 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
       within(dialog).getByRole("button", { name: "Change…" }),
     ).toBeTruthy(),
   );
-  expect(
-    within(dialog).getByRole("textbox", { name: "Project name" }),
-  ).toHaveProperty("value", "Mobile App");
+  expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveProperty(
+    "value",
+    "Mobile App",
+  );
   expect(create_).toHaveProperty("disabled", false);
   fireEvent.click(create_);
   await waitFor(() =>

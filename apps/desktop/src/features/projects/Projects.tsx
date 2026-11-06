@@ -23,11 +23,8 @@ import { useCopy } from "@/components/ui/use-copy";
 import { client, type Project } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
-import {
-  homeRelative,
-  nameFromFolder,
-  splitPathMiddle,
-} from "@/features/projects/paths";
+import { nameFromFolder } from "@/features/projects/paths";
+import { PathText } from "@/features/projects/PathText";
 import "./projects.css";
 
 type OpenDialog =
@@ -59,24 +56,6 @@ function ticketsLabel(count: TicketCount | undefined) {
   if (!count) return "";
   const noun = count.total === 1 ? "ticket" : "tickets";
   return `${count.total} ${noun} · ${count.open} open`;
-}
-
-/** A path on one line: "/private/…/8b654d0c/repo-api", with the full path on hover. */
-function PathText({ path }: { path: string }) {
-  const { lead, middle, tail } = splitPathMiddle(homeRelative(path));
-  return (
-    <span className="path-text" title={path}>
-      {lead && <span className="path-lead">{lead}</span>}
-      {middle && (
-        // Right-to-left puts the ellipsis at the start of the shrinking part;
-        // the inner span keeps the characters in reading order.
-        <span className="path-middle">
-          <bdo dir="ltr">{middle}</bdo>
-        </span>
-      )}
-      <span className="path-tail">{tail}</span>
-    </span>
-  );
 }
 
 /** An icon button that copies text and announces it. */
@@ -198,11 +177,13 @@ function CheckoutRow({
 /** Shows the chosen folder, or that none is chosen, beside the picker. */
 function FolderPicker({
   path,
+  label,
   title,
   hint,
   onChoose,
 }: {
   path: string;
+  label: string;
   title: string;
   hint?: string;
   onChoose: (path: string) => void;
@@ -219,7 +200,7 @@ function FolderPicker({
   }
   return (
     <Field>
-      <FieldLabel>Folder</FieldLabel>
+      <FieldLabel>{label}</FieldLabel>
       <div className="folder-picker">
         <Folder
           aria-hidden="true"
@@ -568,25 +549,29 @@ export function Projects({
         }
         onSubmit={() => void createProject()}
       >
-        <FolderPicker
-          path={newPath}
-          title="Choose the repository folder"
-          hint="Pick it in Finder or drop it here. It becomes the first checkout."
-          onChoose={setNewPath}
-        />
-        <Field>
-          <FieldLabel htmlFor="project-name">Project name</FieldLabel>
-          <Input
-            id="project-name"
-            value={newNameValue}
-            placeholder="Filled in from the folder name"
-            autoComplete="off"
-            aria-invalid={!!error}
-            aria-describedby={error ? "project-form-error" : undefined}
-            onChange={(e) => setNewName(e.target.value)}
+        <div className="project-form">
+          <FolderPicker
+            label="Repository folder"
+            path={newPath}
+            title="Choose the repository folder"
+            hint="Pick it in Finder or drop it here. It becomes the first checkout."
+            onChoose={setNewPath}
           />
-          {error && <FieldError id="project-form-error">{error}</FieldError>}
-        </Field>
+          <Field>
+            <FieldLabel htmlFor="project-name">Name</FieldLabel>
+            <Input
+              id="project-name"
+              className="project-name-input"
+              value={newNameValue}
+              placeholder="Filled in from the folder name"
+              autoComplete="off"
+              aria-invalid={!!error}
+              aria-describedby={error ? "project-form-error" : undefined}
+              onChange={(e) => setNewName(e.target.value)}
+            />
+            {error && <FieldError id="project-form-error">{error}</FieldError>}
+          </Field>
+        </div>
       </DialogShell>
       <DialogShell
         open={!!renaming}
@@ -637,6 +622,7 @@ export function Projects({
         onSubmit={() => void registerCheckout()}
       >
         <FolderPicker
+          label="Folder"
           path={checkoutPath}
           title="Choose the checkout folder"
           onChoose={(path) =>

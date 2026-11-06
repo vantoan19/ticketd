@@ -187,7 +187,6 @@
   align-items: center;
   gap: 8px;
   padding: 0 8px 0 16px;
-  background: var(--recessed);
   box-shadow: 0 -1px 0 0 var(--border);
   font-size: var(--text-caption);
   line-height: 16px;
@@ -230,4 +229,18 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+}
+
+/* New project: the two fields sit 16px apart (the shell's own gap is 8px). */
+.project-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.project-name-input::placeholder {
+  color: #8f8f8f;
+}
+.folder-picker .ui-button {
+  padding: 0 10px;
+  box-shadow: 0 0 0 1px #00000024;
 }
