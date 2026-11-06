@@ -195,9 +195,13 @@ impl Workspace {
             attachments: entries,
         };
         write_synced(&stage.path().join("content.md"), body.as_bytes())?;
+        let manifest = MarkdownExport {
+            directory: PathBuf::from("."),
+            ..result.clone()
+        };
         write_synced(
             &stage.path().join("manifest.json"),
-            &serde_json::to_vec_pretty(&result)?,
+            &serde_json::to_vec_pretty(&manifest)?,
         )?;
         attachments::sync_directory(&stage.path().join("files"))?;
         attachments::sync_directory(stage.path())?;

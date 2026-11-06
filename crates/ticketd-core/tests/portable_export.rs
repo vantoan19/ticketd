@@ -40,6 +40,13 @@ fn exports_repeated_snapshot_once_and_leaves_canonical_document_unchanged() {
         markdown
     );
     assert!(export.directory.join("manifest.json").is_file());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(export.directory.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        manifest["directory"], ".",
+        "the manifest must remain usable when the bundle moves"
+    );
 }
 
 #[test]

@@ -14,6 +14,8 @@ the whole subfolder when sharing, so relative file links remain usable.
 
 The JSON result and manifest have `format_version: 1`, `status` (`complete` or
 `partial`), `directory`, `markdown_path`, `manifest_path`, and `attachments`.
+The CLI result gives the created directory; the portable manifest uses `.` so
+its paths continue to resolve after the bundle moves.
 Each attachment entry records its `uri`, nullable `attachment_id`, `display_name`,
 nullable `original_filename`, and exactly one result: relative `path`,
 `external_url`, or an actionable `omission`. Missing/foreign references preserve
