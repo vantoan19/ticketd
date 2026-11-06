@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, File, Plus, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -212,6 +212,17 @@ function AttachmentPicker({
   const [attempt, setAttempt] = useState<UploadAttempt | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const insertion = useRef(0);
+  useEffect(
+    () => () => {
+      insertion.current += 1;
+    },
+    [],
+  );
+  function changeOpen(next: boolean) {
+    if (!next) insertion.current += 1;
+    onOpenChange(next);
+  }
   useEffect(() => {
     let current = true;
     if (open && tab === "existing")
@@ -228,6 +239,7 @@ function AttachmentPicker({
     };
   }, [open, tab]);
   async function upload(next: UploadAttempt) {
+    const currentInsertion = insertion.current;
     setAttempt(next);
     setBusy(true);
     setError("");
@@ -236,9 +248,10 @@ function AttachmentPicker({
         next.stored ?? (await attachments.upload(next.source, next.requestId));
       next = { ...next, stored: file };
       setAttempt(next);
+      if (insertion.current !== currentInsertion) return;
       await attachments.setTicket(reference, file.id, true, next.linkRequestId);
       setAttempt(null);
-      onOpenChange(false);
+      changeOpen(false);
       onChanged();
     } catch (reason) {
       setError(String(reason));
@@ -247,11 +260,12 @@ function AttachmentPicker({
     }
   }
   async function choose() {
+    const currentInsertion = insertion.current;
     setBusy(true);
     setError("");
     try {
       const source = await attachments.chooseFile();
-      if (source)
+      if (source && insertion.current === currentInsertion)
         await upload({
           source,
           requestId: crypto.randomUUID(),
@@ -282,7 +296,7 @@ function AttachmentPicker({
     }
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Attach file</DialogTitle>

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -18,6 +19,45 @@ afterEach(() => {
   cleanup();
   vi.resetAllMocks();
 });
+
+test.each(["close", "navigate"])(
+  "%s during upload retains the completed file without associating it",
+  async (action) => {
+    vi.mocked(open).mockResolvedValue("C:/trace.log");
+    let complete: ((value: typeof file) => void) | undefined;
+    const stored = new Promise<typeof file>((resolve) => {
+      complete = resolve;
+    });
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "import_attachment" ? stored : [],
+    );
+    const view = render(
+      <TicketAttachments
+        ticket={ticket}
+        revision={0}
+        refresh={async () => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+    fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "import_attachment",
+        expect.anything(),
+      ),
+    );
+    if (action === "close")
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    else view.unmount();
+    await act(async () => {
+      complete?.(file);
+    });
+    expect(invoke).not.toHaveBeenCalledWith(
+      "set_ticket_attachment",
+      expect.anything(),
+    );
+  },
+);
 const ticket = { reference: "T-1", id: "t1", trashed: false } as Ticket;
 const file = {
   id: "f1",
