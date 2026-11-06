@@ -524,10 +524,8 @@ function ExportCard() {
       </p>
       <div className="backup-footer">
         <p className="settings-hint">
-          An export is a readable JSON snapshot (workspace export format 1) that
-          includes Trash. It cannot be imported and is not a full backup; use
-          Backups to keep a restorable copy. Exports never replace an existing
-          file.
+          A readable JSON snapshot that includes Trash. It is not a backup and
+          cannot be imported.
         </p>
         <p className="settings-hint">From the command line:</p>
         <div className="settings-actions">

@@ -499,7 +499,8 @@
 
 /* The Plan actions menu is 237px wide, rows 30px (board E). */
 .plan-actions-menu {
-  width: 235px;
+  box-sizing: border-box;
+  width: 235.5px;
   padding: 6px;
   font-size: var(--text-code);
 }
@@ -570,7 +571,12 @@
   stroke-width: 1.75;
 }
 .plan-dependencies-card [data-slot="empty-icon"] svg {
-  stroke: var(--secondary-foreground);
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+/* Board E-2: the "Add blocker…" button is 34px tall. */
+.plan-dependencies-card [data-slot="empty-content"] .ui-button {
+  height: 34px;
 }
 .plan-dependencies-key-box {
   outline: none;

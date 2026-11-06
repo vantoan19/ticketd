@@ -468,6 +468,8 @@
   line-height: var(--text-ui-line);
 }
 .context-graph-card-title {
+  font-size: var(--text-code);
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -693,6 +695,12 @@
 .context-graph-main .context-graph-preview {
   background: var(--surface);
 }
+/* Frame G: Open ticket sits 12px higher than the panel's default inset. */
+@media (min-width: 701px) {
+  .context-graph-main .context-graph-preview {
+    padding-bottom: 28px;
+  }
+}
 .context-graph-stage {
   position: relative;
 }
@@ -757,7 +765,7 @@
 .context-graph-card {
   flex-direction: row;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 .context-graph-card-icon {
   display: flex;

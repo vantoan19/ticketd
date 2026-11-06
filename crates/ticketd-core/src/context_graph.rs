@@ -681,7 +681,7 @@ impl Workspace {
         if !anchors.is_empty() {
             let placeholders = vec!["?"; anchors.len()].join(",");
             let sql = format!(
-                "SELECT e.id, coalesce((SELECT tag_name FROM ticket_tags WHERE ticket_id=e.id ORDER BY tag_name LIMIT 1), (SELECT tag_name FROM document_tags WHERE document_id=e.id ORDER BY tag_name LIMIT 1)) FROM entities e WHERE e.id IN ({placeholders})"
+                "SELECT e.id, coalesce((SELECT group_concat(tag_name, ', ') FROM (SELECT tag_name FROM ticket_tags WHERE ticket_id=e.id ORDER BY tag_name)), (SELECT group_concat(tag_name, ', ') FROM (SELECT tag_name FROM document_tags WHERE document_id=e.id ORDER BY tag_name))) FROM entities e WHERE e.id IN ({placeholders})"
             );
             let mut stmt = tx.prepare(&sql)?;
             for row in stmt.query_map(rusqlite::params_from_iter(&anchors), |r| {
