@@ -177,8 +177,8 @@ export function TicketFilters(p: Props) {
             </PopoverTrigger>
             <PopoverContent
               className="filters-content"
-              side="right"
-              align="start"
+              side={dock?.anchor === null ? "bottom" : "right"}
+              align={dock?.anchor === null ? "end" : "start"}
               sideOffset={8}
               alignOffset={dock?.anchor ? 8 : 0}
               collisionPadding={8}
