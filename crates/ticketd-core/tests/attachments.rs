@@ -119,7 +119,7 @@ fn a_completed_upload_keeps_its_retry_id_reserved_after_database_failure() {
 }
 
 #[test]
-fn database_only_backups_and_restore_refuse_to_omit_or_replace_retained_snapshots() {
+fn backup_restore_and_safety_copy_preserve_retained_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let mut workspace = Workspace::open(&path).unwrap();
@@ -134,27 +134,29 @@ fn database_only_backups_and_restore_refuse_to_omit_or_replace_retained_snapshot
     workspace
         .set_ticket_attachment(&ticket.reference, &file.id, true)
         .unwrap();
-    let incomplete = dir.path().join("incomplete.sqlite3");
-    assert!(
-        workspace
-            .backup(&incomplete)
-            .unwrap_err()
-            .to_string()
-            .contains("attachment")
-    );
-    assert!(!incomplete.exists());
+    let complete = dir.path().join("complete.sqlite3");
+    workspace.backup(&complete).unwrap();
     drop(workspace);
-    assert!(
-        Workspace::restore(&path, &old)
-            .unwrap_err()
-            .to_string()
-            .contains("attachment")
-    );
+    let safety = Workspace::restore(&path, &old).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert!(workspace.attachments(50, 0).unwrap().is_empty());
+    drop(workspace);
+    Workspace::restore(&path, &safety).unwrap();
     let workspace = Workspace::open(&path).unwrap();
     assert_eq!(
         workspace.ticket_attachments(&ticket.reference).unwrap(),
-        [file]
+        std::slice::from_ref(&file)
     );
+    let exported = dir.path().join("restored.log");
+    workspace.export_attachment(&file.id, &exported).unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"retained");
+    drop(workspace);
+    let elsewhere = dir.path().join("elsewhere.sqlite3");
+    Workspace::restore(&elsewhere, &complete).unwrap();
+    let workspace = Workspace::open(&elsewhere).unwrap();
+    let exported = dir.path().join("elsewhere.log");
+    workspace.export_attachment(&file.id, &exported).unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"retained");
 }
 
 #[test]

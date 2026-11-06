@@ -770,7 +770,19 @@ The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
 Failed association reports the completed Attachment ID for explicit reuse.
 
-Database-only backup, restore, and migration safety-copy paths reject retained
-attachments until attachment-aware packaging is available. They must never
-report an incomplete database/file set as a complete backup. Existing supported
-attachment-free backups remain usable.
+Workspace backups include the database and every retained local file, including
+unused uploads, files referenced from Trash, recovery records and quarantined
+bytes until explicit purge. Concurrent uploads cannot produce a successful
+backup containing a local identity without its bytes. Backups never contain
+account credentials or implicitly download remote content; remote records retain
+references and metadata only.
+
+Desktop restore review and `ticketd inspect-backup <path>` check database
+integrity, retained file inventory and byte checksums, and report local file
+totals and remote-reference limits. Missing or damaged bytes block restoration
+before the current workspace changes. Restoring saves a complete safety copy
+first; failed replacement preserves the original database and files. Interrupted
+replacement is resolved before the workspace reopens. Existing supported
+attachment-free database-only backups remain usable. Attachment-bearing backups
+are versioned containers and must be restored through ticketd rather than opened
+as live workspace databases.

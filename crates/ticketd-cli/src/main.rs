@@ -225,6 +225,8 @@ enum Command {
     },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
+    /// Review backup integrity and retained local bytes as JSON without restoring
+    InspectBackup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
     RestoreWorkspace { path: String },
     /// Export a portable JSON snapshot to stdout or a new file
@@ -1155,6 +1157,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
         }
+        Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::Export { file } => {
             if let Some(path) = file {

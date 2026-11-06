@@ -236,12 +236,11 @@ impl Workspace {
         self.recover_uploads_locked(&root)
     }
 
-    pub(crate) fn database_only_backup_lock(&self) -> Result<File, Error> {
+    pub(crate) fn attachment_backup_lock(&self) -> Result<File, Error> {
         let root = self.attachment_directory()?;
         fs::create_dir_all(&root)?;
         let lock = lock_uploads(&root)?;
         self.recover_uploads_locked(&root)?;
-        reject_database_only_attachments(&self.connection)?;
         Ok(lock)
     }
 
@@ -410,7 +409,7 @@ fn attachment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Attachment> {
     })
 }
 
-fn lock_uploads(root: &Path) -> Result<File, Error> {
+pub(crate) fn lock_uploads(root: &Path) -> Result<File, Error> {
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
@@ -419,39 +418,6 @@ fn lock_uploads(root: &Path) -> Result<File, Error> {
         .open(root.join(".uploads.lock"))?;
     FileExt::lock_exclusive(&lock)?;
     Ok(lock)
-}
-
-// Replaced by attachment-aware packaging in the backup slice. Never report a
-// database-only copy as complete, including safety copies made during restore.
-pub(crate) fn reject_database_only_attachments(connection: &Connection) -> Result<(), Error> {
-    let recorded = crate::backup::table_exists(connection, "attachments")?
-        && connection.query_row("SELECT EXISTS(SELECT 1 FROM attachments)", [], |r| {
-            r.get::<_, bool>(0)
-        })?;
-    let completed_files = if let Some(path) = connection.path().filter(|p| !p.is_empty()) {
-        let mut path = std::ffi::OsString::from(path);
-        path.push(".attachments");
-        match fs::read_dir(PathBuf::from(path)) {
-            Ok(entries) => {
-                let mut completed = false;
-                for entry in entries {
-                    if Uuid::parse_str(&entry?.file_name().to_string_lossy()).is_ok() {
-                        completed = true;
-                        break;
-                    }
-                }
-                completed
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-            Err(e) => return Err(e.into()),
-        }
-    } else {
-        false
-    };
-    if recorded || completed_files {
-        return Err(Error::Backup("database-only backup/restore cannot preserve retained attachment snapshots; attachment-aware backup support is required. Export individual files for now".into()));
-    }
-    Ok(())
 }
 
 fn sync_directory(path: &Path) -> Result<(), Error> {

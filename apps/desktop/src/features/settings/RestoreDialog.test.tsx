@@ -102,6 +102,28 @@ test("the comparison names what will be replaced, current workspace first", asyn
   expect(headers).toEqual(["Replaces", "Current workspace", "This backup"]);
 });
 
+test("restore review reports complete retained local files and remote reference limits", async () => {
+  vi.mocked(workspaceClient.inspectBackup).mockResolvedValue({
+    ...valid,
+    attachment_content: {
+      container_version: 1,
+      local_snapshots: 2,
+      retained_files: 3,
+      retained_bytes: 1024,
+      remote_references: 1,
+    },
+  });
+  const dialog = await openReview();
+  await within(dialog).findByText("Local attachment bytes are complete.");
+  expect(within(dialog).getByText(/3 retained files/).textContent).toContain(
+    "1,024 bytes",
+  );
+  expect(within(dialog).getByText(/1 remote reference/).textContent).toContain(
+    "metadata only",
+  );
+  expect(replaceButton(dialog).disabled).toBe(false);
+});
+
 test("the review scrolls from the keyboard: its body is a focusable region", async () => {
   const dialog = await openReview();
   await within(dialog).findByText("Backup checked.");

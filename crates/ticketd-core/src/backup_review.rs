@@ -56,6 +56,20 @@ pub struct BackupInspection {
     pub check: BackupCheck,
     /// The workspace a restore would replace.
     pub current: WorkspaceSummary,
+    /// Present only after all database and attachment bytes pass verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachment_content: Option<AttachmentBackupContent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentBackupContent {
+    pub container_version: Option<u32>,
+    pub local_snapshots: u64,
+    /// Includes unused files and retained quarantine; excludes recovery manifests.
+    pub retained_files: u64,
+    pub retained_bytes: u64,
+    /// Metadata and references only; remote bytes are never implied.
+    pub remote_references: u64,
 }
 
 /// Why a copy of the workspace was kept next to it.
@@ -159,11 +173,6 @@ pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error
             tables: missing.into_iter().map(str::to_owned).collect(),
         });
     }
-    if let Err(error) = crate::attachments::reject_database_only_attachments(connection) {
-        return Ok(BackupCheck::Damaged {
-            reason: error.to_string(),
-        });
-    }
     let integrity: String =
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
     if integrity != "ok" {
@@ -175,6 +184,11 @@ pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error
     if statement.query([])?.next()?.is_some() {
         return Ok(BackupCheck::Damaged {
             reason: "foreign key check failed".into(),
+        });
+    }
+    if let Err(error) = crate::backup_archive::validate(connection) {
+        return Ok(BackupCheck::Damaged {
+            reason: error.to_string(),
         });
     }
     Ok(BackupCheck::Valid {
@@ -203,6 +217,7 @@ impl Workspace {
             (Some(own), Ok(other)) => own == other,
             _ => false,
         };
+        let mut attachment_content = None;
         let check = if is_current {
             BackupCheck::CurrentWorkspace
         } else {
@@ -210,7 +225,8 @@ impl Workspace {
                 backup,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
             )?;
-            match check_backup(&connection) {
+            connection.execute_batch("BEGIN")?;
+            let check = match check_backup(&connection) {
                 // Text or another format entirely, so there is nothing of ours to name.
                 Err(Error::Database(rusqlite::Error::SqliteFailure(failure, _)))
                     if failure.code == rusqlite::ErrorCode::NotADatabase =>
@@ -226,12 +242,17 @@ impl Workspace {
                     }
                 }
                 other => other?,
+            };
+            if matches!(check, BackupCheck::Valid { .. }) {
+                attachment_content = Some(crate::backup_archive::content(&connection)?);
             }
+            check
         };
         Ok(BackupInspection {
             path: backup.display().to_string(),
             check,
             current,
+            attachment_content,
         })
     }
 

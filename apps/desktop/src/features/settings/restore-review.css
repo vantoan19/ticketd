@@ -207,6 +207,19 @@
 .restore-compare td[data-differs="true"] {
   font-weight: 500;
 }
+@media (max-width: 480px) {
+  .restore-compare {
+    table-layout: fixed;
+  }
+  .restore-compare th:first-child {
+    width: 46%;
+  }
+  .restore-compare th,
+  .restore-compare td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
 .restore-notes {
   display: flex;
   flex-direction: column;
