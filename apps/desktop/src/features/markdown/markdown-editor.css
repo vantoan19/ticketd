@@ -113,6 +113,9 @@
   list-style-type: decimal;
   padding-left: 20px;
 }
+.rich-document li + li {
+  margin-top: 4px;
+}
 .rich-document li:has(> input[type="checkbox"]) {
   list-style: none;
   margin-left: -20px;
