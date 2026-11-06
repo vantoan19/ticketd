@@ -13,4 +13,16 @@ export const windowClient = {
       // No native window, or the platform ignores the request.
     }
   },
+
+  /**
+   * Paints the window background, which the transparent macOS title bar shows,
+   * in the app's canvas color. Best effort, like `setTheme`.
+   */
+  async setBackgroundColor(color: string) {
+    try {
+      await getCurrentWindow().setBackgroundColor(color);
+    } catch {
+      // No native window, or the platform ignores the request.
+    }
+  },
 };
