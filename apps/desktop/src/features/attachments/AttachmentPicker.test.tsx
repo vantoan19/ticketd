@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IDBFactory } from "fake-indexeddb";
 import {
   cleanup,
   fireEvent,
@@ -7,7 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AttachmentPicker } from "./AttachmentPicker";
@@ -19,6 +20,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
+});
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -32,6 +36,69 @@ const file = (name: string) => ({
   locator: `${name}/bytes/${name}`,
 });
 
+test("interrupted uploads recover original identities after remount and stay isolated by workspace", async () => {
+  let workspace = "first-workspace";
+  const requests: string[] = [];
+  let interrupted = true;
+  vi.mocked(open).mockResolvedValue(["C:/recover.txt", "C:/queued.txt"]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return workspace;
+    if (command === "attachment_upload_limit") return 104857600;
+    const params = args as Record<string, unknown>;
+    requests.push(String(params.requestId));
+    if (interrupted) return new Promise(() => {});
+    return file(String(params.source).split("/").at(-1)!);
+  });
+  const picked = vi
+    .fn<
+      (file: unknown, requestId: string, beforeId?: string) => Promise<void>
+    >()
+    .mockResolvedValue(undefined);
+  const mount = () =>
+    render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  const first = mount();
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  const original = requests[0];
+  first.unmount();
+  workspace = "another-workspace";
+  const another = mount();
+  await screen.findByText(/Up to/);
+  expect(screen.queryByRole("listitem", { name: "recover.txt" })).toBeNull();
+  another.unmount();
+  workspace = "first-workspace";
+  const recovered = mount();
+  const row = await screen.findByRole("listitem", { name: "recover.txt" });
+  expect(
+    await screen.findByRole("listitem", { name: "queued.txt" }),
+  ).toBeTruthy();
+  expect(picked).not.toHaveBeenCalled();
+  interrupted = false;
+  fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(picked).toHaveBeenCalled());
+  expect(requests).toEqual([original, original]);
+  recovered.unmount();
+  mount();
+  await screen.findByRole("listitem", { name: "queued.txt" });
+  expect(screen.queryByRole("listitem", { name: "recover.txt" })).toBeNull();
+});
+
+test("unavailable recovery storage blocks new uploads instead of losing retry identity", async () => {
+  vi.stubGlobal("indexedDB", undefined);
+  vi.mocked(open).mockResolvedValue(["C:/unsafe.txt"]);
+  vi.mocked(invoke).mockResolvedValue(104857600);
+  render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await screen.findByText(/No new uploads were started/);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "import_attachment"),
+  ).toBe(false);
+});
+
 test("mixed batches insert successes in selection order and retry the original failed operation before later files", async () => {
   vi.mocked(open).mockResolvedValue([
     "C:/first.txt",
@@ -40,6 +107,7 @@ test("mixed batches insert successes in selection order and retry the original f
   ]);
   let fails = true;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     const source = String((args as Record<string, unknown>)?.source);
     if (source.endsWith("bad.txt") && fails) throw new Error("Disk full");
@@ -98,6 +166,7 @@ test("canceling one file suppresses late insertion, preserves its completed snap
     complete = resolve;
   });
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "cancel_attachment_upload") return;
     const params = args as Record<string, unknown>;

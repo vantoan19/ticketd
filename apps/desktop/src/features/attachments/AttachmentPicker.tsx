@@ -81,8 +81,8 @@ export function AttachmentPicker({
     [],
   );
   const loadRecovery = useCallback(async () => {
-    // Native WebView/browser storage is durable; test/non-browser hosts have none.
-    if (typeof indexedDB === "undefined") return null;
+    if (typeof indexedDB === "undefined")
+      throw new Error("Local upload recovery storage is unavailable");
     recovery.current ??= UploadRecovery.open().then(async (journal) => {
       const records = await journal.list();
       attempts.current.push(

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IDBFactory } from "fake-indexeddb";
 import { createRef } from "react";
 import {
   cleanup,
@@ -8,7 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
@@ -34,6 +35,9 @@ beforeAll(async () => {
     },
   );
   await import("./MarkdownEditor");
+});
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
 });
 afterEach(() => {
   cleanup();
@@ -68,6 +72,7 @@ const ticket: Ticket = {
 function bridge() {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "import_attachment") return file;
     if (command === "attachment_uri") return uri;
