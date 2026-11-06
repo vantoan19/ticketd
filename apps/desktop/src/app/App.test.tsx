@@ -342,7 +342,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
   await openManageMenu("Manage projects", "All projects");
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
   });
   // Escape closes the dialog without discarding the draft.
@@ -356,7 +356,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
     "Draft",
   );

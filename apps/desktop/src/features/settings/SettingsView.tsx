@@ -8,6 +8,7 @@ import {
   Monitor,
   Moon,
   Sun,
+  ChevronDown,
 } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { client } from "@/lib/api/client";
@@ -18,7 +19,7 @@ import {
 } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { homeRelative } from "@/features/projects/paths";
+import { PathText } from "@/features/projects/PathText";
 import { APP_VERSION } from "@/lib/app-version";
 import {
   setPreference,
@@ -200,11 +201,11 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
     ["Format version", String(info.format_version)],
   ];
   return (
-    <SettingsCard id="location" title="Location">
-      <p className="settings-hint">
-        The desktop app and the ticketd command line read and write this same
-        workspace for your user.
-      </p>
+    <SettingsCard
+      id="location"
+      title="Location"
+      description="The desktop app and the ticketd command line read and write this workspace."
+    >
       {loadFailure && (
         <p role="alert" className="settings-failure">
           {loadFailure}
@@ -214,7 +215,7 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
         <>
           <div className="workspace-location">
             <p className="workspace-path" aria-label="Workspace path">
-              {homeRelative(info.path)}
+              <PathText path={info.path} />
             </p>
             <IconButton
               type="button"
@@ -265,6 +266,20 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
   const [restoring, setRestoring] = useState<string | null>(null);
   const [showSafety, setShowSafety] = useState(false);
   const [restoredCount, setRestoredCount] = useState(0);
+  const [safetyCount, setSafetyCount] = useState(0);
+  useEffect(() => {
+    let current = true;
+    void Promise.resolve(workspaceClient.safetyBackups())
+      .then((value) => {
+        if (current && Array.isArray(value)) setSafetyCount(value.length);
+      })
+      .catch(() => {
+        // The count is informational; the list reports its own failure.
+      });
+    return () => {
+      current = false;
+    };
+  }, [restoredCount]);
   useEffect(() => {
     let current = true;
     workspaceClient
@@ -334,6 +349,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     <SettingsCard
       id="backups"
       title="Backups"
+      description="A complete copy of the workspace, checked for integrity after it is saved. It never replaces an existing file."
       actions={
         <Button
           type="button"
@@ -352,10 +368,6 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
         </Button>
       }
     >
-      <p className="settings-hint">
-        A backup is a complete copy of the workspace, checked for integrity
-        after it is saved. It never replaces an existing file.
-      </p>
       <div className="backup-status" role="group" aria-label="Last backup">
         {last ? (
           <>
@@ -403,7 +415,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
         <div>
           <p className="settings-label">Restore from a backup</p>
           <p className="settings-hint">
-            Review what a backup contains before anything changes.
+            You review what the backup contains before anything changes.
           </p>
         </div>
         <Button
@@ -423,12 +435,14 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
           </p>
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="sm"
+            className="safety-toggle"
             aria-expanded={showSafety}
             onClick={() => setShowSafety((shown) => !shown)}
           >
-            {showSafety ? "Hide safety backups" : "Show safety backups"}
+            Safety backups · {safetyCount}
+            <ChevronDown aria-hidden="true" data-open={showSafety} />
           </Button>
         </div>
         {showSafety && <SafetyBackups key={restoredCount} />}

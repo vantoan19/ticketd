@@ -151,3 +151,14 @@
   width: 16px;
   height: 16px;
 }
+
+/* Empty Inbox: a lighter 20px glyph and a 13px button, as in board J. */
+.inbox [data-slot="empty-icon"] svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75;
+  color: var(--muted-foreground);
+}
+.inbox [data-slot="empty-state"] .ui-button {
+  font-size: var(--text-code);
+}
