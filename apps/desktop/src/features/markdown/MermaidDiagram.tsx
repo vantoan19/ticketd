@@ -15,7 +15,13 @@ import { CopySourceButton } from "./CopySourceButton";
 import { renderDiagram } from "./mermaid-renderer";
 import { useDarkTheme } from "@/lib/preferences";
 
-type Result = { source: string; dark: boolean; svg: string; error: string };
+type Result = {
+  source: string;
+  dark: boolean;
+  svg: string;
+  error: string;
+  detail?: string;
+};
 
 export function MermaidDiagram({ source }: { source: string }) {
   const dark = useDarkTheme();
@@ -37,6 +43,7 @@ export function MermaidDiagram({ source }: { source: string }) {
             source,
             dark,
             svg: "",
+            detail: reason instanceof Error ? reason.message : String(reason),
             error: `Could not render this diagram. ${reason instanceof Error && /limit|configuration|external resources/.test(reason.message) ? reason.message : "Check its source in the editor."}`,
           });
       },
@@ -148,7 +155,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           </DialogTrigger>
         </div>
         {current?.error ? (
-          <Alert variant="destructive">
+          <Alert variant="destructive" data-reason={current.detail}>
             <AlertDescription>{current.error}</AlertDescription>
           </Alert>
         ) : !current ? (
