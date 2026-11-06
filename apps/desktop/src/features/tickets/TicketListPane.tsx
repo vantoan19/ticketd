@@ -8,6 +8,8 @@ import {
   Ticket as TicketIcon,
   Trash2,
   X,
+  Columns3,
+  List,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -20,6 +22,9 @@ import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
+import { TicketBoard } from "./TicketBoard";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { setPreference } from "@/lib/preferences";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { Ticket } from "@/lib/api/client";
@@ -221,6 +226,23 @@ export function TicketListPane({
               </span>
             )}
           </p>
+          {!trash && !navigation.plan && (
+            <SegmentedControl
+              compact
+              aria-label="Ticket layout"
+              value={workspace.layout}
+              onValueChange={(value) => {
+                if (!setPreference("ticketLayout", value))
+                  workspace.setError(
+                    "Could not remember ticket layout. Check local storage and try again.",
+                  );
+              }}
+              options={[
+                { value: "list", label: "List", icon: <List /> },
+                { value: "board", label: "Board", icon: <Columns3 /> },
+              ]}
+            />
+          )}
           <IconButton
             className="list-refresh"
             label="Refresh"
@@ -281,13 +303,16 @@ export function TicketListPane({
 
           {refreshFailed && !queryError && (
             <p role="status" className="refresh-failed">
-              Can’t refresh. Showing the last list.{" "}
+              Can’t refresh. Showing the last{" "}
+              {workspace.layout === "board" ? "board" : "list"}.{" "}
               <Button variant="link" size="sm" onClick={() => void refresh()}>
                 Retry
               </Button>
             </p>
           )}
-          {queryError ? (
+          {workspace.layout === "board" ? (
+            <TicketBoard workspace={workspace} onOpen={onOpen} />
+          ) : queryError ? (
             <EmptyState
               role="alert"
               icon={<AlertCircle />}
@@ -488,38 +513,40 @@ export function TicketListPane({
               />
             </>
           )}
-          {!trash && (offset > 0 || total > PAGE_SIZE) && (
-            <div className="pagination">
-              <Button
-                variant="ghost"
-                size="sm"
-                ref={previousButton}
-                disabled={offset === 0}
-                onClick={() => {
-                  paged.current = "previous";
-                  setOffset(Math.max(0, offset - PAGE_SIZE));
-                }}
-              >
-                Previous
-              </Button>
-              <span>
-                {" "}
-                Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                ref={nextButton}
-                disabled={offset + tickets.length >= total}
-                onClick={() => {
-                  paged.current = "next";
-                  setOffset(offset + PAGE_SIZE);
-                }}
-              >
-                Next
-              </Button>
-            </div>
-          )}
+          {!trash &&
+            workspace.layout === "list" &&
+            (offset > 0 || total > PAGE_SIZE) && (
+              <div className="pagination">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  ref={previousButton}
+                  disabled={offset === 0}
+                  onClick={() => {
+                    paged.current = "previous";
+                    setOffset(Math.max(0, offset - PAGE_SIZE));
+                  }}
+                >
+                  Previous
+                </Button>
+                <span>
+                  {" "}
+                  Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  ref={nextButton}
+                  disabled={offset + tickets.length >= total}
+                  onClick={() => {
+                    paged.current = "next";
+                    setOffset(offset + PAGE_SIZE);
+                  }}
+                >
+                  Next
+                </Button>
+              </div>
+            )}
         </>
       }
       <MarkDuplicateDialog
@@ -527,7 +554,7 @@ export function TicketListPane({
         onOpenChange={setMarkingDuplicate}
         refresh={refresh}
       />
-      {showBulk && (
+      {showBulk && workspace.layout === "list" && (
         <BulkControls
           bulk={bulk}
           visible={visibleTickets}

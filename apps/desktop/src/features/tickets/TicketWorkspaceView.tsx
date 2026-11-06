@@ -127,14 +127,29 @@ export function TicketWorkspaceView({
     id: "ticketd.workspace.v2",
   });
   const focusPane = useRef<"detail" | "list" | null>(null);
+  const boardReturn = useRef<{ reference: string; scrollLeft: number } | null>(
+    null,
+  );
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
       document.getElementById("detail-heading")?.focus();
     if (focusPane.current === "list") {
-      const target = listRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
-      );
-      (target ?? document.getElementById("tickets-heading"))?.focus();
+      const returned =
+        workspace.layout === "board" ? boardReturn.current : null;
+      const board =
+        listRef.current?.querySelector<HTMLElement>(".ticket-board");
+      if (board && returned) board.scrollLeft = returned.scrollLeft;
+      const target =
+        (returned &&
+          listRef.current?.querySelector<HTMLButtonElement>(
+            `[data-board-reference="${returned.reference}"]`,
+          )) ||
+        listRef.current?.querySelector<HTMLButtonElement>(
+          '.board-card[aria-pressed="true"], .ticket-row[aria-pressed="true"]',
+        );
+      (target ?? document.getElementById("tickets-heading"))?.focus({
+        preventScroll: true,
+      });
     }
     focusPane.current = null;
   });
@@ -203,6 +218,8 @@ export function TicketWorkspaceView({
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
+            workspace.layout === "board" && "board-layout",
+            !selected && "board-unselected",
           )}
           data-filters-open={filtersOpen ? "" : undefined}
           defaultLayout={defaultLayout}
@@ -222,6 +239,13 @@ export function TicketWorkspaceView({
               planState={planState}
               onCreate={onCreate}
               onOpen={(reference) => {
+                if (workspace.layout === "board")
+                  boardReturn.current = {
+                    reference,
+                    scrollLeft:
+                      listRef.current?.querySelector(".ticket-board")
+                        ?.scrollLeft ?? 0,
+                  };
                 setPlanModeState("list");
                 setSelected(reference);
                 setNarrowDetail(true);
