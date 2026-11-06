@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { AlertTriangle, Check, Download, ExternalLink } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
@@ -91,7 +91,7 @@ export function ExportMarkdownButton({
             <DialogHeader>
               <DialogTitle>
                 {result.status === "partial"
-                  ? "Export complete with omissions"
+                  ? "Export partially complete"
                   : "Export complete"}
               </DialogTitle>
               <DialogDescription>
@@ -100,6 +100,37 @@ export function ExportMarkdownButton({
                 unchanged.
               </DialogDescription>
             </DialogHeader>
+            {result.status === "partial" && (
+              <p role="status" className="portable-export-warning">
+                <AlertTriangle size={16} aria-hidden="true" />
+                Some file bytes were omitted. Review the manifest before
+                sharing.
+              </p>
+            )}
+            <dl className="portable-export-summary" aria-label="Export summary">
+              {(
+                [
+                  [
+                    "Local files",
+                    result.attachments.filter((file) => file.path).length,
+                  ],
+                  [
+                    "External links",
+                    result.attachments.filter((file) => file.external_url)
+                      .length,
+                  ],
+                  [
+                    "Omissions",
+                    result.attachments.filter((file) => file.omission).length,
+                  ],
+                ] as const
+              ).map(([label, count]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>{count}</dd>
+                </div>
+              ))}
+            </dl>
             <p className="break-all text-sm">{result.directory}</p>
             <ul
               className="portable-export-files"
@@ -107,16 +138,25 @@ export function ExportMarkdownButton({
             >
               {result.attachments.map((file) => (
                 <li key={file.uri}>
-                  <strong>{file.display_name}</strong>
-                  <p>
-                    {file.omission ??
-                      (file.path
-                        ? `Copied · ${file.path}`
-                        : "External link · current provider content; no local bytes")}
-                  </p>
-                  {file.external_url && (
-                    <p className="break-all">{file.external_url}</p>
+                  {file.omission ? (
+                    <AlertTriangle size={16} aria-hidden="true" />
+                  ) : file.path ? (
+                    <Check size={16} aria-hidden="true" />
+                  ) : (
+                    <ExternalLink size={16} aria-hidden="true" />
                   )}
+                  <div>
+                    <strong>{file.display_name}</strong>
+                    <p>
+                      {file.omission ??
+                        (file.path
+                          ? `Copied · ${file.path}`
+                          : "External link · current provider content; no local bytes")}
+                    </p>
+                    {file.external_url && (
+                      <p className="break-all">{file.external_url}</p>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

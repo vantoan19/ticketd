@@ -49,7 +49,7 @@ test("exports selected content and reports partial omissions without changing it
   );
   expect(
     await screen.findByRole("dialog", {
-      name: "Export complete with omissions",
+      name: "Export partially complete",
     }),
   ).toBeTruthy();
   expect(screen.getByText("missing.log")).toBeTruthy();
