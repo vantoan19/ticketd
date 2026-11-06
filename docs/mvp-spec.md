@@ -93,7 +93,7 @@ The MVP does not include account sign-in, agent-provider integration, or subscri
 - Support editable, deletable, timestamped authored activities with required human-readable briefs and optional supporting Documents for progress and findings (section 16). Record the editing agent when supplied; do not store human names in the MVP. Attribution is descriptive, not verified identity or authorization.
 - Keep automatic ticket history separate from authored activities: record status, relationship, project/Plan membership, and trash/restore changes. Full body revision history is outside the MVP.
 - Tags use a shared workspace vocabulary; a ticket may have multiple tags independently of other relationships.
-- Priority, deadlines, attachments, and custom fields are not required for the MVP.
+- Priority, deadlines, and custom fields are not required for the MVP. File attachments extend the original MVP as described in section 17.
 
 ### 4.3. Hierarchical relationships, flat presentation
 
@@ -741,3 +741,36 @@ relationship additions/removals, atomic writes, and retry deduplication. Concurr
 writes to the same body may overwrite one another; conflict resolution and full
 body revision history remain outside this version. Technical storage and graph
 query decisions are recorded in ADR 0007.
+
+## 17. Local file attachments
+
+An Attachment is a reusable file identity within one workspace. Upload any regular
+file up to 100 MiB into managed local storage, independently of its ticket
+association. Preserve the original bytes, filename, size, and a separate display
+name. New uploads create new identities; moving or deleting the source file does
+not affect a completed snapshot. Local use works offline.
+
+The ticket property rail lists direct attachments separately from Documents.
+Attach file opens a native file picker; Existing files reuses recent uploads or
+an explicit Attachment ID. Metadata offers explicit Open file and Export file
+actions. Native open permits supported passive file formats; other types remain
+exportable. Opening never happens automatically. Detach from ticket removes only
+that direct association, preserving bytes and other uses, including recoverable
+trash. Files in linked Documents do not become direct ticket attachments.
+
+Completed uploads remain inspectable and reusable even if association fails or
+is abandoned. Retry uses the original upload request ID, including after a lost
+response or source deletion. A failed file copy never creates a valid Attachment.
+A failed database commit preserves completed bytes and a durable recovery record.
+An export refuses to replace an existing file and never leaves partial output.
+
+The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
+[--request-id ID]`, `attachment list [--ticket T-1]`, `attachment inspect <id>`,
+`attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
+`attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
+Failed association reports the completed Attachment ID for explicit reuse.
+
+Database-only backup, restore, and migration safety-copy paths reject retained
+attachments until attachment-aware packaging is available. They must never
+report an incomplete database/file set as a complete backup. Existing supported
+attachment-free backups remain usable.

@@ -25,6 +25,37 @@ enum ReminderCommand {
 }
 
 #[derive(Subcommand)]
+enum AttachmentCommand {
+    /// Store an immutable local snapshot; --request-id makes a lost response safe to retry
+    Add {
+        path: String,
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// List direct ticket attachments, or all workspace uploads including unused files
+    List {
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Inspect a workspace attachment by stable ID
+    Inspect { id: String },
+    /// Reuse an existing attachment on another ticket
+    Link { id: String, ticket: String },
+    /// Remove only this ticket's association, retaining the snapshot and all other uses
+    Detach { id: String, ticket: String },
+    /// Copy stored bytes to a new file without overwriting an existing destination
+    Export { id: String, path: String },
+}
+
+#[derive(Subcommand)]
 enum DocumentCommand {
     /// List what an item (Document, ticket or Plan ID) links to: its outgoing references
     References {
@@ -170,6 +201,11 @@ enum DocumentCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage workspace file snapshots without the desktop running
+    Attachment {
+        #[command(subcommand)]
+        command: AttachmentCommand,
+    },
     /// Capture and read Documents
     Document {
         #[command(subcommand)]
@@ -824,6 +860,7 @@ fn argument_help(parents: &[String], id: &str) -> Option<&'static str> {
     let group = parents.get(1).map(String::as_str).unwrap_or("");
     Some(match id {
         "id" => match group {
+            "attachment" => "The Attachment ID (see `attachment list`)",
             "document" => "The Document ID (see `document recent` or `document search`)",
             "plan" => "The Plan ID (see `plan list`)",
             "project" => "The project ID (see `project list`)",
@@ -945,6 +982,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         None => Workspace::open_default()?,
     };
     let text = match args.command {
+        Command::Attachment { command } => attachment_command(&mut workspace, command)?,
         Command::Document { command } => match command {
             DocumentCommand::References { id, offset } => {
                 serde_json::to_string(&workspace.context_links(&id, 100, offset)?)?
@@ -1803,6 +1841,56 @@ fn main() {
         eprintln!("error: {error}{hint}");
         std::process::exit(1);
     }
+}
+
+fn attachment_command(
+    workspace: &mut Workspace,
+    command: AttachmentCommand,
+) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(match command {
+        AttachmentCommand::Add {
+            path,
+            ticket,
+            name,
+            request_id,
+        } => {
+            let result = workspace.write(
+                request_id.as_deref(),
+                WriteRequest::ImportAttachment {
+                    source: path,
+                    display_name: name,
+                },
+            )?;
+            let WriteResult::Attachment(file) = result else {
+                return Err("unexpected attachment result".into());
+            };
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket, &file.id, true).map_err(|error| {
+                    format!("snapshot stored as {}; ticket association failed: {error}. Reuse it with `ticketd attachment link {} {ticket}`", file.id, file.id)
+                })?;
+            }
+            serde_json::to_string(&file)?
+        }
+        AttachmentCommand::List {
+            ticket,
+            limit,
+            offset,
+        } => serde_json::to_string(&match ticket {
+            Some(ticket) => workspace.ticket_attachments(&ticket)?,
+            None => workspace.attachments(limit, offset)?,
+        })?,
+        AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
+        AttachmentCommand::Link { id, ticket } => {
+            serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?
+        }
+        AttachmentCommand::Detach { id, ticket } => {
+            serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, false)?)?
+        }
+        AttachmentCommand::Export { id, path } => {
+            workspace.export_attachment(&id, &path)?;
+            serde_json::to_string(&serde_json::json!({ "id": id, "path": path }))?
+        }
+    })
 }
 
 fn parse_relationship_kind(

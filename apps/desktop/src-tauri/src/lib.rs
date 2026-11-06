@@ -1,4 +1,5 @@
 //! Desktop adapter for the shared ticketd core.
+mod attachment_commands;
 mod cli_status;
 
 use ticketd_core::{
@@ -1393,6 +1394,13 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            attachment_commands::import_attachment,
+            attachment_commands::list_attachments,
+            attachment_commands::inspect_attachment,
+            attachment_commands::ticket_attachments,
+            attachment_commands::set_ticket_attachment,
+            attachment_commands::export_attachment,
+            attachment_commands::open_attachment,
             context_link_markdown,
             document_context_links,
             ticket_from_document,

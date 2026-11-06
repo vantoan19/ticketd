@@ -62,6 +62,8 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachments;
+pub use attachments::{Attachment, AttachmentKind, DEFAULT_ATTACHMENT_LIMIT};
 mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
@@ -71,10 +73,12 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 46;
+pub const FORMAT_VERSION: i64 = 47;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("attachment: {0}")]
+    Attachment(String),
     #[error("ticket '{0}' was changed elsewhere since it was loaded")]
     TicketChanged(String),
     #[error("document '{0}' was changed elsewhere since it was loaded")]
@@ -690,6 +694,9 @@ impl Workspace {
         }
         if version < 46 {
             ticket_documents::migrate(&transaction)?;
+        }
+        if version < 47 {
+            attachments::migrate(&transaction)?;
         }
         transaction.commit()?;
         Ok(())

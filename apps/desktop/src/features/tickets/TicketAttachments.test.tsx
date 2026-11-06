@@ -1,0 +1,128 @@
+// @vitest-environment jsdom
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { TicketAttachments } from "./TicketAttachments";
+import type { Ticket } from "@/lib/api/client";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+const ticket = { reference: "T-1", id: "t1", trashed: false } as Ticket;
+const file = {
+  id: "f1",
+  display_name: "Trace",
+  original_filename: "trace.log",
+  size_bytes: 7,
+  kind: "local_snapshot",
+  locator: "f1/bytes/trace.log",
+};
+
+test("the rail uploads through the native picker, then associates the stored snapshot", async () => {
+  vi.mocked(open).mockResolvedValue("C:/trace.log");
+  let linked = false;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "ticket_attachments") return linked ? [file] : [];
+    if (command === "import_attachment") return file;
+    if (command === "set_ticket_attachment") {
+      linked = true;
+      return ticket;
+    }
+    return [];
+  });
+  render(
+    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+  await screen.findByRole("button", { name: "Trace" });
+  expect(open).toHaveBeenCalledWith(
+    expect.objectContaining({ directory: false, multiple: false }),
+  );
+  expect(invoke).toHaveBeenCalledWith("import_attachment", {
+    source: "C:/trace.log",
+    requestId: expect.any(String),
+  });
+  expect(invoke).toHaveBeenCalledWith("set_ticket_attachment", {
+    reference: "T-1",
+    attachmentId: "f1",
+    present: true,
+    requestId: expect.any(String),
+  });
+  expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
+});
+
+test("a failed association retains the completed upload and retry links the same ID", async () => {
+  vi.mocked(open).mockResolvedValue("C:/trace.log");
+  let attempts = 0;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "ticket_attachments") return attempts > 1 ? [file] : [];
+    if (command === "import_attachment") return file;
+    if (command === "set_ticket_attachment") {
+      if (++attempts === 1) throw new Error("database busy");
+      return ticket;
+    }
+    return [];
+  });
+  render(
+    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+  await screen.findByText(/Stored as f1/);
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", { name: "Trace" });
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "import_attachment"),
+  ).toHaveLength(1);
+  const links = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "set_ticket_attachment");
+  expect(links[1]?.[1]).toEqual(links[0]?.[1]);
+});
+
+test("metadata offers explicit native open, byte export and reference-only detach", async () => {
+  vi.mocked(save).mockResolvedValue("C:/export.log");
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "ticket_attachments"
+      ? [file]
+      : command === "set_ticket_attachment"
+        ? ticket
+        : null,
+  );
+  render(
+    <TicketAttachments ticket={ticket} revision={0} refresh={async () => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
+  expect(screen.getByText("trace.log")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("open_attachment", { id: "f1" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Export file" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("export_attachment", {
+      id: "f1",
+      destination: "C:/export.log",
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Detach from ticket" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "set_ticket_attachment",
+      expect.objectContaining({ attachmentId: "f1", present: false }),
+    ),
+  );
+});

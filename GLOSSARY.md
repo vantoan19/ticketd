@@ -88,6 +88,9 @@ Reusable context: a thought, draft, spec, knowledge, or supporting detail. A Doc
 **Activity details**:
 A Document created as the supporting detail of an authored Activity. Its originating Activity initially excludes it from ordinary browsing. Keep in Documents or designation as a Plan spec makes it visible without changing identity or provenance; an AI tag does not control visibility. Linking an existing standalone Document does not change its visibility. Deleting the originating Activity leaves the Document intact and discoverable in ordinary browsing.
 
+**Attachment**:
+A workspace-scoped file identity with a display name, original filename, available metadata, and storage locator. It is distinct from a Document and Implementation evidence. A local Attachment is an immutable workspace-managed snapshot; uploading a revision creates a new identity. Reusing or detaching an Attachment changes references without replacing or deleting its bytes. Files inside linked Documents stay associated with those Documents.
+
 **Context graph**:
 A bounded view of explicit relationships among tickets, Documents, and Plans. Activities explain ticket-to-supporting-Document connections but are not separate graph nodes. Tags classify or color items without implying pairwise links or blocking dependencies.
 

@@ -1,0 +1,87 @@
+.ticket-attachments {
+  align-self: stretch;
+  min-width: 0;
+  width: 100%;
+}
+.ticket-attachments ul,
+.attachment-existing ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+  font-size: var(--text-ui);
+}
+.attachment-row:hover {
+  background: var(--accent);
+}
+.attachment-row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.attachment-row > svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.attachment-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-row small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.attachment-hint {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.attachment-upload {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.attachment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.attachment-actions input {
+  min-width: 120px;
+  flex: 1;
+}
+.attachment-metadata {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: var(--text-ui);
+}
+.attachment-metadata dt {
+  color: var(--muted-foreground);
+}
+.attachment-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.attachment-existing ul {
+  max-height: 260px;
+  overflow: auto;
+}

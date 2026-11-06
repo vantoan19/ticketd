@@ -12,6 +12,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    ImportAttachment {
+        source: String,
+        display_name: Option<String>,
+    },
+    SetTicketAttachment {
+        reference: String,
+        attachment_id: String,
+        present: bool,
+    },
     CreateTicketFromDocument {
         id: String,
         title: String,
@@ -232,6 +241,7 @@ pub enum WriteRequest {
 // Results are owned at the public boundary; boxing tickets would complicate every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
+    Attachment(crate::Attachment),
     Document(Document),
     Ticket(Ticket),
     Tickets(Vec<Ticket>),
@@ -250,6 +260,21 @@ impl Workspace {
         request_id: Option<&str>,
         request: WriteRequest,
     ) -> Result<WriteResult, Error> {
+        if let WriteRequest::ImportAttachment {
+            source,
+            display_name,
+        } = &request
+        {
+            let generated = uuid::Uuid::new_v4().to_string();
+            return self
+                .import_attachment(
+                    request_id.unwrap_or(&generated),
+                    source,
+                    display_name.as_deref(),
+                )
+                .map(WriteResult::Attachment);
+        }
+        self.recover_uploads()?;
         let canonical = serde_json::to_string(&request)?;
         self.connection.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
@@ -294,6 +319,20 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::ImportAttachment { .. } => {
+                return Err(Error::Attachment(
+                    "uploads must run outside a database transaction".into(),
+                ));
+            }
+            WriteRequest::SetTicketAttachment {
+                reference,
+                attachment_id,
+                present,
+            } => WriteResult::Ticket(self.set_ticket_attachment(
+                &reference,
+                &attachment_id,
+                present,
+            )?),
             WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
                 self.create_ticket_from_document_following(&id, &title, follow)?,
             ),

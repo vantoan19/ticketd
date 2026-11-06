@@ -54,7 +54,9 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 42] = [
+const TABLES: [(&str, i64); 44] = [
+    ("attachments", 47),
+    ("ticket_attachments", 47),
     ("entities", 31),
     ("documents", 31),
     ("document_opens", 31),
@@ -203,6 +205,7 @@ impl Workspace {
     /// Returns whether the backup was also recorded as the last backup; the
     /// backup itself is saved either way.
     pub fn backup(&self, path: impl AsRef<Path>) -> Result<bool, Error> {
+        let _uploads = self.database_only_backup_lock()?;
         let path = path.as_ref();
         drop(create_new(path)?);
         let result = (|| {
@@ -256,6 +259,7 @@ impl Workspace {
         connection: &Connection,
         workspace: &Path,
     ) -> Result<PathBuf, Error> {
+        crate::attachments::reject_database_only_attachments(connection)?;
         let mut name = workspace.as_os_str().to_os_string();
         name.push(format!("{PRE_MIGRATION_MARKER}{}.sqlite3", Uuid::new_v4()));
         let path = PathBuf::from(name);
@@ -311,6 +315,7 @@ impl Workspace {
         if current_version > FORMAT_VERSION {
             return Err(Error::NewerSchema(current_version));
         }
+        crate::attachments::reject_database_only_attachments(&current)?;
         let mut name = workspace.as_os_str().to_os_string();
         name.push(format!("{SAFETY_MARKER}{}.sqlite3", Uuid::new_v4()));
         let safety = PathBuf::from(name);

@@ -159,6 +159,11 @@ pub(crate) fn check_backup(connection: &Connection) -> Result<BackupCheck, Error
             tables: missing.into_iter().map(str::to_owned).collect(),
         });
     }
+    if let Err(error) = crate::attachments::reject_database_only_attachments(connection) {
+        return Ok(BackupCheck::Damaged {
+            reason: error.to_string(),
+        });
+    }
     let integrity: String =
         connection.pragma_query_value(None, "integrity_check", |row| row.get(0))?;
     if integrity != "ok" {

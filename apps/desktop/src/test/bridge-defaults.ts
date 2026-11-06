@@ -24,6 +24,8 @@ export function bridgeDefault(
     case "activity_feed":
     case "ticket_history":
     case "list_evidence":
+    case "ticket_attachments":
+    case "list_attachments":
     case "ticket_backlinks":
     case "inbox":
     case "safety_backups":

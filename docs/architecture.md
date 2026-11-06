@@ -42,6 +42,38 @@ The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, and `a
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 
+## Local attachment storage
+
+The public `Workspace` interface owns snapshot upload, metadata inspection,
+direct ticket associations, native-open resolution, and byte export. The CLI and
+Tauri adapters share those workflows. Attachments have their own typed records
+and association table, separate from Documents, source connectors, and
+Implementation evidence. The implemented storage kind is `local_snapshot`;
+there is no remote deletion operation.
+
+Snapshots live in `<database-path>.attachments/<attachment-id>/bytes/` beside
+the workspace database. Core upload validates a regular file and the 100 MiB
+bound, writes into a temporary directory, syncs bytes and a recovery manifest,
+then publishes the directory before committing metadata and a replayable result
+in SQLite. A file lock serializes uploads and recovery across processes. A
+completed manifest survives database failure; listing, inspection, or retry
+reconciles it without copying source bytes again. Incomplete staging directories
+are never exposed as valid attachments. Ticket association is a separate
+retryable transaction, so failed or abandoned insertion retains the upload.
+
+Upload and ordinary write request IDs share the existing workspace-wide replay
+namespace. Exact source path and supplied display name define upload request
+equality; retries return original metadata without requiring the source file.
+Native open resolves only a stored, complete snapshot and permits passive file
+formats; arbitrary types can be exported explicitly without executing them.
+Exports publish synced temporary output without replacing an existing file.
+
+Until attachment-aware backup packaging is implemented, database-only backup,
+restore, and migration safety copies reject attachment-bearing workspaces.
+Backup holds the upload lock while checking and copying, so a concurrent upload
+cannot turn an attachment-free copy into an apparently complete partial backup.
+Supported attachment-free and older backups retain their existing behavior.
+
 ## Document editing
 
 Rich document editing uses Plate, with Markdown remaining canonical across storage and CLI operations. Editor document trees remain transient UI state; CodeMirror provides source editing, and Mermaid renders diagrams locally. See [Plate editing with canonical Markdown](adr/0005-plate-editor-with-canonical-markdown.md) for fidelity and integration boundaries.

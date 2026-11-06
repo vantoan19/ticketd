@@ -1,0 +1,376 @@
+use ticketd_core::Workspace;
+
+#[test]
+fn snapshots_survive_source_deletion_reopen_and_detaching_one_ticket() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("trace.bin");
+    std::fs::write(&source, [0, 255, 13, 10, 42]).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let first = workspace.create_ticket("Investigate").unwrap();
+    let second = workspace.create_ticket("Verify").unwrap();
+    let file = workspace
+        .import_attachment("upload-1", &source, Some("Diagnostic trace"))
+        .unwrap();
+    workspace
+        .set_ticket_attachment(&first.reference, &file.id, true)
+        .unwrap();
+    workspace
+        .set_ticket_attachment(&second.reference, &file.id, true)
+        .unwrap();
+    std::fs::remove_file(&source).unwrap();
+    drop(workspace);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment(&file.id).unwrap(), file);
+    assert_eq!(file.original_filename, "trace.bin");
+    assert_eq!(file.size_bytes, 5);
+    assert_eq!(
+        workspace
+            .import_attachment("upload-1", &source, Some("Diagnostic trace"))
+            .unwrap(),
+        file
+    );
+    workspace
+        .set_ticket_attachment(&first.reference, &file.id, false)
+        .unwrap();
+    assert!(
+        workspace
+            .ticket_attachments(&first.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        workspace.ticket_attachments(&second.reference).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(
+        workspace.attachments(50, 0).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    let exported = dir.path().join("export.bin");
+    workspace.export_attachment(&file.id, &exported).unwrap();
+    assert_eq!(std::fs::read(&exported).unwrap(), [0, 255, 13, 10, 42]);
+    assert!(workspace.export_attachment(&file.id, &exported).is_err());
+}
+
+#[test]
+fn completed_bytes_and_identity_survive_a_failed_database_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join(".ticketd-upload.json");
+    std::fs::write(&source, b"original valid bytes").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("PRAGMA foreign_keys=ON;
+        CREATE TABLE commit_failure (id TEXT REFERENCES tickets(id) DEFERRABLE INITIALLY DEFERRED);
+        CREATE TRIGGER fail_upload_commit AFTER INSERT ON attachments BEGIN INSERT INTO commit_failure VALUES ('missing-ticket'); END;").unwrap();
+    assert!(
+        workspace
+            .import_attachment("recover-upload", &source, None)
+            .is_err()
+    );
+    std::fs::remove_file(&source).unwrap();
+    faults
+        .execute_batch("DROP TRIGGER fail_upload_commit; DROP TABLE commit_failure;")
+        .unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    let recovered = workspace.attachments(50, 0).unwrap();
+    assert_eq!(recovered.len(), 1);
+    let retried = workspace
+        .import_attachment("recover-upload", &source, None)
+        .unwrap();
+    assert_eq!(retried, recovered[0]);
+    let export = dir.path().join("recovered.json");
+    workspace.export_attachment(&retried.id, &export).unwrap();
+    assert_eq!(std::fs::read(export).unwrap(), b"original valid bytes");
+}
+
+#[test]
+fn a_completed_upload_keeps_its_retry_id_reserved_after_database_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"keep these bytes").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TRIGGER fail_upload BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'failed metadata save'); END;").unwrap();
+    assert!(
+        workspace
+            .import_attachment("reserved", &source, None)
+            .is_err()
+    );
+    faults.execute_batch("DROP TRIGGER fail_upload;").unwrap();
+    let other = ticketd_core::WriteRequest::CreateTicket {
+        title: "Different operation".into(),
+        project_id: None,
+    };
+    assert!(matches!(
+        workspace.write(Some("reserved"), other),
+        Err(ticketd_core::Error::RequestConflict(_))
+    ));
+    let file = workspace
+        .import_attachment("reserved", &source, None)
+        .unwrap();
+    let export = dir.path().join("export.log");
+    workspace.export_attachment(&file.id, &export).unwrap();
+    assert_eq!(std::fs::read(export).unwrap(), b"keep these bytes");
+}
+
+#[test]
+fn database_only_backups_and_restore_refuse_to_omit_or_replace_retained_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Keep my file").unwrap();
+    let old = dir.path().join("before.sqlite3");
+    workspace.backup(&old).unwrap();
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"retained").unwrap();
+    let file = workspace
+        .import_attachment("backup-file", &source, None)
+        .unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    let incomplete = dir.path().join("incomplete.sqlite3");
+    assert!(
+        workspace
+            .backup(&incomplete)
+            .unwrap_err()
+            .to_string()
+            .contains("attachment")
+    );
+    assert!(!incomplete.exists());
+    drop(workspace);
+    assert!(
+        Workspace::restore(&path, &old)
+            .unwrap_err()
+            .to_string()
+            .contains("attachment")
+    );
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        [file]
+    );
+}
+
+#[test]
+fn revised_uploads_create_new_identities_and_retry_ids_cannot_change_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let source = dir.path().join("report.txt");
+    std::fs::write(&source, b"version one").unwrap();
+    let original = workspace
+        .import_attachment("original", &source, None)
+        .unwrap();
+    std::fs::write(&source, b"version two").unwrap();
+    let revision = workspace
+        .import_attachment("revision", &source, None)
+        .unwrap();
+    assert_ne!(original.id, revision.id);
+    assert_eq!(
+        workspace
+            .import_attachment("original", &source, None)
+            .unwrap(),
+        original
+    );
+    assert!(matches!(
+        workspace.import_attachment("original", &source, Some("Changed")),
+        Err(ticketd_core::Error::RequestConflict(_))
+    ));
+    workspace
+        .write(
+            Some("already-used"),
+            ticketd_core::WriteRequest::CreateTicket {
+                title: "Other operation".into(),
+                project_id: None,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        workspace.import_attachment("already-used", &source, None),
+        Err(ticketd_core::Error::RequestConflict(_))
+    ));
+    for (file, expected) in [(original, b"version one"), (revision, b"version two")] {
+        let export = dir.path().join(&file.id);
+        workspace.export_attachment(&file.id, &export).unwrap();
+        assert_eq!(std::fs::read(export).unwrap(), expected);
+    }
+}
+
+#[test]
+fn failed_association_keeps_the_snapshot_reusable_and_retry_changes_only_one_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Investigate").unwrap();
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"valid bytes").unwrap();
+    let file = workspace
+        .import_attachment("stored", &source, None)
+        .unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TRIGGER fail_association BEFORE INSERT ON ticket_attachments BEGIN SELECT RAISE(ABORT, 'simulated failed association'); END;").unwrap();
+    let link = || ticketd_core::WriteRequest::SetTicketAttachment {
+        reference: ticket.reference.clone(),
+        attachment_id: file.id.clone(),
+        present: true,
+    };
+    assert!(workspace.write(Some("association"), link()).is_err());
+    assert!(
+        workspace
+            .ticket_attachments(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        workspace.attachments(50, 0).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    faults
+        .execute_batch("DROP TRIGGER fail_association;")
+        .unwrap();
+    std::fs::remove_file(source).unwrap();
+    let result = workspace.write(Some("association"), link()).unwrap();
+    assert_eq!(
+        workspace.write(Some("association"), link()).unwrap(),
+        result
+    );
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    let export = dir.path().join("export.log");
+    workspace.export_attachment(&file.id, &export).unwrap();
+    assert_eq!(std::fs::read(export).unwrap(), b"valid bytes");
+}
+
+#[test]
+fn invalid_or_oversized_files_and_filesystem_failure_never_create_valid_attachments() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = dir.path().join("trace.bin");
+    let file = std::fs::File::create(&source).unwrap();
+    file.set_len(ticketd_core::DEFAULT_ATTACHMENT_LIMIT + 1)
+        .unwrap();
+    drop(file);
+    assert!(
+        workspace
+            .import_attachment("size", &source, None)
+            .unwrap_err()
+            .to_string()
+            .contains("100 MiB")
+    );
+    assert!(
+        workspace
+            .import_attachment("directory", dir.path(), None)
+            .is_err()
+    );
+    assert!(
+        workspace
+            .import_attachment("missing", dir.path().join("absent"), None)
+            .is_err()
+    );
+    assert!(workspace.attachments(50, 0).unwrap().is_empty());
+    std::fs::write(&source, b"valid source").unwrap();
+    let root = dir.path().join("workspace.sqlite3.attachments");
+    std::fs::remove_file(root.join(".uploads.lock")).unwrap();
+    std::fs::remove_dir(&root).unwrap();
+    std::fs::write(&root, b"existing valid file").unwrap();
+    assert!(
+        workspace
+            .import_attachment("file-retry", &source, None)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&root).unwrap(), b"existing valid file");
+    assert_eq!(std::fs::read(&source).unwrap(), b"valid source");
+    std::fs::remove_file(root).unwrap();
+    let file = workspace
+        .import_attachment("file-retry", &source, None)
+        .unwrap();
+    assert_eq!(workspace.attachments(50, 0).unwrap(), [file]);
+}
+
+#[test]
+fn concurrent_workspace_instances_retry_one_upload_without_duplicating_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    drop(Workspace::open(&path).unwrap());
+    let source = dir.path().join("concurrent.txt");
+    std::fs::write(&source, b"concurrent bytes").unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+    let workers: Vec<_> = (0..4)
+        .map(|_| {
+            let path = path.clone();
+            let source = source.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let mut workspace = Workspace::open(path).unwrap();
+                barrier.wait();
+                workspace
+                    .import_attachment("same-upload", source, None)
+                    .unwrap()
+            })
+        })
+        .collect();
+    let files: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    assert!(files.iter().all(|file| file == &files[0]));
+    let workspace = Workspace::open(path).unwrap();
+    assert_eq!(workspace.attachments(50, 0).unwrap(), [files[0].clone()]);
+}
+
+#[test]
+fn missing_bytes_retain_identity_and_references_but_cannot_be_exported_or_newly_linked() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("program.exe");
+    std::fs::write(&source, b"arbitrary file").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let ticket = workspace.create_ticket("Keep reference").unwrap();
+    let file = workspace
+        .import_attachment("arbitrary", &source, None)
+        .unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    assert!(
+        workspace
+            .attachment_open_path(&file.id)
+            .unwrap_err()
+            .to_string()
+            .contains("export")
+    );
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&file.locator),
+    )
+    .unwrap();
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(workspace.attachment(&file.id).unwrap(), file);
+    let export = dir.path().join("export.exe");
+    assert!(workspace.export_attachment(&file.id, &export).is_err());
+    assert!(!export.exists());
+    let other = workspace.create_ticket("Another ticket").unwrap();
+    assert!(
+        workspace
+            .set_ticket_attachment(&other.reference, &file.id, true)
+            .is_err()
+    );
+    assert!(
+        workspace
+            .ticket_attachments(&other.reference)
+            .unwrap()
+            .is_empty()
+    );
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, false)
+        .unwrap();
+}

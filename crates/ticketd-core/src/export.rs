@@ -12,6 +12,11 @@ impl Workspace {
         let mut result = Map::new();
         result.insert("format_version".into(), Value::from(2));
         for (table, columns) in [
+            (
+                "attachments",
+                "id, display_name, original_filename, size_bytes, kind, locator",
+            ),
+            ("ticket_attachments", "ticket_id, attachment_id"),
             ("entities", "id, kind"),
             (
                 "documents",
