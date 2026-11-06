@@ -161,6 +161,7 @@ export function AttachmentLibrary({
         </>
       )}
       <AttachmentPicker
+        purpose="store"
         open={picker}
         onOpenChange={(open) => {
           setPicker(open);

@@ -39,9 +39,11 @@ export function AttachmentPicker({
   onPick,
   capture,
   ticketReference = null,
+  purpose = "insert",
 }: {
   open: boolean;
   ticketReference?: string | null | undefined;
+  purpose?: "insert" | "store";
   onOpenChange: (open: boolean) => void;
   onPick: (
     file: Attachment,
@@ -299,21 +301,27 @@ export function AttachmentPicker({
     <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent ref={dropTarget} className="attachment-picker">
         <DialogHeader>
-          <DialogTitle>Attach file</DialogTitle>
+          <DialogTitle>
+            {purpose === "store" ? "Add files" : "Attach file"}
+          </DialogTitle>
           <DialogDescription>
-            Attach local snapshots or reuse an existing workspace file.
+            {purpose === "store"
+              ? "Store files in this workspace for reuse across tickets and Documents."
+              : "Attach local snapshots or reuse an existing workspace file."}
           </DialogDescription>
         </DialogHeader>
-        <SegmentedControl
-          aria-label="Attachment source"
-          value={tab}
-          onValueChange={setTab}
-          options={[
-            { value: "upload", label: "Upload", disabled: busy },
-            { value: "existing", label: "Existing files", disabled: busy },
-          ]}
-        />
-        {tab === "upload" ? (
+        {purpose === "insert" && (
+          <SegmentedControl
+            aria-label="Attachment source"
+            value={tab}
+            onValueChange={setTab}
+            options={[
+              { value: "upload", label: "Upload", disabled: busy },
+              { value: "existing", label: "Existing files", disabled: busy },
+            ]}
+          />
+        )}
+        {tab === "upload" || purpose === "store" ? (
           <>
             <div
               className="attachment-upload"
@@ -356,7 +364,9 @@ export function AttachmentPicker({
                       </small>
                       <p role="status">
                         {row.state === "inserted"
-                          ? "Attached"
+                          ? purpose === "store"
+                            ? "Stored"
+                            : "Attached"
                           : row.state === "canceled"
                             ? "Canceled"
                             : row.state === "failed"
@@ -444,8 +454,9 @@ export function AttachmentPicker({
               </ul>
             )}
             <p className="attachment-hint">
-              Completed files remain available if insertion is canceled or
-              saving fails. Retry keeps the original upload identity.
+              {purpose === "store"
+                ? "Stored files remain available for reuse. Choose them in a ticket or Document to create a reference."
+                : "Completed files remain available if insertion is canceled or saving fails. Retry keeps the original upload identity."}
             </p>
           </>
         ) : (

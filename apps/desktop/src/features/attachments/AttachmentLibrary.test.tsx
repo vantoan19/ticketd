@@ -60,3 +60,18 @@ test("library searches core metadata and state and opens the chosen stable file"
   });
   await screen.findByText("No matching files");
 });
+
+test("adding files to the library offers storage without an insertion into nowhere", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "search_attachments"
+      ? []
+      : command === "attachment_workspace_id"
+        ? "workspace"
+        : 104857600,
+  );
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add files" }));
+  expect(screen.getByRole("dialog", { name: "Add files" })).toBeTruthy();
+  expect(screen.queryByRole("radio", { name: "Existing files" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
+});
