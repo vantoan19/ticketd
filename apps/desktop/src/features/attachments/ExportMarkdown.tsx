@@ -112,12 +112,19 @@ export function ExportMarkdownButton({
                 [
                   [
                     "Local files",
-                    result.attachments.filter((file) => file.path).length,
+                    new Set(
+                      result.attachments.flatMap((file) =>
+                        file.path ? [file.path] : [],
+                      ),
+                    ).size,
                   ],
                   [
                     "External links",
-                    result.attachments.filter((file) => file.external_url)
-                      .length,
+                    new Set(
+                      result.attachments.flatMap((file) =>
+                        file.external_url ? [file.external_url] : [],
+                      ),
+                    ).size,
                   ],
                   [
                     "Omissions",
