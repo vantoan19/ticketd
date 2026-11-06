@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "ticketd",
-        "width": 1100,
-        "height": 760
+        "width": 1280,
+        "height": 800
       }
     ],
     "security": {
