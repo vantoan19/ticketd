@@ -364,6 +364,25 @@ fn local_ticket(cli: &Cli) -> String {
 }
 
 #[test]
+fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
+    let cli = Cli::new();
+    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    let reference = local_ticket(&cli);
+    let uri = "ticketd://attachment/foreign-workspace/trace-file";
+    cli.run(&["change", &reference, "--body", &format!("[trace]({uri})")]);
+    let preview = cli.run(&["source", "publish", &reference, "--preview"]);
+    assert_eq!(preview["eligibility"]["reason"], "internal_attachments");
+    assert_eq!(preview["internal_attachments"][0]["uri"], uri);
+    assert_eq!(preview["local"]["attachments"], 0);
+    let message = preview["eligibility"]["message"].as_str().unwrap();
+    assert!(message.contains("Remove these links"), "{message}");
+    let error = cli.fail(&["source", "publish", &reference], Some(TOKEN));
+    assert!(error.contains(message), "{error}");
+    assert!(cli.run(&["show", &reference])["publication"].is_null());
+    assert!(cli.run(&["show", &reference])["source"].is_null());
+}
+
+#[test]
 fn publish_previews_then_creates_one_issue_and_replays_without_another() {
     let cli = Cli::new();
     cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);

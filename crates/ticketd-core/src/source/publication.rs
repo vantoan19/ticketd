@@ -37,6 +37,7 @@
 //! compare-and-set on the stored status, in one write transaction that holds no
 //! network call.
 
+use pulldown_cmark::{Event, Parser, Tag};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -123,6 +124,8 @@ pub enum IneligibleReason {
     Unsupported,
     /// An earlier attempt is running or its outcome is unknown.
     AttemptOpen,
+    /// Workspace attachment links cannot be read by external readers.
+    InternalAttachments,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +145,16 @@ pub struct PublicationLocalData {
     pub plan: Option<String>,
     pub tags: Vec<String>,
     pub subtickets: Vec<String>,
+    #[serde(default)]
+    pub attachments: u64,
+}
+
+/// A workspace-only file link that external readers cannot resolve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicationAttachmentLink {
+    pub uri: String,
+    /// Known only for identities in this workspace; foreign IDs are never resolved locally.
+    pub display_name: Option<String>,
 }
 
 /// What publishing would send, shown before anything is created.
@@ -161,6 +174,8 @@ pub struct PublicationPreview {
     /// [`PublishOptions::expected_fingerprint`] to publish exactly this.
     pub fingerprint: String,
     pub local: PublicationLocalData,
+    #[serde(default)]
+    pub internal_attachments: Vec<PublicationAttachmentLink>,
     pub eligibility: Eligibility,
     /// The open attempt blocking publication, if any.
     pub attempt: Option<PublicationAttempt>,
@@ -810,7 +825,71 @@ fn eligibility(
         };
         return Ok(ineligible(IneligibleReason::AttemptOpen, message));
     }
+    let links = publication_attachment_links(connection, &ticket.body)?;
+    if !links.is_empty() {
+        let mut affected = Vec::new();
+        for link in links {
+            affected.push(match link.display_name {
+                Some(name) => format!("{name} ({})", link.uri),
+                None => link.uri,
+            });
+        }
+        return Ok(ineligible(
+            IneligibleReason::InternalAttachments,
+            format!(
+                "{reference} cannot be published: workspace-only attachment links in the outgoing description cannot be opened outside ticketd: {}. Remove these links from the description or replace them with URLs accessible to your readers, then preview again. Export Markdown with files to share the content separately. Direct local attachments stay in ticketd and are not automatically published; nothing was sent",
+                affected.join(", ")
+            ),
+        ));
+    }
     Ok(Eligibility::Eligible)
+}
+
+fn publication_attachment_links(
+    connection: &Connection,
+    body: &str,
+) -> Result<Vec<PublicationAttachmentLink>, Error> {
+    let mut links = crate::embedded_attachments::destinations(body);
+    // Source-mode HTML and URI scheme casing must not bypass the Markdown preflight.
+    for event in Parser::new(body) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
+                if dest_url
+                    .to_ascii_lowercase()
+                    .starts_with("ticketd://attachment/")
+                {
+                    links.insert(dest_url.into_string());
+                }
+            }
+            Event::Html(html) | Event::InlineHtml(html) => {
+                for (at, _) in html
+                    .to_ascii_lowercase()
+                    .match_indices("ticketd://attachment/")
+                {
+                    let uri = html[at..]
+                        .split(|c: char| c.is_whitespace() || matches!(c, '\'' | '"' | '<' | '>'))
+                        .next()
+                        .unwrap_or_default();
+                    links.insert(uri.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    links
+        .into_iter()
+        .map(|uri| {
+            let display_name = connection
+                .query_row(
+                    "SELECT a.display_name FROM attachments a JOIN attachment_workspace w \
+             ON ?1 = 'ticketd://attachment/' || w.id || '/' || a.id",
+                    [&uri],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(PublicationAttachmentLink { uri, display_name })
+        })
+        .collect()
 }
 
 /// What must exist before anything can be published to `provider`: a connector
@@ -885,6 +964,7 @@ impl Workspace {
             destination,
             destinations,
             title: ticket.title,
+            internal_attachments: publication_attachment_links(&self.connection, &ticket.body)?,
             body: ticket.body,
             local: PublicationLocalData {
                 activities: self.connection.query_row("SELECT COUNT(*) FROM activities WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
@@ -894,6 +974,7 @@ impl Workspace {
                     let mut statement = self.connection.prepare("SELECT 'T-' || t.number FROM ticket_parents p JOIN tickets t ON t.id = p.child_id WHERE p.parent_id = ?1 ORDER BY t.number")?;
                     statement.query_map([&ticket.id], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?
                 },
+                attachments: self.connection.query_row("SELECT COUNT(*) FROM ticket_attachments WHERE ticket_id = ?1", [&ticket.id], |row| row.get(0))?,
             },
             eligibility,
             attempt: open_attempt(&self.connection, &ticket.id, None)?,
@@ -2058,7 +2139,7 @@ fn complete_attempt(
             "UPDATE tickets SET title = ?2, body = ?3 WHERE id = ?1",
             params![sent.ticket_id, new_title, new_body],
         )?;
-        crate::document_links::index_body(transaction, sent.ticket_id, new_body)?;
+        crate::document_links::index_external_body(transaction, sent.ticket_id, new_body)?;
     }
     match sent.adopt {
         Some(from) => adopt_identity(transaction, from, sent.ticket_id, sent.agent)?,

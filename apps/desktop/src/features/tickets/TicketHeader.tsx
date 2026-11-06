@@ -246,7 +246,9 @@ export function TicketHeader({
                 {!ticket.source && target && (
                   <DropdownMenuItem
                     disabled={
-                      !preview || preview.eligibility.kind !== "eligible"
+                      !preview ||
+                      (preview.eligibility.kind !== "eligible" &&
+                        preview.eligibility.reason !== "internal_attachments")
                     }
                     onSelect={() => setPublishing(true)}
                     className="publication-menu-item"

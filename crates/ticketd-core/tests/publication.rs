@@ -403,6 +403,272 @@ fn publication_error(error: Error) -> PublicationError {
 }
 
 #[test]
+fn workspace_attachment_links_block_preview_and_publication_before_any_remote_write() {
+    let mut f = Fixture::new();
+    let source = f.dir.path().join("trace.log");
+    std::fs::write(&source, b"diagnostic bytes").unwrap();
+    let file = f
+        .workspace
+        .import_attachment("upload", &source, Some("Cache trace"))
+        .unwrap();
+    let uri = f.workspace.attachment_uri(&file.id).unwrap();
+    let ticket = describe(
+        &mut f,
+        "Share context",
+        &format!("Read [custom label]({uri})."),
+    );
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    let Eligibility::Ineligible { message, .. } = preview.eligibility else {
+        panic!("workspace-only links must block publication");
+    };
+    assert!(message.contains("Cache trace"), "{message}");
+    assert!(message.contains(&file.id), "{message}");
+    assert!(message.contains("description"), "{message}");
+    assert_eq!(preview.internal_attachments.len(), 1);
+    assert_eq!(preview.internal_attachments[0].uri, uri);
+    assert_eq!(
+        preview.internal_attachments[0].display_name.as_deref(),
+        Some("Cache trace")
+    );
+    let error = f.publish(&ticket.reference).unwrap_err().to_string();
+    assert!(error.contains(&message), "{error}");
+    assert_eq!(f.created(), 0);
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn retries_recheck_exact_outgoing_markdown_and_never_send_foreign_attachment_links() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Share context", "Public text");
+    f.mode(Mode::LoseResponse);
+    f.publish(&ticket.reference).unwrap_err();
+    f.fake.0.lock().unwrap().issues.clear();
+    f.resolve(&ticket.reference, &not_created()).unwrap();
+    let uri = "ticketd://attachment/other-workspace/unknown-file";
+    f.workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some(format!(
+                    "| File |\n| --- |\n| [trace][file] |\n\n[file]: {uri}"
+                )),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut f = f.reopen();
+    f.mode(Mode::Create);
+    let error = f.publish(&ticket.reference).unwrap_err().to_string();
+    assert!(error.contains(uri), "{error}");
+    assert_eq!(f.created(), 1, "recovery must not create a second issue");
+    assert_eq!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .len(),
+        1
+    );
+    f.workspace
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                body: Some("Share [trace](https://example.test/trace.log).".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    f.publish(&ticket.reference).unwrap();
+    assert_eq!(f.created(), 2);
+    assert_eq!(
+        f.fake.0.lock().unwrap().created[1].body,
+        "Share [trace](https://example.test/trace.log)."
+    );
+}
+
+#[test]
+fn publication_and_refresh_preserve_local_context_while_replacing_only_derived_file_uses() {
+    let mut f = Fixture::new();
+    let source = f.dir.path().join("trace.log");
+    std::fs::write(&source, b"diagnostic bytes").unwrap();
+    let file = f
+        .workspace
+        .import_attachment("upload", &source, None)
+        .unwrap();
+    let uri = f.workspace.attachment_uri(&file.id).unwrap();
+    let document = f
+        .workspace
+        .create_document(Some("Local context"), &format!("[trace]({uri})"))
+        .unwrap();
+    let ticket = describe(&mut f, "Share context", "Public description");
+    f.workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    f.workspace
+        .set_ticket_document(&ticket.reference, &document.id, true)
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.eligibility, Eligibility::Eligible);
+    assert_eq!(preview.local.attachments, 1);
+    f.publish(&ticket.reference).unwrap();
+    let missing_uri = uri.replace(&file.id, "unknown-file");
+    for body in [
+        format!("[trace]({uri})"),
+        format!("[missing]({missing_uri})"),
+        "Source removed its file link".into(),
+    ] {
+        f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().body = body.clone();
+        let report = f
+            .workspace
+            .refresh_sources(&f.engine, &RefreshOptions::default())
+            .unwrap();
+        assert!(report.failures.is_empty(), "{report:?}");
+        assert_eq!(f.ticket(&ticket.reference).body, body);
+        assert_eq!(
+            f.workspace.ticket_attachments(&ticket.reference).unwrap(),
+            std::slice::from_ref(&file)
+        );
+        assert_eq!(
+            f.workspace.embedded_attachments(&document.id).unwrap(),
+            std::slice::from_ref(&file)
+        );
+        assert!(
+            f.workspace
+                .context_links(&ticket.reference, 100, 0)
+                .unwrap()
+                .iter()
+                .any(|link| link.target_id == document.id && link.explicit)
+        );
+        let expected = if body.contains(&missing_uri) {
+            vec![missing_uri.clone()]
+        } else if body.contains(&uri) {
+            vec![uri.clone()]
+        } else {
+            vec![]
+        };
+        assert_eq!(
+            f.workspace.embedded_attachment_uris(&ticket.id).unwrap(),
+            expected
+        );
+    }
+    assert!(
+        f.workspace
+            .embedded_attachments(&ticket.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(f.created(), 1);
+    // A new workspace imports the same source text without resolving its foreign identity.
+    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().body =
+        format!("[missing]({missing_uri})");
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        let mut issue = remote.issues[&101].clone();
+        issue.reference.identity.id = "102".into();
+        issue.reference.locator = "o/r#102".into();
+        issue.display = "o/r#102".into();
+        remote.issues.insert(102, issue);
+    }
+    let report = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    let mut imported = Workspace::open(f.dir.path().join("imported.sqlite3")).unwrap();
+    imported
+        .save_source(&f.engine, "fake", &values(json!({"repositories": ["o/r"]})))
+        .unwrap();
+    let report = imported
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 2);
+    let imported_ticket = imported.show_ticket(&report.imported[0]).unwrap();
+    assert_eq!(
+        imported
+            .embedded_attachment_uris(&imported_ticket.id)
+            .unwrap(),
+        vec![missing_uri]
+    );
+}
+
+#[test]
+fn preflight_checks_link_destinations_including_source_html_without_treating_code_as_links() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Share").unwrap();
+    for body in [
+        "<a href=\"ticketd://attachment/foreign/file\">trace</a>",
+        "![trace](TICKETD://attachment/foreign/file)",
+        "[trace](ticketd&#58;//attachment/foreign/file)",
+        "<ticketd://attachment/foreign/file>",
+    ] {
+        f.workspace
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    body: Some(body.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(f.publish(&ticket.reference).is_err(), "must block: {body}");
+        assert_eq!(f.created(), 0, "must not create: {body}");
+    }
+    f.workspace.change_ticket(&ticket.reference, TicketPatch {
+        body: Some("Code example: `[trace](ticketd://attachment/foreign/file)`\n\n```md\n[trace](ticketd://attachment/foreign/file)\n```".into()),
+        ..Default::default()
+    }).unwrap();
+    f.publish(&ticket.reference).unwrap();
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn resolving_an_uncertain_publication_keeps_local_associations_without_resending_its_body() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Share context");
+    let source = f.dir.path().join("trace.log");
+    std::fs::write(&source, b"diagnostic bytes").unwrap();
+    let file = f
+        .workspace
+        .import_attachment("upload", &source, None)
+        .unwrap();
+    let uri = f.workspace.attachment_uri(&file.id).unwrap();
+    f.workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    let body = format!("Remote text with [trace]({uri})");
+    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().body = body.clone();
+    let outcome = f
+        .resolve(&ticket.reference, &accept_different("101"))
+        .unwrap();
+    assert_eq!(outcome.ticket.body, body);
+    assert_eq!(
+        f.workspace.embedded_attachment_uris(&ticket.id).unwrap(),
+        vec![uri]
+    );
+    assert_eq!(
+        f.workspace.ticket_attachments(&ticket.reference).unwrap(),
+        vec![file]
+    );
+    assert_eq!(
+        f.created(),
+        1,
+        "resolution reads the existing issue, never publishes again"
+    );
+    assert!(f.publish(&ticket.reference).unwrap().replayed);
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
 fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
     let mut f = Fixture::new();
     let ticket = describe(

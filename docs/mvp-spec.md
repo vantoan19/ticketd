@@ -787,6 +787,19 @@ The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
 Failed association reports the completed Attachment ID for explicit reuse.
 
+Publication checks the exact outgoing description in the core before creating a
+remote issue, including retries after a failed or resolved attempt. Workspace-only
+attachment links block publication, with affected URIs, known display names, and
+guidance to remove or replace the links with accessible URLs or share a separate
+export with files. Desktop publication and `source publish T-1 --preview` show the
+same preflight. No file upload or private-path rewrite is implied.
+
+Direct local attachment associations are not automatically published. They stay
+with the ticket through publication and source refresh, as do independently linked
+local Documents and their files. Source-authoritative description changes replace
+only derived references; unresolved incoming file links remain visible without
+blocking refresh or resolving against another workspace's attachments.
+
 Workspace backups include the database and every retained local file, including
 unused uploads, files referenced from Trash, recovery records and quarantined
 bytes until explicit purge. Concurrent uploads cannot produce a successful
