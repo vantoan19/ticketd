@@ -164,13 +164,37 @@ export function AttachmentPreview({
     >
       <DialogContent className="attachment-preview-dialog">
         <DialogHeader className="attachment-preview-header">
-          <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
-          <DialogDescription>
-            Local snapshot
-            {file
-              ? ` · ${formatSize(file.size_bytes)}`
-              : " · File in its owning workspace"}
-          </DialogDescription>
+          <div className="attachment-preview-heading">
+            <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
+            <DialogDescription>
+              Local snapshot
+              {file
+                ? ` · ${formatSize(file.size_bytes)}`
+                : " · File in its owning workspace"}
+            </DialogDescription>
+          </div>
+          <div className="attachment-preview-file-actions">
+            {file && (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={busy || info?.can_open === false}
+                  onClick={() => void action(() => attachments.open(file.id))}
+                >
+                  <ExternalLink aria-hidden="true" />
+                  Open file
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void action(() => attachments.export(file))}
+                >
+                  <Download aria-hidden="true" />
+                  Export file
+                </Button>
+              </>
+            )}
+          </div>
         </DialogHeader>
         <div className="attachment-preview-layout">
           <div className="attachment-preview-stage">
@@ -263,6 +287,12 @@ export function AttachmentPreview({
               </>
             )}
             {error && <p role="alert">{error}</p>}
+            {info?.can_open === false && (
+              <small className="attachment-hint">
+                Open is unavailable for this file. Export preserves its bytes
+                when available; choose an application explicitly.
+              </small>
+            )}
             {actions}
           </aside>
         </div>
@@ -271,36 +301,10 @@ export function AttachmentPreview({
             Local snapshot · Removing a link keeps this file in your workspace.
           </p>
           <div className="attachment-actions">
-            {file && (
-              <>
-                <Button
-                  variant="outline"
-                  disabled={busy || info?.can_open === false}
-                  onClick={() => void action(() => attachments.open(file.id))}
-                >
-                  <ExternalLink aria-hidden="true" />
-                  Open file
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => void action(() => attachments.export(file))}
-                >
-                  <Download aria-hidden="true" />
-                  Export file
-                </Button>
-              </>
-            )}
             <Button variant="ghost" onClick={close}>
               Done
             </Button>
           </div>
-          {info?.can_open === false && (
-            <small className="attachment-hint">
-              Open is unavailable for this file. Export preserves its bytes when
-              available; choose an application explicitly.
-            </small>
-          )}
         </footer>
         {picker && onReplace && (
           <AttachmentPicker
