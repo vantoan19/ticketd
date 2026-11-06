@@ -122,14 +122,14 @@ test("the section list only offers sections that have cards", () => {
 test("the Location card shows the path, counts, size, and format version", async () => {
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
   expect((await screen.findByLabelText("Workspace path")).textContent).toBe(
-    info.path,
+    "~/Library/Application Support/ticketd/workspace.sqlite3",
   );
   const text = screen.getByRole("region", { name: "Location" }).textContent;
   expect(text).toContain("Tickets42");
   expect(text).toContain("Projects3");
   expect(text).toContain("Active Plans2");
   expect(text).toContain("File size2.5 MB");
-  expect(text).toContain("Workspace format version20");
+  expect(text).toContain("Format version20");
 });
 
 test("Copy path puts the workspace path on the clipboard", async () => {
@@ -183,7 +183,11 @@ test("Back up now saves to the chosen file and shows it as the checked last back
   });
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
   expect(screen.queryByLabelText(/Backup file path/)).toBeNull();
-  expect(screen.getByText("No backup has been made yet.")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "No backups yet. Your first one will be listed here with its date and size.",
+    ),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   expect((await screen.findByLabelText("Last backup path")).textContent).toBe(
     lastBackup.path,
