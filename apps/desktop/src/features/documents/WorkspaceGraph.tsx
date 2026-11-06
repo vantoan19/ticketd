@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { ArrowLeft, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -18,6 +18,7 @@ import {
 } from "./graph-text";
 import type { Point } from "./context-layout";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { ListHeader } from "@/components/ui/list-header";
 import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -47,6 +48,12 @@ const RELATIONSHIPS = [
   "discovered",
 ];
 const NO_POSITIONS: Record<string, Point> = {};
+/** Ticket reference to project name ("" when it has none), shared by every mount. */
+const projectOf = new Map<string, string>();
+
+function projectName(node: { ticket_reference?: string | null | undefined }) {
+  return (node.ticket_reference && projectOf.get(node.ticket_reference)) || "";
+}
 
 /** Connections among the shown items, or the item's own total when only one is shown. */
 function connectionSummary(graph: Graph): string {
@@ -87,6 +94,8 @@ export function WorkspaceGraph({
   const [error, setError] = useState("");
   const [loadingPage, setLoadingPage] = useState(false);
   const [fit, setFit] = useState(true);
+  // Bumped when more ticket projects are known, so cards and the panel redraw.
+  const [projectsVersion, setProjectsVersion] = useState(0);
   const [viewport, setViewport] = useState<Viewport>({
     x: 100,
     y: 100,
@@ -227,14 +236,22 @@ export function WorkspaceGraph({
   }, [mapNodes, shownEdges]);
   const nodes = useMemo(
     () =>
-      connected.map((node) => ({
-        id: node.id,
-        label: nodeAriaLabel(node),
-        ...cardParts(node),
-        kind: node.kind,
-        status: node.state?.split(" · ")[0] ?? "",
-      })),
-    [connected],
+      connected.map((node) => {
+        const parts = cardParts(node);
+        return {
+          id: node.id,
+          label: nodeAriaLabel(node),
+          ...parts,
+          caption: [parts.caption, projectName(node)]
+            .filter(Boolean)
+            .join(" · "),
+          kind: node.kind,
+          status: node.state?.split(" · ")[0] ?? "",
+        };
+      }),
+    // projectName reads projectOf, which projectsVersion tracks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connected, projectsVersion],
   );
   const edges = useMemo(() => flowEdges(shownEdges), [shownEdges]);
   const [knownTags, setKnownTags] = useState<string[]>([]);
@@ -251,6 +268,54 @@ export function WorkspaceGraph({
     };
   }, [revision]);
   const preview = graph?.nodes.find((node) => node.id === selected);
+  // The graph carries no project, so each shown ticket's project is looked up
+  // once from the existing ticket and project lists.
+  const wanted = useMemo(
+    () => [
+      ...new Set(
+        [...mapNodes, ...(preview ? [preview] : [])].flatMap((node) =>
+          node.kind === "ticket" && node.ticket_reference
+            ? [node.ticket_reference]
+            : [],
+        ),
+      ),
+    ],
+    [mapNodes, preview],
+  );
+  useEffect(() => {
+    const missing = wanted.filter((reference) => !projectOf.has(reference));
+    if (!missing.length) return;
+    let current = true;
+    void (async () => {
+      try {
+        const names = new Map(
+          ((await client.listProjects()) ?? []).map((item) => [
+            item.id,
+            item.name,
+          ]),
+        );
+        await Promise.all(
+          missing.map(async (reference) => {
+            try {
+              const ticket = await client.showTicket(reference);
+              projectOf.set(
+                reference,
+                (ticket.project_id && names.get(ticket.project_id)) || "",
+              );
+            } catch {
+              // A card without a project is still a card.
+            }
+          }),
+        );
+      } catch {
+        return;
+      }
+      if (current) setProjectsVersion((n) => n + 1);
+    })();
+    return () => {
+      current = false;
+    };
+  }, [wanted]);
   const showMap = opensAsMap(graph?.nodes.length ?? 0, mapChoice, Infinity);
   const filtered = !!(search || kind || tag || relationship);
   const relationshipCount = graph?.edges.length ?? 0;
@@ -341,9 +406,8 @@ export function WorkspaceGraph({
         <p>
           {[
             stateLine(preview),
-            graph?.node_tags[preview.id]
-              ? `Tag: ${graph.node_tags[preview.id]}`
-              : "",
+            projectName(preview),
+            graph?.node_tags[preview.id],
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -359,7 +423,11 @@ export function WorkspaceGraph({
           </div>
         ))}
       </dl>
-      {(graph?.connection_counts?.[preview.id] ?? 0) > 0 && (
+      {(graph?.connection_counts?.[preview.id] ?? 0) >
+        labelledConnections(preview.id, graph!).reduce(
+          (sum, row) => sum + row.items.length,
+          0,
+        ) && (
         <p>
           {graph?.connection_counts?.[preview.id]}{" "}
           {graph?.connection_counts?.[preview.id] === 1
@@ -381,9 +449,6 @@ export function WorkspaceGraph({
         title="Workspace graph"
         actions={
           <>
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              Back
-            </Button>
             {!!graph?.nodes.length && (
               <SegmentedControl
                 aria-label="View"
@@ -459,6 +524,9 @@ export function WorkspaceGraph({
           </Button>
         )}
         <span className="context-graph-grow" />
+        <IconButton label="Back" onClick={onBack}>
+          <ArrowLeft />
+        </IconButton>
         <label className="context-graph-switch">
           <Switch
             aria-label="Include update details"
@@ -470,7 +538,7 @@ export function WorkspaceGraph({
           Update details
         </label>
       </div>
-      <div className="context-graph-body">
+      <div className="context-graph-body" data-map={showMap || undefined}>
         {error && <p role="alert">{error}</p>}
         {showMap ? (
           <div className="context-graph-main">
@@ -557,7 +625,16 @@ export function WorkspaceGraph({
           </p>
         ) : (
           graph && (
-            <p role="status" className="context-graph-status">
+            <p
+              role="status"
+              className={
+                showMap &&
+                !graph.next_cursor &&
+                graph.omitted_groups.length === 0
+                  ? "context-graph-status sr-only"
+                  : "context-graph-status"
+              }
+            >
               {relationship && graph.nodes.length === 0
                 ? `No connected items on this page${graph.next_cursor ? "; load more to search the rest" : ""}`
                 : relationship
@@ -596,8 +673,12 @@ export function WorkspaceGraph({
             </p>
           )
         )}
-        <h2>Items</h2>
-        <ul className="context-graph-list">
+        <h2 className={showMap ? "sr-only" : undefined}>Items</h2>
+        <ul
+          className={
+            showMap ? "context-graph-list sr-only" : "context-graph-list"
+          }
+        >
           {graph?.nodes.map((node) => (
             <li key={node.id}>
               <KindIcon kind={node.kind} />

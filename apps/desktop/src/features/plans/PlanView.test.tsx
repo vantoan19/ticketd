@@ -317,10 +317,9 @@ test("the title row carries the labeled view toggle, and a summary line sits abo
   // The header spans both panes: the toggle is not inside the list section.
   const list = screen.getByRole("region", { name: "Launch" });
   expect(list.contains(toggle)).toBe(false);
-  // The summary lives in the header only; the list toolbar does not repeat it.
-  await waitFor(() =>
-    expect(screen.getAllByText("2 tickets · no project")).toHaveLength(1),
-  );
+  // The summary sits in the list header, left of the filters.
+  const summary = await screen.findByText("2 tickets · no project");
+  expect(list.contains(summary)).toBe(true);
 
   expect(screen.getByRole("button", { name: "Filters" }).textContent).toContain(
     "Filter",

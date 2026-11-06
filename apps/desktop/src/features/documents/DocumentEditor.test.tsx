@@ -374,7 +374,7 @@ it("saves a draft before opening the context graph without a dialog", async () =
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
@@ -452,7 +452,7 @@ it("consumes graph navigation after saving so later edits stay on the Document",
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "First" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open context graph" }));
   await act(async () => {});
   expect(graph).toHaveBeenCalledTimes(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -551,7 +551,9 @@ it("shows readable linked context and opens a Document referenced in its passage
   expect(
     screen.queryByRole("textbox", { name: "New ticket title" }),
   ).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Create ticket from this" }),
+  );
   expect(screen.getByLabelText("New ticket title")).toBeTruthy();
 });
 
@@ -590,7 +592,7 @@ it("lists each connected item once and names Plans that use the Document as spec
   renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
   await screen.findByRole("button", { name: /T-4/ });
   expect(screen.getAllByRole("button", { name: /T-4/ })).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Spec of Roadmap" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Roadmap" })).toBeTruthy();
   expect(
     screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
   ).toBeTruthy();
@@ -625,7 +627,7 @@ it("names a Plan that only has the Document attached as a supporting Document", 
   renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
   expect(
     await screen.findByRole("button", {
-      name: "Supporting Document of Checkout revamp",
+      name: "Checkout revamp",
     }),
   ).toBeTruthy();
   expect(
@@ -964,7 +966,7 @@ it("keeps Link a Document, Create ticket and Context graph in Read and Edit", ()
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={vi.fn()} />,
   );
   const names = () =>
-    ["Link a Document", "Create ticket", "Context graph"].map(
+    ["Link a Document", "Create ticket from this", "Open context graph"].map(
       (name) => screen.queryByRole("button", { name }) !== null,
     );
   expect(names()).toEqual([true, true, true]);

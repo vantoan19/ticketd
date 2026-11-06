@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Layers, Link2, Workflow } from "lucide-react";
+import { Layers, Link2, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -348,7 +348,7 @@ export function PlanDependencies({
             <div className="plan-dependencies-card">
               {key}
               <EmptyState
-                icon={<Workflow />}
+                icon={<Network />}
                 title="Nothing blocks anything in this Plan yet"
                 description={`${
                   members.length === 1

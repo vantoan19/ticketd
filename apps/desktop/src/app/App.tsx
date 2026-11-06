@@ -295,6 +295,13 @@ function AppContent() {
                   <WorkspaceSidebar
                     onCapture={openCapture}
                     counts={counts}
+                    activePlanCount={
+                      view === "tickets" &&
+                      navigation.kind !== "trash" &&
+                      navigation.plan
+                        ? (workspace.scopeTotal ?? workspace.total)
+                        : undefined
+                    }
                     view={view}
                     workspaceGraphOpen={graphOrigin === "__workspace__"}
                     setView={openView}

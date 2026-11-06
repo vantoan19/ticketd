@@ -98,9 +98,6 @@ test("adds context, designates a spec, and opens its source", async () => {
     screen.getByRole("button", { name: "Document: Proposal" }).className,
   ).toContain("plan-spec-chip");
   expect(screen.queryByText("1 linked Document")).toBeNull();
-  expect(
-    screen.getByRole("button", { name: "Add context" }).textContent,
-  ).toContain("Add context");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Actions for Proposal" }),
     { button: 0, ctrlKey: false },

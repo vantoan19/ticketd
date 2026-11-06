@@ -212,12 +212,15 @@ it("disables tagging and ticket creation for a trashed Document", async () => {
   );
   await screen.findByText("In Trash");
   expect(
-    (screen.getByRole("button", { name: "Add tag" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "Add tags" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(
-    (screen.getByRole("button", { name: "Create ticket" }) as HTMLButtonElement)
-      .disabled,
+    (
+      screen.getByRole("button", {
+        name: "Create ticket from this",
+      }) as HTMLButtonElement
+    ).disabled,
   ).toBe(true);
 });
 

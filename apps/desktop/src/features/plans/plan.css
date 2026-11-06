@@ -27,7 +27,7 @@
 .plan-list-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   height: 44px;
   padding: 0 8px 0 16px;
   box-shadow: 0 1px 0 0 var(--header-boundary);
@@ -50,10 +50,11 @@
 .plan-title-row[data-renaming="true"] {
   flex-wrap: nowrap;
 }
-.plan-header-summary {
+.plan-list-summary {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+  white-space: nowrap;
 }
 .plan-title-spacer {
   flex: 1;
@@ -90,9 +91,11 @@
   align-items: center;
   gap: 8px;
 }
+/* One row: progress, counts, then the spec chip at the right end. The counts
+   wrap inside their own cell, so the header never grows a second row. */
 .plan-summary {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px 16px;
   color: var(--muted-foreground);
@@ -101,6 +104,8 @@
 }
 .plan-progress {
   display: inline-flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: 8px;
   color: var(--foreground);
@@ -147,6 +152,8 @@
 }
 .plan-counts {
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 4px 16px;
   margin: 0;
@@ -529,10 +536,47 @@
   min-height: 0;
   max-width: none;
 }
+.plan-dependencies-card [data-slot="empty-header"] {
+  max-width: 420px;
+}
 .plan-dependencies-card [data-slot="empty-description"] {
   max-width: 420px;
+}
+.plan-dependencies-card [data-slot="empty-content"] .ui-button {
+  gap: 6px;
+}
+.plan-dependencies-card [data-slot="empty-content"] .ui-button svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
+}
+.plan-dependencies-card [data-slot="empty-icon"] svg {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.75;
 }
 .plan-dependencies-key-box {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--control-boundary);
+}
+
+/* Header rows match board E: purpose 28px, counts row 28px with the spec chip at its right end. */
+.plan-purpose-edit {
+  height: 28px;
+}
+.plan-summary {
+  min-height: 28px;
+  gap: 8px 14px;
+}
+.plan-documents {
+  gap: 0;
+  flex: none;
+}
+.plan-documents .plan-document-row [aria-haspopup="menu"],
+.plan-documents .plan-add-context {
+  width: 28px;
+  height: 28px;
+}
+.plan-counts {
+  flex-wrap: nowrap;
+  gap: 4px 14px;
 }

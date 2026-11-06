@@ -138,9 +138,9 @@ export function PlanDocuments({
       {!readOnly && (
         <Popover open={adding} onOpenChange={setAdding}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <Plus data-icon="inline-start" /> Add context
-            </Button>
+            <IconButton label="Add context" className="plan-add-context">
+              <Plus />
+            </IconButton>
           </PopoverTrigger>
           <PopoverContent
             align="end"
