@@ -128,7 +128,7 @@ export function useTicketWorkspace(
   // refetch whenever the same scope is chosen again.
   const scopeKind = navigation.kind;
   const scopePlan = navigation.plan;
-  const layout = !trash && !scopePlan ? ticketLayout : "list";
+  const layout = !trash ? ticketLayout : "list";
   const filterArgs = useMemo<FindFilter>(
     () => ({
       query,
