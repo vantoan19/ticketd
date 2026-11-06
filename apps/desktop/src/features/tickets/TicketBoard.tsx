@@ -17,6 +17,7 @@ import { StatusIcon } from "./StatusIcon";
 import { readiness, readinessLabel } from "./ticket-row";
 import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
+import { useBoardDrag } from "./useBoardDrag";
 import "./ticket-board.css";
 
 export function TicketBoard({
@@ -27,6 +28,7 @@ export function TicketBoard({
   onOpen: (reference: string) => void;
 }) {
   const { statusAction } = workspace;
+  const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
   return (
     <>
       <p className="sr-only" role="status" aria-live="polite">
@@ -72,6 +74,7 @@ export function TicketBoard({
         onConfirm={statusAction.confirmLeave}
       />
       <div
+        ref={boardRef}
         className="ticket-board"
         role="region"
         aria-label="Ticket status board"
@@ -82,6 +85,14 @@ export function TicketBoard({
           return (
             <section
               className="board-column"
+              data-board-status={status}
+              data-drop-allowed={
+                drag
+                  ? ticketStatusChoices(drag.ticket).includes(status) &&
+                    status !== drag.ticket.status
+                  : undefined
+              }
+              data-drop-target={drag?.target === status || undefined}
               key={status}
               aria-label={`${status} column`}
             >
@@ -120,6 +131,9 @@ export function TicketBoard({
                   return (
                     <div
                       className="board-card-container"
+                      data-dragging={
+                        drag?.ticket.reference === ticket.reference || undefined
+                      }
                       key={ticket.id}
                       aria-busy={statusAction.pending.has(ticket.reference)}
                     >
@@ -128,7 +142,12 @@ export function TicketBoard({
                         className="board-card"
                         data-board-reference={ticket.reference}
                         aria-pressed={workspace.selected === ticket.reference}
-                        onClick={() => onOpen(ticket.reference)}
+                        onPointerDown={(event) => start(event, ticket)}
+                        onDragStart={(event) => event.preventDefault()}
+                        onClick={(event) => {
+                          if (open(event.currentTarget, event.detail))
+                            onOpen(ticket.reference);
+                        }}
                       >
                         <span className="board-card-top">
                           <span className="ticket-ref">{ticket.reference}</span>
@@ -257,6 +276,27 @@ export function TicketBoard({
           );
         })}
       </div>
+      {drag && (
+        <>
+          <div
+            className="board-drag-preview"
+            aria-hidden="true"
+            style={{
+              left: drag.x - drag.offsetX,
+              top: drag.y - drag.offsetY,
+              width: drag.width,
+            }}
+          >
+            <span className="ticket-ref">{drag.ticket.reference}</span>
+            <span className="board-card-title">{drag.ticket.title}</span>
+          </div>
+          <p className="sr-only" role="status">
+            {drag.target
+              ? `Drop to change status to ${drag.target}.`
+              : "Drag to an allowed status column. Escape cancels."}
+          </p>
+        </>
+      )}
       <p className="board-summary">Counts reflect current filters.</p>
     </>
   );
