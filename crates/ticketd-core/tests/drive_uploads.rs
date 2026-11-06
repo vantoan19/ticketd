@@ -313,6 +313,18 @@ fn revised_upload_is_a_new_attachment_and_cannot_reuse_an_ordinary_write_request
         )
         .unwrap();
     assert_ne!(first.id, revision.id);
+    assert!(
+        workspace
+            .upload_drive_bytes(
+                "original",
+                "trace.log",
+                b"revised bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .is_err()
+    );
     assert_eq!(first.size_bytes, Some(14));
     assert_eq!(revision.size_bytes, Some(13));
     assert_eq!(

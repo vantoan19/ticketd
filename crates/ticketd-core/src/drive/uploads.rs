@@ -242,6 +242,12 @@ impl Workspace {
         provider: &dyn DriveUploadProvider,
         progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<Attachment, Error> {
+        if let Some(previous) = self.find_drive_upload(request_id)?
+            && (previous.request.size_bytes != bytes.len() as u64
+                || previous.request.sha256 != format!("{:x}", Sha256::digest(bytes)))
+        {
+            return Err(Error::RequestConflict(request_id.into()));
+        }
         self.run_drive_upload(
             request_id,
             filename,
