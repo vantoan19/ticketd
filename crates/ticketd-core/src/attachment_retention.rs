@@ -140,7 +140,7 @@ impl Workspace {
             }
         }
         if previous.unwrap_or(0) != draft.revision {
-            return Err(Error::Attachment("recovery draft changed in another window; keep this window open and reload before replacing it".into()));
+            return Err(Error::Attachment("recovery draft changed in another window; copy this window's draft before reloading to review the stored recovery".into()));
         }
         let next = draft.revision + 1;
         tx.execute("INSERT INTO attachment_drafts(owner,kind,revision,payload,markdown) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(owner) DO UPDATE SET kind=excluded.kind,revision=excluded.revision,payload=excluded.payload,markdown=excluded.markdown",

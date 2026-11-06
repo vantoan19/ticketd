@@ -3,28 +3,28 @@ use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn draft_retentions() -> Result<Vec<ticketd_core::DraftRetention>, String> {
     open_workspace()
         .and_then(|w| w.draft_retentions())
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn complete_draft_cutover() -> Result<(), String> {
     open_workspace()
         .and_then(|mut w| w.complete_draft_cutover())
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn draft_cutover_pending() -> Result<bool, String> {
     open_workspace()
         .and_then(|w| w.draft_cutover_pending())
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn retain_draft(
     draft: ticketd_core::DraftRetention,
 ) -> Result<ticketd_core::DraftRetention, String> {
@@ -33,7 +33,7 @@ pub fn retain_draft(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn attachment_usage(id: String) -> Result<ticketd_core::AttachmentUsage, String> {
     open_workspace()
         .and_then(|w| w.attachment_usage(&id))
