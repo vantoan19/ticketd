@@ -764,10 +764,27 @@ response or source deletion. A failed file copy never creates a valid Attachment
 A failed database commit preserves completed bytes and a durable recovery record.
 An export refuses to replace an existing file and never leaves partial output.
 
+The shared editor inserts stored files at the caret as ordinary inline Markdown
+links, including inside lists and tables. Upload and Existing files share the
+same picker in descriptions, ticket creation, Documents, and authored update
+briefs and details. Insertion changes the draft; each host retains its existing
+autosave or explicit-submit behavior. Failed saves retain the draft and completed
+files. Closing the picker before upload completion leaves the file available
+without inserting it.
+
+Canonical links use `ticketd://attachment/<workspace-id>/<attachment-id>`.
+Resolution is restricted to the owning workspace. Authored labels are literal
+content, independent of the file's display name. Reading, focusing, and changing
+editor modes do not rewrite source. Existing Markdown images and unsupported
+content retain source editing as their lossless fallback. Inline link removal
+changes only the reference. Saved body and brief references are derived in the
+same transaction as their content, separately from direct ticket associations.
+
 The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 [--request-id ID]`, `attachment list [--ticket T-1]`, `attachment inspect <id>`,
 `attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
+`attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
 Failed association reports the completed Attachment ID for explicit reuse.
 
 Database-only backup, restore, and migration safety-copy paths reject retained

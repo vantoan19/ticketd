@@ -311,3 +311,29 @@ graph queries. The desktop owns capture/editing state and graph presentation;
 the CLI exposes the same operations without coordinating their transactions.
 Explicit relationship tables remain authoritative. Shared entity identities
 support cross-type references while concrete records retain domain invariants.
+
+## Inline attachment references
+
+Schema 48 assigns a persistent workspace identity and derives
+`embedded_attachments` from canonical Markdown link/image destinations, including
+GFM tables and reference-style links. Ticket and Document body indexing and
+Activity brief indexing update these references within the content transaction;
+Activity details use their supporting Document identity. Activity deletion removes
+its brief references while leaving the supporting Document and its files intact.
+Trash keeps references. Direct `ticket_attachments` remain independent, and files
+in linked Documents are not flattened into ticket attachments.
+
+`Workspace::attachment_uri` checks a completed snapshot before producing
+`ticketd://attachment/<workspace-id>/<attachment-id>`.
+`resolve_attachment_uri` rejects foreign workspace identities and retains metadata
+for missing local bytes. Newly introduced local links require stored bytes;
+existing broken references remain editable and removable. Foreign links remain
+canonical content with unresolved reference records. `embedded_attachments` and
+`embedded_attachment_uris` expose derived uses without depending on editor trees.
+
+The desktop shares one AttachmentPicker between the direct-ticket adapter and
+MarkdownEditor. Its `onPick(file, requestId)` callback receives only a successfully
+stored or inspected identity. MarkdownEditor resolves the URI through the core
+and inserts at its saved rich/source selection; the host owns persistence. Closing
+or unmounting abandons insertion without deleting uploaded bytes. The CLI's
+`attachment uri` exposes the same identity contract without the desktop.

@@ -73,3 +73,25 @@ fn independent_cli_processes_add_inspect_reuse_export_and_detach_snapshots() {
         serde_json::json!([file])
     );
 }
+
+#[test]
+fn cli_authored_markdown_tracks_workspace_scoped_inline_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"trace").unwrap();
+    let file = run(dir.path(), &["attachment", "add", source.to_str().unwrap()]);
+    let id = file["id"].as_str().unwrap();
+    let uri = run(dir.path(), &["attachment", "uri", id]);
+    let uri = uri.as_str().unwrap();
+    assert!(uri.starts_with("ticketd://attachment/"));
+    assert!(!uri.contains("trace.txt"));
+    let body = format!("Keep [My authored label]({uri}) here.");
+    let document = run(dir.path(), &["document", "create", "--body", &body]);
+    let document_id = document["id"].as_str().unwrap();
+    let workspace = ticketd_core::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    assert_eq!(workspace.show_document(document_id).unwrap().body, body);
+    assert_eq!(
+        workspace.embedded_attachments(document_id).unwrap()[0].id,
+        id
+    );
+}

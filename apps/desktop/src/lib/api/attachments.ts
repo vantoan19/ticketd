@@ -13,6 +13,14 @@ const attachmentSchema = z.object({
 export type Attachment = z.infer<typeof attachmentSchema>;
 
 export const attachments = {
+  async uri(id: string) {
+    return z.string().parse(await invoke("attachment_uri", { id }));
+  },
+  async resolve(uri: string) {
+    return attachmentSchema.parse(
+      await invoke("resolve_attachment_uri", { uri }),
+    );
+  },
   async forTicket(reference: string) {
     return z
       .array(attachmentSchema)

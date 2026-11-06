@@ -127,9 +127,9 @@ test("reading, selection, focus and editor mode changes preserve source without 
     rich,
   );
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
-  expect(screen.getByLabelText("Description source").textContent).toContain(
-    "###   Hello",
-  );
+  expect(
+    screen.getByRole("textbox", { name: "Description source" }).textContent,
+  ).toContain("###   Hello");
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
   const currentRich = screen.getByRole("textbox", {
     name: "Description rich text",
@@ -251,7 +251,7 @@ test("focuses the description on entry and reentry for rich and source documents
       await vi.advanceTimersByTimeAsync(30);
     });
     const editable = body.startsWith("<")
-      ? screen.getByLabelText("Description source").querySelector(".cm-content")
+      ? screen.getByRole("textbox", { name: "Description source" })
       : screen.getByRole("textbox", { name: "Description rich text" });
     expect(document.activeElement).toBe(editable);
     fireEvent.click(screen.getByRole("button", { name: "Done editing" }));

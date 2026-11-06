@@ -1401,6 +1401,8 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::set_ticket_attachment,
             attachment_commands::export_attachment,
             attachment_commands::open_attachment,
+            attachment_commands::attachment_uri,
+            attachment_commands::resolve_attachment_uri,
             context_link_markdown,
             document_context_links,
             ticket_from_document,

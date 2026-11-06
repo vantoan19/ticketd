@@ -19,6 +19,7 @@ import { documents } from "@/features/documents/api";
 import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
@@ -98,6 +99,8 @@ function DocumentLink({
   const { select, revision } = useContext(TicketNavigation);
   const openDocument = useContext(DocumentNavigation);
   const openPlan = useContext(PlanNavigation);
+  if (href?.startsWith("ticketd://attachment/"))
+    return <AttachmentLink uri={href}>{children}</AttachmentLink>;
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
@@ -270,6 +273,12 @@ function mentionBlock(tag: string) {
 // during workspace polling would remount diagrams and discard their SVG/state.
 const components: Components = {
   a: DocumentLink,
+  img: ({ src, alt }) =>
+    src?.startsWith("ticketd://attachment/") ? (
+      <AttachmentLink uri={src}>{alt || "Attachment"}</AttachmentLink>
+    ) : (
+      <img src={src} alt={alt ?? ""} />
+    ),
   table: ({ children }) => (
     <div
       className="markdown-table-scroll"

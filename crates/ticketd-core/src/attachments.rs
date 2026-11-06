@@ -52,14 +52,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 
 impl Workspace {
     pub(crate) fn attachment_directory(&self) -> Result<PathBuf, Error> {
-        let path = self
-            .connection
-            .path()
-            .filter(|p| !p.is_empty())
-            .ok_or_else(|| Error::Attachment("workspace has no file path".into()))?;
-        let mut path = std::ffi::OsString::from(path);
-        path.push(".attachments");
-        Ok(PathBuf::from(path))
+        attachment_directory(&self.connection)
     }
 
     /// Store an immutable snapshot. Retry the same request ID and arguments after
@@ -304,31 +297,7 @@ impl Workspace {
     }
 
     fn validate_attachment_bytes(&self, attachment: &Attachment) -> Result<PathBuf, Error> {
-        if Uuid::parse_str(&attachment.id).is_err()
-            || Path::new(&attachment.original_filename).file_name()
-                != Some(std::ffi::OsStr::new(&attachment.original_filename))
-            || attachment.locator
-                != format!("{}/bytes/{}", attachment.id, attachment.original_filename)
-        {
-            return Err(Error::Attachment(
-                "invalid managed snapshot locator; preserve the file and repair its metadata"
-                    .into(),
-            ));
-        }
-        let path = self.attachment_directory()?.join(&attachment.locator);
-        match fs::metadata(&path) {
-            Ok(metadata) if metadata.is_file() && metadata.len() == attachment.size_bytes => {
-                Ok(path)
-            }
-            Ok(_) => Err(Error::Attachment(format!(
-                "stored bytes for '{}' are incomplete; restore them from a complete backup or choose a new attachment",
-                attachment.display_name
-            ))),
-            Err(error) => Err(Error::Attachment(format!(
-                "cannot read stored bytes for '{}' ({}): {error}; restore the snapshot or choose a new attachment",
-                attachment.display_name, attachment.id
-            ))),
-        }
+        validate_attachment_bytes(&self.connection, attachment)
     }
 
     /// Explicit native-open support. Adapters must never open a file automatically.
@@ -394,7 +363,7 @@ impl Workspace {
     }
 }
 
-fn read_attachment(connection: &Connection, id: &str) -> Result<Attachment, Error> {
+pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attachment, Error> {
     connection.query_row("SELECT id, display_name, original_filename, size_bytes, locator FROM attachments WHERE id=?1", [id], attachment_row).optional()?
         .ok_or_else(|| Error::Attachment(format!("'{id}' was not found; use attachment list to find a workspace attachment ID")))
 }
@@ -460,4 +429,41 @@ fn sync_directory(path: &Path) -> Result<(), Error> {
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
+}
+
+pub(crate) fn validate_attachment_bytes(
+    connection: &Connection,
+    attachment: &Attachment,
+) -> Result<PathBuf, Error> {
+    if Uuid::parse_str(&attachment.id).is_err()
+        || Path::new(&attachment.original_filename).file_name()
+            != Some(std::ffi::OsStr::new(&attachment.original_filename))
+        || attachment.locator != format!("{}/bytes/{}", attachment.id, attachment.original_filename)
+    {
+        return Err(Error::Attachment(
+            "invalid managed snapshot locator; preserve the file and repair its metadata".into(),
+        ));
+    }
+    let path = attachment_directory(connection)?.join(&attachment.locator);
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() == attachment.size_bytes => Ok(path),
+        Ok(_) => Err(Error::Attachment(format!(
+            "stored bytes for '{}' are incomplete; restore them from a complete backup or choose a new attachment",
+            attachment.display_name
+        ))),
+        Err(error) => Err(Error::Attachment(format!(
+            "cannot read stored bytes for '{}' ({}): {error}; restore the snapshot or choose a new attachment",
+            attachment.display_name, attachment.id
+        ))),
+    }
+}
+
+fn attachment_directory(connection: &Connection) -> Result<PathBuf, Error> {
+    let path = connection
+        .path()
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| Error::Attachment("workspace has no file path".into()))?;
+    let mut path = std::ffi::OsString::from(path);
+    path.push(".attachments");
+    Ok(PathBuf::from(path))
 }

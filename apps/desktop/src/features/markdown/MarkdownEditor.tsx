@@ -1,13 +1,14 @@
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
@@ -65,6 +66,8 @@ import {
 } from "@platejs/table";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
+import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
+import { attachments, type Attachment } from "@/lib/api/attachments";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
@@ -96,6 +99,7 @@ import {
   ListChecks,
   MoreHorizontal,
   FileCode2,
+  Paperclip,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -392,9 +396,11 @@ function insert(editor: PlateEditor, type: string) {
 function Toolbar({
   visible,
   floating,
+  onAttach,
 }: {
   visible: boolean;
   floating: boolean;
+  onAttach: () => void;
 }) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
@@ -453,6 +459,17 @@ function Toolbar({
           {icon}
         </Button>
       ))}
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Insert attachment"
+        title="Insert attachment"
+        onMouseDown={keepFocus}
+        onClick={onAttach}
+      >
+        <Paperclip />
+      </Button>
       <Popover
         open={linkOpen}
         onOpenChange={(open) => {
@@ -730,6 +747,27 @@ export function MarkdownEditor({
   // In the rich editor the copy and source buttons share the toolbar row instead of adding one.
   const inlineMode = !source && !readOnly;
   const container = useRef<HTMLElement>(null);
+  const sourceEditor = useRef<ReactCodeMirrorRef>(null);
+  const sourceEditorExtensions = useMemo(
+    () => [
+      ...sourceExtensions,
+      EditorView.contentAttributes.of({ "aria-label": `${label} source` }),
+    ],
+    [label],
+  );
+  const [attachmentPicker, setAttachmentPicker] = useState(false);
+  const focusAfterInsertion = useRef(false);
+  const insertion = useRef<{
+    rich: PlateEditor["selection"];
+    source: { from: number; to: number } | undefined;
+    markdown: string;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      insertion.current = null;
+    },
+    [],
+  );
   const emitted = useRef(value);
   const synchronizing = useRef(false);
   const [initialMarkdown] = useState(() => writeMarkdown(document.value));
@@ -782,6 +820,72 @@ export function MarkdownEditor({
   }, [autoFocus, readOnly, source, editor]);
   // Slate drops its selection when focus leaves, so remember the last caret for outside changes.
   const lastSelection = useRef<PlateEditor["selection"]>(null);
+  useEffect(() => {
+    if (attachmentPicker || !focusAfterInsertion.current) return;
+    focusAfterInsertion.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      if (source) sourceEditor.current?.view?.focus();
+      else editor.tf.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [attachmentPicker, source, editor]);
+  function beginAttachment() {
+    // Native selection changes can precede Slate's throttled selection update.
+    const selection = window.getSelection();
+    const rich =
+      !source && selection && container.current?.contains(selection.anchorNode)
+        ? editor.api.toSlateRange(selection, {
+            exactMatch: false,
+            suppressThrow: true,
+          })
+        : null;
+    insertion.current = {
+      rich: rich ?? editor.selection ?? lastSelection.current,
+      source: sourceEditor.current?.view?.state.selection.main,
+      markdown: value,
+    };
+    focusAfterInsertion.current = true;
+    setAttachmentPicker(true);
+  }
+  async function insertAttachment(file: Attachment) {
+    const pending = insertion.current;
+    const uri = await attachments.uri(file.id);
+    if (!pending || pending !== insertion.current) return;
+    if (pending.markdown !== emitted.current)
+      throw new Error(
+        "The document changed while choosing a file. Close the picker and choose the insertion point again; the stored file remains available.",
+      );
+    if (source) {
+      const view = sourceEditor.current?.view;
+      if (!view)
+        throw new Error("Reopen this editor to insert the stored file.");
+      const { from, to } = pending.source ?? view.state.selection.main;
+      const link = writeMarkdown([
+        {
+          type: "p",
+          children: [
+            { type: "a", url: uri, children: [{ text: file.display_name }] },
+          ],
+        },
+      ]);
+      view.dispatch({
+        changes: { from, to, insert: link },
+        selection: { anchor: from + link.length },
+      });
+    } else {
+      if (pending.rich) editor.tf.select(pending.rich);
+      else editor.tf.select(editor.api.end([]) ?? [0]);
+      // Insert a link node rather than upserting the surrounding link or replacing its label.
+      editor.tf.insertNodes({
+        type: "a",
+        url: uri,
+        children: [{ text: file.display_name }],
+      });
+      editor.tf.move({ distance: 1, unit: "offset" });
+    }
+    focusAfterInsertion.current = true;
+    insertion.current = null;
+  }
   useEffect(() => {
     if (!focusRequest || readOnly) return;
     const frame = window.requestAnimationFrame(() => {
@@ -960,6 +1064,19 @@ export function MarkdownEditor({
           source={value}
           label={`Copy ${label} Markdown`}
         />
+        {source && !readOnly && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Insert attachment"
+            title="Insert attachment"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={beginAttachment}
+          >
+            <Paperclip />
+          </Button>
+        )}
         <Button
           disabled={document.reasons.length > 0}
           type="button"
@@ -996,12 +1113,13 @@ export function MarkdownEditor({
       )}
       {source ? (
         <CodeMirror
+          ref={sourceEditor}
           value={value}
           autoFocus={autoFocus}
           readOnly={readOnly}
           editable={!readOnly}
           aria-label={`${label} source`}
-          extensions={sourceExtensions}
+          extensions={sourceEditorExtensions}
           onChange={(next) => {
             if (!readOnly && next !== value) {
               emitted.current = next;
@@ -1049,6 +1167,7 @@ export function MarkdownEditor({
             <Toolbar
               visible={active || persistentToolbar}
               floating={!persistentToolbar}
+              onAttach={beginAttachment}
             />
           )}
           <PlateContent
@@ -1172,6 +1291,16 @@ export function MarkdownEditor({
             </div>
           )}
         </Plate>
+      )}
+      {!readOnly && (
+        <AttachmentPicker
+          open={attachmentPicker}
+          onOpenChange={(open) => {
+            setAttachmentPicker(open);
+            if (!open) insertion.current = null;
+          }}
+          onPick={insertAttachment}
+        />
       )}
     </section>
   );

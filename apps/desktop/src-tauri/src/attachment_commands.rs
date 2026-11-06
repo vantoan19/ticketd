@@ -80,3 +80,17 @@ pub fn open_attachment(app: tauri::AppHandle, id: String) -> Result<(), String> 
         .open_path(path.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn attachment_uri(id: String) -> Result<String, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_uri(&id))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn resolve_attachment_uri(uri: String) -> Result<Attachment, String> {
+    open_workspace()
+        .and_then(|w| w.resolve_attachment_uri(&uri))
+        .map_err(|e| e.to_string())
+}

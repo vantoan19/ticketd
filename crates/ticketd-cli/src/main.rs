@@ -47,6 +47,8 @@ enum AttachmentCommand {
     },
     /// Inspect a workspace attachment by stable ID
     Inspect { id: String },
+    /// Print the workspace-scoped URI to use in canonical Markdown links
+    Uri { id: String },
     /// Reuse an existing attachment on another ticket
     Link { id: String, ticket: String },
     /// Remove only this ticket's association, retaining the snapshot and all other uses
@@ -1880,6 +1882,7 @@ fn attachment_command(
             None => workspace.attachments(limit, offset)?,
         })?,
         AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
+        AttachmentCommand::Uri { id } => serde_json::to_string(&workspace.attachment_uri(&id)?)?,
         AttachmentCommand::Link { id, ticket } => {
             serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?
         }
