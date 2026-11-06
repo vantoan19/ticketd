@@ -286,6 +286,7 @@ export function TicketProperties({
       className="ticket-properties"
       data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
+      tabIndex={0}
     >
       {ticket.trashed && (
         <p role="note" className="rail-trash-note">

@@ -104,13 +104,20 @@
   position: relative;
 }
 .description-reading .description-document {
-  /* The hover outline sits 8px outside the text on the left and right and 4px
-     above and below it; margins cancel the padding so the text does not move. */
-  margin: 8px -8px 0;
-  padding: 4px 8px;
-  /* Tall enough that the Edit button (32px, 4px inset) stays inside the outline, never on its border. */
+  /* The hover card is 12px outside the text on every side (frame A/B); the
+     margins cancel the padding so the text does not move. Beside the list the
+     text sits 24px under the subtitle; expanded it sits 36px under it. */
+  margin: -4px -12px -12px;
+  padding: 12px;
   min-height: 48px;
   border-radius: 8px;
+}
+.ticket-detail[data-expanded] .description-reading .description-document {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+.ticket-detail[data-expanded] .subtickets {
+  margin-top: 44px;
 }
 .description-reading:hover .description-document,
 .description-reading:focus-within .description-document {
@@ -119,9 +126,27 @@
 .description-edit {
   position: absolute;
   top: 8px;
-  right: 0;
+  right: 8px;
   z-index: 1;
   opacity: 0;
+}
+/* Compact: icon, "Edit" and the key hint, 28px tall (74px wide). */
+.description-reading .description-edit {
+  height: 28px;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: var(--text-code);
+  line-height: 16px;
+}
+.description-reading .description-edit kbd {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  font-size: inherit;
+  color: var(--muted-foreground);
 }
 .description-reading:hover .description-edit,
 .description-reading:focus-within .description-edit {
