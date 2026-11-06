@@ -130,10 +130,12 @@ pub async fn capture_attachment(
 
 #[tauri::command]
 pub async fn import_attachment(
+    webview: tauri::Webview,
     source: String,
     request_id: String,
-    progress: Option<tauri::ipc::Channel<UploadProgress>>,
+    progress: Option<tauri::ipc::JavaScriptChannelId>,
 ) -> Result<Attachment, String> {
+    let progress = progress.map(|channel| channel.channel_on(webview));
     let (guard, canceled) = start_upload(&request_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
