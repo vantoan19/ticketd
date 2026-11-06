@@ -238,9 +238,20 @@ test("Document Reload preserves the independently recoverable discarded draft un
         },
       ],
     ]),
-    (command) => {
-      if (command === "save_document")
-        throw new Error("document changed elsewhere");
+    (command, args) => {
+      if (command === "save_document") {
+        const request = args as {
+          expectedUpdatedAt: string;
+          body: string | null;
+        };
+        if (request.expectedUpdatedAt !== initial.updated_at)
+          throw new Error("document changed elsewhere");
+        return {
+          ...initial,
+          body: request.body ?? initial.body,
+          updated_at: "saved",
+        };
+      }
       if (command === "show_document") return initial;
       if (command === "document_context_links") return [[], []];
       return [];
@@ -262,9 +273,11 @@ test("Document Reload preserves the independently recoverable discarded draft un
   );
   expect(records.get("document:d1")?.markdown).toContain(body);
   fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
-  expect(
-    screen.getByRole("textbox", { name: "Document rich text" }).textContent,
-  ).toContain("Discarded trace");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Document rich text" }).textContent,
+    ).toContain("Discarded trace"),
+  );
   await waitFor(() =>
     expect(records.get("document:d1")?.payload).toMatchObject({
       draft: { body },

@@ -742,14 +742,13 @@ export function MarkdownEditor({
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
-  const [historyProtected, setHistoryProtected] = useState(false);
+  const [protectedValue, setProtectedValue] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
-    setHistoryProtected(false);
     void recovery
       .put(historyOwner, null, value ? [value] : [], "undo")
       .then(() => {
-        if (current) setHistoryProtected(true);
+        if (current) setProtectedValue(value);
       })
       .catch(() => {});
     return () => {
@@ -1203,7 +1202,7 @@ export function MarkdownEditor({
         </Alert>
       )}
       {recovery.active &&
-        historyProtected &&
+        protectedValue === value &&
         !recoveryError &&
         value.includes("ticketd://attachment/") && (
           <p
