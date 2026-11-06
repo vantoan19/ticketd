@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,6 +18,7 @@ import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
+import { FilterDockContext } from "@/features/tickets/filter-dock";
 import { TicketListPane } from "@/features/tickets/TicketListPane";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { TicketWorkspace } from "@/features/tickets/useTicketWorkspace";
@@ -69,6 +71,21 @@ export function TicketWorkspaceView({
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
   const listRef = useRef<HTMLElement>(null);
+  // The Filters panel docks beside the list, so the detail pane makes room.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterDock = useMemo(
+    () => ({
+      open: filtersOpen,
+      setOpen: setFiltersOpen,
+      anchor: {
+        get current() {
+          return listRef.current?.closest<HTMLElement>("#list") ?? null;
+        },
+        set current(_: HTMLElement | null) {},
+      },
+    }),
+    [filtersOpen],
+  );
   // Plan dependencies take the detail pane. Each Plan opens on its list.
   const [planMode, setPlanModeState] = useState<"list" | "dependencies">(
     "list",
@@ -140,111 +157,114 @@ export function TicketWorkspaceView({
     setNarrowDetail(false);
   }
   return (
-    <div
-      className="plan-workspace"
-      hidden={hidden}
-      data-plan={scopedPlan ? "" : undefined}
-    >
-      {scopedPlan && (
-        <PlanHeader
-          key={scopedPlan.id}
-          plan={scopedPlan}
-          plans={workspace.plans}
-          projects={workspace.projects}
-          state={planState}
-          mode={planMode}
-          onModeChange={setPlanMode}
-        />
-      )}
-      {dependenciesOpen && (
-        <PlanDependencies
-          id={scopedPlan.id}
-          revision={workspace.revision}
-          projects={workspace.projects}
-          refresh={workspace.refresh}
-          onClose={() => setPlanMode("list")}
-          archived={scopedPlan.archived}
-          onOpen={(reference) => {
-            setPlanMode("list");
-            setSelected(reference);
-            setNarrowDetail(true);
-          }}
-        />
-      )}
-      <ResizablePanelGroup
-        orientation="horizontal"
-        // The split handle is hidden here; left enabled, the panel library still
-        // claims presses nearby, which stopped the sidebar's New menu from opening.
-        disabled={narrow}
-        className={cn(
-          "ticket-workspace",
-          expanded && "expanded",
-          narrowDetail && "narrow-detail",
-        )}
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
-        hidden={hidden || Boolean(dependenciesOpen)}
+    <FilterDockContext.Provider value={filterDock}>
+      <div
+        className="plan-workspace"
+        hidden={hidden}
+        data-plan={scopedPlan ? "" : undefined}
       >
-        <ResizablePanel
-          id="list"
-          minSize={360}
-          defaultSize={384}
-          className="list-panel"
-        >
-          <TicketListPane
-            workspace={workspace}
-            bulk={bulk}
-            listRef={listRef}
-            planState={planState}
-            onCreate={onCreate}
+        {scopedPlan && (
+          <PlanHeader
+            key={scopedPlan.id}
+            plan={scopedPlan}
+            plans={workspace.plans}
+            projects={workspace.projects}
+            state={planState}
+            mode={planMode}
+            onModeChange={setPlanMode}
+          />
+        )}
+        {dependenciesOpen && (
+          <PlanDependencies
+            id={scopedPlan.id}
+            revision={workspace.revision}
+            projects={workspace.projects}
+            refresh={workspace.refresh}
+            onClose={() => setPlanMode("list")}
+            archived={scopedPlan.archived}
             onOpen={(reference) => {
-              setPlanModeState("list");
+              setPlanMode("list");
               setSelected(reference);
               setNarrowDetail(true);
-              const narrow = window.matchMedia(NARROW_QUERY).matches;
-              if (narrow) focusPane.current = "detail";
-              // The Open tickets preference: a ticket opened from the list may
-              // take the full width. Narrow windows already show it that way.
-              else if (openTickets === "expanded") {
+            }}
+          />
+        )}
+        <ResizablePanelGroup
+          orientation="horizontal"
+          // The split handle is hidden here; left enabled, the panel library still
+          // claims presses nearby, which stopped the sidebar's New menu from opening.
+          disabled={narrow}
+          className={cn(
+            "ticket-workspace",
+            expanded && "expanded",
+            narrowDetail && "narrow-detail",
+          )}
+          data-filters-open={filtersOpen ? "" : undefined}
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
+          hidden={hidden || Boolean(dependenciesOpen)}
+        >
+          <ResizablePanel
+            id="list"
+            minSize={360}
+            defaultSize={384}
+            className="list-panel"
+          >
+            <TicketListPane
+              workspace={workspace}
+              bulk={bulk}
+              listRef={listRef}
+              planState={planState}
+              onCreate={onCreate}
+              onOpen={(reference) => {
+                setPlanModeState("list");
+                setSelected(reference);
+                setNarrowDetail(true);
+                const narrow = window.matchMedia(NARROW_QUERY).matches;
+                if (narrow) focusPane.current = "detail";
+                // The Open tickets preference: a ticket opened from the list may
+                // take the full width. Narrow windows already show it that way.
+                else if (openTickets === "expanded") {
+                  setExpanded(true);
+                  focusPane.current = "detail";
+                }
+              }}
+            />
+          </ResizablePanel>
+          <ResizableHandle
+            className="split-handle"
+            aria-label="Resize ticket list"
+          />
+          <ResizablePanel
+            id="detail"
+            minSize={480}
+            className="detail-panel"
+            // The panel library makes its content box `overflow: auto` with an
+            // auto height, so a percentage-height child never gets a bound and the
+            // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
+            style={DETAIL_PANEL_STYLE}
+          >
+            <TicketDetailPane
+              workspace={workspace}
+              expanded={expanded}
+              inboxTarget={inboxTarget}
+              onExpand={() => {
                 setExpanded(true);
                 focusPane.current = "detail";
-              }
-            }}
-          />
-        </ResizablePanel>
-        <ResizableHandle
-          className="split-handle"
-          aria-label="Resize ticket list"
-        />
-        <ResizablePanel
-          id="detail"
-          minSize={480}
-          className="detail-panel"
-          // The panel library makes its content box `overflow: auto` with an
-          // auto height, so a percentage-height child never gets a bound and the
-          // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.
-          style={DETAIL_PANEL_STYLE}
-        >
-          <TicketDetailPane
-            workspace={workspace}
-            expanded={expanded}
-            inboxTarget={inboxTarget}
-            onExpand={() => {
-              setExpanded(true);
-              focusPane.current = "detail";
-            }}
-            onReturn={() => {
-              setExpanded(false);
-              setNarrowDetail(false);
-              focusPane.current = "list";
-            }}
-            onSelect={(value, mention) => {
-              if (value === null) focusPane.current = "list";
-              setSelected(value, mention);
-            }}
-          />
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
+              }}
+              onReturn={() => {
+                setExpanded(false);
+                setNarrowDetail(false);
+                focusPane.current = "list";
+              }}
+              onSelect={(value, mention) => {
+                if (value === null) focusPane.current = "list";
+                setSelected(value, mention);
+              }}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </div>
+    </FilterDockContext.Provider>
   );
 }

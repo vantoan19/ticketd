@@ -7,6 +7,7 @@ import { Picker } from "@/components/ui/picker";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
@@ -15,6 +16,7 @@ import { client, type Ticket } from "@/lib/api/client";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { StatusDot } from "@/components/ui/status-dot";
 import { ticketStatuses } from "@/lib/statuses";
+import { useFilterDock } from "./filter-dock";
 import "./ticket-filters.css";
 
 type Props = {
@@ -50,7 +52,10 @@ type Props = {
 
 export function TicketFilters(p: Props) {
   const [searching, setSearching] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const dock = useFilterDock();
+  const [localOpen, setLocalOpen] = useState(false);
+  const filtersOpen = dock ? dock.open : localOpen;
+  const setFiltersOpen = dock ? dock.setOpen : setLocalOpen;
   const update = (setter: (value: string) => void, value: string) => {
     setter(value);
     p.setOffset(0);
@@ -136,11 +141,14 @@ export function TicketFilters(p: Props) {
             </IconButton>
           )}
           <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+            {dock && <PopoverAnchor virtualRef={dock.anchor} />}
             <PopoverTrigger asChild>
               {p.labeledFilter ? (
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="filter-trigger"
+                  data-active={filtersOpen || filterCount > 0 ? "" : undefined}
                   aria-label={
                     filterCount ? `Filters, ${filterCount} active` : "Filters"
                   }
@@ -171,8 +179,9 @@ export function TicketFilters(p: Props) {
               className="filters-content"
               side="right"
               align="start"
-              sideOffset={0}
+              sideOffset={8}
               alignOffset={0}
+              collisionPadding={8}
               aria-label="Ticket filters"
             >
               <div className="filters-head">
@@ -181,83 +190,85 @@ export function TicketFilters(p: Props) {
                   Clear all
                 </Button>
               </div>
-              {p.navigation.kind !== "progress" && (
-                <FilterSection label="Status">
-                  <div className="toggle-chips">
-                    {ticketStatuses.map((value) => (
-                      <ToggleChip
-                        key={value}
-                        pressed={p.status === value}
-                        onToggle={() =>
-                          update(p.setStatus, p.status === value ? "" : value)
-                        }
-                      >
-                        <StatusIcon status={value} size={16} decorative />
-                        {value}
-                      </ToggleChip>
-                    ))}
-                  </div>
+              <div className="filters-body">
+                {p.navigation.kind !== "progress" && (
+                  <FilterSection label="Status">
+                    <div className="toggle-chips">
+                      {ticketStatuses.map((value) => (
+                        <ToggleChip
+                          key={value}
+                          pressed={p.status === value}
+                          onToggle={() =>
+                            update(p.setStatus, p.status === value ? "" : value)
+                          }
+                        >
+                          <StatusIcon status={value} size={16} decorative />
+                          {value}
+                        </ToggleChip>
+                      ))}
+                    </div>
+                  </FilterSection>
+                )}
+                {p.navigation.kind !== "ready" && (
+                  <FilterSection label="Availability">
+                    <SegmentedControl
+                      aria-label="Availability"
+                      value={p.availability || "Any"}
+                      onValueChange={(value) =>
+                        update(p.setAvailability, value === "Any" ? "" : value)
+                      }
+                      options={[
+                        { value: "Any", label: "Any" },
+                        {
+                          value: "Ready",
+                          label: "Ready",
+                          icon: <StatusDot tone="ready" size={8} />,
+                        },
+                        {
+                          value: "Blocked",
+                          label: "Blocked",
+                          icon: <StatusDot tone="blocked" size={8} />,
+                        },
+                      ]}
+                    />
+                  </FilterSection>
+                )}
+                {!p.navigation.plan && (
+                  <FilterSection label="Plan">
+                    <Picker
+                      label="Plan"
+                      icon={<Layers aria-hidden="true" />}
+                      value={p.plan || "__any"}
+                      onValueChange={(value) =>
+                        update(p.setPlan, value === "__any" ? "" : value)
+                      }
+                      options={[
+                        { value: "__any", label: "Any Plan" },
+                        ...p.plans.map((item) => ({
+                          value: item.id,
+                          label: `${item.name}${item.archived ? " (archived)" : ""}`,
+                        })),
+                      ]}
+                    />
+                  </FilterSection>
+                )}
+                <FilterSection label="Tags">
+                  <TagChips
+                    open={filtersOpen}
+                    selected={tagList}
+                    onChange={setTagList}
+                  />
+                  <p className="filter-hint">
+                    Tickets must have every tag you pick.
+                  </p>
                 </FilterSection>
-              )}
-              {p.navigation.kind !== "ready" && (
-                <FilterSection label="Availability">
-                  <SegmentedControl
-                    aria-label="Availability"
-                    value={p.availability || "Any"}
-                    onValueChange={(value) =>
-                      update(p.setAvailability, value === "Any" ? "" : value)
-                    }
-                    options={[
-                      { value: "Any", label: "Any" },
-                      {
-                        value: "Ready",
-                        label: "Ready",
-                        icon: <StatusDot tone="ready" size={8} />,
-                      },
-                      {
-                        value: "Blocked",
-                        label: "Blocked",
-                        icon: <StatusDot tone="blocked" size={8} />,
-                      },
-                    ]}
+                <FilterSection label="Parent ticket">
+                  <ParentSearch
+                    value={p.family}
+                    onChange={(value) => update(p.setFamily, value)}
                   />
                 </FilterSection>
-              )}
-              {!p.navigation.plan && (
-                <FilterSection label="Plan">
-                  <Picker
-                    label="Plan"
-                    icon={<Layers aria-hidden="true" />}
-                    value={p.plan || "__any"}
-                    onValueChange={(value) =>
-                      update(p.setPlan, value === "__any" ? "" : value)
-                    }
-                    options={[
-                      { value: "__any", label: "Any Plan" },
-                      ...p.plans.map((item) => ({
-                        value: item.id,
-                        label: `${item.name}${item.archived ? " (archived)" : ""}`,
-                      })),
-                    ]}
-                  />
-                </FilterSection>
-              )}
-              <FilterSection label="Tags">
-                <TagChips
-                  open={filtersOpen}
-                  selected={tagList}
-                  onChange={setTagList}
-                />
-                <p className="filter-hint">
-                  Tickets must have every tag you pick.
-                </p>
-              </FilterSection>
-              <FilterSection label="Parent ticket">
-                <ParentSearch
-                  value={p.family}
-                  onChange={(value) => update(p.setFamily, value)}
-                />
-              </FilterSection>
+              </div>
               <div className="filters-foot">
                 <span role="status">
                   {ofTotal} {p.total === 1 ? "ticket matches" : "tickets match"}
@@ -367,7 +378,7 @@ function TagChips({
   const all = [...new Set([...vocabulary, ...selected])];
   if (all.length === 0) return <p className="filter-hint">No tags yet.</p>;
   return (
-    <div className="toggle-chips">
+    <div className="toggle-chips tag-chips">
       {all.map((tag) => (
         <ToggleChip
           key={tag}

@@ -1123,8 +1123,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 24px;
-  margin-top: 8px;
+  gap: 16px;
 }
 .create-form .ticket-properties {
   margin: 0;

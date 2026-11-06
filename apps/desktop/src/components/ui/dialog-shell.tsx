@@ -83,7 +83,7 @@ export function DialogShell({
           <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
             {children}
           </div>
-          <div className="dialog-shell-footer flex h-[60px] items-center gap-2 pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
+          <div className="dialog-shell-footer flex h-[60px] items-center gap-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
             {footerLeading}
             <p
               id={reasonId}

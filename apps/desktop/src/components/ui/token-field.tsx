@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { cn } from "cn";
 
 /**
@@ -15,6 +15,7 @@ export function TokenField({
   placeholder,
   suggestions = [],
   className,
+  chevron = false,
 }: {
   values: string[];
   onChange: (values: string[]) => void;
@@ -24,6 +25,8 @@ export function TokenField({
   /** Existing values offered in a dropdown above the field (it sits at a dialog's bottom edge) while it has focus. */
   suggestions?: string[];
   className?: string;
+  /** Shows a dropdown chevron at the end, marking that suggestions are offered. */
+  chevron?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [focused, setFocused] = useState(false);
@@ -53,14 +56,14 @@ export function TokenField({
     <div
       data-slot="token-field"
       className={cn(
-        "ui-input relative flex min-h-10 flex-wrap items-center gap-1.5 px-2 py-1.5 focus-within:outline focus-within:outline-1 focus-within:outline-(--input-focus)",
+        "ui-input relative flex min-h-10 flex-wrap items-center gap-1.5 pr-2.5 pl-2 py-1 focus-within:outline focus-within:outline-1 focus-within:outline-(--input-focus)",
         className,
       )}
     >
       {values.map((value) => (
         <span
           key={value}
-          className="inline-flex h-6 items-center gap-1 rounded-md bg-(--recessed) pr-1 pl-2 text-xs shadow-(--shadow-border-base)"
+          className="inline-flex h-6 items-center gap-1 rounded-full bg-(--recessed) pr-1 pl-2 text-(length:--text-code)"
         >
           {value}
           <button
@@ -109,6 +112,12 @@ export function TokenField({
             onChange(values.slice(0, -1));
         }}
       />
+      {chevron && (
+        <ChevronDown
+          aria-hidden="true"
+          className="pointer-events-none size-3.5 shrink-0 text-muted-foreground"
+        />
+      )}
       {open && (
         <ul
           id={listId}

@@ -47,33 +47,6 @@ function staleKind(code: string): Stale {
   return "";
 }
 
-function TicketSummary({
-  label,
-  ticket,
-  icon = ticket.status,
-  note,
-}: {
-  label: string;
-  ticket: Pick<Ticket, "reference" | "title" | "status">;
-  /** The status whose icon to show; defaults to the ticket's own. */
-  icon?: string;
-  note: string;
-}) {
-  return (
-    <div className="duplicate-ticket" role="group" aria-label={label}>
-      <span className="duplicate-ticket-label">{label}</span>
-      <span className="duplicate-ticket-title">
-        <span className="duplicate-ticket-reference">{ticket.reference}</span>{" "}
-        {ticket.title}
-      </span>
-      <span className="duplicate-ticket-status">
-        <StatusIcon status={icon} size={14} decorative />
-        {note}
-      </span>
-    </div>
-  );
-}
-
 /**
  * The dialog that marks a ticket as a duplicate and decides each affected
  * dependency, in one flow: choose the canonical ticket, then Replace, Keep or
@@ -350,33 +323,66 @@ export function Duplicates({
                   below.
                 </p>
               )}
-              {canonicalTicket && (
-                <div className="duplicate-tickets">
-                  <TicketSummary
-                    label="Duplicate"
-                    ticket={ticket}
-                    icon="Duplicate"
-                    note={`${ticket.status} → Duplicate · Duplicate of ${preview.canonical}`}
-                  />
-                  <TicketSummary
-                    label="Canonical ticket"
-                    ticket={canonicalTicket}
-                    note={`${canonicalTicket.status} · unchanged`}
-                  />
-                </div>
-              )}
-              <div>
-                <Button
-                  type="button"
-                  variant="link"
-                  className="duplicate-change"
-                  disabled={pending}
-                  onClick={() => changeCanonical()}
+              <div className="duplicate-canonical-field">
+                <span
+                  className="duplicate-field-label"
+                  id={`canonical-label-${ticket.id}`}
                 >
-                  {separate
-                    ? "Change existing endpoint"
-                    : "Change canonical ticket"}
-                </Button>
+                  {separate ? "Existing endpoint" : "Canonical ticket"}
+                </span>
+                <div
+                  className="duplicate-canonical"
+                  role="group"
+                  aria-labelledby={`canonical-label-${ticket.id}`}
+                >
+                  {canonicalTicket ? (
+                    <>
+                      <StatusIcon
+                        status={canonicalTicket.status}
+                        size={16}
+                        decorative
+                      />
+                      <span className="duplicate-canonical-reference">
+                        {canonicalTicket.reference}
+                      </span>
+                      <span className="duplicate-canonical-title">
+                        {canonicalTicket.title}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="duplicate-canonical-title">{target}</span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="duplicate-change"
+                    disabled={pending}
+                    aria-label={
+                      separate
+                        ? "Change existing endpoint"
+                        : "Change canonical ticket"
+                    }
+                    onClick={() => changeCanonical()}
+                  >
+                    Change
+                  </Button>
+                </div>
+                {canonicalTicket && !separate && (
+                  <p
+                    className="duplicate-result"
+                    role="group"
+                    aria-label="Duplicate"
+                  >
+                    <StatusIcon status="Duplicate" size={14} decorative />
+                    <span>
+                      Result: {ticket.reference} becomes{" "}
+                      <span className="duplicate-result-value">
+                        Duplicate of {preview.canonical}
+                      </span>
+                    </span>
+                  </p>
+                )}
                 {!separate && preview.canonical !== target && (
                   <p className="duplicate-note">
                     {target} is itself a duplicate, so {ticket.reference} points
@@ -389,12 +395,12 @@ export function Duplicates({
                   aria-label="Affected dependencies"
                   className="dependencies"
                 >
-                  <h3>Affected dependencies</h3>
-                  <p className="duplicate-note">
-                    {separate
-                      ? `Each of these dependencies is being moved from ${target} to ${ticket.reference}, so each needs a decision.`
-                      : "A duplicate ticket never satisfies a blocking dependency, so each of these needs a decision."}
-                  </p>
+                  <h3>
+                    Dependencies to review{" "}
+                    <span className="dependencies-count">
+                      {preview.edges.length}
+                    </span>
+                  </h3>
                   <ul>
                     {preview.edges.map((edge, index) => {
                       const issue = preview.replacement_issues[index] ?? null;
@@ -407,21 +413,32 @@ export function Duplicates({
                         <li key={name} className="dependency-edge">
                           <div className="dependency-edges">
                             <span>
-                              <span className="dependency-edge-label">
-                                Current
+                              <span className="dependency-ref">
+                                {edge.blocker}
                               </span>{" "}
-                              {name}
+                              blocks{" "}
+                              <span className="dependency-ref">
+                                {edge.dependent}
+                              </span>
                             </span>
-                            <span>
-                              <span className="dependency-edge-label">
-                                Proposed
-                              </span>{" "}
-                              {edge.replacement_blocker} blocks{" "}
-                              {edge.replacement_dependent}
-                            </span>
+                            {reason && (
+                              <p className="dependency-reason">{reason}.</p>
+                            )}
+                            <p className="dependency-consequence">
+                              {choice
+                                ? consequence(
+                                    sourceRef,
+                                    edge,
+                                    choice,
+                                    outcomes,
+                                    separate,
+                                  )
+                                : "Choose what happens to this dependency."}
+                            </p>
                           </div>
                           <SegmentedControl<Unchosen>
                             aria-label={`Choice for ${name}`}
+                            compact
                             value={choice}
                             onValueChange={(next) =>
                               setChoices((current) =>
@@ -431,10 +448,13 @@ export function Duplicates({
                               )
                             }
                             options={(
-                              ["replace", "remove", "retain"] as const
+                              ["replace", "retain", "remove"] as const
                             ).map((value) => ({
                               value,
-                              label: choiceLabels[value],
+                              label:
+                                value === "replace"
+                                  ? `Replace with ${separate ? ticket.reference : preview.canonical}`
+                                  : choiceLabels[value],
                               disabled:
                                 !!stale || (value === "replace" && !!issue),
                               ...(value === "replace" && reason
@@ -442,20 +462,6 @@ export function Duplicates({
                                 : {}),
                             }))}
                           />
-                          {reason && (
-                            <p className="dependency-reason">{reason}.</p>
-                          )}
-                          <p className="dependency-consequence">
-                            {choice
-                              ? consequence(
-                                  sourceRef,
-                                  edge,
-                                  choice,
-                                  outcomes,
-                                  separate,
-                                )
-                              : "Choose what happens to this dependency."}
-                          </p>
                         </li>
                       );
                     })}
@@ -466,17 +472,11 @@ export function Duplicates({
                   {sourceRef} has no dependencies to review.
                 </p>
               )}
-              <p className="duplicate-summary">
+              <p className="sr-only">
                 {separate
                   ? "All of the chosen changes are applied together or not at all."
                   : summarize(ticket.reference, preview.canonical, choices)}
               </p>
-              {!separate && (
-                <p className="duplicate-note">
-                  Removing the duplicate link later restores the earlier status.
-                  Any dependency changes you apply now stay as they are.
-                </p>
-              )}
             </div>
             {stale && (
               <div role="alert" className="duplicate-stale">
@@ -509,7 +509,7 @@ export function Duplicates({
                 <FieldLabel htmlFor={`canonical-${ticket.id}`}>
                   {separate
                     ? "Existing endpoint to replace"
-                    : "Canonical ticket reference"}
+                    : "Canonical ticket"}
                 </FieldLabel>
                 <Input
                   ref={canonicalInput}
@@ -526,6 +526,11 @@ export function Duplicates({
                   }}
                   placeholder="Search by title or T-number"
                   autoComplete="off"
+                  aria-label={
+                    separate
+                      ? "Existing endpoint to replace"
+                      : "Canonical ticket reference"
+                  }
                   aria-invalid={!!error}
                 />
                 <FieldError>{error}</FieldError>
