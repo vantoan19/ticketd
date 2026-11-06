@@ -28,7 +28,7 @@ import {
   type RowContextKind,
   type RowScope,
 } from "./ticket-row";
-import { formatDateTime } from "@/lib/format";
+import { compactAgo, formatDateTime } from "@/lib/format";
 import type { StatusCounts, Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
 
@@ -329,8 +329,11 @@ function RowDetails({
             dateTime={ticket.updated_at}
             title={formatDateTime(ticket.updated_at)}
           >
-            {ticket.trashed ? "Trashed" : "Updated"}{" "}
-            {ago(ticket.updated_at, now)}
+            <span className="sr-only">
+              {ticket.trashed ? "Trashed" : "Updated"}{" "}
+              {ago(ticket.updated_at, now)}
+            </span>
+            <span aria-hidden="true">{compactAgo(ticket.updated_at, now)}</span>
           </time>
         ) : (
           "Update time unknown"

@@ -207,7 +207,13 @@ export function TicketListPane({
           <p>
             {filtered && scopeTotal !== undefined
               ? `${total} of ${scopeTotal}`
-              : `${total} ${total === 1 ? "ticket" : "tickets"}`}
+              : total}
+            {!(filtered && scopeTotal !== undefined) && (
+              <span className="sr-only">
+                {" "}
+                {total === 1 ? "ticket" : "tickets"}
+              </span>
+            )}
           </p>
           <IconButton
             className="list-refresh"

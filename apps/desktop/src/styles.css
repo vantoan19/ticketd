@@ -40,6 +40,7 @@
   line-height: normal;
   color: var(--foreground);
   /* The type scale (DESIGN.md section 3). Every font-size uses one of these. */
+  --text-wordmark: 15px;
   --text-caption: 12px;
   --text-caption-line: 16px;
   --text-ui: 14px;
@@ -523,7 +524,8 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  padding: 0 12px 12px;
+  /* The nav column is 208px wide, 11px from the window edge (design frame A). */
+  padding: 0 5px 12px 11px;
   background: var(--background);
   color: var(--foreground);
 }
@@ -595,27 +597,29 @@
   align-items: center;
   gap: 8px;
   height: 48px;
-  padding-inline: 8px 0;
+  padding-inline: 12px 0;
 }
 .brand strong {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: var(--text-ui-line);
-  letter-spacing: -0.28px;
+  font-size: var(--text-wordmark);
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.3px;
 }
 .new-ticket {
   margin-left: auto;
+  width: 32px;
+  padding: 0;
 }
 .sidebar-nav {
   display: grid;
-  gap: 4px;
-  margin-top: 20px;
+  gap: 0;
+  margin-top: 0;
 }
 .sidebar-nav ul {
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: 2px;
+  gap: 0;
 }
 .sidebar-nav li {
   width: 100%;
@@ -626,7 +630,7 @@
   gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 10px 0 12px;
   border-radius: 6px;
   text-align: left;
   color: var(--muted-foreground);
@@ -642,7 +646,8 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  font-size: var(--text-caption);
+  font-size: 12px;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
 }
@@ -662,12 +667,14 @@
   flex: none;
 }
 .sidebar-heading {
-  color: var(--muted-foreground);
+  color: var(--secondary-foreground);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 20px 8px 0;
-  font-size: var(--text-caption);
+  height: 28px;
+  margin: 20px 0 0;
+  padding-left: 12px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 16px;
 }
@@ -682,8 +689,8 @@
 .sidebar-heading button {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   color: var(--muted-foreground);
 }
@@ -692,7 +699,7 @@
   color: var(--foreground);
 }
 .sidebar-heading + .sidebar-nav {
-  margin-top: 8px;
+  margin-top: 0;
 }
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {
@@ -1494,7 +1501,21 @@
 /* After a pointer interaction controls show no focus ring (see
    useInputModality); text fields keep their outline so typing stays visible. */
 html[data-input="pointer"]
-  :is(button, summary, a, [role="radio"], [role="combobox"]):focus-visible {
+  :is(
+    button,
+    summary,
+    a,
+    [role="radio"],
+    [role="combobox"],
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    [aria-haspopup],
+    pre[tabindex],
+    [tabindex]:not(input, textarea, [contenteditable="true"])
+  ):focus-visible,
+html[data-input="pointer"] .ticket-rows li:has(.ticket-row:focus-visible),
+html[data-input="pointer"] .sidebar-nav button:focus-visible {
   box-shadow: none;
   outline: none;
 }

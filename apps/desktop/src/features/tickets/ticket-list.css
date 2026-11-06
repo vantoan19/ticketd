@@ -23,13 +23,14 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 56px minmax(0, 1fr) auto;
-  column-gap: 8px;
+  grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+  column-gap: 4px;
   row-gap: 2px;
   width: 100%;
   min-width: 0;
-  min-height: 48px;
-  padding: 8px 12px 8px 0;
+  /* Two lines: 8 + 20 + 2 + 16 + 6 = 52px (design frame A). */
+  min-height: 52px;
+  padding: 8px 6px 6px 0;
   text-align: left;
   border-radius: 6px;
   background: transparent;
@@ -63,9 +64,10 @@
   gap: 8px;
   min-width: 0;
   color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: clip;
+  overflow-clip-margin: 2px;
 }
 .ticket-row-state {
   display: inline-flex;
@@ -97,19 +99,19 @@
   gap: 0 8px;
   min-width: 0;
   height: 16px;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 1px;
 }
 .ticket-tag {
   flex: none;
+  height: 18px;
+  margin-block: -1px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--recessed);
-  box-shadow: var(--shadow-border-base);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  line-height: 18px;
   white-space: nowrap;
-}
-.ticket-rows li:hover .ticket-tag,
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-tag {
-  background: var(--surface);
 }
 .ticket-list .ticket-row:focus-visible {
   position: relative;
@@ -370,8 +372,8 @@
   align-items: center;
   gap: 8px;
   height: 32px;
-  margin-top: 12px;
-  margin-bottom: 2px;
+  margin-top: 0;
+  margin-bottom: 0;
   padding: 0 4px 0 32px;
   background: var(--recessed);
   box-shadow:
@@ -485,7 +487,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 2px;
 }
 /* Priority when the line is tight: the state keeps its words, the context and
    tags shrink with an ellipsis and never to nothing. */
