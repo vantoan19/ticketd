@@ -1,0 +1,89 @@
+.attachment-library {
+  padding: 28px var(--page-gutter);
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+.attachment-library header,
+.attachment-library-tools,
+.attachment-library footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.attachment-library header {
+  margin-bottom: 24px;
+}
+.attachment-library h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.attachment-library p,
+.attachment-library footer {
+  font-size: var(--text-ui);
+  color: var(--muted-foreground);
+}
+.attachment-library-tools {
+  margin-bottom: 20px;
+}
+.attachment-library-tools input {
+  max-width: 320px;
+}
+.attachment-table-scroll {
+  overflow: auto;
+}
+.attachment-library table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--text-ui);
+}
+.attachment-library th {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.attachment-library th,
+.attachment-library td {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 8px;
+}
+.attachment-library td:first-child {
+  width: 40%;
+  min-width: 200px;
+}
+.attachment-library td small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+.attachment-usage-link {
+  color: var(--primary);
+  text-align: left;
+}
+.attachment-usage-link:hover {
+  text-decoration: underline;
+}
+.attachment-usage-link:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.attachment-library footer {
+  margin-top: 16px;
+}
+@media (max-width: 640px) {
+  .attachment-library {
+    padding: 16px;
+  }
+  .attachment-library-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .attachment-library-tools input {
+    max-width: none;
+  }
+}

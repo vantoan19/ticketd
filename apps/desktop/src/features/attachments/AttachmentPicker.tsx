@@ -1,6 +1,6 @@
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { File as FileIcon, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import {
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
+import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
   state:
@@ -37,8 +38,10 @@ export function AttachmentPicker({
   onOpenChange,
   onPick,
   capture,
+  ticketReference = null,
 }: {
   open: boolean;
+  ticketReference?: string | null | undefined;
   onOpenChange: (open: boolean) => void;
   onPick: (
     file: Attachment,
@@ -48,7 +51,6 @@ export function AttachmentPicker({
   capture?: { sources: CaptureSource[] } | undefined;
 }) {
   const [tab, setTab] = useState<"upload" | "existing">("upload");
-  const [recent, setRecent] = useState<Attachment[]>([]);
   const [id, setId] = useState("");
   const [rows, setRows] = useState<UploadAttempt[]>([]);
   const attempts = useRef<UploadAttempt[]>([]);
@@ -125,21 +127,6 @@ export function AttachmentPicker({
       current = false;
     };
   }, [open]);
-  useEffect(() => {
-    let current = true;
-    if (open && tab === "existing")
-      void attachments
-        .recent()
-        .then((files) => {
-          if (current) setRecent(files);
-        })
-        .catch((reason: unknown) => {
-          if (current) setError(String(reason));
-        });
-    return () => {
-      current = false;
-    };
-  }, [open, tab]);
 
   async function run() {
     if (running.current) return;
@@ -300,16 +287,17 @@ export function AttachmentPicker({
       const file = await attachments.inspect(attachmentId.trim());
       if (insertion.current !== currentInsertion) return;
       await onPick(file, crypto.randomUUID());
-      changeOpen(false);
+      if (insertion.current === currentInsertion) changeOpen(false);
     } catch (reason) {
       setError(String(reason));
     } finally {
       setBusy(false);
     }
   }
+  const existingInsertion = insertion.current;
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent ref={dropTarget}>
+      <DialogContent ref={dropTarget} className="attachment-picker">
         <DialogHeader>
           <DialogTitle>Attach file</DialogTitle>
           <DialogDescription>
@@ -476,27 +464,25 @@ export function AttachmentPicker({
                 Reuse ID
               </Button>
             </div>
-            <p className="attachment-hint">Recent workspace files</p>
-            <ul aria-label="Existing files">
-              {recent.map((file) => (
-                <li key={file.id}>
-                  <button
-                    className="attachment-row"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void reuse(file.id)}
-                  >
-                    <FileIcon aria-hidden="true" />
-                    <span>
-                      {file.display_name}
-                      <small>
-                        {formatSize(file.size_bytes)} · {file.id}
-                      </small>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ExistingAttachments
+              ticketReference={ticketReference}
+              onBusyChange={setBusy}
+              onDone={() => {
+                if (insertion.current === existingInsertion) changeOpen(false);
+              }}
+              onPick={async (file, requestId) => {
+                if (insertion.current !== existingInsertion)
+                  throw new Error(
+                    "Insertion was canceled. The file remains in the workspace.",
+                  );
+                const stored = await attachments.inspect(file.id);
+                if (insertion.current !== existingInsertion)
+                  throw new Error(
+                    "Insertion was canceled. The file remains in the workspace.",
+                  );
+                await pick.current(stored, requestId);
+              }}
+            />
           </div>
         )}
         {error && <p role="alert">{error}</p>}

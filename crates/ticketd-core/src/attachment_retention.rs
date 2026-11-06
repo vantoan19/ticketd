@@ -196,8 +196,15 @@ impl Workspace {
     /// Includes recoverable trash and unpromoted Activity details; never flattens linked Documents.
     pub fn attachment_usage(&self, id: &str) -> Result<AttachmentUsage, Error> {
         let tx = self.connection.unchecked_transaction()?;
-        crate::attachments::read_attachment(&tx, id)?;
-        let mut statement = tx.prepare(
+        let usage = read_usage(&tx, id)?;
+        tx.commit()?;
+        Ok(usage)
+    }
+}
+
+pub(crate) fn read_usage(tx: &Connection, id: &str) -> Result<AttachmentUsage, Error> {
+    crate::attachments::read_attachment(tx, id)?;
+    let mut statement = tx.prepare(
             "SELECT 'ticket_attachment', t.id, t.id, t.trashed FROM ticket_attachments a JOIN tickets t ON t.id=a.ticket_id WHERE a.attachment_id=?1
              UNION ALL SELECT 'ticket_body', t.id, t.id, t.trashed FROM embedded_attachments a JOIN tickets t ON t.id=a.source_id WHERE a.attachment_id=?1
              UNION ALL SELECT 'document_body', d.id, NULL, d.trashed FROM embedded_attachments a JOIN documents d ON d.id=a.source_id WHERE a.attachment_id=?1
@@ -205,27 +212,25 @@ impl Workspace {
              UNION ALL SELECT d.kind, d.owner, NULL, 0 FROM attachment_draft_references a JOIN attachment_drafts d ON d.owner=a.owner WHERE a.attachment_id=?1
              ORDER BY 1,2",
         )?;
-        let protections = statement
-            .query_map([id], |r| {
-                Ok(AttachmentProtection {
-                    kind: r.get(0)?,
-                    owner: r.get(1)?,
-                    ticket_id: r.get(2)?,
-                    trashed: r.get(3)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let legacy_drafts_pending: bool = tx.query_row(
-            "SELECT pending FROM attachment_draft_cutover WHERE singleton=1",
-            [],
-            |r| r.get(0),
-        )?;
-        tx.commit()?;
-        Ok(AttachmentUsage {
-            eligible: protections.is_empty() && !legacy_drafts_pending,
-            legacy_drafts_pending,
-            protections,
-        })
-    }
+    let protections = statement
+        .query_map([id], |r| {
+            Ok(AttachmentProtection {
+                kind: r.get(0)?,
+                owner: r.get(1)?,
+                ticket_id: r.get(2)?,
+                trashed: r.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    let legacy_drafts_pending: bool = tx.query_row(
+        "SELECT pending FROM attachment_draft_cutover WHERE singleton=1",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(AttachmentUsage {
+        eligible: protections.is_empty() && !legacy_drafts_pending,
+        legacy_drafts_pending,
+        protections,
+    })
 }

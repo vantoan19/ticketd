@@ -6,6 +6,9 @@ import {
 import { ContextGraph } from "@/features/documents/ContextGraph";
 import { WorkspaceGraph } from "@/features/documents/WorkspaceGraph";
 import { Documents } from "@/features/documents/Documents";
+import { AttachmentLibrary } from "@/features/attachments/AttachmentLibrary";
+import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
+import type { Attachment } from "@/lib/api/attachments";
 import type { SettingsCardKey } from "@/features/settings/settings-sections";
 import { type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -51,7 +54,11 @@ function AppContent() {
     | "settings"
     | "inbox"
     | "documents"
+    | "attachments"
   >("tickets");
+  const [attachmentPreview, setAttachmentPreview] = useState<Attachment | null>(
+    null,
+  );
   const [settingsSection, setSettingsSection] =
     useState<SettingsCardKey>("appearance");
   useThemeSync();
@@ -119,6 +126,8 @@ function AppContent() {
     graph?: string | null;
     keepGraph?: boolean;
   }) => {
+    if ((next.view && next.view !== "attachments") || next.graph)
+      setAttachmentPreview(null);
     if (next.keepGraph) {
       setGraphOrigin(null);
       if (next.view) setViewState(next.view);
@@ -373,6 +382,20 @@ function AppContent() {
                       }}
                     />
                   )}
+                  {view === "attachments" && graphOrigin === null && (
+                    <AttachmentLibrary onPreview={setAttachmentPreview} />
+                  )}
+                  {view === "attachments" &&
+                    graphOrigin === null &&
+                    attachmentPreview && (
+                      <AttachmentPreview
+                        target={{
+                          id: attachmentPreview.id,
+                          initial: attachmentPreview,
+                        }}
+                        onClose={() => setAttachmentPreview(null)}
+                      />
+                    )}
                   {
                     <div
                       className="management"

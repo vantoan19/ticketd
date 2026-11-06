@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    RenameAttachment {
+        id: String,
+        display_name: String,
+    },
     ImportAttachment {
         source: String,
         display_name: Option<String>,
@@ -319,6 +323,9 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::RenameAttachment { id, display_name } => {
+                WriteResult::Attachment(self.rename_attachment(&id, &display_name)?)
+            }
             WriteRequest::ImportAttachment { .. } => {
                 return Err(Error::Attachment(
                     "uploads must run outside a database transaction".into(),

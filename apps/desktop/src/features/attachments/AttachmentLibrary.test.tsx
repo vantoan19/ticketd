@@ -1,0 +1,62 @@
+// @vitest-environment jsdom
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { AttachmentLibrary } from "./AttachmentLibrary";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+
+test("library searches core metadata and state and opens the chosen stable file", async () => {
+  const file = {
+    id: "stable",
+    display_name: "Trace",
+    original_filename: "trace.log",
+    size_bytes: 9,
+    kind: "local_snapshot",
+    locator: "stable/bytes/trace.log",
+  };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "search_attachments") {
+      const { query } = args as { query: { search: string; state: string } };
+      return query.search === "no match"
+        ? []
+        : [
+            {
+              attachment: file,
+              related: false,
+              usage: {
+                eligible: true,
+                legacy_drafts_pending: false,
+                protections: [],
+              },
+            },
+          ];
+    }
+    throw new Error(`Unexpected ${command}`);
+  });
+  const preview = vi.fn();
+  render(<AttachmentLibrary onPreview={preview} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
+  expect(preview).toHaveBeenCalledWith(file);
+  fireEvent.click(screen.getByRole("radio", { name: "Unused" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenLastCalledWith("search_attachments", {
+      query: expect.objectContaining({ state: "unused", limit: 50 }),
+    }),
+  );
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search files" }), {
+    target: { value: "no match" },
+  });
+  await screen.findByText("No matching files");
+});
