@@ -219,6 +219,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   bridge.invoke.mockReset();
   localStorage.clear();
@@ -243,6 +244,88 @@ async function chooseStatus(reference: string, status: string) {
   fireEvent.click(screen.getByRole("menuitemradio", { name: status }));
   await settle();
 }
+
+test("Board and List resizing retain independent pane widths without replacing the detail draft", async () => {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
+  const app = render(<App />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /T-1.*Ticket 1/ }));
+  await settle();
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Keep this unsaved draft" },
+  });
+  let separator = screen.getByRole("separator", { name: "Resize ticket list" });
+  const size = () => Number(separator.getAttribute("aria-valuenow"));
+  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  await settle();
+  const listSize = size();
+  await showBoard();
+  expect(size()).toBeCloseTo(44);
+  fireEvent.keyDown(separator, { key: "ArrowRight" });
+  await settle();
+  const boardSize = size();
+  expect(boardSize).toBeGreaterThan(44);
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  await settle();
+  expect(size()).toBeCloseTo(listSize);
+  await showBoard();
+  expect(size()).toBeCloseTo(boardSize);
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Keep this unsaved draft",
+  );
+  app.unmount();
+  render(<App />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /T-1.*Ticket 1/ }));
+  await settle();
+  separator = screen.getByRole("separator", { name: "Resize ticket list" });
+  expect(size()).toBeCloseTo(boardSize);
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  await settle();
+  expect(size()).toBeCloseTo(listSize);
+});
+
+test("saved-status feedback can be dismissed and does not return after leaving its filtered scope", async () => {
+  saved = [ticket(1), ticket(3)];
+  render(<App />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "In progress");
+  const message =
+    "T-1 is now In progress. It no longer matches the current filters.";
+  const notice = screen.getByText(message).closest('[role="status"]')!;
+  expect(
+    within(notice as HTMLElement).getByRole("button", {
+      name: "Dismiss status update",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
+  await settle();
+  expect(screen.queryByText(message)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  expect(screen.queryByText(message)).toBeNull();
+  await chooseStatus("T-3", "In review");
+  expect(
+    screen.getByText(
+      "T-3 is now In review. It no longer matches the current filters.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Dismiss status update" }),
+  );
+  expect(
+    screen.queryByText(
+      "T-3 is now In review. It no longer matches the current filters.",
+    ),
+  ).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "Ticket status board" }),
+  );
+});
 
 function boardGeometry() {
   const board = screen.getByRole("region", { name: "Ticket status board" });

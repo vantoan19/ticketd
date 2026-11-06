@@ -6,7 +6,12 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import {
+  useDefaultLayout,
+  useGroupRef,
+  usePanelRef,
+  type Layout,
+} from "react-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -29,6 +34,7 @@ const DETAIL_PANEL_STYLE = {
   overflow: "hidden",
 } as const;
 const NARROW_QUERY = "(max-width: 1071px)";
+const BOARD_SPLIT: Layout = { list: 44, detail: 56 };
 
 function subscribeNarrow(callback: () => void) {
   const media = window.matchMedia(NARROW_QUERY);
@@ -131,11 +137,27 @@ export function TicketWorkspaceView({
         "Could not remember ticket layout. Check local storage and try again.",
       );
   };
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+  const listSplit = useDefaultLayout({
     // Versioned: layouts saved by earlier builds (468px list) must not override
     // the 384px default.
     id: "ticketd.workspace.v2",
   });
+  const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
+  const groupRef = useGroupRef();
+  const listPanelRef = usePanelRef();
+  const activeSplit = useRef(workspace.layout);
+  const splitLayouts = useRef<{ list: Layout | undefined; board: Layout }>({
+    list: listSplit.defaultLayout,
+    board: boardSplit.defaultLayout ?? BOARD_SPLIT,
+  });
+  useLayoutEffect(() => {
+    if (activeSplit.current === workspace.layout) return;
+    activeSplit.current = workspace.layout;
+    const layout = splitLayouts.current[workspace.layout];
+    // Change the library's layout without remounting the detail editor or board scrollers.
+    if (layout) groupRef.current?.setLayout(layout);
+    else listPanelRef.current?.resize(384);
+  }, [workspace.layout, groupRef, listPanelRef]);
   const focusPane = useRef<"detail" | "list" | null>(null);
   const boardReturn = useRef<{ reference: string; scrollLeft: number } | null>(
     null,
@@ -223,7 +245,9 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={narrow}
+          disabled={
+            narrow || expanded || (workspace.layout === "board" && !selected)
+          }
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
@@ -232,12 +256,28 @@ export function TicketWorkspaceView({
             !selected && "board-unselected",
           )}
           data-filters-open={filtersOpen ? "" : undefined}
-          defaultLayout={defaultLayout}
-          onLayoutChanged={onLayoutChanged}
+          groupRef={groupRef}
+          defaultLayout={
+            workspace.layout === "board"
+              ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
+              : listSplit.defaultLayout
+          }
+          onLayoutChanged={(layout, meta) => {
+            const mode = activeSplit.current;
+            if (meta.isUserInteraction || !splitLayouts.current[mode])
+              splitLayouts.current[mode] = meta.requestedLayout ?? layout;
+            // Full-width modes and window constraints must not overwrite the preferred split.
+            if (meta.isUserInteraction)
+              (mode === "board" ? boardSplit : listSplit).onLayoutChanged(
+                layout,
+                meta,
+              );
+          }}
           hidden={hidden || Boolean(dependenciesOpen)}
         >
           <ResizablePanel
             id="list"
+            panelRef={listPanelRef}
             minSize={360}
             defaultSize={384}
             className="list-panel"

@@ -1,6 +1,13 @@
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
-import { CornerDownRight, Folder, Layers, MoreHorizontal } from "lucide-react";
+import {
+  CornerDownRight,
+  Folder,
+  Layers,
+  MoreHorizontal,
+  X,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,9 +38,25 @@ export function TicketBoard({
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
   return (
     <>
-      <p className="sr-only" role="status" aria-live="polite">
-        {statusAction.notice}
-      </p>
+      <div
+        className={statusAction.notice ? "board-status-notice" : "sr-only"}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span>{statusAction.notice}</span>
+        {statusAction.notice && (
+          <IconButton
+            label="Dismiss status update"
+            onClick={() => {
+              statusAction.dismissNotice();
+              boardRef.current?.focus({ preventScroll: true });
+            }}
+          >
+            <X />
+          </IconButton>
+        )}
+      </div>
       {Object.entries(statusAction.failures)
         .filter(([, message]) => message)
         .map(([reference, message]) => (
