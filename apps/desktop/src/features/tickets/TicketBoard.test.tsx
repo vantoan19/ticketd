@@ -303,13 +303,13 @@ test("pointer dragging into an empty column saves through the card status action
   // Browsers dispatch a click after pointerup, including after a captured drag.
   fireEvent.click(card, { detail: 1 });
   await settle(20);
-  expect(bridge.invoke).toHaveBeenCalledWith("bulk_status", {
-    references: ["T-1"],
-    status: "In progress",
+  expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
+    reference: "T-1",
+    patch: { status: "In progress" },
     requestId: expect.any(String),
   });
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(1);
   expect(
     within(
@@ -346,7 +346,7 @@ test("same-column and outside drops, Escape and pointer cancellation preserve sa
   releasePointer(400);
   await settle();
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(document.activeElement).toBe(card);
   // A canceled mouse drag must not swallow the next keyboard activation.
@@ -388,7 +388,7 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
   await settle(64);
   expect(board.scrollLeft).toBe(position);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
 });
 
@@ -411,7 +411,7 @@ test("drag respects external destinations and revalidates source changes made du
   releasePointer(400);
   await settle();
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(screen.getByRole("alert").textContent).toContain(
     "This status is no longer available",
@@ -440,7 +440,7 @@ test("a pending dragged ticket cannot be dragged again or changed through its me
     screen.getByRole("button", { name: "Change status of T-1" }),
   ).toHaveProperty("disabled", true);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(1);
   saved[0] = ticket(1, "In progress");
   finish?.([saved[0]]);
@@ -461,7 +461,7 @@ test("dropping in Duplicate opens the shared review without moving until confirm
   ).toBeTruthy();
   expect(saved[0]?.status).toBe("Todo");
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await settle(20);
