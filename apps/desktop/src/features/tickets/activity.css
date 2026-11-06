@@ -12,7 +12,7 @@
   gap: 8px 12px;
 }
 .activity-heading h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -29,7 +29,7 @@
 }
 .activity-meta {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .activity-list {
@@ -67,7 +67,7 @@
   align-items: baseline;
   gap: 2px 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   overflow-wrap: anywhere;
 }
@@ -81,7 +81,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   text-align: start;
   cursor: text;
@@ -120,7 +120,7 @@
 .activity-caption {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.4;
 }
 .activity-attached {
@@ -128,7 +128,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .activity-attached svg {
   flex: none;
@@ -141,7 +141,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .activity-empty {
   padding: 12px 0;

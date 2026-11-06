@@ -49,7 +49,7 @@
 .ticket-title {
   min-width: 0;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
   overflow: hidden;
@@ -63,7 +63,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   overflow: hidden;
 }
@@ -193,10 +193,11 @@
   border-radius: 4px;
   box-shadow: inset 0 0 0 1px var(--border);
   font-family: var(--font-mono, ui-monospace, Menlo, monospace);
-  font-size: 11px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .bulk-menu-label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   color: var(--muted-foreground);
 }
@@ -214,7 +215,7 @@
 }
 .bulk-count {
   padding-inline: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
@@ -265,7 +266,7 @@
   gap: 8px;
   margin: 0;
   padding-inline: 8px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .bulk-error {
@@ -289,7 +290,7 @@
   margin-left: auto;
   padding-left: 16px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .bulk-tag-form {
   display: grid;
@@ -316,7 +317,8 @@
 }
 .bulk-tag-note {
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 
 .ticket-row-action {
@@ -387,14 +389,14 @@
   color: var(--muted-foreground);
 }
 .ticket-group-header h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .ticket-group-count {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-group-add {
@@ -414,7 +416,7 @@
   box-shadow: var(--shadow-border-base);
   color: var(--secondary-foreground);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -448,18 +450,18 @@
 }
 .segmented-count {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .source-refresh {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-row-time {
   flex: none;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -467,7 +469,7 @@
   flex-wrap: wrap;
 }
 .ticket-row-tags {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-rows li:has(.ticket-row:focus-visible) {
@@ -547,7 +549,7 @@
   margin: 0;
   padding: 4px 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 /* Two classes: the generic `.ticket-list > p` padding must not win, or the note
@@ -556,6 +558,6 @@
   margin: 0;
   padding: 24px 20px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }

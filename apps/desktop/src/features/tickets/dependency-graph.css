@@ -12,7 +12,7 @@
   gap: 12px;
 }
 .graph-header h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 600;
   line-height: 20px;
 }
@@ -23,7 +23,7 @@
   padding: 0;
   list-style: none;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .graph-legend li {
@@ -35,7 +35,7 @@
   padding: 8px 12px;
   border-radius: 6px;
   background: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .graph-body {
@@ -69,7 +69,7 @@
 .graph-zoom {
   min-width: 40px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-variant-numeric: tabular-nums;
 }
 .dependency-graph-view .react-flow__node {
@@ -121,7 +121,7 @@
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .graph-node-reference {
@@ -136,22 +136,23 @@
   padding: 0 6px;
   border-radius: 999px;
   background: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .graph-node-title {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .graph-availability {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .graph-panel {
@@ -162,17 +163,18 @@
   padding: 12px;
   border-radius: 8px;
   box-shadow: var(--shadow-border-base);
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .graph-panel h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 600;
   line-height: 20px;
 }
 .graph-panel h4 {
   margin-top: 4px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
 }
 .graph-panel ul {
@@ -184,7 +186,7 @@
   align-items: center;
   gap: 6px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .graph-panel-facts {
   display: grid;
@@ -214,6 +216,6 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }

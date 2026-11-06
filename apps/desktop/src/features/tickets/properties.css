@@ -31,7 +31,7 @@
 }
 .rail-label {
   color: var(--secondary-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 400;
   line-height: 16px;
 }
@@ -49,7 +49,7 @@
   gap: 8px;
   min-height: 32px;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .rail-value svg {
@@ -67,7 +67,7 @@
 }
 .rail-section small {
   color: var(--secondary-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .rail-section small[role="alert"],
@@ -91,7 +91,7 @@
 .rail-note {
   display: block;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   overflow-wrap: anywhere;
 }
@@ -111,7 +111,7 @@
   padding: 0 10px;
   border-radius: 9999px;
   background: var(--accent);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .status-menu {
@@ -125,7 +125,7 @@
   white-space: normal;
   padding: 8px 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   font-weight: 400;
 }
@@ -181,7 +181,7 @@
 }
 /* The rail shows a two-line excerpt; Activity holds the full entry. */
 .latest-update-text {
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -208,11 +208,11 @@ aside.ticket-properties :disabled svg {
   align-items: center;
   gap: 10px;
   min-height: 32px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .rail-none {
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }

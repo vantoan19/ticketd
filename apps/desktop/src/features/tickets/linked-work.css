@@ -13,13 +13,13 @@
 .linked-work-state {
   margin-left: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .linked-work-confirm {
   display: grid;
   gap: 12px;
   width: 20rem;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .linked-work-confirm p {
   margin: 0;
@@ -87,7 +87,7 @@
 .linked-work-label,
 .linked-work-status {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .linked-work-label {
@@ -98,7 +98,7 @@
 .linked-work-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 13px;
+  font-size: var(--text-code);
 }
 .linked-work-title {
   height: auto;
@@ -234,7 +234,7 @@
 .link-ticket-note {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .link-ticket-sentence {
   display: flex;
@@ -256,7 +256,7 @@
   width: 100%;
   padding: 6px 8px;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .link-ticket-results button:hover,
 .link-ticket-results button:focus-visible {
@@ -271,7 +271,7 @@
 .link-ticket-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .link-ticket-chosen {
   display: flex;
@@ -292,5 +292,5 @@
 }
 .linked-work-note {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }

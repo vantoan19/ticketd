@@ -39,6 +39,16 @@
   font-size: 16px;
   line-height: normal;
   color: var(--foreground);
+  /* The type scale (DESIGN.md section 3). Every font-size uses one of these. */
+  --text-caption: 12px;
+  --text-caption-line: 16px;
+  --text-ui: 14px;
+  --text-ui-line: 20px;
+  --text-code: 13px;
+  --text-reading: 16px;
+  --text-title: 24px;
+  --text-title-line: 32px;
+  --text-section: 32px;
   background: var(--background);
   color-scheme: light;
   --background: #fafafa;
@@ -204,7 +214,7 @@
     font-family: inherit;
   }
   button {
-    font-size: 14px;
+    font-size: var(--text-ui);
     font-weight: 400;
   }
   button:disabled {
@@ -215,11 +225,11 @@
     font-weight: 500;
   }
   label {
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 20px;
   }
   small {
-    font-size: 12px;
+    font-size: var(--text-caption);
     line-height: 16px;
   }
   /* Geist Mono's contextual alternates join "--" into one stroke that covers
@@ -247,7 +257,7 @@
     border: 0;
     border-radius: 6px;
     box-shadow: var(--shadow-border);
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 20px;
     padding: 8px 12px;
   }
@@ -275,7 +285,7 @@
 .ui-button {
   border: 0;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 14px;
 }
@@ -348,7 +358,7 @@
   border: 0;
   border-radius: 6px;
   box-shadow: var(--shadow-border);
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
 }
@@ -459,7 +469,7 @@
   box-shadow: var(--focus-ring);
 }
 .ui-section-title {
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -478,7 +488,7 @@
 [data-slot="select-item"],
 [data-slot="dropdown-menu-item"] {
   min-height: 32px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   border-radius: 6px;
 }
 
@@ -500,7 +510,7 @@
   background: var(--surface);
   color: var(--foreground);
   box-shadow: var(--shadow-menu);
-  font-size: 14px;
+  font-size: var(--text-ui);
   transform: translateY(-200%);
 }
 .skip-link:focus {
@@ -549,7 +559,7 @@
   gap: 8px;
   padding: 0 8px 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .sidebar-source {
@@ -588,8 +598,10 @@
   padding-inline: 8px 0;
 }
 .brand strong {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
 }
 .new-ticket {
   margin-left: auto;
@@ -630,7 +642,7 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
 }
@@ -655,7 +667,7 @@
   align-items: center;
   justify-content: space-between;
   margin: 20px 8px 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   line-height: 16px;
 }
@@ -742,27 +754,27 @@
   padding: 0 12px 0 20px;
 }
 .management h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
   color: var(--foreground);
 }
 .list-header h1 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .list-header p {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .management > p {
   margin-top: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .list-controls {
@@ -808,7 +820,7 @@
 }
 .filters-content legend {
   margin-bottom: 16px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
 }
 .ticket-list > p {
@@ -821,7 +833,7 @@
   gap: 12px;
   padding: 24px;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .ticket-detail {
   width: 100%;
@@ -854,14 +866,14 @@
   color: var(--muted-foreground);
 }
 .detail-header h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
 }
 .detail-header .detail-reference {
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -912,7 +924,7 @@
   margin: 0;
   padding: 48px 24px;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .detail-empty p {
@@ -922,7 +934,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-personal-actions {
@@ -933,7 +945,7 @@
 }
 .ticket-ref {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
   color: var(--muted-foreground);
@@ -954,7 +966,7 @@
   border-radius: 0;
   box-shadow: none;
   color: var(--foreground);
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -967,7 +979,7 @@
 .editor-save-state {
   margin-top: 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .detail-content [role="status"]:empty {
@@ -975,7 +987,7 @@
 }
 .detail-document > .detail-title {
   margin-bottom: 8px;
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -989,7 +1001,7 @@
   margin-bottom: 8px;
 }
 .detail-section-heading h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -1033,11 +1045,14 @@
   padding: 64px 24px;
   text-align: center;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .empty-state strong {
   color: var(--foreground);
-  font-size: 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  letter-spacing: -0.28px;
 }
 /* One content gutter for the management pages (Projects, Plans, Documents):
    their titles start at the same x, whatever each column's width. */
@@ -1056,7 +1071,7 @@
   overflow-y: auto;
 }
 .management h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -1112,14 +1127,14 @@
   padding: 12px 24px;
   background: var(--error-surface);
   color: var(--error-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 
 /* Description and note content share a readable document surface. */
 .markdown-document {
   min-width: 0;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   overflow-wrap: anywhere;
 }
@@ -1127,7 +1142,7 @@
   margin-top: 12px;
 }
 .markdown-document :is(h1, h2, h3, h4, h5, h6) {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1135,18 +1150,18 @@
   font-weight: 600;
 }
 .markdown-document h1 {
-  font-size: 32px;
+  font-size: var(--text-section);
   line-height: 40px;
   font-weight: 600;
   letter-spacing: -1.28px;
 }
 .markdown-document h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .markdown-document h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   letter-spacing: -0.28px;
 }
@@ -1197,7 +1212,7 @@
 }
 .markdown-document code {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1214,7 +1229,7 @@
   white-space: pre;
   background: var(--recessed);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1236,7 +1251,7 @@
   padding: 4px 12px;
   background: var(--background);
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .markdown-block-toolbar > :first-child {
@@ -1250,7 +1265,7 @@
   border-collapse: collapse;
   width: max-content;
   min-width: 100%;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .markdown-document :is(td, th) {
   border: 1px solid var(--border);
@@ -1429,11 +1444,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .sidebar-source-line small {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .sidebar-source > .ui-button {
@@ -1498,8 +1513,8 @@ html[data-theme="dark"][data-input="pointer"]
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 18px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .rail-trash-note svg {
   flex: none;

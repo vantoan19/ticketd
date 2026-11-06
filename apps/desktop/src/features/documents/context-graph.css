@@ -40,7 +40,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .context-graph-edge-label {
   position: absolute;
@@ -55,11 +56,12 @@
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: var(--text-caption);
   white-space: nowrap;
+  line-height: var(--text-caption-line);
 }
 .context-graph-heading h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   line-height: 32px;
   margin: 0;
 }
@@ -175,7 +177,7 @@
   background: none;
   color: var(--foreground);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   text-align: left;
@@ -199,7 +201,7 @@
   grid-column: 2;
   margin: 2px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .context-graph-list li > p strong {
@@ -248,7 +250,7 @@
   border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .graph-legend-title {
@@ -303,7 +305,7 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 12px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   color: var(--muted-foreground);
 }
@@ -401,7 +403,7 @@
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
 .context-graph-zoom button {
@@ -462,8 +464,8 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .context-graph-card-title {
   overflow: hidden;
@@ -472,12 +474,12 @@
 }
 .context-graph-card-ref {
   font-family: var(--font-mono, ui-monospace, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--muted-foreground);
 }
 .context-graph-card-caption {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   color: var(--muted-foreground);
   white-space: nowrap;
@@ -499,7 +501,8 @@
   box-shadow: var(--shadow-border-base);
   color: var(--foreground);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .context-graph-search:focus-visible {
   outline: none;
@@ -509,12 +512,13 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-ui);
   color: var(--muted-foreground);
+  line-height: var(--text-ui-line);
 }
 .context-graph-eyebrow {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
 .context-graph-selected {
@@ -524,13 +528,14 @@
 }
 .context-graph-selected h2 {
   margin: 0;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
   font-weight: 500;
+  letter-spacing: -0.28px;
 }
 .context-graph-selected p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--muted-foreground);
 }
 .context-graph-selected-kind {
@@ -538,14 +543,14 @@
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono, ui-monospace, Menlo, monospace);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   color: var(--muted-foreground);
 }
 .context-graph-connection {
   margin: 0;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 
 .context-graph-page .react-flow__edges {
@@ -556,7 +561,8 @@
 }
 .context-graph-page .react-flow__edge-text {
   fill: var(--secondary-foreground, var(--foreground));
-  font-size: 11px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .context-graph-page .react-flow__edge-textbg {
   fill: var(--surface);
@@ -590,7 +596,7 @@
 
 .context-graph-page h3 {
   margin: 20px 0 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 600;
 }
 .context-graph-count {

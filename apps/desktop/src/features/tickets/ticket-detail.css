@@ -8,7 +8,7 @@
 .detail-header-message {
   flex-basis: 100%;
   padding-bottom: 8px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .detail-header-message[role="alert"] {
@@ -54,7 +54,7 @@
 .ticket-detail[data-expanded] .description-document,
 .ticket-detail[data-expanded] .description-document :is(p, li),
 .ticket-detail[data-expanded] .editor-body [role="textbox"] {
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 24px;
 }
 .ticket-state-line {
@@ -64,7 +64,7 @@
   gap: 4px 12px;
   margin: 0 0 24px;
   color: var(--secondary-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .ticket-source-state {
@@ -83,7 +83,7 @@
 }
 .list-position-text {
   padding-inline: 4px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -100,7 +100,7 @@
   align-items: center;
   gap: 4px;
   color: var(--link-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   text-align: left;
   text-decoration: none;
@@ -130,7 +130,7 @@
   padding: 4px 4px 4px 16px;
   background: var(--background);
   color: var(--secondary-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .source-card .description-document {
@@ -148,7 +148,7 @@
   box-shadow: var(--shadow-border-base);
   background: var(--recessed);
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-unavailable-notice p {
@@ -175,13 +175,13 @@
   gap: 6px;
   margin: 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-caption {
   margin: 8px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 
@@ -193,7 +193,7 @@
 .source-number,
 .rail-source-identity .source-link {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
 }
 .header-source-link {
@@ -214,14 +214,14 @@
   display: grid;
   gap: 8px;
   box-shadow: var(--shadow-tooltip);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
 .source-card-header .source-link {
-  font-size: 12px;
+  font-size: var(--text-caption);
   white-space: nowrap;
 }
 .source-description-clip[data-collapsed] {
@@ -236,7 +236,7 @@
   margin-left: auto;
 }
 .source-card-actions .ui-button {
-  font-size: 12px;
+  font-size: var(--text-caption);
   gap: 4px;
   padding: 0 4px;
 }
@@ -266,7 +266,7 @@
   box-shadow: var(--shadow-large);
 }
 .take-ownership-title {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
