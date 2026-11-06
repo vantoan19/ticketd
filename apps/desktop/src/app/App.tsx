@@ -383,7 +383,13 @@ function AppContent() {
                     />
                   )}
                   {view === "attachments" && graphOrigin === null && (
-                    <AttachmentLibrary onPreview={setAttachmentPreview} />
+                    <AttachmentLibrary
+                      onPreview={setAttachmentPreview}
+                      onOpenSettings={() => {
+                        setSettingsSection("attachments");
+                        openView("settings");
+                      }}
+                    />
                   )}
                   {view === "attachments" &&
                     graphOrigin === null &&

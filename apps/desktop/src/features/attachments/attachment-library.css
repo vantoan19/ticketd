@@ -1,3 +1,31 @@
+.attachment-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+.attachment-library-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px var(--page-gutter);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  font-size: var(--text-caption);
+}
+.attachment-library-bar nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+.attachment-library-bar nav svg {
+  width: 16px;
+  height: 16px;
+}
 .attachment-library {
   padding: 28px var(--page-gutter);
   flex: 1 1 0;
@@ -19,6 +47,8 @@
 }
 .attachment-library h1 {
   font-size: 24px;
+  line-height: 32px;
+  letter-spacing: -0.6px;
   font-weight: 600;
   margin: 0 0 8px;
 }

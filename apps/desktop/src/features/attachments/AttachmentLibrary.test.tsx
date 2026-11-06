@@ -100,3 +100,12 @@ test("adding files to the library offers storage without an insertion into nowhe
   expect(screen.queryByRole("radio", { name: "Existing files" })).toBeNull();
   expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
 });
+
+test("the library offers the existing storage settings without losing its search surface", async () => {
+  vi.mocked(invoke).mockResolvedValue([]);
+  const settings = vi.fn();
+  render(<AttachmentLibrary onPreview={() => {}} onOpenSettings={settings} />);
+  fireEvent.click(screen.getByRole("button", { name: "Storage settings" }));
+  expect(settings).toHaveBeenCalledOnce();
+  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+});
