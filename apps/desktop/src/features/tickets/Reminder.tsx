@@ -136,7 +136,7 @@ export function Reminder({
         >
           <Bell data-icon="inline-start" />
           <span className="reminder-label">
-            {due ? reminderSummary(due) : "Remind me"}
+            {due ? reminderSummary(due) : "Remind me…"}
           </span>
         </Button>
       </PopoverTrigger>

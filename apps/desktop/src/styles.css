@@ -149,10 +149,12 @@
   --accent: #262626;
   --accent-foreground: #ededed;
   --muted: #1a1a1a;
-  --border: #ffffff24;
+  /* Board K: pane and section dividers are white at 12% (#272727 on the rail,
+     #333333 on the list); rings and inputs stay at 14% via --shadow-border-base. */
+  --border: #ffffff1f;
   --group-hairline: #ffffff14;
   --input: #ffffff24;
-  --header-boundary: #ffffff24;
+  --header-boundary: #ffffff1f;
   --control-boundary: #6b6b6b;
   --error-surface: #2b1414;
   --error-foreground: #fecaca;
@@ -343,6 +345,12 @@
   color: var(--disabled-foreground);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
+}
+/* Board H: a blocked dialog primary keeps its #F2F2F2 fill with an inset 1px
+   ring and #8F8F8F text. */
+.dialog-shell-footer .ui-button-primary:disabled {
+  color: var(--control-boundary);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ui-button-ghost:disabled,
 .ui-button-link:disabled {
@@ -1580,4 +1588,11 @@ html[data-theme="dark"][data-input="pointer"]
 .ui-dialog:has(.create-form) .dialog-shell-body {
   min-height: 0;
   overflow-y: auto;
+}
+/* Filters panel open (board C): the panel covers the left of the detail pane,
+   so the empty state centres in the space to its right (centre x 1120) and sits
+   23.5px higher, as the frame draws it. */
+.ticket-workspace[data-filters-open] .ticket-detail[data-empty] .detail-empty {
+  padding-left: calc(24px + 360px);
+  padding-bottom: calc(48px + 47px);
 }

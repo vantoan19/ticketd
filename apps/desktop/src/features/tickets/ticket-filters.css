@@ -210,3 +210,34 @@
   height: 32px;
   padding-left: 34px;
 }
+
+/* Board C geometry. Availability is three equal thirds; labels in the panel,
+   its footer and the list's filter row are 13px; the constraint chip is 28px
+   tall (26 plus the 1px ring on each side); the parent field's placeholder and
+   glyph are #8F8F8F. */
+.filters-content [data-slot="segmented-control"] {
+  display: flex;
+  width: 100%;
+  gap: 0;
+}
+.filters-content [data-slot="segmented-control"] > button {
+  flex: 1 1 0;
+  justify-content: center;
+  font-size: var(--text-code);
+}
+.filters-head .ui-button,
+.filters-foot .ui-button,
+.filter-chips > .ui-button,
+.filter-trigger {
+  font-size: var(--text-code);
+}
+.filter-chips > .ui-button[data-variant="outline"] {
+  height: 26px;
+  padding-inline: 8px 4px;
+}
+.parent-search input::placeholder {
+  color: var(--control-boundary);
+}
+.parent-search-icon {
+  color: var(--control-boundary);
+}

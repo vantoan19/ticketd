@@ -118,6 +118,7 @@ export function LinkedWork({
     return (
       <RailSection label="Relationships">
         <div id={`linked-work-${reference}`} className="linked-work" data-empty>
+          {linkAction}
           {current?.links && openContextGraph && (
             <Button
               variant="ghost"
@@ -125,10 +126,9 @@ export function LinkedWork({
               onClick={() => openContextGraph(reference)}
             >
               <Network aria-hidden="true" />
-              Context graph
+              Open context graph
             </Button>
           )}
-          {linkAction}
           {!current && (
             <span className="linked-work-state" role="status">
               Loading relationships…
@@ -276,6 +276,7 @@ export function LinkedWork({
           </Button>
         )}
         <div className="linked-work-actions">
+          {linkAction}
           <Button
             variant="ghost"
             size="sm"
@@ -284,9 +285,8 @@ export function LinkedWork({
             }
           >
             <Network aria-hidden="true" />
-            {openContextGraph ? "Context graph" : "Dependencies"}
+            {openContextGraph ? "Open context graph" : "Dependencies"}
           </Button>
-          {linkAction}
         </div>
       </div>
     </RailSection>
