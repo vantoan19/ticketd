@@ -328,7 +328,7 @@ export function AttachmentPreview({
                 {onReplace && (
                   <p className="attachment-hint">
                     Only this reference changes. Other uses keep their original
-                    snapshot.
+                    attachment.
                   </p>
                 )}
                 <details>
