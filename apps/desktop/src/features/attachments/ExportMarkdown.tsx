@@ -75,7 +75,7 @@ export function ExportMarkdownButton({
           Exporting Markdown with files…
         </span>
       )}
-      {error && (
+      {error && !result && (
         <p role="alert" className="text-destructive text-sm">
           {error}
         </p>
@@ -171,6 +171,11 @@ export function ExportMarkdownButton({
               <p role="status">
                 Missing files keep their readable references. Review the
                 manifest before sharing.
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="text-destructive text-sm">
+                {error}
               </p>
             )}
             <DialogFooter>

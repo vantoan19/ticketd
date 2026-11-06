@@ -5,10 +5,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ExportMarkdownButton } from "./ExportMarkdown";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -74,4 +76,32 @@ test("cancelling the output folder does not export anything", async () => {
   await waitFor(() => expect(open).toHaveBeenCalled());
   expect(invoke).not.toHaveBeenCalled();
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("file-manager failures are announced inside the export result", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  vi.mocked(invoke).mockResolvedValue({
+    format_version: 1,
+    status: "complete",
+    directory: "C:/sharing/export",
+    markdown_path: "content.md",
+    manifest_path: "manifest.json",
+    attachments: [],
+  });
+  vi.mocked(revealItemInDir).mockRejectedValue(
+    new Error("File manager unavailable"),
+  );
+  render(
+    <ExportMarkdownButton source={{ kind: "markdown", body: "Read me" }} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Export Markdown with files" }),
+  );
+  const result = await screen.findByRole("dialog", { name: "Export complete" });
+  fireEvent.click(
+    within(result).getByRole("button", { name: "Show manifest" }),
+  );
+  expect((await within(result).findByRole("alert")).textContent).toContain(
+    "File manager unavailable",
+  );
 });
