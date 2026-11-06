@@ -768,6 +768,9 @@ Results are paged (50 in desktop, at most 1,000 per core query). Existing files
 offers the same search inside the shared picker, prioritizing the current
 ticket's related files, then recent uploads. Selection order controls insertion;
 reusing a file never copies its bytes or changes its identity.
+Local image thumbnails load lazily for supported files up to 5 MiB. Larger files
+keep a file icon and the explicit shared preview, so a library does not
+automatically buffer many large media responses.
 
 Rename changes only the display name. The original filename and every literal
 Markdown label, including an initially generated filename label, stay unchanged.

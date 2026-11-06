@@ -16,6 +16,23 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("large images keep a file icon without automatically buffering preview bytes", () => {
+  vi.mocked(invoke).mockResolvedValue("workspace");
+  render(
+    <AttachmentThumbnail
+      file={{
+        id: "large",
+        display_name: "Large screenshot",
+        original_filename: "large.png",
+        size_bytes: 20 * 1024 * 1024,
+        kind: "local_snapshot",
+        locator: "large/bytes/large.png",
+      }}
+    />,
+  );
+  expect(invoke).not.toHaveBeenCalled();
+});
+
 test("only supported local images get a passive thumbnail, with a readable row after decoding fails", async () => {
   const file = {
     id: "image",

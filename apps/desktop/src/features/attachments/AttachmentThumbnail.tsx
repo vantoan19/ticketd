@@ -8,6 +8,10 @@ export function AttachmentThumbnail({ file }: { file: Attachment }) {
   const [failed, setFailed] = useState<string | null>(null);
   const candidate =
     file.kind === "local_snapshot" &&
+    // The native protocol buffers responses; a library must not auto-load many 100 MiB images.
+    // Larger images keep their icon and remain available through the explicit shared preview.
+    file.size_bytes !== null &&
+    file.size_bytes <= 5 * 1024 * 1024 &&
     /\.(png|jpe?g|gif|webp|bmp)$/i.test(file.original_filename);
   useEffect(() => {
     if (!candidate) return;
