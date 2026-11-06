@@ -23,6 +23,12 @@ pub enum MarkdownExportSource {
     Markdown {
         body: String,
     },
+    /// Selection plus its source, so definitions outside the selected range can
+    /// remain usable without exporting unrelated content.
+    Selection {
+        body: String,
+        context: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +72,9 @@ impl Workspace {
         let tx = self.connection.unchecked_transaction()?;
         let (mut body, direct) = match source {
             MarkdownExportSource::Markdown { body } => (body, Vec::new()),
+            MarkdownExportSource::Selection { body, context } => {
+                (selection_with_definitions(&body, &context), Vec::new())
+            }
             MarkdownExportSource::Document { id } => (self.show_document(&id)?.body, Vec::new()),
             MarkdownExportSource::Ticket { reference } => {
                 let ticket = self.show_ticket(&reference)?;
@@ -269,6 +278,36 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(())
+}
+
+fn selection_with_definitions(body: &str, context: &str) -> String {
+    let source = parse(context);
+    let selected = parse(body);
+    let mut candidate = body.to_owned();
+    for (_, definition) in source.reference_definitions().iter() {
+        candidate.push_str("\n\n");
+        candidate.push_str(&context[definition.span.clone()]);
+    }
+    let mut used = BTreeSet::new();
+    for event in parse(&candidate) {
+        if let Event::Start(Tag::Link { link_type, id, .. } | Tag::Image { link_type, id, .. }) =
+            event
+            && matches!(
+                link_type,
+                LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+            )
+            && selected.reference_definitions().get(&id).is_none()
+            && let Some(definition) = source.reference_definitions().get(&id)
+        {
+            used.insert((definition.span.start, definition.span.end));
+        }
+    }
+    let mut output = body.to_owned();
+    for (start, end) in used {
+        output.push_str("\n\n");
+        output.push_str(&context[start..end]);
+    }
+    output
 }
 
 /// Replace destinations only, leaving labels, surrounding prose and code literal.

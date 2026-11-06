@@ -333,3 +333,33 @@ fn foreign_reference_never_copies_a_present_local_identity_with_the_same_attachm
         0
     );
 }
+
+#[test]
+fn source_selection_carries_used_reference_definitions_without_exporting_unselected_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .import_attachment_bytes("a", "selected.txt", b"selected bytes", |_, _| true)
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let context = format!(
+        "Private unselected prose\n\nRead [chosen][file].\n\n[file]: {uri} \"custom title\"\n\n[unselected]: https://example.com/private"
+    );
+    let export = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Selection {
+                body: "Read [chosen][file].".into(),
+                context,
+            },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(export.status, ticketd_core::ExportStatus::Complete);
+    assert_eq!(export.attachments.len(), 1);
+    let output = std::fs::read_to_string(export.directory.join("content.md")).unwrap();
+    assert!(output.contains("Read [chosen][file]."));
+    assert!(output.contains("\"custom title\""));
+    assert!(!output.contains("ticketd://"));
+    assert!(!output.contains("Private unselected prose"));
+    assert!(!output.contains("example.com/private"));
+}

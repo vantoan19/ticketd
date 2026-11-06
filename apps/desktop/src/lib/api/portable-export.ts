@@ -4,7 +4,8 @@ import { z } from "zod";
 export type MarkdownExportSource =
   | { kind: "document"; id: string }
   | { kind: "ticket"; reference: string }
-  | { kind: "markdown"; body: string };
+  | { kind: "markdown"; body: string }
+  | { kind: "selection"; body: string; context: string };
 
 const resultSchema = z.object({
   format_version: z.literal(1),

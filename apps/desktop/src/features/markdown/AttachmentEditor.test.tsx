@@ -105,7 +105,11 @@ test("portable export captures only the selected source Markdown without editing
   );
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
-      source: { kind: "markdown", body: "**selected**" },
+      source: {
+        kind: "selection",
+        body: "**selected**",
+        context: "Before **selected** after",
+      },
       output: "C:/sharing",
     }),
   );

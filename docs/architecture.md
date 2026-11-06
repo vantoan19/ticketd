@@ -89,6 +89,8 @@ Exports publish synced temporary output without replacing an existing file.
 
 `Workspace::export_markdown_with_files` owns portable content export for saved
 Documents, tickets (including direct attachments), and selected/current Markdown.
+Selections can supply source context; core carries only used reference definitions
+into the output, without copying unrelated prose or files.
 It acquires the attachment file lock before a SQLite read snapshot, uses local
 metadata/byte validation and external provider viewer links, and rewrites only
 exported destinations. A fresh temporary bundle is retained only after its

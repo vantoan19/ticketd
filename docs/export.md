@@ -32,6 +32,8 @@ linked Documents stay with those Documents and are not collected recursively.
 Desktop ticket headers and Document readers offer **Export Markdown with files**.
 The shared editor exports selected rich/source content, or its current full
 Markdown when nothing is selected, without saving or changing its draft.
+Source selections carry only the reference definitions they use, including when
+those definitions sit outside the selected range; unrelated content is excluded.
 Ordinary copy-as-Markdown keeps internal workspace links. The blocked-publication
 dialog's **Export with files** shares the same workflow and never publishes.
 The result dialog reports omissions and offers **Show Markdown** and **Show

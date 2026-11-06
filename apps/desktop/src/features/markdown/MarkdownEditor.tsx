@@ -1230,6 +1230,12 @@ export function MarkdownEditor({
           compact
           source={() => {
             const selection = sourceEditor.current?.view?.state.selection.main;
+            if (source && selection && !selection.empty)
+              return {
+                kind: "selection",
+                body: value.slice(selection.from, selection.to),
+                context: value,
+              };
             const nativeSelection = window.getSelection();
             const rich =
               !source &&
@@ -1241,11 +1247,9 @@ export function MarkdownEditor({
                   })
                 : editor.selection;
             const selected =
-              source && selection && !selection.empty
-                ? value.slice(selection.from, selection.to)
-                : !source && rich && !RangeApi.isCollapsed(rich)
-                  ? writeMarkdown(editor.api.fragment(rich))
-                  : value;
+              !source && rich && !RangeApi.isCollapsed(rich)
+                ? writeMarkdown(editor.api.fragment(rich))
+                : value;
             return { kind: "markdown", body: selected };
           }}
         />
