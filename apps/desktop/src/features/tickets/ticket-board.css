@@ -96,6 +96,27 @@
   justify-content: space-between;
   gap: 8px;
 }
+.board-card-container {
+  position: relative;
+}
+.board-card-container .board-card-top {
+  padding-right: 24px;
+}
+.board-card-menu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+.board-card-saving {
+  display: block;
+  margin: -4px 0 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.board-status-error {
+  padding: 0 16px;
+  font-size: var(--text-caption);
+}
 .board-card-title {
   display: -webkit-box;
   overflow: hidden;

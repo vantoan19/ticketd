@@ -21,19 +21,14 @@ import {
   duplicateTargetText,
   externalDuplicateTarget,
   externalSource,
+  ticketStatusChoices,
 } from "./ticket-source";
 import { Button } from "@/components/ui/button";
 import { RailSection } from "./RailSection";
 import { ticketStatuses } from "@/lib/statuses";
 import { StatusIcon } from "./StatusIcon";
 import { Duplicates } from "./Duplicates";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmLeaveDuplicate } from "./ConfirmLeaveDuplicate";
 import {
   Popover,
   PopoverContent,
@@ -263,7 +258,7 @@ export function TicketProperties({
   const target = externalDuplicateTarget(ticket);
   const resolvedTarget = target?.kind === "external" ? target.ticket : null;
   // The core says which statuses may be chosen; the current one is always shown.
-  const statusChoices = owner ? owner.status_choices : ticketStatuses;
+  const statusChoices = ticketStatusChoices(ticket);
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
     (ticket.project_id || "No project");
@@ -430,51 +425,18 @@ export function TicketProperties({
           onOpen={onOpenNote}
         />
       )}
-      <Dialog
-        open={leaving !== null}
-        onOpenChange={(open) => {
-          if (!open) setLeaving(null);
+      <ConfirmLeaveDuplicate
+        canonical={ticket.duplicate_of ?? ""}
+        status={leaving}
+        returnFocus={statusTrigger}
+        onCancel={() => setLeaving(null)}
+        onConfirm={(status) => {
+          setLeaving(null);
+          void save("Status", () =>
+            client.changeTicket(ticket.reference, { status }),
+          );
         }}
-      >
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            statusTrigger.current?.focus();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Remove the duplicate link?</DialogTitle>
-            <DialogDescription>
-              This removes the duplicate link to {ticket.duplicate_of}.
-              Continue?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="settings-actions">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                const status = leaving;
-                setLeaving(null);
-                if (status)
-                  void save("Status", () =>
-                    client.changeTicket(ticket.reference, { status }),
-                  );
-              }}
-            >
-              Change status
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setLeaving(null)}
-            >
-              Keep duplicate
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      />
       {duplicateOpen && (
         <Duplicates
           ticket={ticket}

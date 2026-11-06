@@ -63,6 +63,7 @@ export function Duplicates({
   returnFocus,
   onDone,
   onCancel,
+  onApplyFailure,
   startSeparate = false,
   initialCanonical = "",
 }: {
@@ -82,6 +83,8 @@ export function Duplicates({
   onDone?: () => void;
   /** Called when Cancel discards the review (Escape keeps it). */
   onCancel?: () => void;
+  /** Reconcile a possibly committed write without treating it as confirmed success. */
+  onApplyFailure?: () => Promise<void>;
 }) {
   const canonicalInput = useRef<HTMLInputElement>(null);
   const [canonical, setCanonicalText] = useState(
@@ -103,6 +106,7 @@ export function Duplicates({
   } | null>(null);
   const [stale, setStale] = useState<Stale>("");
   const [pending, setPending] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [attempt, setAttempt] = useState<{ key: string; id: string } | null>(
     null,
   );
@@ -225,11 +229,12 @@ export function Duplicates({
   }
 
   async function apply() {
-    if (!preview) return;
+    if (!preview || pending) return;
     const key = JSON.stringify({ target, preview, choices, separate });
     const id = attempt?.key === key ? attempt.id : crypto.randomUUID();
     setAttempt({ key, id });
     setPending(true);
+    setApplying(true);
     setError("");
     try {
       const decisions: DependencyDecision[] = preview.edges.map(
@@ -251,8 +256,8 @@ export function Duplicates({
           decisions,
           id,
         );
-      setAttempt(null);
       await refresh();
+      setAttempt(null);
       canonicalDrafts.delete(ticket.reference);
       onDone?.();
       onOpenChange(false);
@@ -261,8 +266,14 @@ export function Duplicates({
       const kind = staleKind(failure.code);
       if (kind) setStale(kind);
       else setError(failure.message);
+      try {
+        await onApplyFailure?.();
+      } catch {
+        // Keep the write's error and request identity when its saved state cannot be read.
+      }
     } finally {
       setPending(false);
+      setApplying(false);
     }
   }
 
@@ -286,6 +297,7 @@ export function Duplicates({
             : null;
   return (
     <DialogShell
+      busy={applying}
       open={open}
       onOpenChange={onOpenChange}
       title={title}
