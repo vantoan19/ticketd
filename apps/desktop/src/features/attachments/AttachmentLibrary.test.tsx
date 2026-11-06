@@ -109,3 +109,52 @@ test("the library offers the existing storage settings without losing its search
   expect(settings).toHaveBeenCalledOnce();
   expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
 });
+
+test("usage stays compact in the table and opens details without labeling recovery as unused", async () => {
+  const file = {
+    id: "protected",
+    display_name: "Trace",
+    original_filename: "trace.log",
+    size_bytes: 9,
+    kind: "local_snapshot",
+    locator: "protected/bytes/trace.log",
+  };
+  vi.mocked(invoke).mockResolvedValue([
+    {
+      attachment: file,
+      related: false,
+      usage: {
+        eligible: false,
+        legacy_drafts_pending: false,
+        protections: [
+          {
+            kind: "document_body",
+            owner: "document",
+            ticket_id: null,
+            trashed: false,
+          },
+          {
+            kind: "ticket_attachment",
+            owner: "ticket",
+            ticket_id: "ticket",
+            trashed: false,
+          },
+        ],
+      },
+    },
+    {
+      attachment: { ...file, id: "pending", display_name: "Recovery file" },
+      related: false,
+      usage: { eligible: false, legacy_drafts_pending: true, protections: [] },
+    },
+  ]);
+  const preview = vi.fn();
+  render(<AttachmentLibrary onPreview={preview} />);
+  fireEvent.click(await screen.findByRole("button", { name: "2 places" }));
+  expect(preview).toHaveBeenCalledWith(file);
+  expect(screen.queryByText(/not a direct ticket attachment/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Unused" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Recovery protected" }),
+  ).toBeTruthy();
+});

@@ -7,7 +7,6 @@ import type { Attachment, AttachmentState } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
-import { usageContext } from "./usage-context";
 import { RenameAttachment } from "./RenameAttachment";
 import { AttachmentThumbnail } from "./AttachmentThumbnail";
 import "./attachment-library.css";
@@ -136,9 +135,10 @@ export function AttachmentLibrary({
                         >
                           {usage.protections.length
                             ? `${usage.protections.length} ${usage.protections.length === 1 ? "place" : "places"}`
-                            : "Unused"}
+                            : usage.legacy_drafts_pending
+                              ? "Recovery protected"
+                              : "Unused"}
                         </button>
-                        <small>{usageContext(usage)}</small>
                       </td>
                       <td>
                         <Button

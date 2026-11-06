@@ -64,10 +64,12 @@
   max-width: 320px;
 }
 .attachment-table-scroll {
+  position: relative;
   overflow: auto;
 }
 .attachment-library table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   text-align: left;
   font-size: var(--text-ui);
@@ -84,6 +86,10 @@
 .attachment-library td:first-child {
   width: 40%;
   min-width: 200px;
+}
+.attachment-library td:not(:first-child),
+.attachment-library th:not(:first-child) {
+  white-space: nowrap;
 }
 .attachment-library td small {
   display: block;
