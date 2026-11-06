@@ -33,6 +33,10 @@
   width: 100%;
   accent-color: var(--primary);
 }
+.attachment-uploads strong,
+.attachment-uploads small {
+  display: block;
+}
 .attachment-row {
   display: flex;
   align-items: center;
