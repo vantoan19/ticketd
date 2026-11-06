@@ -66,8 +66,9 @@ mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
 mod attachments;
+pub mod drive;
 mod embedded_attachments;
-pub use attachments::{Attachment, AttachmentKind, DEFAULT_ATTACHMENT_LIMIT};
+pub use attachments::{Attachment, AttachmentKind, AttachmentOpenTarget, DEFAULT_ATTACHMENT_LIMIT};
 mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
@@ -77,10 +78,12 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 48;
+pub const FORMAT_VERSION: i64 = 51;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Drive: {0}")]
+    Drive(#[from] drive::DriveError),
     #[error("attachment: {0}")]
     Attachment(String),
     #[error("ticket '{0}' was changed elsewhere since it was loaded")]
@@ -467,7 +470,9 @@ impl Workspace {
     }
 
     fn migrate(connection: &mut Connection, version: i64) -> Result<(), Error> {
-        connection.pragma_update(None, "foreign_keys", "ON")?;
+        // Schema51 rebuilds the parent attachment table without cascading into
+        // reference/retention rows. Validate all foreign keys before committing.
+        connection.pragma_update(None, "foreign_keys", "OFF")?;
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if version == 0 {
@@ -736,7 +741,21 @@ impl Workspace {
         if version < 48 {
             embedded_attachments::migrate(&transaction)?;
         }
+        if version < 51 {
+            drive::migrate(&transaction)?;
+        }
+        let violations: i64 =
+            transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })?;
+        if violations != 0 {
+            return Err(Error::Attachment(
+                "migration would invalidate existing references; preserved pre-migration backup"
+                    .into(),
+            ));
+        }
         transaction.commit()?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
         Ok(())
     }
 

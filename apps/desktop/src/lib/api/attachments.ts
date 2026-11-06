@@ -6,13 +6,29 @@ const attachmentSchema = z.object({
   id: z.string(),
   display_name: z.string(),
   original_filename: z.string(),
-  size_bytes: z.number().nonnegative(),
-  kind: z.literal("local_snapshot"),
+  size_bytes: z.number().nonnegative().nullable(),
+  kind: z.enum(["local_snapshot", "external_reference"]),
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 
 export const attachments = {
+  async driveConfiguration() {
+    return z
+      .object({ configured: z.boolean(), message: z.string() })
+      .parse(await invoke("drive_configuration"));
+  },
+  async selectDrive(operationId: string) {
+    return z
+      .object({
+        files: z.array(attachmentSchema),
+        failures: z.array(z.string()),
+      })
+      .parse(await invoke("select_drive_files", { operationId }));
+  },
+  async cancelDriveSelection(operationId: string) {
+    await invoke("cancel_drive_selection", { operationId });
+  },
   async uri(id: string) {
     return z.string().parse(await invoke("attachment_uri", { id }));
   },

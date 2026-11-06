@@ -17,6 +17,10 @@ impl Workspace {
                 "id, display_name, original_filename, size_bytes, kind, locator",
             ),
             ("ticket_attachments", "ticket_id, attachment_id"),
+            (
+                "drive_references",
+                "attachment_id, connection_id, file_id, metadata",
+            ),
             ("entities", "id, kind"),
             (
                 "documents",

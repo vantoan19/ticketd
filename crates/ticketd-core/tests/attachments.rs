@@ -24,7 +24,7 @@ fn snapshots_survive_source_deletion_reopen_and_detaching_one_ticket() {
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.attachment(&file.id).unwrap(), file);
     assert_eq!(file.original_filename, "trace.bin");
-    assert_eq!(file.size_bytes, 5);
+    assert_eq!(file.size_bytes, Some(5));
     assert_eq!(
         workspace
             .import_attachment("upload-1", &source, Some("Diagnostic trace"))

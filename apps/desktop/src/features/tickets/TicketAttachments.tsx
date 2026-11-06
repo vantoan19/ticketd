@@ -85,7 +85,11 @@ export function TicketAttachments({
                 <File aria-hidden="true" />
                 <span>
                   {file.display_name}
-                  <small>{formatSize(file.size_bytes)} · Local snapshot</small>
+                  <small>
+                    {file.kind === "external_reference"
+                      ? "Google Drive · External reference"
+                      : `${formatSize(file.size_bytes)} · Local snapshot`}
+                  </small>
                 </span>
               </button>
             </li>
@@ -125,7 +129,9 @@ export function TicketAttachments({
           <DialogHeader>
             <DialogTitle>{selected?.display_name ?? "Attachment"}</DialogTitle>
             <DialogDescription>
-              Local snapshot · Stored in this workspace
+              {selected?.kind === "external_reference"
+                ? "Google Drive · Current source content · No local snapshot"
+                : "Local snapshot · Stored in this workspace"}
             </DialogDescription>
           </DialogHeader>
           {selected && (
@@ -133,8 +139,12 @@ export function TicketAttachments({
               <dl className="attachment-metadata">
                 <dt>Original filename</dt>
                 <dd>{selected.original_filename}</dd>
-                <dt>Size</dt>
-                <dd>{formatSize(selected.size_bytes)}</dd>
+                {selected.kind === "local_snapshot" && (
+                  <>
+                    <dt>Size</dt>
+                    <dd>{formatSize(selected.size_bytes)}</dd>
+                  </>
+                )}
                 <dt>Attachment ID</dt>
                 <dd>
                   <code>{selected.id}</code>
@@ -153,18 +163,22 @@ export function TicketAttachments({
                     void action(() => attachments.open(selected.id))
                   }
                 >
-                  Open file
+                  {selected.kind === "external_reference"
+                    ? "Open in Drive"
+                    : "Open file"}
                 </Button>
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    void action(() => attachments.export(selected))
-                  }
-                >
-                  <Download aria-hidden="true" />
-                  Export file
-                </Button>
+                {selected.kind === "local_snapshot" && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void action(() => attachments.export(selected))
+                    }
+                  >
+                    <Download aria-hidden="true" />
+                    Export file
+                  </Button>
+                )}
                 {!ticket.trashed && (
                   <Button
                     variant="ghost"

@@ -88,7 +88,7 @@ fn index_content(
         let id = uri.strip_prefix(&prefix);
         if let Some(id) = id.filter(|_| validate_new && !previous.contains(uri)) {
             let file = crate::attachments::read_attachment(tx, id)?;
-            crate::attachments::validate_attachment_bytes(tx, &file)?;
+            crate::attachments::validate_attachment_reference(tx, &file)?;
         }
     }
     tx.execute(
@@ -109,7 +109,7 @@ impl Workspace {
     /// A stable identity that never embeds a filesystem path or provider URL.
     pub fn attachment_uri(&self, id: &str) -> Result<String, Error> {
         let file = self.attachment(id)?;
-        crate::attachments::validate_attachment_bytes(&self.connection, &file)?;
+        crate::attachments::validate_attachment_reference(&self.connection, &file)?;
         Ok(format!(
             "ticketd://attachment/{}/{id}",
             workspace_id(&self.connection)?

@@ -47,6 +47,19 @@ enum AttachmentCommand {
     },
     /// Inspect a workspace attachment by stable ID
     Inspect { id: String },
+    /// Last-known Drive metadata and opaque connection handle; no network needed
+    DriveInfo { id: String },
+    /// Reference an already-authorized Drive file using the shared OS credential store
+    DriveAdd {
+        connection: String,
+        file_id: String,
+        #[arg(long)]
+        resource_key: Option<String>,
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// Resolve current Drive metadata without downloading or converting content
+    DriveResolve { id: String },
     /// Print the workspace-scoped URI to use in canonical Markdown links
     Uri { id: String },
     /// Reuse an existing attachment on another ticket
@@ -1894,6 +1907,42 @@ fn attachment_command(
             None => workspace.attachments(limit, offset)?,
         })?,
         AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
+        AttachmentCommand::DriveInfo { id } => {
+            serde_json::to_string(&workspace.drive_reference(&id)?)?
+        }
+        AttachmentCommand::DriveAdd {
+            connection,
+            file_id,
+            resource_key,
+            ticket,
+        } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &connection,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let file = workspace.reference_drive_file(
+                &connection,
+                &file_id,
+                resource_key.as_deref(),
+                &provider,
+            )?;
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket, &file.id, true).map_err(|error| format!("Drive reference saved as {}; association failed: {error}; reuse with `ticketd attachment link {} {ticket}`", file.id, file.id))?;
+            }
+            serde_json::to_string(&file)?
+        }
+        AttachmentCommand::DriveResolve { id } => {
+            let reference = workspace.drive_reference(&id)?;
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &reference.connection_id,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            serde_json::to_string(&workspace.resolve_drive_reference(&id, &provider)?)?
+        }
         AttachmentCommand::Uri { id } => serde_json::to_string(&workspace.attachment_uri(&id)?)?,
         AttachmentCommand::Link { id, ticket } => {
             serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?
