@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
-import type { FindFilter, Ticket } from "@/lib/api/client";
+import type { FindFilter, Ticket, TicketSource } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -46,10 +46,41 @@ function ticket(id: number, status = "Todo"): Ticket {
     prerequisites: [],
   };
 }
+function external(overrides: Partial<TicketSource> = {}): TicketSource {
+  return {
+    provider: "github",
+    provider_name: "GitHub",
+    place: "sample/repo",
+    number: "#98",
+    id: "98",
+    locator: "sample/repo#98",
+    display: "sample/repo#98",
+    url: "https://github.com/sample/repo/issues/98",
+    origin: "imported",
+    ownership: "external",
+    state: { state: "open" },
+    closure_unrecognized: false,
+    last_refreshed_at: null,
+    last_attempt_at: null,
+    last_error: null,
+    content_locked: true,
+    status_locked: false,
+    status_choices: ["Todo", "In progress", "In review"],
+    duplicate_target: null,
+    ...overrides,
+  };
+}
 let saved: Ticket[];
 let change = 0;
 let readOverride: ((filter: FindFilter) => Promise<unknown> | null) | null =
   null;
+let writeOverride:
+  | ((args: {
+      references: string[];
+      status: string;
+      requestId: string;
+    }) => Promise<Ticket[]>)
+  | null = null;
 function matching(filter: FindFilter) {
   return saved.filter(
     (item) =>
@@ -79,10 +110,17 @@ beforeEach(() => {
   saved = [ticket(1), ticket(2, "In review")];
   change = 0;
   readOverride = null;
+  writeOverride = null;
   bridge.invoke.mockImplementation(
     async (
       command: string,
-      args?: { filter?: FindFilter; reference?: string },
+      args?: {
+        filter?: FindFilter;
+        reference?: string;
+        references?: string[];
+        status?: string;
+        requestId?: string;
+      },
     ) => {
       if (command === "workspace_change_token") return change;
       if (command === "list_projects")
@@ -112,6 +150,32 @@ beforeEach(() => {
         return counts(matching(args.filter));
       if (command === "show_ticket")
         return saved.find((item) => item.reference === args?.reference);
+      if (
+        command === "bulk_status" &&
+        args?.references &&
+        args.status &&
+        args.requestId
+      ) {
+        if (writeOverride)
+          return writeOverride({
+            references: args.references,
+            status: args.status,
+            requestId: args.requestId,
+          });
+        saved = saved.map((item) =>
+          args.references?.includes(item.reference)
+            ? {
+                ...item,
+                status: args.status!,
+                availability: null,
+                duplicate_of: null,
+              }
+            : item,
+        );
+        return saved.filter((item) =>
+          args.references?.includes(item.reference),
+        );
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -132,6 +196,519 @@ async function showBoard() {
   fireEvent.click(screen.getByRole("radio", { name: "Board" }));
   await settle();
 }
+async function chooseStatus(reference: string, status: string) {
+  const trigger = screen.getByRole("button", {
+    name: `Change status of ${reference}`,
+  });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await settle();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: status }));
+  await settle();
+}
+
+test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
+  let finish: ((value: Ticket[]) => void) | undefined;
+  writeOverride = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Todo");
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+  await chooseStatus("T-1", "Done");
+  expect(screen.getByText("Saving T-1…")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  ).toHaveProperty("disabled", true);
+  expect(
+    screen.getByRole("button", { name: "Change status of T-2" }),
+  ).toHaveProperty("disabled", false);
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+    { key: "Enter" },
+  );
+  await settle();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(1);
+  await act(async () => {
+    saved[0] = { ...ticket(1, "Done"), availability: null };
+    finish?.([saved[0]]);
+  });
+  await settle(20);
+  expect(screen.queryByText("Saving T-1…")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  );
+});
+
+test("a failed save keeps its saved column and retries with the same request identity", async () => {
+  let fail = true;
+  writeOverride = async ({ status }) => {
+    if (fail) throw new Error("Database busy");
+    saved[0] = ticket(1, status);
+    return [saved[0]];
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Canceled");
+  expect(screen.getByRole("alert").textContent).toContain("Database busy");
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText("T-1 is now Canceled.")).toBeNull();
+  fail = false;
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry status change for T-1" }),
+  );
+  await settle();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "bulk_status",
+  );
+  expect(writes).toHaveLength(2);
+  expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
+  expect(screen.getByText("T-1 is now Canceled.")).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Canceled column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+});
+
+test("a lost response reconciles applied state and a historical replay never replaces newer saved status", async () => {
+  let first = true;
+  writeOverride = async () => {
+    if (first) {
+      first = false;
+      saved[0] = ticket(1, "Done");
+      throw new Error("Response lost");
+    }
+    return [ticket(1, "Done")];
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Done");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Current saved status: Done",
+  );
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+  saved[0] = ticket(1, "In review");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry status change for T-1" }),
+  );
+  await settle();
+  expect(screen.getByText("T-1 is now In review.")).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "In review column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).queryByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeNull();
+  const writes = bridge.invoke.mock.calls.filter(
+    ([command]) => command === "bulk_status",
+  );
+  expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
+});
+
+test("a successful status save refreshes sidebar counts immediately", async () => {
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command, args) =>
+    command === "sidebar_counts"
+      ? {
+          unread_inbox: 0,
+          ready: saved.filter((item) => item.availability === "Ready").length,
+          in_progress: saved.filter((item) => item.status === "In progress")
+            .length,
+        }
+      : fallback(command, args),
+  );
+  render(<App />);
+  await settle();
+  await showBoard();
+  expect(screen.getByRole("button", { name: "In progress 0" })).toBeTruthy();
+  await chooseStatus("T-1", "In progress");
+  expect(screen.getByRole("button", { name: "In progress 1" })).toBeTruthy();
+});
+
+test("card menus honor core status choices, source closure exceptions and retained local provenance", async () => {
+  saved = [
+    { ...ticket(1), source: external() },
+    {
+      ...ticket(2),
+      source: external({
+        state: { state: "closed", reason: "unknown" },
+        closure_unrecognized: true,
+        status_choices: ["Todo", "Done", "Canceled"],
+      }),
+    },
+    { ...ticket(3), source: external({ ownership: "local" }) },
+  ];
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+    { key: "Enter" },
+  );
+  await settle();
+  expect(
+    screen
+      .getByRole("menuitemradio", { name: "Done" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
+  expect(
+    screen
+      .getByRole("menuitemradio", { name: "In review" })
+      .getAttribute("aria-disabled"),
+  ).toBeNull();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  await settle();
+  await chooseStatus("T-2", "Canceled");
+  expect(screen.getByText("T-2 is now Canceled.")).toBeTruthy();
+  await chooseStatus("T-3", "Done");
+  expect(screen.getByText("T-3 is now Done.")).toBeTruthy();
+});
+
+test("ownership changes during a card save reconcile the saved state and permitted choices", async () => {
+  writeOverride = async () => {
+    saved[0] = {
+      ...ticket(1, "Done"),
+      source: external({
+        status_locked: true,
+        state: { state: "closed", reason: "completed" },
+        status_choices: [],
+      }),
+    };
+    throw {
+      code: "batch_operation",
+      index: 0,
+      message: "GitHub owns this closure",
+    };
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "In progress");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Current saved status: Done",
+  );
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+  fireEvent.keyDown(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+    { key: "Enter" },
+  );
+  await settle();
+  expect(
+    screen
+      .getByRole("menuitemradio", { name: "In progress" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
+});
+
+test("a failed pre-save read offers a working retry without writing stale card data", async () => {
+  const fallback = bridge.invoke.getMockImplementation()!;
+  let fail = true;
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "show_ticket" && fail) throw new Error("Read unavailable");
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Done");
+  expect(screen.getByRole("alert").textContent).toContain("Read unavailable");
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+  fail = false;
+  fireEvent.click(
+    screen.getByRole("button", { name: "Retry status change for T-1" }),
+  );
+  await settle();
+  expect(screen.getByText("T-1 is now Done.")).toBeTruthy();
+});
+
+test("Duplicate uses the existing review and canceling either duplicate flow preserves saved relationships", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Duplicate");
+  expect(
+    screen.getByRole("heading", { name: "Mark T-1 as a duplicate" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await settle(20);
+  expect(saved[0]?.status).toBe("Todo");
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  );
+  saved[0] = { ...ticket(1, "Duplicate"), duplicate_of: "T-2" };
+  change++;
+  await settle(2000);
+  await chooseStatus("T-1", "Todo");
+  expect(
+    screen.getByRole("heading", { name: "Remove the duplicate link?" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Keep duplicate" }));
+  await settle(20);
+  expect(saved[0]?.duplicate_of).toBe("T-2");
+  expect(saved[0]?.status).toBe("Duplicate");
+  await chooseStatus("T-1", "Todo");
+  fireEvent.click(screen.getByRole("button", { name: "Change status" }));
+  await settle();
+  expect(saved[0]?.duplicate_of).toBeNull();
+  expect(screen.getByText("T-1 is now Todo.")).toBeTruthy();
+});
+
+test("a lost duplicate review response reconciles its saved placement before retry", async () => {
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "preview_duplicate_dependencies")
+      return {
+        source: "T-1",
+        canonical: "T-2",
+        mode: "duplicate",
+        edges: [],
+        waiting: [],
+        replacement_issues: [],
+      };
+    if (command === "mark_duplicate_reviewed") {
+      saved[0] = { ...ticket(1, "Duplicate"), duplicate_of: "T-2" };
+      throw new Error("Duplicate response lost");
+    }
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Duplicate");
+  const input = screen.getByRole("textbox", {
+    name: "Canonical ticket reference",
+  });
+  fireEvent.change(input, { target: { value: "T-2" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
+  await settle();
+  expect(screen.getByText("Duplicate response lost")).toBeTruthy();
+  const todo = screen.getByRole("region", {
+    name: "Todo column",
+    hidden: true,
+  });
+  expect(within(todo).queryByText("Ticket 1")).toBeNull();
+  const duplicate = screen.getByRole("region", {
+    name: "Duplicate column",
+    hidden: true,
+  });
+  expect(within(duplicate).getByText("Ticket 1")).toBeTruthy();
+});
+
+test("a failed source-column refresh cannot keep a reconciled ticket in its previous status", async () => {
+  writeOverride = async () => {
+    saved[0] = ticket(1, "Done");
+    readOverride = (filter) =>
+      filter.status === "Todo" ? Promise.reject(new Error("Read busy")) : null;
+    throw new Error("Response lost");
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Done");
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeNull();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByRole(
+      "button",
+      { name: /T-1.*Ticket 1/ },
+    ),
+  ).toBeTruthy();
+});
+
+test("a duplicate save stays protected until its reviewed request finishes", async () => {
+  const fallback = bridge.invoke.getMockImplementation()!;
+  let finish: ((value: Ticket) => void) | undefined;
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "preview_duplicate_dependencies")
+      return {
+        source: "T-1",
+        canonical: "T-2",
+        mode: "duplicate",
+        edges: [],
+        waiting: [],
+        replacement_issues: [],
+      };
+    if (command === "mark_duplicate_reviewed")
+      return new Promise<Ticket>((resolve) => {
+        finish = resolve;
+      });
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Duplicate");
+  const input = screen.getByRole("textbox", {
+    name: "Canonical ticket reference",
+  });
+  fireEvent.change(input, { target: { value: "T-2" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Mark duplicate" }));
+  await settle();
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await settle();
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  await act(async () => {
+    saved[0] = { ...ticket(1, "Duplicate"), duplicate_of: "T-2" };
+    finish?.(saved[0]);
+  });
+  await settle(20);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("T-1 is now Duplicate.")).toBeTruthy();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  );
+});
+
+test("switching layouts preserves a pending card request and its protection", async () => {
+  let finish: ((value: Ticket[]) => void) | undefined;
+  writeOverride = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Done");
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  await settle();
+  await showBoard();
+  expect(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  ).toHaveProperty("disabled", true);
+  expect(screen.getByText("Saving T-1…")).toBeTruthy();
+  await act(async () => {
+    saved[0] = ticket(1, "Done");
+    finish?.([saved[0]]);
+  });
+  await settle();
+  expect(screen.getByText("T-1 is now Done.")).toBeTruthy();
+});
+
+test("a move out of Ready keeps its filters, announces departure and focuses the board", async () => {
+  render(<App />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "In progress");
+  expect(screen.queryByRole("button", { name: /T-1.*Ticket 1/ })).toBeNull();
+  expect(
+    screen.getByText(
+      "T-1 is now In progress. It no longer matches the current filters.",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Ready", level: 1 })).toBeTruthy();
+  await settle(20);
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "Ticket status board" }),
+  );
+});
+
+test("a card status action changes only that ticket and leaves the selected detail draft intact", async () => {
+  saved = [
+    {
+      ...ticket(1),
+      children: [{ reference: "T-3", title: "Ticket 3", trashed: false }],
+    },
+    ticket(2, "In review"),
+    {
+      ...ticket(3),
+      parent: { reference: "T-1", title: "Ticket 1", trashed: false },
+    },
+  ];
+  const fallback = bridge.invoke.getMockImplementation()!;
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "bulk_status") {
+      saved = saved.map((item) =>
+        args.references.includes(item.reference)
+          ? { ...item, status: args.status, availability: null }
+          : item,
+      );
+      return saved.filter((item) => args.references.includes(item.reference));
+    }
+    return fallback(command, args);
+  });
+  render(<App />);
+  await settle();
+  await showBoard();
+  fireEvent.click(screen.getByRole("button", { name: /T-2.*Ticket 2/ }));
+  await settle();
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Keep my draft" },
+  });
+  const action = screen.getByRole("button", { name: "Change status of T-1" });
+  fireEvent.keyDown(action, { key: "Enter" });
+  await settle();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "In progress" }));
+  await settle();
+  expect(
+    within(
+      screen.getByRole("region", { name: "In progress column" }),
+    ).getByRole("button", { name: /T-1.*Ticket 1/ }),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByRole(
+      "button",
+      { name: /T-3.*Ticket 3/ },
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Keep my draft",
+  );
+  expect(screen.getByText("T-1 is now In progress.")).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("bulk_status", {
+    references: ["T-1"],
+    status: "In progress",
+    requestId: expect.any(String),
+  });
+});
 
 test("List is the default and Board keeps all six columns, including empty statuses", async () => {
   render(<App />);
@@ -207,7 +784,7 @@ test("each status loads a bounded page with accurate totals and its own Load mor
     progress.getByRole("button", { name: "Load more In progress" }),
   );
   await settle();
-  expect(progress.getAllByRole("button")).toHaveLength(128);
+  expect(progress.getAllByRole("button", { name: /^T-\d+/ })).toHaveLength(128);
   expect(
     progress.queryByRole("button", { name: "Load more In progress" }),
   ).toBeNull();

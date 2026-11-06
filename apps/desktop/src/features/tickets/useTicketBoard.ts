@@ -167,5 +167,42 @@ export function useTicketBoard(
       if (request === generation.current) loadingMore.current.delete(status);
     }
   }
-  return { columns: displayed, refresh, loadMore };
+  async function matches(ticket: Ticket): Promise<boolean> {
+    if (requestFilter.status && requestFilter.status !== ticket.status)
+      return false;
+    // Ask the core with the same filters. A newly moved card can be beyond the loaded prefix.
+    for (let offset = 0; ; offset += BATCH_SIZE) {
+      const page = await client.findTickets({
+        ...requestFilter,
+        status: ticket.status,
+        offset,
+        limit: BATCH_SIZE,
+      });
+      if (page.some((item) => item.reference === ticket.reference)) return true;
+      if (page.length < BATCH_SIZE) return false;
+    }
+  }
+  function confirmTicket(ticket: Ticket) {
+    generation.current++;
+    if (saved.current.key !== key) return;
+    // A failed column read must not keep a ticket whose saved status is now known elsewhere.
+    const columns = saved.current.columns.map((column) => {
+      const contained = column.tickets.some((item) => item.id === ticket.id);
+      if (!contained) return column;
+      const remains = !ticket.trashed && column.status === ticket.status;
+      return {
+        ...column,
+        tickets: column.tickets.flatMap((item) =>
+          item.id !== ticket.id ? [item] : remains ? [ticket] : [],
+        ),
+        total:
+          remains || column.total === null
+            ? column.total
+            : Math.max(0, column.total - 1),
+      };
+    });
+    saved.current = { key, columns };
+    setState(saved.current);
+  }
+  return { columns: displayed, refresh, loadMore, matches, confirmTicket };
 }
