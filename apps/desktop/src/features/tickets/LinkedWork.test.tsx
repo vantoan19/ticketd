@@ -160,7 +160,9 @@ test("a ticket with no links still offers its Context graph", async () => {
       <Section ticket={base} refresh={vi.fn()} onOpenGraph={vi.fn()} />
     </ContextGraphNavigation.Provider>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Context graph" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Open context graph" }),
+  );
   expect(open).toHaveBeenCalledWith("T-1");
 });
 

@@ -55,6 +55,8 @@
   line-height: 24px;
 }
 .breadcrumb-back {
+  /* Board B: the back arrow sits 12px left of the button's own inset. */
+  margin-left: -12px;
   gap: 6px;
   color: var(--secondary-foreground);
 }
