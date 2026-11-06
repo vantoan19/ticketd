@@ -22,9 +22,18 @@ export function useBoardStatus(workspace: {
   const intents = useRef(new Map<string, Review>());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [failures, setFailures] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState({
+    scope: workspace.board.key,
+    message: "",
+  });
+  if (notice.scope !== workspace.board.key)
+    setNotice({ scope: workspace.board.key, message: "" });
   const [review, setReview] = useState<Review | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+
+  function clearNotice() {
+    setNotice({ scope: latest.current.board.key, message: "" });
+  }
 
   function lock(reference: string, value: boolean) {
     if (value) busy.current.add(reference);
@@ -62,9 +71,10 @@ export function useBoardStatus(workspace: {
       const board = latest.current.board;
       const matches = await board.matches(current);
       if (board.key !== latest.current.board.key) continue;
-      setNotice(
-        `${reference} is now ${current.status}.${matches ? "" : " It no longer matches the current filters."}`,
-      );
+      setNotice({
+        scope: board.key,
+        message: `${reference} is now ${current.status}.${matches ? "" : " It no longer matches the current filters."}`,
+      });
       return;
     }
   }
@@ -72,7 +82,7 @@ export function useBoardStatus(workspace: {
     const reference = attempt.ticket.reference;
     lock(reference, true);
     setFailures((old) => ({ ...old, [reference]: "" }));
-    setNotice("");
+    clearNotice();
     attempts.current.set(reference, attempt);
     try {
       await client.changeTicket(
@@ -119,7 +129,7 @@ export function useBoardStatus(workspace: {
       `button[aria-label="Change status of ${reference}"]`,
     );
     lock(reference, true);
-    setNotice("");
+    clearNotice();
     setFailures((old) => ({ ...old, [reference]: "" }));
     try {
       // Authority may have changed since the card was read. The write also validates atomically.
@@ -157,7 +167,8 @@ export function useBoardStatus(workspace: {
     choose,
     pending,
     failures,
-    notice,
+    notice: notice.scope === workspace.board.key ? notice.message : "",
+    dismissNotice: clearNotice,
     review,
     returnFocus,
     cancelReview() {

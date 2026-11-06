@@ -188,6 +188,22 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
+.board-status-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--recessed);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.board-status-notice > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .board-empty {
   padding: 24px 12px;
   text-align: center;
@@ -196,11 +212,8 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
-.ticket-workspace.board-layout #list {
-  flex: 1 1 44% !important;
-}
-.ticket-workspace.board-layout #detail {
-  flex: 1 1 56% !important;
+.ticket-workspace.board-layout.board-unselected #list {
+  flex: 1 1 0 !important;
 }
 .ticket-workspace.board-layout.board-unselected #detail,
 .ticket-workspace.board-layout.board-unselected .split-handle {
