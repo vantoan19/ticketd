@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import type { PlanViewState } from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
+import { planSummary } from "@/features/plans/plan-summary";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -196,6 +197,11 @@ export function TicketListPane({
     >
       {scopedPlan ? (
         <div className="plan-list-toolbar">
+          {planState.view && (
+            <span className="plan-list-summary">
+              {planSummary(planState.view.members, projects)}
+            </span>
+          )}
           <span className="plan-list-spacer" />
           <TicketFilters part="controls" labeledFilter {...filterProps} />
         </div>

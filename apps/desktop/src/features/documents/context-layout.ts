@@ -11,8 +11,8 @@ export type LayoutRequest = {
 };
 
 /** Card footprint the layout keeps clear, matching the rendered node size. */
-export const CARD_WIDTH = 180;
-export const CARD_HEIGHT = 72;
+export const CARD_WIDTH = 200;
+export const CARD_HEIGHT = 56;
 const GAP = 24;
 const MID = { x: 400, y: 240 };
 /** Room the arrowhead takes at the target end of a line. */

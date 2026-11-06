@@ -150,7 +150,6 @@ export function TicketWorkspaceView({
           key={scopedPlan.id}
           plan={scopedPlan}
           plans={workspace.plans}
-          projects={workspace.projects}
           state={planState}
           mode={planMode}
           onModeChange={setPlanMode}

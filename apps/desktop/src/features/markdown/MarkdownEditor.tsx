@@ -295,7 +295,10 @@ function Diagram(props: PlateElementProps) {
         <details>
           <summary>
             <Code aria-hidden="true" />
-            <span className="diagram-summary-label">Mermaid diagram</span>
+            <span className="diagram-summary-label">
+              Mermaid diagram
+              {diagramLabels(source) && ` · ${diagramLabels(source)}`}
+            </span>
             <span className="diagram-summary-action">Edit source</span>
             <span className="sr-only">Diagram source</span>
           </summary>
@@ -1172,4 +1175,15 @@ export function MarkdownEditor({
       )}
     </section>
   );
+}
+
+/** The node labels of a flowchart ("Cart, Pay, Receipt"), so a collapsed diagram says what it holds. */
+function diagramLabels(source: string) {
+  const labels: string[] = [];
+  for (const match of source.matchAll(
+    /\b[\w-]+\s*(?:\[\[?|\(\(?|\{)\s*"?([^\])}"]+?)"?\s*(?:\]\]?|\)\)?|\})/g,
+  ))
+    if (match[1] && !labels.includes(match[1].trim()))
+      labels.push(match[1].trim());
+  return labels.slice(0, 4).join(", ");
 }

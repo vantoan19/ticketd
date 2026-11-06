@@ -2,7 +2,7 @@ import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText, Pin, Plus, Search, Trash2 } from "lucide-react";
+import { FileText, Pin, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   documents,
@@ -672,7 +672,8 @@ export function Documents({
                     disabled={trashed}
                     onClick={() => setAddingTag(true)}
                   >
-                    Add tag
+                    <Tag data-icon="inline-start" aria-hidden="true" />
+                    Add tags
                   </Button>
                 ) : (
                   <form

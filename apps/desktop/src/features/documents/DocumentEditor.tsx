@@ -771,7 +771,12 @@ export function DocumentEditor({
         )}
         {initial &&
           (writing ? (
-            <div className="document-title">{titleInput}</div>
+            <div className="document-title">
+              {titleInput}
+              <p className="document-title-hint">
+                Title · the Document’s heading
+              </p>
+            </div>
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
@@ -884,7 +889,7 @@ export function DocumentEditor({
                 setBody(next);
               }}
               label={capture ? "Your thought" : "Document"}
-              {...(capture ? { placeholder: "Write a thought…" } : {})}
+              placeholder={capture ? "Write a thought…" : "Type / for blocks"}
               readOnly={locked}
               autoFocus={capture}
               persistentToolbar={capture}
@@ -920,6 +925,11 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
+        {writing && !capture && !locked && body.trim() && (
+          <p className="document-block-hint" aria-hidden="true">
+            Type / for blocks
+          </p>
+        )}
         {capture && titleField}
         {!initial && saveError}
         {capture && (
@@ -1053,7 +1063,7 @@ export function DocumentEditor({
                 }}
               >
                 <SquarePen aria-hidden="true" />
-                Create ticket
+                Create ticket from this
               </Button>
             )}
             {onOpenGraph && (
@@ -1062,7 +1072,7 @@ export function DocumentEditor({
                 onClick={() => navigate(() => onOpenGraph(initial.id))}
               >
                 <Network aria-hidden="true" />
-                Context graph
+                Open context graph
               </Button>
             )}
           </div>
@@ -1193,7 +1203,7 @@ function ConnectedLabel({ item }: { item: Connection }) {
   }, [item.kind, item.label]);
   const text =
     item.kind === "plan" && item.passages.length === 0
-      ? `${item.attached ? "Supporting Document of" : "Spec of"} ${item.label}`
+      ? item.label
       : ticket?.title
         ? `${item.label} · ${ticket.title}`
         : item.label;

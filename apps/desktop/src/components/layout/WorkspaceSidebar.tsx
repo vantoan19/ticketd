@@ -85,6 +85,7 @@ export function WorkspaceSidebar({
   workspaceGraphOpen = false,
   onCapture,
   counts,
+  activePlanCount,
   setView,
   projects,
   plans,
@@ -103,6 +104,8 @@ export function WorkspaceSidebar({
   workspaceGraphOpen?: boolean;
   onCapture: (from: HTMLElement | null) => void;
   counts: SidebarCounts | null;
+  /** The open Plan's ticket count; Plans carry no counts of their own. */
+  activePlanCount?: number | undefined;
   setView: (view: View) => void;
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
@@ -322,6 +325,11 @@ export function WorkspaceSidebar({
                       >
                         <Layers size={16} />{" "}
                         <span title={e.name}>{e.name}</span>
+                        {navigation.plan === e.id &&
+                          view === "tickets" &&
+                          activePlanCount !== undefined && (
+                            <SidebarCount value={activePlanCount} />
+                          )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}

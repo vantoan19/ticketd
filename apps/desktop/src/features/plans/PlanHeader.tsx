@@ -40,8 +40,6 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusDot } from "@/components/ui/status-dot";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { plansClient, type Plan } from "@/lib/api/plans";
-import type { Project } from "@/lib/api/client";
-import { planSummary } from "./plan-summary";
 import { statusCountKey, ticketStatuses } from "@/lib/statuses";
 import { PlanDocuments } from "./PlanDocuments";
 import { AddTicketsDialog } from "./AddTicketsDialog";
@@ -55,14 +53,12 @@ import "./plan.css";
 export function PlanHeader({
   plan,
   plans,
-  projects,
   state,
   mode,
   onModeChange,
 }: {
   plan: Plan;
   plans: Plan[];
-  projects: Project[];
   state: PlanViewState;
   mode: "list" | "dependencies";
   onModeChange: (mode: "list" | "dependencies") => void;
@@ -134,7 +130,6 @@ export function PlanHeader({
       view.counts.duplicate
     : 0;
   const canArchive = !current.archived;
-  const summary = view ? planSummary(view.members, projects) : "";
   return (
     <header className="plan-header">
       <div className="plan-title-row" data-renaming={renaming || undefined}>
@@ -171,7 +166,6 @@ export function PlanHeader({
               {current.name}
             </h1>
             <PlanState current={current} />
-            {summary && <span className="plan-header-summary">{summary}</span>}
           </>
         )}
         <span className="plan-title-spacer" />

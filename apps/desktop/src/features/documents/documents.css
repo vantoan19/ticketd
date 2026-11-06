@@ -638,3 +638,22 @@
 .document-workspace .document-body .mermaid-block {
   box-shadow: none;
 }
+
+/* Edit: the title field's caption and the trailing block prompt. */
+.document-title-hint {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.document-block-hint {
+  margin: 20px 0 0;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  user-select: none;
+}
+.document-rail .document-tags:empty {
+  display: none;
+}

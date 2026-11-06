@@ -47,7 +47,9 @@ function fitOptions(width: number): FitViewOptions {
   return {
     padding: {
       top: "32px",
-      right: `${Math.round(32 * scale)}px`,
+      // The legend and Not connected cards float over the right edge (200px
+      // wide plus a 16px margin): a fitted card never sits under them.
+      right: `${Math.round(32 * scale) + 216}px`,
       bottom: "72px",
       left: `${Math.round(32 * scale)}px`,
     },

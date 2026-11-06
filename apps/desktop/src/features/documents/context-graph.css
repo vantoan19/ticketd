@@ -767,3 +767,25 @@
   flex-direction: column;
   min-width: 0;
 }
+
+/* Board G: the canvas fills the pane edge to edge; nothing frames it or sits below it. */
+.context-graph-body[data-map] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.context-graph-body[data-map] > .context-graph-main {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  border: 0;
+}
+.context-graph-body[data-map] > .context-graph-status:not(.sr-only) {
+  flex: none;
+  margin: 8px 20px;
+}
+.context-graph-page .react-flow__node-card {
+  width: 200px;
+}
