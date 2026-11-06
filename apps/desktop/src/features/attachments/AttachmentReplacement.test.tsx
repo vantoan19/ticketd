@@ -111,3 +111,21 @@ test("shared reference definitions stay intact when one reference-style use is r
     ),
   );
 });
+
+test("a destination-shaped label and an inline title survive selected replacement literally", async () => {
+  bridge();
+  const change = vi.fn();
+  const source = `[Chosen \\](${oldUri}) label](${oldUri} "keep title")`;
+  render(<MarkdownDocument source={source} onChange={change} />);
+  fireEvent.click(screen.getByRole("button", { name: /^Chosen/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose a replacement" }),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  await waitFor(() =>
+    expect(change).toHaveBeenCalledWith(
+      `[Chosen \\](${oldUri}) label](${newUri} "keep title")`,
+    ),
+  );
+});

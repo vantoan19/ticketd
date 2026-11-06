@@ -326,16 +326,7 @@ function replaceDestination(
   oldUri: string,
   nextUri: string,
 ): string {
-  const destination = occurrence.indexOf(`](${oldUri}`);
-  const angled = occurrence.indexOf(`](<${oldUri}>`);
-  const offset =
-    destination >= 0 ? destination + 2 : angled >= 0 ? angled + 3 : -1;
-  if (offset >= 0)
-    return (
-      occurrence.slice(0, offset) +
-      nextUri +
-      occurrence.slice(offset + oldUri.length)
-    );
+  if (occurrence === `<${oldUri}>`) return `[${oldUri}](${nextUri})`;
   let depth = 0;
   for (
     let index = occurrence.startsWith("!") ? 1 : 0;
@@ -346,9 +337,35 @@ function replaceDestination(
       index += 1;
       continue;
     }
+    if (occurrence[index] === "`") {
+      const ticks = /^`+/.exec(occurrence.slice(index))?.[0] ?? "`";
+      let close = occurrence.indexOf(ticks, index + ticks.length);
+      while (
+        close >= 0 &&
+        (occurrence[close - 1] === "`" ||
+          occurrence[close + ticks.length] === "`")
+      )
+        close = occurrence.indexOf(ticks, close + ticks.length);
+      if (close >= 0) {
+        index = close + ticks.length - 1;
+        continue;
+      }
+    }
     if (occurrence[index] === "[") depth += 1;
-    if (occurrence[index] === "]" && --depth === 0)
-      return `${occurrence.slice(0, index + 1)}(${nextUri})`;
+    if (occurrence[index] !== "]" || --depth !== 0) continue;
+    const label = occurrence.slice(0, index + 1);
+    const tail = occurrence.slice(index + 1);
+    const destination = /^\(\s*<?/.exec(tail);
+    if (destination && tail.slice(destination[0].length).startsWith(oldUri)) {
+      const offset = index + 1 + destination[0].length;
+      return (
+        occurrence.slice(0, offset) +
+        nextUri +
+        occurrence.slice(offset + oldUri.length)
+      );
+    }
+    if (!tail || tail.startsWith("[")) return `${label}(${nextUri})`;
+    break;
   }
   throw new Error(
     "This reference could not be selected safely. Edit its Markdown source to replace it.",
