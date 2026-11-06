@@ -13,7 +13,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { cn } from "cn";
-import { usePreferences } from "@/lib/preferences";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { usePlanView } from "@/features/plans/usePlanView";
@@ -93,15 +93,13 @@ export function TicketWorkspaceView({
     }),
     [filtersOpen, workspace.layout],
   );
-  // Plan dependencies take the detail pane. Each Plan opens on its list.
-  const [planMode, setPlanModeState] = useState<"list" | "dependencies">(
-    "list",
-  );
+  // Dependencies are temporary; ticket layouts share the remembered preference.
+  const [showDependencies, setShowDependencies] = useState(false);
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
   const [shownPlan, setShownPlan] = useState(planScope);
   if (shownPlan !== planScope) {
     setShownPlan(planScope);
-    setPlanModeState("list");
+    setShowDependencies(false);
   }
   useEffect(() => {
     // A new Plan opens with its title in view, not where the last one scrolled.
@@ -118,11 +116,20 @@ export function TicketWorkspaceView({
     workspace.refresh,
   );
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
-  const dependenciesOpen = planMode === "dependencies" && scopedPlan;
-  const setPlanMode = (mode: "list" | "dependencies") => {
-    setPlanModeState(mode);
-    if (mode === "dependencies") setNarrowDetail(true);
-    else setNarrowDetail(selected !== null);
+  const dependenciesOpen = showDependencies && scopedPlan;
+  const showTickets = () => {
+    setShowDependencies(false);
+    setNarrowDetail(selected !== null);
+  };
+  const setPlanMode = (mode: "list" | "board" | "dependencies") => {
+    if (mode === "dependencies") {
+      setShowDependencies(true);
+      setNarrowDetail(true);
+    } else if (setPreference("ticketLayout", mode)) showTickets();
+    else
+      workspace.setError(
+        "Could not remember ticket layout. Check local storage and try again.",
+      );
   };
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     // Versioned: layouts saved by earlier builds (468px list) must not override
@@ -193,7 +200,7 @@ export function TicketWorkspaceView({
             plan={scopedPlan}
             plans={workspace.plans}
             state={planState}
-            mode={planMode}
+            mode={dependenciesOpen ? "dependencies" : workspace.layout}
             onModeChange={setPlanMode}
           />
         )}
@@ -203,10 +210,10 @@ export function TicketWorkspaceView({
             revision={workspace.revision}
             projects={workspace.projects}
             refresh={workspace.refresh}
-            onClose={() => setPlanMode("list")}
+            onClose={showTickets}
             archived={scopedPlan.archived}
             onOpen={(reference) => {
-              setPlanMode("list");
+              showTickets();
               setSelected(reference);
               setNarrowDetail(true);
             }}
@@ -249,7 +256,7 @@ export function TicketWorkspaceView({
                       listRef.current?.querySelector(".ticket-board")
                         ?.scrollLeft ?? 0,
                   };
-                setPlanModeState("list");
+                setShowDependencies(false);
                 setSelected(reference);
                 setNarrowDetail(true);
                 const narrow = window.matchMedia(NARROW_QUERY).matches;
