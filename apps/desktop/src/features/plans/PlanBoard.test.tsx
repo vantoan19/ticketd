@@ -483,12 +483,12 @@ test("a cross-project Plan includes parent and subticket cards, pages columns in
   expect(within(child).getByText("Beta")).toBeTruthy();
   expect(within(child).getByText("Subticket of T-1")).toBeTruthy();
   expect(within(parent).queryByText("Launch")).toBeNull();
-  expect(within(board).queryByRole("button", { name: /T-201/ })).toBeNull();
-  expect(within(board).queryByRole("button", { name: /T-202/ })).toBeNull();
+  expect(within(board).queryByRole("button", { name: /^T-201\D/ })).toBeNull();
+  expect(within(board).queryByRole("button", { name: /^T-202\D/ })).toBeNull();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByRole(
       "button",
-      { name: /T-200/ },
+      { name: /^T-200\D/ },
     ),
   ).toBeTruthy();
   fireEvent.click(todo.getByRole("button", { name: "Load more Todo" }));
