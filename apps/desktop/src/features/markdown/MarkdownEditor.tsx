@@ -1185,5 +1185,16 @@ function diagramLabels(source: string) {
   ))
     if (match[1] && !labels.includes(match[1].trim()))
       labels.push(match[1].trim());
+  // Bare node names (Cart-->Pay-->Receipt) read as their own labels.
+  if (labels.length === 0)
+    for (const part of source.split(/\s*(?:-->|---|==>|-\.->|;|\n)\s*/)) {
+      const name = part.replace(/^\|[^|]*\|\s*/, "").trim();
+      if (
+        /^[A-Za-z][\w-]*$/.test(name) &&
+        !/^(graph|flowchart|TD|TB|LR|RL|BT)$/i.test(name) &&
+        !labels.includes(name)
+      )
+        labels.push(name);
+    }
   return labels.slice(0, 4).join(", ");
 }

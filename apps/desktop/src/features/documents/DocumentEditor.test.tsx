@@ -267,7 +267,7 @@ it("opens a connected ticket after saving a document draft", async () => {
   renderEditor(
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
-  await screen.findByText("From");
+  await screen.findByText(/^From\s*“/);
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
@@ -992,5 +992,5 @@ it("quotes a passage shared by several connections once", async () => {
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   await screen.findByRole("button", { name: "T-1" });
   expect(screen.getAllByText(/See\s+T-1/)).toHaveLength(2);
-  expect(screen.getAllByText("Both from")).toHaveLength(1);
+  expect(screen.getAllByText(/^Both from\s*“/)).toHaveLength(1);
 });

@@ -1,5 +1,31 @@
 import DOMPurify from "dompurify";
 
+/** One stuck render must not leave every later diagram on its skeleton. */
+const RENDER_TIMEOUT_MS = 10000;
+function withTimeout<T>(work: Promise<T>, ms: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            "Diagram rendering timed out. Check its source in the editor.",
+          ),
+        ),
+      ms,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (reason: unknown) => {
+        clearTimeout(timer);
+        reject(reason instanceof Error ? reason : new Error(String(reason)));
+      },
+    );
+  });
+}
+
 let queue = Promise.resolve();
 let nextId = 0;
 
@@ -31,7 +57,7 @@ export function renderDiagram(
     const scratch = document.createElement("div");
     scratch.setAttribute("aria-hidden", "true");
     scratch.style.cssText =
-      "position:absolute;visibility:hidden;pointer-events:none;";
+      "position:absolute;left:-10000px;top:0;width:1200px;visibility:hidden;pointer-events:none;";
     document.body.append(scratch);
     try {
       mermaid.initialize({
@@ -70,7 +96,10 @@ export function renderDiagram(
           "themeVariables",
         ],
       });
-      const { svg } = await mermaid.render(id, source, scratch);
+      const { svg } = await withTimeout(
+        mermaid.render(id, source, scratch),
+        RENDER_TIMEOUT_MS,
+      );
       const sanitized = DOMPurify.sanitize(svg, {
         USE_PROFILES: { svg: true, svgFilters: true },
         FORBID_TAGS: [

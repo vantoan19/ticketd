@@ -208,7 +208,8 @@ export function PlanHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align="end"
-                sideOffset={4}
+                sideOffset={12}
+                alignOffset={-9}
                 className="plan-actions-menu"
                 onCloseAutoFocus={(event) => {
                   // Rename puts the cursor in the title, not back on the menu.

@@ -61,7 +61,10 @@ export function EmptyState({
       className={cn("gap-3 p-6 text-wrap md:p-6", className)}
     >
       <EmptyHeader className="max-w-[380px] gap-1">
-        <EmptyMedia variant="icon" className="mb-0 rounded-lg">
+        <EmptyMedia
+          variant="icon"
+          className="rounded-lg text-secondary-foreground [&_svg:not([class*='size-'])]:size-5 [&_svg]:stroke-[1.75]"
+        >
           <span aria-hidden="true" className="contents">
             {icon}
           </span>

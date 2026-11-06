@@ -637,6 +637,10 @@
   flex-direction: column;
   gap: 8px;
 }
+/* Frame G: 32px buttons. */
+.context-graph-preview-actions > button {
+  height: 32px;
+}
 .context-graph-strip .context-graph-preview-actions {
   flex-direction: row;
 }
@@ -741,6 +745,9 @@
 }
 .context-graph-connections dd {
   margin: 2px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }

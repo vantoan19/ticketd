@@ -213,3 +213,27 @@ test("keeps resource-loading image nodes as source without invoking the renderer
   expect(screen.getByLabelText("Mermaid source").textContent).toBe(source);
   expect(engine.render).not.toHaveBeenCalled();
 });
+
+test("a stuck render times out instead of leaving the skeleton, and paints on the next focus", async () => {
+  vi.useFakeTimers();
+  try {
+    engine.render.mockReturnValueOnce(new Promise(() => {}));
+    engine.render.mockResolvedValue({
+      svg: '<svg viewBox="0 0 100 50"><text>Cart</text></svg>',
+    });
+    const { container } = render(
+      <MermaidDiagram source={"flowchart LR\n  A --> B\n"} />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10500);
+    });
+    expect(container.querySelector(".mermaid-pending")).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(screen.getByRole("img", { name: "Mermaid diagram" })).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
