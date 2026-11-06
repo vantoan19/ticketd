@@ -32,9 +32,12 @@ function Media({
   onError: () => void;
 }) {
   const media = useRef<HTMLMediaElement>(null);
+  const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
     const element = media.current;
+    const picture = image.current;
     return () => {
+      picture?.removeAttribute("src");
       if (!element) return;
       element.pause();
       element.removeAttribute("src");
@@ -42,7 +45,9 @@ function Media({
     };
   }, []);
   if (mime.startsWith("image/"))
-    return <img src={url} alt={file.display_name} onError={onError} />;
+    return (
+      <img ref={image} src={url} alt={file.display_name} onError={onError} />
+    );
   const props = {
     src: url,
     controls: true,

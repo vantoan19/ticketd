@@ -256,3 +256,23 @@ fn managed_directory_links_cannot_serve_or_export_bytes_outside_the_workspace() 
     assert!(workspace.attachment_open_path(&file.id).is_err());
     assert_eq!(workspace.attachment(&file.id).unwrap(), file);
 }
+
+#[test]
+fn replacing_snapshot_bytes_with_a_directory_keeps_metadata_and_never_opens_it_as_media() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .import_attachment_bytes("image", "image.png", PNG, |_, _| true)
+        .unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let stored = dir
+        .path()
+        .join("workspace.sqlite3.attachments")
+        .join(&file.locator);
+    std::fs::remove_file(&stored).unwrap();
+    std::fs::create_dir(&stored).unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::Incomplete);
+    assert_eq!(preview.attachment, file);
+    assert!(workspace.attachment_media(&identity, &file.id).is_err());
+}

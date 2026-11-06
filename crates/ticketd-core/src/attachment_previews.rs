@@ -343,6 +343,13 @@ pub(crate) fn open_snapshot(
     if !canonical_path.starts_with(&canonical_root) {
         return Err(invalid());
     }
+    // Reject special files before open (a pipe can block), then verify the actual handle too.
+    if !fs::metadata(&canonical_path)
+        .map_err(snapshot_io)?
+        .is_file()
+    {
+        return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are not a regular file. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
+    }
     let file = File::open(&canonical_path).map_err(snapshot_io)?;
     let metadata = file.metadata().map_err(snapshot_io)?;
     if !metadata.is_file() || metadata.len() != attachment.size_bytes {
