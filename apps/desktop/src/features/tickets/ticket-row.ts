@@ -80,10 +80,23 @@ export function rowContextItem(
   return project ? { kind: "project", label: project.name } : null;
 }
 
-/** Line two shows the first tag whole and the others as a "+N" count. */
-export function rowTagSlot(
-  tags: readonly string[],
-): { first: string; more: number } | null {
-  const [first, ...rest] = tags;
-  return first === undefined ? null : { first, more: rest.length };
+/** Gap between pills, and the room the "+N" pill needs, in px. */
+const GAP = 8;
+const MORE_WIDTH = 32;
+
+/**
+ * How many of the pills fit in `room` px. The first always shows; "+N" takes
+ * the place of the rest when some are left out.
+ */
+export function fittingTags(widths: readonly number[], room: number): number {
+  let used = 0;
+  let fit = 0;
+  for (const [index, width] of widths.entries()) {
+    used += width + (index > 0 ? GAP : 0);
+    const rest = widths.length - index - 1;
+    const needed = used + (rest > 0 ? GAP + MORE_WIDTH : 0);
+    if (needed > room) break;
+    fit = index + 1;
+  }
+  return Math.max(1, fit);
 }

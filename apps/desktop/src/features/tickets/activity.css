@@ -193,3 +193,32 @@
   box-shadow: inset 0 0 0 1px var(--border);
   color: var(--foreground);
 }
+
+/* Board B: entries are a 28px header row (agent, "update · time", Latest,
+   actions), the update text indented under the name, events on 28px rows. */
+.activity-list {
+  gap: 0;
+}
+.activity-entry {
+  padding-block: 4px 8px;
+}
+.activity-meta {
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-height: 24px;
+}
+.activity-author-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  align-self: center;
+}
+.activity-entry .activity-note,
+.activity-entry > .activity-details-link {
+  margin-inline-start: 22px;
+}
+.ticket-detail[data-expanded] .activity-note {
+  font-size: var(--text-reading);
+  line-height: 24px;
+}

@@ -466,7 +466,7 @@ test("preserves new and edited drafts across hidden navigation, external refresh
     throw new Error(`Unexpected ${command}`);
   });
   const view = render(<Activity {...scoped} />);
-  await screen.findByText("Agent: cli-agent");
+  await screen.findByText("cli-agent");
   fireEvent.click(screen.getByRole("button", { name: "Write an update…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Edit Markdown source" }),
@@ -533,7 +533,7 @@ test("explicitly saves an edited note and returns to the untouched new draft", a
     },
   );
   render(<Activity {...scoped} />);
-  await screen.findByText("Agent: cli-agent");
+  await screen.findByText("cli-agent");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: /Actions for update from/ }),
     { button: 0, ctrlKey: false },

@@ -8,7 +8,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, Layers, Lock, Trash2, type LucideIcon } from "lucide-react";
+import {
+  ChevronDown,
+  Folder,
+  Layers,
+  Lock,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -547,17 +554,23 @@ export function TicketProperties({
               align="end"
               className="rail-tags-picker"
               display={
-                ticket.tags.length ? (
-                  <span className="rail-tags">
-                    {ticket.tags.map((tag) => (
-                      <span className="rail-tag" key={tag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Add tags</span>
-                )
+                <>
+                  {ticket.tags.length ? (
+                    <span className="rail-tags">
+                      {ticket.tags.map((tag) => (
+                        <span className="rail-tag" key={tag}>
+                          {tag}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Add tags</span>
+                  )}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="rail-tags-chevron"
+                  />
+                </>
               }
               label="Tags"
               value={ticket.tags.length ? "Edit tags" : "Add tags"}
