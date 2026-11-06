@@ -29,7 +29,7 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn workspace_id(tx: &Connection) -> Result<String, Error> {
+pub(crate) fn workspace_id(tx: &Connection) -> Result<String, Error> {
     Ok(tx.query_row(
         "SELECT id FROM attachment_workspace WHERE singleton=1",
         [],
@@ -38,7 +38,7 @@ fn workspace_id(tx: &Connection) -> Result<String, Error> {
 }
 
 /// All Markdown destinations, including image and reference-style syntax, but never code.
-fn destinations(markdown: &str) -> BTreeSet<String> {
+pub(crate) fn destinations(markdown: &str) -> BTreeSet<String> {
     Parser::new_ext(
         markdown,
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,

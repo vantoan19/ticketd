@@ -1,0 +1,431 @@
+// @vitest-environment jsdom
+import { createRef, useState } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { afterEach, beforeAll, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
+import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
+import { DocumentEditor } from "@/features/documents/DocumentEditor";
+import { Activity } from "@/features/tickets/Activity";
+import { MarkdownEditor } from "./MarkdownEditor";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+beforeAll(async () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  Object.defineProperty(Range.prototype, "getClientRects", {
+    configurable: true,
+    value: () => [],
+  });
+  Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => new DOMRect(),
+  });
+  await import("./MarkdownEditor");
+});
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  vi.resetAllMocks();
+});
+
+function bridge(records = new Map<string, Record<string, unknown>>()) {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_cutover_pending") return false;
+    if (command === "draft_retentions") return [...records.values()];
+    if (command === "retain_draft") {
+      const draft = (args as { draft: Record<string, unknown> }).draft;
+      const saved = { ...draft, revision: Number(draft.revision) + 1 };
+      records.set(String(draft.owner), saved);
+      return saved;
+    }
+    if (command === "save_document" || command === "edit_activity")
+      throw new Error("Database busy");
+    return [];
+  });
+  return records;
+}
+
+async function typeSource(label: string, text: string) {
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  const source = await screen.findByRole("textbox", {
+    name: `${label} source`,
+  });
+  act(() => {
+    const view = EditorView.findFromDOM(source);
+    view?.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+      userEvent: "input",
+    });
+  });
+}
+
+test("unpublished new-ticket content is core-retained and recovers after a failed submission and restart", async () => {
+  const records = new Map<string, Record<string, unknown>>();
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_cutover_pending") return false;
+    if (command === "draft_retentions") return [...records.values()];
+    if (command === "retain_draft") {
+      const draft = (args as { draft: Record<string, unknown> }).draft;
+      const saved = { ...draft, revision: Number(draft.revision) + 1 };
+      records.set(String(draft.owner), saved);
+      return saved;
+    }
+    return [];
+  });
+  const create = vi.fn().mockRejectedValue(new Error("Database busy"));
+  function Host() {
+    return (
+      <DraftRecoveryProvider>
+        <CreateTicketDialog
+          open
+          onOpenChange={vi.fn()}
+          triggerRef={createRef()}
+          navigation={{ project: "all", plan: "" }}
+          projects={[]}
+          plans={[]}
+          create={create}
+        />
+      </DraftRecoveryProvider>
+    );
+  }
+  const first = render(<Host />);
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "Recover me" },
+  });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit Markdown source" }),
+  );
+  const source = await screen.findByRole("textbox", {
+    name: "Description source",
+  });
+  act(() => {
+    EditorView.findFromDOM(source)?.dispatch({
+      changes: {
+        from: 0,
+        insert: "[Trace](ticketd://attachment/workspace/file)",
+      },
+    });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await screen.findByText(/Could not create ticket/);
+  await waitFor(() =>
+    expect(records.get("new-ticket")?.markdown).toEqual([
+      "[Trace](ticketd://attachment/workspace/file)",
+    ]),
+  );
+  first.unmount();
+  render(<Host />);
+  expect(await screen.findByRole("textbox", { name: "Title" })).toHaveProperty(
+    "value",
+    "Recover me",
+  );
+  expect(screen.getByText(/Draft restored/)).toBeTruthy();
+  expect(
+    screen.getByRole("textbox", { name: "Description rich text" }).textContent,
+  ).toContain("Trace");
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+  await waitFor(() => expect(records.get("new-ticket")?.payload).toBeNull());
+});
+
+test("a failed Document capture keeps canonical recovery and its original create request through restart", async () => {
+  const records = bridge();
+  const first = render(
+    <DraftRecoveryProvider>
+      <DocumentEditor initial={null} onClose={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  await typeSource(
+    "Your thought",
+    "[Trace](ticketd://attachment/workspace/file)",
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("save_document", expect.anything()),
+  );
+  await waitFor(() =>
+    expect(records.get("document:capture")?.payload).toMatchObject({
+      pending: { requestId: expect.any(String) },
+    }),
+  );
+  const calls = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "save_document");
+  const requestId = (calls[0]?.[1] as { requestId: string }).requestId;
+  first.unmount();
+  render(
+    <DraftRecoveryProvider>
+      <DocumentEditor initial={null} onClose={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  expect(
+    (await screen.findByRole("textbox", { name: "Your thought rich text" }))
+      .textContent,
+  ).toContain("Trace");
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === "save_document"),
+    ).toHaveLength(2),
+  );
+  expect(invoke).toHaveBeenLastCalledWith(
+    "save_document",
+    expect.objectContaining({
+      requestId,
+      body: "[Trace](ticketd://attachment/workspace/file)",
+    }),
+  );
+});
+
+test("an Activity edit recovers independently of an unpublished brief and details", async () => {
+  const records = bridge(
+    new Map([
+      [
+        "activity:T-1",
+        {
+          owner: "activity:T-1",
+          kind: "draft",
+          revision: 1,
+          payload: {
+            brief: "Unpublished brief",
+            details: "[Detail](ticketd://attachment/workspace/file)",
+            support: "",
+          },
+          markdown: ["[Detail](ticketd://attachment/workspace/file)"],
+        },
+      ],
+      [
+        "activity-edit:T-1",
+        {
+          owner: "activity-edit:T-1",
+          kind: "draft",
+          revision: 1,
+          payload: {
+            id: "a1",
+            original: "Original",
+            content: "[Edited](ticketd://attachment/workspace/file)",
+          },
+          markdown: ["[Edited](ticketd://attachment/workspace/file)"],
+        },
+      ],
+    ]),
+  );
+  function Host() {
+    return (
+      <DraftRecoveryProvider>
+        <Activity
+          reference="T-1"
+          status="Todo"
+          revision={0}
+          projects={[]}
+          active
+          trashed={false}
+        />
+      </DraftRecoveryProvider>
+    );
+  }
+  const first = render(<Host />);
+  expect(
+    (await screen.findByRole("textbox", { name: "Edit update rich text" }))
+      .textContent,
+  ).toContain("Edited");
+  first.unmount();
+  render(<Host />);
+  expect(
+    (await screen.findByRole("textbox", { name: "Edit update rich text" }))
+      .textContent,
+  ).toContain("Edited");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+  expect(
+    (await screen.findByRole("textbox", { name: "New update rich text" }))
+      .textContent,
+  ).toContain("Unpublished brief");
+  expect(
+    screen.getByRole("textbox", { name: "Details rich text" }).textContent,
+  ).toContain("Detail");
+  await waitFor(() =>
+    expect(records.get("activity-edit:T-1")?.payload).toBeNull(),
+  );
+  expect(records.get("activity:T-1")?.payload).toMatchObject({
+    brief: "Unpublished brief",
+  });
+});
+
+test("source Undo and rich/source transitions keep independent history protection after reference removal", async () => {
+  const records = bridge();
+  const body = "[Trace](ticketd://attachment/workspace/file)";
+  function Editor() {
+    const [value, setValue] = useState(body);
+    return (
+      <MarkdownEditor persistentToolbar value={value} onChange={setValue} />
+    );
+  }
+  const host = render(
+    <DraftRecoveryProvider>
+      <Editor />
+    </DraftRecoveryProvider>,
+  );
+  await typeSource("Markdown document", "");
+  await waitFor(() =>
+    expect(
+      [...records.values()].some(
+        (record) =>
+          record.kind === "undo" && (record.markdown as string[]).length === 0,
+      ),
+    ).toBe(true),
+  );
+  const source = screen.getByRole("textbox", {
+    name: "Markdown document source",
+  });
+  fireEvent.keyDown(source, { key: "z", code: "KeyZ", ctrlKey: true });
+  await waitFor(() => expect(source.textContent).toContain(body));
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+  expect(
+    screen.getByRole("textbox", { name: "Markdown document rich text" })
+      .textContent,
+  ).toContain("Trace");
+  const writes = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "retain_draft")
+    .map(([, args]) => (args as { draft: Record<string, unknown> }).draft);
+  expect(
+    writes.some(
+      (draft) =>
+        draft.kind === "undo" && (draft.markdown as string[]).includes(body),
+    ),
+  ).toBe(true);
+  expect(writes.some((draft) => draft.kind === "draft")).toBe(false);
+  host.unmount();
+  await waitFor(() =>
+    expect(
+      [...records.values()].filter((record) => record.kind === "undo"),
+    ).toHaveLength(0),
+  );
+});
+
+test("legacy draft import protects unopened owners and does not acknowledge other desktop profiles", async () => {
+  const records = bridge();
+  localStorage.setItem("ticketd:activity-draft:unopened", "Legacy brief");
+  localStorage.setItem(
+    "ticketd:activity-details:unopened",
+    "[Details](ticketd://attachment/workspace/file)",
+  );
+  localStorage.setItem("ticketd:activity-support:other", "document-id");
+  render(
+    <DraftRecoveryProvider>
+      <p>Workspace ready</p>
+    </DraftRecoveryProvider>,
+  );
+  await screen.findByText("Workspace ready");
+  expect(records.get("activity:unopened")?.payload).toMatchObject({
+    brief: "Legacy brief",
+    details: "[Details](ticketd://attachment/workspace/file)",
+  });
+  expect(records.get("activity:other")?.payload).toMatchObject({
+    support: "document-id",
+  });
+  expect(invoke).not.toHaveBeenCalledWith("complete_draft_cutover");
+  expect(localStorage.getItem("ticketd:activity-draft:unopened")).toBeNull();
+});
+
+test("distinct legacy profile drafts survive a primary recovery tombstone", async () => {
+  const records = bridge(
+    new Map([
+      [
+        "activity:T-1",
+        {
+          owner: "activity:T-1",
+          kind: "draft",
+          revision: 3,
+          payload: null,
+          markdown: [],
+        },
+      ],
+    ]),
+  );
+  localStorage.setItem(
+    "ticketd:activity-draft:T-1",
+    JSON.stringify({
+      brief: "Other profile",
+      details: "[Trace](ticketd://attachment/workspace/file)",
+      support: "",
+    }),
+  );
+  render(
+    <DraftRecoveryProvider>
+      <p>Workspace ready</p>
+    </DraftRecoveryProvider>,
+  );
+  await screen.findByText("Workspace ready");
+  expect(records.get("activity:T-1")?.payload).toBeNull();
+  const legacy = [...records.values()].find((record) =>
+    String(record.owner).startsWith("legacy:"),
+  );
+  expect(legacy?.payload).toMatchObject({ brief: "Other profile" });
+  expect(legacy?.markdown).toContain(
+    "[Trace](ticketd://attachment/workspace/file)",
+  );
+  expect(localStorage.getItem("ticketd:activity-draft:T-1")).toBeNull();
+});
+
+test("failed draft protection is visible and blocks publication until explicit retry succeeds", async () => {
+  let fail = true;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      if (fail) throw new Error("Recovery storage unavailable");
+      const draft = (args as { draft: { revision: number } }).draft;
+      return { ...draft, revision: draft.revision + 1 };
+    }
+    return [];
+  });
+  const create = vi.fn().mockResolvedValue("T-1");
+  render(
+    <DraftRecoveryProvider>
+      <CreateTicketDialog
+        open
+        onOpenChange={vi.fn()}
+        triggerRef={createRef()}
+        navigation={{ project: "all", plan: "" }}
+        projects={[]}
+        plans={[]}
+        create={create}
+      />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.change(await screen.findByRole("textbox", { name: "Title" }), {
+    target: { value: "Keep my draft" },
+  });
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Could not protect recoverable drafts",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await screen.findByText(/Could not create ticket/);
+  expect(create).not.toHaveBeenCalled();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry draft recovery" }));
+  await waitFor(() =>
+    expect(
+      screen.queryAllByText(/Could not protect recoverable drafts/),
+    ).toHaveLength(0),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+});

@@ -787,6 +787,32 @@ The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
 Failed association reports the completed Attachment ID for explicit reuse.
 
+Recoverable ticket/new-ticket, Document/capture, and authored-update brief/details
+drafts retain their files across navigation, restart, failed saves/submissions,
+editor mode changes and external-refresh conflict choices. Draft recovery does
+not publish an Activity or Document. Successful save, explicit discard or
+replacement updates only that recovery owner; independent rich/source Undo and
+Document conflict Reload Undo keep separate protection. Removing a reference or
+releasing recovery never deletes bytes. No inactivity expiry or automatic
+unreferenced-file deletion applies.
+
+`attachment usage <id>` explains direct, inline, draft, Undo and Trash protections
+and reports advisory cleanup eligibility. Trashed tickets/Documents and hidden
+Activity details remain uses; deleting an Activity removes its brief use while
+preserving its supporting Document and its files. Cleanup must check eligibility
+again when it executes.
+
+For an upgraded workspace with existing attachments, review recoverable drafts
+from every desktop profile before allowing cleanup. Startup imports the current
+profile's drafts without claiming other profiles are empty. Confirm **All desktop
+profiles reviewed** or run `attachment complete-draft-migration
+--all-profiles-reviewed` after importing/reviewing them. Until then usage reports
+`legacy_drafts_pending: true`; inspection, export and authoring remain available.
+Fresh workspaces and attachment-free upgrades need no desktop review.
+Distinct old profile drafts are preserved separately when their recovery keys
+collide; `attachment recovery-drafts` inspects their private recovery payloads
+without publishing them.
+
 Workspace backups include the database and every retained local file, including
 unused uploads, files referenced from Trash, recovery records and quarantined
 bytes until explicit purge. Concurrent uploads cannot produce a successful

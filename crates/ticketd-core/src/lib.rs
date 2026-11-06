@@ -65,8 +65,10 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachment_retention;
 mod attachments;
 mod embedded_attachments;
+pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{Attachment, AttachmentKind, DEFAULT_ATTACHMENT_LIMIT};
 mod change_token;
 pub use activities::{
@@ -77,7 +79,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 48;
+pub const FORMAT_VERSION: i64 = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -735,6 +737,9 @@ impl Workspace {
         }
         if version < 48 {
             embedded_attachments::migrate(&transaction)?;
+        }
+        if version < 50 {
+            attachment_retention::migrate(&transaction, version > 0)?;
         }
         transaction.commit()?;
         Ok(())

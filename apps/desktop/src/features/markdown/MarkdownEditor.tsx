@@ -68,6 +68,10 @@ import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import { attachments, type Attachment } from "@/lib/api/attachments";
+import {
+  useDraftRecovery,
+  useDraftRecoveryError,
+} from "@/lib/draft-recovery-context";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
@@ -703,6 +707,8 @@ export interface MarkdownEditorProps {
   paragraphAfterQuote?: boolean;
   /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
   persistentToolbar?: boolean;
+  /** Recovery owner to explain independent Undo protection in attachment usage. */
+  recoveryOwner?: string;
 }
 
 let pointerDown = false;
@@ -724,7 +730,24 @@ export function MarkdownEditor({
   focusLink,
   paragraphAfterQuote = false,
   persistentToolbar = false,
+  recoveryOwner = label,
 }: MarkdownEditorProps) {
+  const recovery = useDraftRecovery();
+  const recoveryError = useDraftRecoveryError();
+  const [historyOwner] = useState(
+    () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
+  );
+  useEffect(() => {
+    void recovery
+      .put(historyOwner, null, value ? [value] : [], "undo")
+      .catch(() => {});
+  }, [recovery, historyOwner, value]);
+  useEffect(
+    () => () => {
+      void recovery.put(historyOwner, null, []).catch(() => {});
+    },
+    [recovery, historyOwner],
+  );
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
   const [active, setActive] = useState(false);
@@ -850,6 +873,7 @@ export function MarkdownEditor({
   async function insertAttachment(file: Attachment) {
     const pending = insertion.current;
     const uri = await attachments.uri(file.id);
+    await recovery.put(historyOwner, null, [`[File](${uri})`], "undo");
     if (!pending || pending !== insertion.current) return;
     if (pending.markdown !== emitted.current)
       throw new Error(
@@ -1056,6 +1080,17 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
+      {recoveryError && (
+        <Alert variant="destructive">
+          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
+          <AlertDescription>
+            Keep this window open. {recoveryError}
+            <Button type="button" onClick={recovery.retry}>
+              Retry draft recovery
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       <div
         className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
         data-persistent={persistentToolbar || undefined}

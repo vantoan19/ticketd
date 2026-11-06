@@ -13,6 +13,8 @@ import { TokenField } from "@/components/ui/token-field";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
+import { z } from "zod";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "./create-ticket.css";
 
 // Select items cannot have an empty value, so "none" stands for no Project or Plan.
@@ -27,6 +29,15 @@ type Draft = {
   tags: string[];
   restored: boolean;
 };
+const draftSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  status: z.string(),
+  project: z.string(),
+  plan: z.string(),
+  tags: z.array(z.string()),
+  restored: z.boolean(),
+});
 export function CreateTicketDialog({
   open,
   onOpenChange,
@@ -55,7 +66,18 @@ export function CreateTicketDialog({
     keepOpen: boolean,
   ) => Promise<string>;
 }) {
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const recovery = useDraftRecovery();
+  const [draft, setDraft] = useState<Draft | null>(() => {
+    const saved = recovery.read("new-ticket", draftSchema);
+    return saved ? { ...saved, restored: true } : null;
+  });
+  const [editorGeneration, setEditorGeneration] = useState(0);
+  useEffect(() => {
+    const payload = draft && (draft.title || draft.body) ? draft : null;
+    void recovery
+      .put("new-ticket", payload, draft?.body ? [draft.body] : [])
+      .catch(() => {});
+  }, [draft, recovery]);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
@@ -127,6 +149,7 @@ export function CreateTicketDialog({
     lock.current = true;
     setPending(true);
     try {
+      await recovery.flush();
       const reference = await create(
         draft!.title,
         draft!.body,
@@ -136,6 +159,8 @@ export function CreateTicketDialog({
         draft!.tags,
         createMore,
       );
+      await recovery.put("new-ticket", null, []);
+      setEditorGeneration((value) => value + 1);
       if (createMore) {
         update({ title: "", body: "", restored: false });
         setAnnouncement(`Created ${reference}`);
@@ -233,6 +258,8 @@ export function CreateTicketDialog({
             }}
           >
             <LazyMarkdownEditor
+              key={editorGeneration}
+              recoveryOwner="new-ticket"
               label="Description"
               placeholder="Steps, acceptance criteria, or a checklist"
               readOnly={pending}
@@ -253,6 +280,7 @@ export function CreateTicketDialog({
               size="sm"
               onClick={() => {
                 update({ title: "", body: "", restored: false });
+                setEditorGeneration((value) => value + 1);
                 titleRef.current?.focus();
               }}
             >

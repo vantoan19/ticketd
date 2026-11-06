@@ -95,3 +95,51 @@ fn cli_authored_markdown_tracks_workspace_scoped_inline_references() {
         id
     );
 }
+
+#[test]
+fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("draft.txt");
+    std::fs::write(&source, b"unpublished").unwrap();
+    let file = run(dir.path(), &["attachment", "add", source.to_str().unwrap()]);
+    let id = file["id"].as_str().unwrap();
+    let mut workspace =
+        ticketd_core::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let body = format!("[Draft]({})", workspace.attachment_uri(id).unwrap());
+    workspace
+        .retain_draft(&ticketd_core::DraftRetention {
+            owner: "activity:T-1".into(),
+            kind: "draft".into(),
+            revision: 0,
+            payload: Some(serde_json::json!({"brief": body})),
+            markdown: vec![body],
+        })
+        .unwrap();
+    drop(workspace);
+    let usage = run(dir.path(), &["attachment", "usage", id]);
+    assert_eq!(usage["eligible"], false);
+    assert_eq!(usage["protections"][0]["owner"], "activity:T-1");
+    assert_eq!(usage["protections"][0]["kind"], "draft");
+    let recovery = run(dir.path(), &["attachment", "recovery-drafts"]);
+    assert_eq!(recovery[0]["owner"], "activity:T-1");
+    assert!(
+        recovery[0]["payload"]["brief"]
+            .as_str()
+            .unwrap()
+            .contains("ticketd://attachment/")
+    );
+    let completed = run(
+        dir.path(),
+        &[
+            "attachment",
+            "complete-draft-migration",
+            "--all-profiles-reviewed",
+        ],
+    );
+    assert_eq!(completed["legacy_drafts_pending"], false);
+    // Acknowledgement never releases an actual protected draft.
+    assert_eq!(
+        run(dir.path(), &["attachment", "usage", id])["eligible"],
+        false
+    );
+}
