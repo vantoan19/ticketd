@@ -362,9 +362,13 @@ fn snapshot_io(error: std::io::Error) -> SnapshotFailure {
         } else {
             PreviewStatus::Unavailable
         },
-        message: format!(
-            "Cannot read stored bytes: {error}. Restore the snapshot and retry, or choose a replacement for this reference."
-        ),
+        message: if error.kind() == std::io::ErrorKind::NotFound {
+            "Stored bytes are missing. Restore the snapshot and retry, or choose a replacement for this reference.".into()
+        } else {
+            format!(
+                "Cannot read stored bytes: {error}. Restore the snapshot and retry, or choose a replacement for this reference."
+            )
+        },
     }
 }
 

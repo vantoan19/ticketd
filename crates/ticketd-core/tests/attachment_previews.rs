@@ -168,6 +168,12 @@ fn missing_and_incomplete_bytes_keep_metadata_and_retry_observes_restoration() {
     let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
     assert_eq!(preview.attachment, file);
     assert_eq!(preview.status, PreviewStatus::Missing);
+    assert_eq!(
+        preview.message.as_deref(),
+        Some(
+            "Stored bytes are missing. Restore the snapshot and retry, or choose a replacement for this reference."
+        )
+    );
     assert!(!preview.can_open);
     std::fs::write(&stored, b"partial").unwrap();
     assert_eq!(
