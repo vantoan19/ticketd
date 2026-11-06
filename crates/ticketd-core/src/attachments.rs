@@ -46,7 +46,7 @@ pub struct Attachment {
     /// Always known for local snapshots; providers may omit a native file's size.
     pub size_bytes: Option<u64>,
     pub kind: AttachmentKind,
-    /// Relative to this workspace's managed attachment directory.
+    /// A local relative path or opaque provider locator; never a credential.
     pub locator: String,
 }
 
