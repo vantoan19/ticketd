@@ -574,9 +574,10 @@
   stroke: var(--muted-foreground);
   stroke-width: 1.5;
 }
-/* Board E-2: the "Add blocker…" button is 34px tall. */
+/* Board E-2: the "Add blocker…" button is 32px tall; its 1px ring makes the
+   34px outer edge measured in the frame. */
 .plan-dependencies-card [data-slot="empty-content"] .ui-button {
-  height: 34px;
+  height: 32px;
 }
 .plan-dependencies-key-box {
   outline: none;

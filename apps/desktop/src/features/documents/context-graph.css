@@ -396,7 +396,7 @@
 .context-graph-zoom {
   flex: none;
   align-self: flex-start;
-  margin: 8px 16px;
+  margin: 0 16px 16px;
   height: 32px;
   display: flex;
   align-items: center;
@@ -637,7 +637,7 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 /* Frame G: 32px buttons. */
 .context-graph-preview-actions > button {
@@ -645,6 +645,7 @@
 }
 .context-graph-strip .context-graph-preview-actions {
   flex-direction: row;
+  gap: 8px;
 }
 /* The list is never squeezed to a part-row; the selection above it gives way instead. */
 .context-graph-preview-split .context-graph-unconnected {

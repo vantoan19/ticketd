@@ -12,8 +12,7 @@ import { ContextGraphCanvas } from "./ContextGraphCanvas";
 
 const instance = {
   fitView: vi.fn(),
-  zoomIn: vi.fn(),
-  zoomOut: vi.fn(),
+  zoomTo: vi.fn(),
   getNodes: () => [],
   getZoom: () => 1,
 };
@@ -114,7 +113,11 @@ test("the legend has its own row beside the canvas, one zoom and Fit control sta
   const zoom = within(canvas).getByRole("group", { name: "Zoom" });
   expect(zoom.textContent).toContain("50%");
   fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }));
-  expect(instance.zoomIn).toHaveBeenCalled();
+  // One press steps the shown 50% by the standard 1.2 factor.
+  expect(instance.zoomTo).toHaveBeenLastCalledWith(
+    expect.closeTo(0.6, 5),
+    expect.anything(),
+  );
   fireEvent.click(within(zoom).getByRole("button", { name: "Fit" }));
   // Fit keeps cards legible; the user pans for the rest.
   expect(instance.fitView).toHaveBeenCalledWith(
