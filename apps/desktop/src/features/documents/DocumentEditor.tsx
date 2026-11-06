@@ -78,10 +78,12 @@ function DocumentDate({ value }: { value: string }) {
     value
   ) : (
     <time dateTime={value} title={value}>
-      {date.toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}
+      {date.toDateString() === new Date().toDateString()
+        ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
+        : date.toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })}
     </time>
   );
 }
@@ -189,7 +191,7 @@ export function DocumentEditor({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [status, setStatus] = useState(
-    initial ? "Saved locally" : "Start writing. We’ll save as you go.",
+    initial ? "Saved on this computer" : "Start writing. We’ll save as you go.",
   );
   const [savedDocument, setSavedDocument] = useState(initial);
   const [trashed, setTrashed] = useState(initial?.trashed ?? false);
@@ -340,7 +342,7 @@ export function DocumentEditor({
       };
       pending.current = null;
       saving.current = false;
-      setStatus("Saved locally");
+      setStatus("Saved on this computer");
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
@@ -363,7 +365,7 @@ export function DocumentEditor({
           const latest = await documents.show(id.current);
           pending.current = null;
           if (reconcile(latest)) {
-            setStatus("Saved locally");
+            setStatus("Saved on this computer");
             void save();
           } else setFailed(false);
           return;
@@ -563,9 +565,7 @@ export function DocumentEditor({
       id="document-title"
       aria-label={capture ? "Optional title" : "Title"}
       className={capture ? undefined : "document-title-input"}
-      placeholder={
-        capture ? "Add a title (optional)" : "Add a title (optional)"
-      }
+      placeholder={capture ? "Add a title (optional)" : "Title"}
       readOnly={locked}
       value={title || (head ? heading : "")}
       onChange={(event) => {
@@ -582,7 +582,7 @@ export function DocumentEditor({
       </Field>
     </FieldGroup>
   );
-  const isSaved = status === "Saved locally";
+  const isSaved = status === "Saved on this computer";
   const statusLine = (
     <span role="status" className="document-status">
       {isSaved && <Check aria-hidden="true" />}
@@ -617,39 +617,61 @@ export function DocumentEditor({
         (item) =>
           item.kind === "plan" && item.passages.length === 0 && item.attached,
       );
-  const sharing = new Map<string, number>();
-  for (const item of connected)
-    for (const passage of item.passages)
-      sharing.set(passage, (sharing.get(passage) ?? 0) + 1);
-  // A passage that mentions several items is quoted once below the list, not under each.
-  const shared = [...sharing]
-    .filter(([passage, count]) => count > 1 && !bareLinkLabel(passage))
-    .map(([passage]) => passage);
-  const passageView = (passage: string) =>
-    bareLinkLabel(passage) ? null : (
-      <DocumentNavigation.Provider
-        key={passage}
-        value={
-          onOpenDocument ? (id) => navigate(() => onOpenDocument(id)) : null
-        }
+  // Plans this Document is the spec of (or supports) have their own section;
+  // every other connection is a mention, listed once.
+  const isAttachment = (item: (typeof connected)[number]) =>
+    item.kind === "plan" && item.passages.length === 0;
+  const mentions = connected.filter((item) => !isAttachment(item));
+  const attachments = connected.filter(isAttachment);
+  const attachmentLabel = planSpec ? "Spec of" : "Supporting Document of";
+  const passages = [
+    ...new Set(mentions.flatMap((item) => item.passages)),
+  ].filter((passage) => !bareLinkLabel(passage));
+  const passageView = (passage: string) => (
+    <DocumentNavigation.Provider
+      key={passage}
+      value={onOpenDocument ? (id) => navigate(() => onOpenDocument(id)) : null}
+    >
+      <PlanNavigation.Provider
+        value={onOpenPlan ? (id) => navigate(() => onOpenPlan(id)) : null}
       >
-        <PlanNavigation.Provider
-          value={onOpenPlan ? (id) => navigate(() => onOpenPlan(id)) : null}
-        >
-          <div className="document-passage">
-            <MarkdownDocument
-              revision={workspaceRevision}
-              source={passage}
-              select={
-                onOpenTicket
-                  ? (reference) => navigate(() => onOpenTicket(reference))
-                  : undefined
-              }
-            />
-          </div>
-        </PlanNavigation.Provider>
-      </DocumentNavigation.Provider>
-    );
+        <div className="document-passage">
+          <MarkdownDocument
+            revision={workspaceRevision}
+            source={passage}
+            select={
+              onOpenTicket
+                ? (reference) => navigate(() => onOpenTicket(reference))
+                : undefined
+            }
+          />
+        </div>
+      </PlanNavigation.Provider>
+    </DocumentNavigation.Provider>
+  );
+  const connectionRow = (item: (typeof connected)[number]) => (
+    <li key={`${item.kind}-${item.id}`}>
+      <Button
+        variant="ghost"
+        onClick={() => {
+          if (item.kind === "document")
+            navigate(() => onOpenDocument?.(item.id));
+          else if (item.kind === "ticket")
+            navigate(() => onOpenTicket?.(item.label));
+          else if (item.kind === "plan") navigate(() => onOpenPlan?.(item.id));
+        }}
+      >
+        <ConnectedLabel item={item} />
+      </Button>
+      {item.attached && item.passages.length === 0 && item.kind !== "plan" && (
+        <p className="document-direction">
+          {item.to ? "Attached Document" : `Attached to ${item.label}`}
+        </p>
+      )}
+    </li>
+  );
+  const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
+  const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
   return (
     <DocumentSurface capture={capture} onClose={requestClose}>
       {initial && (
@@ -753,7 +775,7 @@ export function DocumentEditor({
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
-        {initial && (
+        {initial && !writing && (
           <p className="document-subtitle">
             Updated{" "}
             <DocumentDate
@@ -926,64 +948,36 @@ export function DocumentEditor({
       {initial && (
         <aside className="document-rail" aria-label="Document details">
           {linkError && <p role="alert">{linkError}</p>}
-          {connected.length > 0 && (
-            <section aria-label="Connections">
-              <h2>Connections</h2>
+          {mentions.length > 0 && (
+            <section aria-label="Mentions">
+              <h2>Mentions</h2>
               {links.some((group) => group.length === 100) && (
                 <p>Showing the first 100 items in each direction.</p>
               )}
-              <ul>
-                {connected.map((item) => (
-                  <li key={`${item.kind}-${item.id}`}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (item.kind === "document")
-                          navigate(() => onOpenDocument?.(item.id));
-                        else if (item.kind === "ticket")
-                          navigate(() => onOpenTicket?.(item.label));
-                        else if (item.kind === "plan")
-                          navigate(() => onOpenPlan?.(item.id));
-                      }}
-                    >
-                      <ConnectedLabel item={item} />
-                    </Button>
-                    {item.attached && item.passages.length === 0 && (
-                      <p className="document-direction">
-                        {item.to
-                          ? "Attached Document"
-                          : `Attached to ${item.label}`}
-                      </p>
-                    )}
-                    {item.passages
-                      .filter((passage) => sharing.get(passage) === 1)
-                      .map((passage) => passageView(passage))}
-                  </li>
-                ))}
-              </ul>
-              {shared.map((passage) => (
-                <div key={passage} className="document-shared-passage">
-                  <p>Linked from the same passage</p>
-                  {passageView(passage)}
+              <ul>{mentions.map((item) => connectionRow(item))}</ul>
+              {passages.length > 0 && (
+                <div className="document-passage-caption">
+                  <p>
+                    {passages.length === 1 && mentions.length > 1
+                      ? mentions.length === 2
+                        ? "Both from"
+                        : "All from"
+                      : "From"}
+                  </p>
+                  {passages.map((passage) => passageView(passage))}
                 </div>
-              ))}
+              )}
+            </section>
+          )}
+          {attachments.length > 0 && (
+            <section aria-label={attachmentLabel}>
+              <h2>{attachmentLabel}</h2>
+              <ul>{attachments.map((item) => connectionRow(item))}</ul>
             </section>
           )}
           {typeof children === "function" ? children({ trashed }) : children}
           <section aria-label="Document properties">
             <dl>
-              <dt>Updated</dt>
-              <dd>
-                <DocumentDate
-                  value={savedDocument?.updated_at ?? initial.updated_at}
-                />
-              </dd>
-              <dt>Created</dt>
-              <dd>
-                <DocumentDate
-                  value={savedDocument?.created_at ?? initial.created_at}
-                />
-              </dd>
               {initial.origin_ticket && (
                 <>
                   <dt>Origin</dt>
@@ -1008,6 +1002,18 @@ export function DocumentEditor({
                   : "Shown in Documents"}
               </dd>
             </dl>
+            <p className="document-timestamps">
+              {updatedAt === createdAt ? (
+                <>
+                  Created and updated <DocumentDate value={updatedAt} />
+                </>
+              ) : (
+                <>
+                  Updated <DocumentDate value={updatedAt} /> · created{" "}
+                  <DocumentDate value={createdAt} />
+                </>
+              )}
+            </p>
           </section>
           <div className="document-rail-actions">
             <Popover open={pickerOpen} onOpenChange={setPickerOpen}>

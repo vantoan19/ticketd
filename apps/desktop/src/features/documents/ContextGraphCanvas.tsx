@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   Background,
@@ -18,7 +19,8 @@ import {
   type ReactFlowInstance,
   type Viewport,
 } from "@xyflow/react";
-import { Maximize, Minus, Plus } from "lucide-react";
+import { FileText, Layers, Maximize, Minus, Plus } from "lucide-react";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { centerZoom, panToInclude } from "./graph-text";
 import { GraphLegend } from "./GraphLegend";
 import { routeAll, type Rect } from "./edge-routing";
@@ -55,7 +57,13 @@ function fitOptions(width: number): FitViewOptions {
   };
 }
 
-type CardData = { ref: string; title: string; caption: string };
+type CardData = {
+  ref: string;
+  title: string;
+  caption: string;
+  kind: string;
+  status: string;
+};
 
 // Position's values are these strings.
 const SIDES = ["top", "right", "bottom", "left"] as const;
@@ -74,11 +82,24 @@ function CardNode({ data }: NodeProps<Node<CardData>>) {
           />
         </span>
       ))}
-      <span className="context-graph-card-title">
-        {data.ref && <span className="context-graph-card-ref">{data.ref}</span>}{" "}
-        {data.title}
+      <span className="context-graph-card-icon" aria-hidden="true">
+        {data.kind === "plan" ? (
+          <Layers />
+        ) : data.kind === "document" ? (
+          <FileText />
+        ) : (
+          <StatusIcon status={data.status || "Todo"} size={16} decorative />
+        )}
       </span>
-      <span className="context-graph-card-caption">{data.caption}</span>
+      <span className="context-graph-card-text">
+        <span className="context-graph-card-title">
+          {data.ref && (
+            <span className="context-graph-card-ref">{data.ref}</span>
+          )}{" "}
+          {data.title}
+        </span>
+        <span className="context-graph-card-caption">{data.caption}</span>
+      </span>
     </div>
   );
 }
@@ -100,6 +121,7 @@ export function ContextGraphCanvas({
   centerId,
   centerOn = null,
   loading = false,
+  overlay,
 }: {
   nodes: {
     id: string;
@@ -107,6 +129,8 @@ export function ContextGraphCanvas({
     ref?: string;
     title?: string;
     caption?: string;
+    kind?: string;
+    status?: string;
   }[];
   edges: Edge[];
   selected: string | null;
@@ -125,6 +149,8 @@ export function ContextGraphCanvas({
   centerOn?: string | null;
   /** The items have not arrived yet: the canvas stays unseen rather than flashing an empty grid. */
   loading?: boolean;
+  /** Cards pinned top-right on the canvas under the legend (Not connected). */
+  overlay?: ReactNode;
 }) {
   const positionsRef = useRef(positions);
   const onPositionsRef = useRef(onPositions);
@@ -428,6 +454,8 @@ export function ContextGraphCanvas({
               ref: node.ref ?? "",
               title: node.title ?? node.label,
               caption: node.caption ?? "",
+              kind: node.kind ?? "ticket",
+              status: node.status ?? "",
             },
             ariaLabel: node.label,
             style: { width: CARD_WIDTH, minHeight: CARD_HEIGHT },
@@ -515,8 +543,9 @@ export function ContextGraphCanvas({
           </button>
         </div>
       </div>
-      <div className="context-graph-pinned">
+      <div className="context-graph-overlay">
         <GraphLegend />
+        {overlay}
       </div>
     </div>
   );

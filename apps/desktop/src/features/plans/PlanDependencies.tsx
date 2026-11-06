@@ -305,28 +305,33 @@ export function PlanDependencies({
   const members = graph?.nodes.filter((node) => !node.boundary) ?? [];
   const outside = graph ? graph.nodes.length - members.length : 0;
   const total = graph?.total_members ?? members.length;
+  const empty =
+    graph !== null && members.length > 0 && graph.edges.length === 0;
+  const key = (
+    <p className="plan-dependencies-key">
+      <span>
+        <svg width="40" height="10" viewBox="0 0 40 10" aria-hidden="true">
+          <line
+            x1="2"
+            y1="5"
+            x2="31"
+            y2="5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <path d="M30 1.5l7 3.5-7 3.5z" fill="currentColor" />
+        </svg>
+        blocks: arrow points at the ticket that waits
+      </span>
+      <span>
+        <span className="plan-dependencies-key-box" aria-hidden="true" />
+        outside this Plan
+      </span>
+    </p>
+  );
   return (
     <section className="plan-dependencies" aria-label="Plan dependencies">
-      <p className="plan-dependencies-key">
-        <span>
-          <svg width="40" height="10" viewBox="0 0 40 10" aria-hidden="true">
-            <line
-              x1="2"
-              y1="5"
-              x2="31"
-              y2="5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <path d="M30 1.5l7 3.5-7 3.5z" fill="currentColor" />
-          </svg>
-          blocks: arrow points at the ticket that waits
-        </span>
-        <span>
-          <span className="plan-dependencies-key-box" aria-hidden="true" />
-          outside this Plan
-        </span>
-      </p>
+      {!empty && key}
       {error && <p role="alert">{error}</p>}
       {!graph && !error && <p role="status">Loading dependencies…</p>}
       {graph && members.length === 0 && (
@@ -340,28 +345,31 @@ export function PlanDependencies({
         <>
           {graph.edges.length === 0 ? (
             // Nothing to draw: say what the arrows will mean and how to get one.
-            <EmptyState
-              icon={<Workflow />}
-              title="Nothing blocks anything in this Plan yet"
-              description={`${
-                members.length === 1
-                  ? `${members[0]?.reference} is its only ticket. `
-                  : `None of its ${members.length} tickets waits on another. `
-              }When one ticket must finish before another, add a blocker and the order appears here.`}
-              action={
-                !archived && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    aria-expanded={selected === members[0]?.reference}
-                    onClick={() => setSelected(members[0]?.reference ?? null)}
-                  >
-                    <Link2 data-icon="inline-start" aria-hidden="true" />
-                    Add blocker…
-                  </Button>
-                )
-              }
-            />
+            <div className="plan-dependencies-card">
+              {key}
+              <EmptyState
+                icon={<Workflow />}
+                title="Nothing blocks anything in this Plan yet"
+                description={`${
+                  members.length === 1
+                    ? `${members[0]?.reference} is its only ticket. `
+                    : `None of its ${members.length} tickets waits on another. `
+                }When one ticket must finish before another, add a blocker and the order appears here.`}
+                action={
+                  !archived && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-expanded={selected === members[0]?.reference}
+                      onClick={() => setSelected(members[0]?.reference ?? null)}
+                    >
+                      <Link2 data-icon="inline-start" aria-hidden="true" />
+                      Add blocker…
+                    </Button>
+                  )
+                }
+              />
+            </div>
           ) : (
             <>
               <div className="plan-graph-canvas">

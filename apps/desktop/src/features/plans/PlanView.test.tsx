@@ -159,7 +159,7 @@ test("shows status counts and members for the Plan, and updates both when a memb
   expect(group.textContent).toContain("Todo1");
   expect(group.textContent).toContain("Duplicate1");
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
-  expect(screen.getByText("Active")).toBeTruthy();
+  expect(screen.getByText("Active Plan")).toBeTruthy();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Remove T-1 from Launch" }),
@@ -226,7 +226,7 @@ test("archiving moves the Plan to Archived, where it can be reactivated", async 
   await chooseAction("Archive Plan…");
   expect(screen.getByText(/Archiving hides this Plan/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-  await screen.findByText("Archived", { selector: ".plan-state" });
+  await screen.findByText("Archived Plan", { selector: ".plan-state" });
   // An archived Plan is read-only; Reactivate is its one action.
   expect(screen.getByRole("button", { name: "Reactivate" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Add tickets" })).toBeNull();
@@ -336,7 +336,7 @@ test("renaming focuses the title, shows its hint, and F2 starts it", async () =>
   // The hint sits in the title row and the state stays visible.
   const row = field.parentElement!;
   expect(row.contains(screen.getByText("saves", { exact: false }))).toBe(true);
-  expect(within(row).getByText("Active")).toBeTruthy();
+  expect(within(row).getByText("Active Plan")).toBeTruthy();
   fireEvent.keyDown(field, { key: "Escape" });
   expect(screen.queryByRole("textbox", { name: "Plan name" })).toBeNull();
   fireEvent.keyDown(document.body, { key: "F2" });

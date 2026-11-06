@@ -215,6 +215,7 @@ export function PlanHeader({
               <DropdownMenuContent
                 align="end"
                 sideOffset={4}
+                className="plan-actions-menu"
                 onCloseAutoFocus={(event) => {
                   // Rename puts the cursor in the title, not back on the menu.
                   if (!focusRename.current) return;
@@ -385,7 +386,7 @@ function PlanState({ current }: { current: Plan }) {
   return (
     <span className="plan-state">
       <StatusDot tone={current.archived ? "neutral" : "positive"} />
-      {current.archived ? "Archived" : "Active"}
+      {current.archived ? "Archived Plan" : "Active Plan"}
     </span>
   );
 }

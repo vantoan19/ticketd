@@ -535,3 +535,106 @@
   background: transparent;
   box-shadow: none;
 }
+
+/* Board F: the open Document fills the pane. The header rule sits 48px from
+   the top, the body scrolls on the left, and a flat 272px rail (250px of
+   content once its 20px padding is taken) hangs off a hairline on the right. */
+.documents-page:has(> .document-workspace) {
+  padding: 0;
+  overflow: hidden;
+}
+.document-workspace {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  grid-template-rows: 48px minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+.document-bar {
+  margin-bottom: 0;
+  padding: 0 8px 0 12px;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.document-workspace > .document-main {
+  padding: 40px 48px;
+  overflow-y: auto;
+}
+.document-workspace > .document-rail {
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: 0;
+  background: var(--background);
+  box-shadow: inset 1px 0 0 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.document-rail h2 {
+  line-height: 16px;
+}
+.document-rail dd {
+  font-size: var(--text-ui);
+}
+.document-rail .document-timestamps {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.document-rail .document-passage-caption {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.document-title .document-title-input {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+/* The Document's body is plain text, not a bordered card. */
+.document-workspace .document-body .markdown-editor {
+  background: transparent;
+  box-shadow: none;
+}
+.document-workspace .document-body .rich-document {
+  min-height: 0;
+  padding: 0;
+}
+.document-workspace
+  .document-body
+  .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
+}
+/* In Edit a diagram is one line of source; the diagram itself is for Read. */
+.document-workspace .document-body .diagram-editor > .mermaid-block {
+  display: none;
+}
+.document-workspace .document-body .diagram-editor summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--recessed);
+  list-style: none;
+}
+.document-workspace
+  .document-body
+  .diagram-editor
+  summary::-webkit-details-marker {
+  display: none;
+}
+.document-workspace .document-body .diagram-editor summary svg {
+  width: 14px;
+  height: 14px;
+}
+.diagram-summary-action {
+  margin-left: auto;
+  color: var(--foreground);
+}
+/* Read mode: a grey header bar, no outer border, white boxes. */
+.document-workspace .document-body .mermaid-block {
+  box-shadow: none;
+}

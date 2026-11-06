@@ -110,7 +110,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: 9999px;
-  background: var(--control-boundary);
+  background: var(--accent);
 }
 .plan-progress-bar > span {
   display: block;
@@ -154,30 +154,10 @@
 .plan-counts > div[data-zero="true"] {
   opacity: 0.6;
 }
-/* Below ~1100pt the status words give way to their icons (the word stays
-   available to screen readers and as a tooltip) so the Document chip keeps the
-   row instead of wrapping under the counts. */
-.plan-summary {
-  container-type: inline-size;
-}
-@container (max-width: 1100px) {
-  .plan-counts {
-    flex-wrap: nowrap;
-    gap: 4px 12px;
-  }
-  .plan-count-name {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-}
 .plan-counts > div {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .plan-counts dt {
   display: inline-flex;
@@ -508,4 +488,51 @@
 
 .plan-workspace[data-plan] .ticket-detail[data-empty] .detail-header {
   display: none;
+}
+
+/* The Plan actions menu is 237px wide, rows 30px (board E). */
+.plan-actions-menu {
+  width: 237px;
+}
+.plan-actions [aria-expanded="true"] {
+  background: var(--accent);
+}
+/* Nothing is selected: the hint sits at the centre of the whole pane. */
+.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-scroll {
+  display: flex;
+}
+.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-empty {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Nothing to draw: legend strip over a centred empty state, in a 760 x 420
+   card (board E-2). */
+.plan-dependencies-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: min(100%, 760px);
+  height: 420px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.plan-dependencies-card .plan-dependencies-key {
+  flex: none;
+  height: 44px;
+  padding: 0 16px;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.plan-dependencies-card [data-slot="empty-state"] {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+}
+.plan-dependencies-card [data-slot="empty-description"] {
+  max-width: 420px;
+}
+.plan-dependencies-key-box {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
 }

@@ -651,3 +651,119 @@
     overflow: auto;
   }
 }
+
+/* Board G: the map fills the pane edge to edge. The toolbar is one 48px row,
+   the legend and the Not connected card sit on the canvas top-right, and the
+   selection panel is a 300px column. */
+.context-graph-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.context-graph-page .context-graph-toolbar {
+  flex: none;
+  height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  flex-wrap: nowrap;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.context-graph-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 0 24px;
+  overflow-y: auto;
+}
+.context-graph-body > .context-graph-status,
+.context-graph-body > h2,
+.context-graph-body > .context-graph-list,
+.context-graph-body > [role="alert"] {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+.context-graph-main {
+  height: max(420px, 100%);
+  margin-bottom: 16px;
+  border: 0;
+}
+.context-graph-main .context-graph-preview {
+  background: var(--surface);
+}
+.context-graph-stage {
+  position: relative;
+}
+.context-graph-overlay {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 200px;
+}
+.context-graph-overlay .graph-legend {
+  padding: 12px;
+}
+.context-graph-overlay .context-graph-unconnected {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.context-graph-search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.context-graph-search-field svg {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.context-graph-search-field .context-graph-search {
+  padding-left: 32px;
+}
+.context-graph-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.context-graph-connections dt {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-connections dd {
+  margin: 2px 0 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-page .react-flow__node-card {
+  background: var(--surface);
+}
+.context-graph-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.context-graph-card-icon {
+  display: flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.context-graph-card-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.context-graph-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}

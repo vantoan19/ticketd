@@ -372,6 +372,8 @@ export function ContextGraph({
                   id: node.id,
                   label: nodeAriaLabel(node),
                   ...cardParts(node),
+                  kind: node.kind,
+                  status: node.state?.split(" · ")[0] ?? "",
                 }))}
                 edges={edges}
                 selected={selected}
