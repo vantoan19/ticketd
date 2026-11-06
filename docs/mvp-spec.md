@@ -758,6 +758,16 @@ exportable. Opening never happens automatically. Detach from ticket removes only
 that direct association, preserving bytes and other uses, including recoverable
 trash. Files in linked Documents do not become direct ticket attachments.
 
+Inline links and direct attachment rows share a media preview dialog. Supported
+images, video and audio are attempted locally with explicit playback controls;
+unsupported files/codecs and failed rendering keep metadata and open/export
+actions. PDF, office and attached HTML content are not embedded viewers. Missing
+bytes retain identity, name and last-known metadata; Retry reinspects storage.
+Choose a replacement uploads/selects another identity and changes only the
+chosen reference, preserving all other uses. A changed draft requires reselection.
+Previewing, focusing or closing never changes canonical Markdown or its labels.
+The dialog fits compact screens and inherits the current light/dark theme.
+
 Completed uploads remain inspectable and reusable even if association fails or
 is abandoned. Retry uses the original upload request ID, including after a lost
 response or source deletion. A failed file copy never creates a valid Attachment.

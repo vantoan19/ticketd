@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 
@@ -11,6 +11,48 @@ export const attachmentSchema = z.object({
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
+const previewSchema = z.object({
+  attachment: attachmentSchema,
+  status: z.enum([
+    "available",
+    "unsupported",
+    "missing",
+    "incomplete",
+    "unavailable",
+    "too_large",
+  ]),
+  media_type: z
+    .enum([
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/webp",
+      "image/bmp",
+      "audio/mpeg",
+      "audio/wav",
+      "audio/ogg",
+      "audio/mp4",
+      "video/mp4",
+      "video/webm",
+      "video/ogg",
+    ])
+    .nullable(),
+  message: z.string().nullable(),
+  can_open: z.boolean(),
+  usage: z.object({
+    total: z.number().int().nonnegative(),
+    legacy_drafts_pending: z.boolean(),
+    entries: z.array(
+      z.object({
+        kind: z.string(),
+        owner: z.string(),
+        label: z.string(),
+        trashed: z.boolean(),
+      }),
+    ),
+  }),
+});
+export type PreviewInfo = z.infer<typeof previewSchema>;
 const progressSchema = z.object({
   copied: z.number().nonnegative(),
   total: z.number().nonnegative(),
@@ -58,6 +100,14 @@ const driveReferenceSchema = z.object({
 export type DriveReference = z.infer<typeof driveReferenceSchema>;
 
 export const attachments = {
+  async preview(workspace: string, id: string) {
+    return previewSchema.parse(
+      await invoke("attachment_preview", { workspace, id }),
+    );
+  },
+  mediaUrl(workspace: string, id: string) {
+    return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;
+  },
   async driveInfo(id: string) {
     return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
   },
@@ -131,11 +181,11 @@ export const attachments = {
   async inspect(id: string) {
     return attachmentSchema.parse(await invoke("inspect_attachment", { id }));
   },
-  async chooseFile() {
+  async chooseFile(multiple = true) {
     const chosen = await open({
       title: "Attach file",
       directory: false,
-      multiple: true,
+      multiple,
     });
     return typeof chosen === "string" ? [chosen] : (chosen ?? []);
   },
@@ -195,6 +245,19 @@ export const attachments = {
   },
   async open(id: string) {
     await invoke("open_attachment", { id });
+  },
+  async replaceTicket(
+    reference: string,
+    previousId: string,
+    replacementId: string,
+    requestId: string,
+  ) {
+    await invoke("replace_ticket_attachment", {
+      reference,
+      previousId,
+      replacementId,
+      requestId,
+    });
   },
   async export(file: Attachment) {
     const destination = await save({

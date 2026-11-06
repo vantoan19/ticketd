@@ -1,30 +1,25 @@
 import { useEffect, useState } from "react";
-import { Download, File, Plus } from "lucide-react";
+import { File, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import type { Ticket } from "@/lib/api/client";
 import { RailSection } from "./RailSection";
 import "./ticket-attachments.css";
 import { formatSize } from "@/features/attachments/format-size";
-import { DriveReferenceDetails } from "@/features/attachments/DriveReferenceDetails";
 
-export function TicketAttachments({
-  ticket,
-  revision,
-  refresh,
-}: {
+type Props = {
   ticket: Ticket;
   revision: number;
   refresh: () => Promise<void>;
-}) {
+};
+
+export function TicketAttachments(props: Props) {
+  return <TicketAttachmentFiles key={props.ticket.id} {...props} />;
+}
+
+function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
   const [files, setFiles] = useState<Attachment[]>([]);
   const [visits, setVisits] = useState(0);
   const [error, setError] = useState("");
@@ -120,94 +115,51 @@ export function TicketAttachments({
           changed();
         }}
       />
-      <Dialog
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{selected?.display_name ?? "Attachment"}</DialogTitle>
-            <DialogDescription>
-              {selected?.kind === "external_reference"
-                ? "Google Drive · Current source content · No local snapshot"
-                : "Local snapshot · Stored in this workspace"}
-            </DialogDescription>
-          </DialogHeader>
-          {selected && (
+      {selected && (
+        <AttachmentPreview
+          key={selected.id}
+          target={{ id: selected.id, initial: selected }}
+          onClose={() => setSelected(null)}
+          onReplace={
+            ticket.trashed
+              ? undefined
+              : async (replacement, requestId) => {
+                  await attachments.replaceTicket(
+                    ticket.reference,
+                    selected.id,
+                    replacement.id,
+                    requestId,
+                  );
+                  changed();
+                }
+          }
+          actions={
             <>
-              <dl className="attachment-metadata">
-                {selected.kind === "external_reference" && (
-                  <DriveReferenceDetails id={selected.id} />
-                )}
-                <dt>Original filename</dt>
-                <dd>{selected.original_filename}</dd>
-                {selected.kind === "local_snapshot" && (
-                  <>
-                    <dt>Size</dt>
-                    <dd>{formatSize(selected.size_bytes)}</dd>
-                  </>
-                )}
-                <dt>Attachment ID</dt>
-                <dd>
-                  <code>{selected.id}</code>
-                </dd>
-              </dl>
-              <p className="attachment-hint">
-                Files in linked Documents stay with their Documents. Detaching
-                removes only this ticket’s association.
-              </p>
               {error && <p role="alert">{error}</p>}
-              <div className="attachment-actions">
+              {!ticket.trashed && (
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   disabled={busy}
                   onClick={() =>
-                    void action(() => attachments.open(selected.id))
+                    void action(async () => {
+                      await attachments.setTicket(
+                        ticket.reference,
+                        selected.id,
+                        false,
+                        crypto.randomUUID(),
+                      );
+                      setSelected(null);
+                      changed();
+                    })
                   }
                 >
-                  {selected.kind === "external_reference"
-                    ? "Open in Drive"
-                    : "Open file"}
+                  Detach from ticket
                 </Button>
-                {selected.kind === "local_snapshot" && (
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(() => attachments.export(selected))
-                    }
-                  >
-                    <Download aria-hidden="true" />
-                    Export file
-                  </Button>
-                )}
-                {!ticket.trashed && (
-                  <Button
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() =>
-                      void action(async () => {
-                        await attachments.setTicket(
-                          ticket.reference,
-                          selected.id,
-                          false,
-                          crypto.randomUUID(),
-                        );
-                        setSelected(null);
-                        changed();
-                      })
-                    }
-                  >
-                    Detach from ticket
-                  </Button>
-                )}
-              </div>
+              )}
             </>
-          )}
-        </DialogContent>
-      </Dialog>
+          }
+        />
+      )}
     </RailSection>
   );
 }

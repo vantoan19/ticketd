@@ -1,5 +1,6 @@
 //! Desktop adapter for the shared ticketd core.
 mod attachment_commands;
+mod attachment_media;
 mod cli_status;
 mod drive_commands;
 
@@ -1386,6 +1387,16 @@ pub fn run() -> Result<(), tauri::Error> {
         ticketd_core::source::RefreshPolicy::default(),
     ));
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol(
+            "attachment-media",
+            |context, request, responder| {
+                if context.webview_label() != "main" {
+                    responder.respond(attachment_media::denied(tauri::http::StatusCode::FORBIDDEN));
+                    return;
+                }
+                attachment_media::handle(request, responder);
+            },
+        )
         .manage(drive_commands::DrivePickerOperations::default())
         .manage(Refresher(std::sync::Arc::clone(&coordinator)))
         .setup(move |_| {
@@ -1393,6 +1404,15 @@ pub fn run() -> Result<(), tauri::Error> {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        // Tauri classifies registered schemes as local IPC origins. Media is never a document.
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("attachment-media-navigation")
+                .on_navigation(|_, url| {
+                    url.scheme() != "attachment-media"
+                        && url.host_str() != Some("attachment-media.localhost")
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
@@ -1410,11 +1430,13 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::inspect_attachment,
             attachment_commands::ticket_attachments,
             attachment_commands::set_ticket_attachment,
+            attachment_commands::replace_ticket_attachment,
             attachment_commands::export_attachment,
             attachment_commands::export_markdown_with_files,
             attachment_commands::open_attachment,
             attachment_commands::attachment_uri,
             attachment_commands::resolve_attachment_uri,
+            attachment_commands::attachment_preview,
             attachment_commands::draft_retentions,
             attachment_commands::complete_draft_cutover,
             attachment_commands::draft_cutover_pending,

@@ -1013,6 +1013,21 @@ export function DocumentEditor({
               >
                 <MarkdownDocument
                   revision={workspaceRevision}
+                  onChange={
+                    locked
+                      ? undefined
+                      : (value) => {
+                          const shown = withoutDerivedHeading(
+                            body,
+                            title,
+                            savedDocument?.heading,
+                          );
+                          const next =
+                            body.slice(0, body.length - shown.length) + value;
+                          draft.current = { ...draft.current, body: next };
+                          setBody(next);
+                        }
+                  }
                   source={withoutDerivedHeading(
                     body,
                     title,

@@ -302,3 +302,48 @@ fn schema50_upgrade_preserves_local_receipts_canonical_uses_drafts_undo_and_safe
         .unwrap();
     assert!(workspace.change_token().unwrap() > before);
 }
+
+#[test]
+fn shared_preview_keeps_remote_metadata_without_serving_or_exporting_remote_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let file = workspace
+        .reference_drive_file(&connection, "selected-doc", None, &SelectedFile)
+        .unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.attachment, file);
+    assert_eq!(preview.status, ticketd_core::PreviewStatus::Unsupported);
+    assert!(preview.media_type.is_none());
+    assert!(preview.can_open);
+    assert!(preview.message.unwrap().contains("No local snapshot"));
+    assert!(workspace.attachment_media(&identity, &file.id).is_err());
+    assert!(!dir.path().join("workspace.attachments").exists());
+    let old = workspace
+        .import_attachment_bytes("old", "old.txt", b"old bytes", |_, _| true)
+        .unwrap();
+    let ticket = workspace
+        .create_ticket("Replace just this association")
+        .unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &old.id, true)
+        .unwrap();
+    workspace
+        .write(
+            Some("replace-drive"),
+            ticketd_core::WriteRequest::ReplaceTicketAttachment {
+                reference: ticket.reference.clone(),
+                previous_id: old.id.clone(),
+                replacement_id: file.id.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        [file]
+    );
+    let destination = dir.path().join("old.txt");
+    workspace.export_attachment(&old.id, &destination).unwrap();
+    assert_eq!(std::fs::read(destination).unwrap(), b"old bytes");
+}

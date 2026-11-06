@@ -6,7 +6,9 @@ import { attachments, type Attachment } from "@/lib/api/attachments";
 export function DrivePicker({
   onPick,
   onComplete,
+  single = false,
 }: {
+  single?: boolean;
   onPick: (
     file: Attachment,
     requestId: string,
@@ -89,6 +91,10 @@ export function DrivePicker({
     }
   }
   async function attach() {
+    if (single && files.filter((item) => item.selected).length !== 1) {
+      setError("Choose exactly one file to replace this reference.");
+      return;
+    }
     setBusy(true);
     setError("");
     const failed: (typeof files)[number][] = [];

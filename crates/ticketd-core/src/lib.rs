@@ -67,8 +67,12 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachment_previews;
 mod attachment_retention;
 mod attachments;
+pub use attachment_previews::{
+    AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+};
 pub mod drive;
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};

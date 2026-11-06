@@ -226,14 +226,14 @@ impl Workspace {
                 }
             }
             AttachmentKind::LocalSnapshot => {
-                let path = match attachments::validate_attachment_bytes(&self.connection, file) {
-                    Ok(path) => path,
-                    Err(Error::Attachment(message)) => {
-                        entry.omission = Some(message);
-                        return Ok(());
-                    }
-                    Err(error) => return Err(error),
-                };
+                let (_, mut input) =
+                    match crate::attachment_previews::open_snapshot(&self.connection, file) {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            entry.omission = Some(error.message);
+                            return Ok(());
+                        }
+                    };
                 // Identity-prefixed ASCII names are collision safe on case-insensitive
                 // filesystems, and cannot introduce paths, reserved names or Markdown syntax.
                 let name: String = file
@@ -251,15 +251,6 @@ impl Workspace {
                 let name = &name[name.len().saturating_sub(100)..];
                 let relative = format!("files/{}-{name}", file.id);
                 let output = folder.join(&relative);
-                let mut input = match fs::File::open(path) {
-                    Ok(input) => input,
-                    Err(error) => {
-                        entry.omission = Some(format!(
-                            "Cannot read stored bytes: {error}; restore the snapshot and retry."
-                        ));
-                        return Ok(());
-                    }
-                };
                 let mut destination = fs::File::create(&output)?;
                 let count = std::io::copy(&mut input, &mut destination)?;
                 if Some(count) != file.size_bytes {

@@ -490,6 +490,37 @@ const file = {
 };
 const uri = "ticketd://attachment/workspace-1/file-1";
 
+test("rich attachment inspection and close leave the unsent editor draft untouched", async () => {
+  const changed = vi.fn();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-1";
+    if (command === "resolve_attachment_uri") return file;
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "unsupported",
+        media_type: null,
+        message: "Preview unavailable for this format.",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return null;
+  });
+  render(
+    <MarkdownEditor
+      value={`Before [Authored label](${uri}) after`}
+      onChange={changed}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Preview attachment: Authored label" }),
+  );
+  await screen.findByRole("heading", { name: "trace [final].log" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(changed).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
+});
+
 test("inserts a stored file at the rich caret without rewriting on focus or mode changes", async () => {
   const changed = vi.fn();
   vi.mocked(open).mockResolvedValue("C:/trace.log");
