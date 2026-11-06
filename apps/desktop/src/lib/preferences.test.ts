@@ -78,3 +78,17 @@ test("the native window follows Light and Dark, and System hands control back", 
   expect(setTheme).toHaveBeenLastCalledWith(null);
   cleanup();
 });
+
+test("the window background follows the resolved theme", async () => {
+  const { renderHook, act, cleanup } = await import("@testing-library/react");
+  const { windowClient } = await import("@/lib/api/window");
+  const { useThemeSync } = await import("@/lib/preferences");
+  vi.spyOn(windowClient, "setTheme").mockResolvedValue();
+  const bg = vi.spyOn(windowClient, "setBackgroundColor").mockResolvedValue();
+  renderHook(() => useThemeSync());
+  act(() => void setPreference("theme", "light"));
+  expect(bg).toHaveBeenLastCalledWith("#FAFAFA");
+  act(() => void setPreference("theme", "dark"));
+  expect(bg).toHaveBeenLastCalledWith("#0A0A0A");
+  cleanup();
+});

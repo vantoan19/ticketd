@@ -139,6 +139,10 @@ export function useThemeSync() {
   useEffect(() => {
     void windowClient.setTheme(theme === "system" ? null : theme);
   }, [theme]);
+  // The transparent macOS title bar shows the window color: the canvas.
+  useEffect(() => {
+    void windowClient.setBackgroundColor(dark ? "#0A0A0A" : "#FAFAFA");
+  }, [dark]);
 }
 
 /** Applies the stored theme before the first render. */

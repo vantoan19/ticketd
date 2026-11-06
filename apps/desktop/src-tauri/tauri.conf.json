@@ -14,7 +14,9 @@
       {
         "title": "ticketd",
         "width": 1280,
-        "height": 800
+        "height": 800,
+        "titleBarStyle": "Transparent",
+        "backgroundColor": "#FAFAFA"
       }
     ],
     "security": {
