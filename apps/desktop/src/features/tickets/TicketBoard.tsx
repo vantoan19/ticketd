@@ -17,7 +17,6 @@ export function TicketBoard({
 }) {
   return (
     <>
-      <p className="board-summary">Counts reflect current filters.</p>
       <div
         className="ticket-board"
         role="region"
@@ -144,6 +143,7 @@ export function TicketBoard({
           );
         })}
       </div>
+      <p className="board-summary">Counts reflect current filters.</p>
     </>
   );
 }
