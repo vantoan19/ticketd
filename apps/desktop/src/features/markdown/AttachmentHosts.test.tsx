@@ -17,6 +17,7 @@ import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { Activity } from "@/features/tickets/Activity";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import type { Ticket } from "@/lib/api/client";
+import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -121,6 +122,7 @@ test("reader replacement follows description autosave and retains the chosen occ
         media_type: null,
         message: "Stored bytes are missing",
         can_open: false,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     if (command === "list_attachments")
       return [{ ...file, id: "replacement", display_name: "Replacement" }];
@@ -155,6 +157,70 @@ test("reader replacement follows description autosave and retains the chosen occ
       .body,
   ).toBe(expected);
 });
+
+test.each(["reader", "rich"])(
+  "%s replacement cannot acknowledge a new reference before durable recovery accepts it",
+  async (mode) => {
+    const nextUri = "ticketd://attachment/workspace-1/replacement";
+    const records = new Map<string, Record<string, unknown>>();
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "draft_cutover_pending") return false;
+      if (command === "draft_retentions") return [...records.values()];
+      if (command === "retain_draft") {
+        const draft = (args as { draft: Record<string, unknown> }).draft;
+        if (JSON.stringify(draft.markdown).includes(nextUri))
+          throw new Error("Retention unavailable");
+        const stored = { ...draft, revision: Number(draft.revision) + 1 };
+        records.set(String(draft.owner), stored);
+        return stored;
+      }
+      if (command === "attachment_workspace_id") return "workspace-1";
+      if (command === "attachment_upload_limit") return 104857600;
+      if (command === "resolve_attachment_uri") return file;
+      if (command === "attachment_preview")
+        return {
+          attachment: file,
+          status: "missing",
+          media_type: null,
+          message: "Stored bytes are missing",
+          can_open: false,
+          usage: { total: 1, entries: [], legacy_drafts_pending: false },
+        };
+      if (command === "list_attachments")
+        return [{ ...file, id: "replacement", display_name: "Replacement" }];
+      if (command === "inspect_attachment")
+        return { ...file, id: "replacement", display_name: "Replacement" };
+      if (command === "attachment_uri") return nextUri;
+      return [];
+    });
+    render(
+      <DraftRecoveryProvider>
+        <TicketEditor ticket={{ ...ticket, body: link }} onSaved={vi.fn()} />
+      </DraftRecoveryProvider>,
+    );
+    if (mode === "rich") {
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Edit description" }),
+      );
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "Preview attachment: Trace",
+        }),
+      );
+    } else
+      fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose a replacement" }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+    await within(
+      screen.getByRole("dialog", { name: "Attach file" }),
+    ).findByText(/Retention unavailable/);
+    expect(screen.getByRole("dialog", { name: "Attach file" })).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
+  },
+);
 
 test("ticket descriptions autosave inserted links and retain the failed draft", async () => {
   bridge();

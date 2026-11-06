@@ -4,6 +4,9 @@ import {
   useMemo,
   useRef,
   useState,
+  useContext,
+  createContext,
+  useCallback,
   type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
@@ -128,6 +131,9 @@ import { insertions, slashChoices, slashMayOpen } from "./slash-menu";
 import { applyExternalValue } from "./external-value";
 import { readMarkdown, writeMarkdown } from "./plate-markdown";
 import "./markdown-editor.css";
+const AttachmentProtection = createContext<(uri: string) => Promise<void>>(
+  async () => {},
+);
 
 // Source mode keeps what is typed: Enter inserts a plain newline, so list markers are not
 // doubled and a closing fence never inherits indentation.
@@ -163,6 +169,7 @@ function Element(props: PlateElementProps) {
   const { element, children } = props;
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
+  const protectAttachment = useContext(AttachmentProtection);
   const path = editor.api.findPath(element);
   const [preview, setPreview] = useState<{
     uri: string;
@@ -260,6 +267,8 @@ function Element(props: PlateElementProps) {
                       ? undefined
                       : async (file, _requestId, signal) => {
                           const uri = await attachments.uri(file.id);
+                          signal.throwIfAborted();
+                          await protectAttachment(uri);
                           signal.throwIfAborted();
                           if (writeMarkdown(editor.children) !== before)
                             throw new Error(
@@ -791,6 +800,11 @@ export function MarkdownEditor({
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
   const [protectedValue, setProtectedValue] = useState<string | null>(null);
+  const protectAttachment = useCallback(
+    (uri: string) =>
+      recovery.put(historyOwner, null, [`[File](${uri})`], "undo"),
+    [recovery, historyOwner],
+  );
   useEffect(() => {
     let current = true;
     void recovery
@@ -1379,98 +1393,105 @@ export function MarkdownEditor({
               onAttach={beginAttachment}
             />
           )}
-          <PlateContent
-            readOnly={readOnly}
-            // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
-            // inside the editable, so native input (autocorrect, dictation) could keep it beside
-            // typed text or fold it into what is saved. Only while the document is empty.
-            {...(placeholder && value.trim() === ""
-              ? {
-                  "data-empty": "",
-                  style: {
-                    "--editor-placeholder": JSON.stringify(placeholder),
-                  } as CSSProperties,
-                }
-              : {})}
-            aria-label={`${label} rich text`}
-            role={slash ? "combobox" : "textbox"}
-            aria-autocomplete={slash ? "list" : undefined}
-            aria-haspopup={slash ? "listbox" : undefined}
-            aria-expanded={slash ? true : undefined}
-            aria-controls={slash ? slashMenuId : undefined}
-            aria-activedescendant={
-              slash && choices[slashIndex]
-                ? `${slashMenuId}-${choices[slashIndex][0]}`
-                : undefined
-            }
-            onCompositionStart={closeSlash}
-            onMouseDown={closeSlash}
-            className="rich-document"
-            onKeyDown={keyDown}
-            onPaste={(event) => {
-              if (readOnly) return;
-              const pasted = event.clipboardData.getData("text/plain");
-              if (!pasted) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const incoming = readMarkdown(pasted);
-              if (incoming.reasons.length) editor.tf.insertText(pasted);
-              else {
-                const first = incoming.value[0];
-                // Slate merges a fragment's first block into the current block.
-                // An empty leading paragraph protects a pasted heading/list/table.
-                editor.tf.insertFragment(
-                  first?.type === "p"
-                    ? incoming.value
-                    : [
-                        { type: "p", children: [{ text: "" }] },
-                        ...incoming.value,
-                      ],
-                );
+          <AttachmentProtection.Provider value={protectAttachment}>
+            <PlateContent
+              readOnly={readOnly}
+              // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
+              // inside the editable, so native input (autocorrect, dictation) could keep it beside
+              // typed text or fold it into what is saved. Only while the document is empty.
+              {...(placeholder && value.trim() === ""
+                ? {
+                    "data-empty": "",
+                    style: {
+                      "--editor-placeholder": JSON.stringify(placeholder),
+                    } as CSSProperties,
+                  }
+                : {})}
+              aria-label={`${label} rich text`}
+              role={slash ? "combobox" : "textbox"}
+              aria-autocomplete={slash ? "list" : undefined}
+              aria-haspopup={slash ? "listbox" : undefined}
+              aria-expanded={slash ? true : undefined}
+              aria-controls={slash ? slashMenuId : undefined}
+              aria-activedescendant={
+                slash && choices[slashIndex]
+                  ? `${slashMenuId}-${choices[slashIndex][0]}`
+                  : undefined
               }
-            }}
-            onDragOver={(event) => {
-              if (
-                event.dataTransfer.types.includes("application/x-ticketd-block")
-              )
+              onCompositionStart={closeSlash}
+              onMouseDown={closeSlash}
+              className="rich-document"
+              onKeyDown={keyDown}
+              onPaste={(event) => {
+                if (readOnly) return;
+                const pasted = event.clipboardData.getData("text/plain");
+                if (!pasted) return;
                 event.preventDefault();
-              event.stopPropagation();
-            }}
-            onDrop={(event) => {
-              const data = event.dataTransfer.getData(
-                "application/x-ticketd-block",
-              );
-              if (!data || readOnly) return;
-              event.preventDefault();
-              event.stopPropagation();
-              let payload: unknown;
-              try {
-                payload = JSON.parse(data);
-              } catch {
-                return;
-              }
-              if (
-                typeof payload !== "object" ||
-                payload === null ||
-                !("editorId" in payload) ||
-                payload.editorId !== editorId ||
-                !("index" in payload) ||
-                typeof payload.index !== "number" ||
-                !Number.isInteger(payload.index) ||
-                payload.index < 0 ||
-                payload.index >= editor.children.length
-              )
-                return;
-              const range = editor.api.findEventRange(event);
-              const destination = range?.anchor.path[0];
-              if (
-                destination !== undefined &&
-                destination >= 0 &&
-                destination < editor.children.length
-              )
-                editor.tf.moveNodes({ at: [payload.index], to: [destination] });
-            }}
-          />
+                event.stopPropagation();
+                const incoming = readMarkdown(pasted);
+                if (incoming.reasons.length) editor.tf.insertText(pasted);
+                else {
+                  const first = incoming.value[0];
+                  // Slate merges a fragment's first block into the current block.
+                  // An empty leading paragraph protects a pasted heading/list/table.
+                  editor.tf.insertFragment(
+                    first?.type === "p"
+                      ? incoming.value
+                      : [
+                          { type: "p", children: [{ text: "" }] },
+                          ...incoming.value,
+                        ],
+                  );
+                }
+              }}
+              onDragOver={(event) => {
+                if (
+                  event.dataTransfer.types.includes(
+                    "application/x-ticketd-block",
+                  )
+                )
+                  event.preventDefault();
+                event.stopPropagation();
+              }}
+              onDrop={(event) => {
+                const data = event.dataTransfer.getData(
+                  "application/x-ticketd-block",
+                );
+                if (!data || readOnly) return;
+                event.preventDefault();
+                event.stopPropagation();
+                let payload: unknown;
+                try {
+                  payload = JSON.parse(data);
+                } catch {
+                  return;
+                }
+                if (
+                  typeof payload !== "object" ||
+                  payload === null ||
+                  !("editorId" in payload) ||
+                  payload.editorId !== editorId ||
+                  !("index" in payload) ||
+                  typeof payload.index !== "number" ||
+                  !Number.isInteger(payload.index) ||
+                  payload.index < 0 ||
+                  payload.index >= editor.children.length
+                )
+                  return;
+                const range = editor.api.findEventRange(event);
+                const destination = range?.anchor.path[0];
+                if (
+                  destination !== undefined &&
+                  destination >= 0 &&
+                  destination < editor.children.length
+                )
+                  editor.tf.moveNodes({
+                    at: [payload.index],
+                    to: [destination],
+                  });
+              }}
+            />
+          </AttachmentProtection.Provider>
           {slash && !readOnly && (
             <div
               id={slashMenuId}

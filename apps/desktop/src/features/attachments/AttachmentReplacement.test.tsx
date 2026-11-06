@@ -45,6 +45,7 @@ function bridge() {
         media_type: null,
         message: "Stored file is missing.",
         can_open: false,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "list_attachments")

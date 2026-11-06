@@ -39,6 +39,18 @@ const previewSchema = z.object({
     .nullable(),
   message: z.string().nullable(),
   can_open: z.boolean(),
+  usage: z.object({
+    total: z.number().int().nonnegative(),
+    legacy_drafts_pending: z.boolean(),
+    entries: z.array(
+      z.object({
+        kind: z.string(),
+        owner: z.string(),
+        label: z.string(),
+        trashed: z.boolean(),
+      }),
+    ),
+  }),
 });
 export type PreviewInfo = z.infer<typeof previewSchema>;
 const progressSchema = z.object({

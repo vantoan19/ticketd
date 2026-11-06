@@ -24,6 +24,7 @@ import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
+import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
@@ -386,6 +387,15 @@ export function MarkdownDocument({
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
 }) {
   const currentSource = useRef(source);
+  const recovery = useDraftRecovery();
+  const replacementHistory = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      const owner = replacementHistory.current;
+      if (owner) void recovery.put(owner, null, []).catch(() => {});
+    },
+    [recovery],
+  );
   useLayoutEffect(() => {
     currentSource.current = source;
   }, [source]);
@@ -399,6 +409,14 @@ export function MarkdownDocument({
       signal: AbortSignal,
     ) => {
       const nextUri = await attachments.uri(file.id);
+      signal.throwIfAborted();
+      replacementHistory.current ??= `undo:attachment-replacement:${crypto.randomUUID()}`;
+      await recovery.put(
+        replacementHistory.current,
+        null,
+        [source, `[File](${nextUri})`],
+        "undo",
+      );
       signal.throwIfAborted();
       if (currentSource.current !== source)
         throw new Error(

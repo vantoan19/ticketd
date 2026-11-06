@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rusqlite::OptionalExtension;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -30,6 +31,22 @@ pub struct AttachmentPreview {
     pub media_type: Option<String>,
     pub message: Option<String>,
     pub can_open: bool,
+    pub usage: PreviewUsage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewUsage {
+    pub total: usize,
+    pub entries: Vec<PreviewUse>,
+    pub legacy_drafts_pending: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewUse {
+    pub kind: String,
+    pub owner: String,
+    pub label: String,
+    pub trashed: bool,
 }
 
 /// An authorized handle, never a path exposed to the WebView. All reads use this handle.
@@ -96,6 +113,46 @@ impl Workspace {
             media_type,
             message,
             can_open,
+            usage: self.preview_usage(id)?,
+        })
+    }
+
+    fn preview_usage(&self, id: &str) -> Result<PreviewUsage, Error> {
+        // Reuse the authoritative accounting; this is only a bounded display projection.
+        let usage = self.attachment_usage(id)?;
+        let total = usage.protections.len();
+        let mut entries = Vec::new();
+        for protection in usage.protections.into_iter().take(20) {
+            let label = if let Some(ticket_id) = &protection.ticket_id {
+                self.connection.query_row("SELECT 'T-' || number || ' · ' || substr(title,1,200) FROM tickets WHERE id=?1", [ticket_id], |row| row.get::<_, String>(0)).optional()?.unwrap_or_else(|| "Ticket context".into())
+            } else if protection.kind == "document_body" {
+                self.connection
+                    .query_row(
+                        &format!(
+                            "SELECT {} FROM documents d WHERE id=?1",
+                            crate::documents::HEADING
+                        ),
+                        [&protection.owner],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                    .unwrap_or_else(|| "Document context".into())
+            } else if protection.kind == "undo" {
+                "Undo history".into()
+            } else {
+                "Recoverable draft".into()
+            };
+            entries.push(PreviewUse {
+                kind: protection.kind,
+                owner: protection.owner,
+                label,
+                trashed: protection.trashed,
+            });
+        }
+        Ok(PreviewUsage {
+            total,
+            entries,
+            legacy_drafts_pending: usage.legacy_drafts_pending,
         })
     }
 

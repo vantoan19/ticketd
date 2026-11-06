@@ -4,6 +4,72 @@ const PNG: &[u8] =
     b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
 
 #[test]
+fn preview_names_shared_usage_without_flattening_documents_drafts_or_trash() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .import_attachment_bytes("image", "image.png", PNG, |_, _| true)
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let ticket = workspace.create_ticket("Investigate screenshot").unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    workspace
+        .change_ticket(
+            &ticket.reference,
+            ticketd_core::TicketPatch {
+                body: Some(format!("[Inline]({uri})")),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let document = workspace
+        .create_document(Some("Incident analysis"), &format!("[Evidence]({uri})"))
+        .unwrap();
+    workspace.set_document_trashed(&document.id, true).unwrap();
+    workspace
+        .retain_draft(&ticketd_core::DraftRetention {
+            owner: "unpublished-description".into(),
+            kind: "draft".into(),
+            revision: 0,
+            payload: Some(serde_json::json!({"body":uri})),
+            markdown: vec![format!("[Draft]({uri})")],
+        })
+        .unwrap();
+    let preview = workspace
+        .attachment_preview(&workspace.attachment_workspace_id().unwrap(), &file.id)
+        .unwrap();
+    assert_eq!(preview.usage.total, 4);
+    assert!(
+        preview
+            .usage
+            .entries
+            .iter()
+            .any(|usage| usage.label == "T-1 · Investigate screenshot"
+                && usage.kind == "ticket_body")
+    );
+    assert!(
+        preview
+            .usage
+            .entries
+            .iter()
+            .any(|usage| usage.label == "Incident analysis" && usage.trashed)
+    );
+    assert!(
+        preview
+            .usage
+            .entries
+            .iter()
+            .any(|usage| usage.kind == "draft")
+    );
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        [file]
+    );
+}
+
+#[test]
 fn replacing_one_direct_association_is_atomic_replayable_and_retains_other_uses() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

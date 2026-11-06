@@ -50,6 +50,7 @@ test("closing pending inspection ignores its late response and media close relea
       media_type: "video/mp4",
       message: null,
       can_open: true,
+      usage: { total: 0, entries: [], legacy_drafts_pending: false },
     }),
   );
   expect(screen.queryByRole("dialog")).toBeNull();
@@ -68,6 +69,7 @@ test("closing pending inspection ignores its late response and media close relea
           media_type: "video/mp4",
           message: null,
           can_open: true,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
         },
   );
   const playing = render(
@@ -93,6 +95,55 @@ const file = {
   locator: "file-1/bytes/screen.png",
 };
 
+test("usage distinguishes persisted context, recoverable trash and Undo alongside missing metadata", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : {
+          attachment: file,
+          status: "missing",
+          media_type: null,
+          message: "Stored bytes are missing",
+          can_open: false,
+          usage: {
+            total: 3,
+            legacy_drafts_pending: false,
+            entries: [
+              {
+                kind: "ticket_body",
+                owner: "t1",
+                label: "T-1 · Checkout failure",
+                trashed: false,
+              },
+              {
+                kind: "document_body",
+                owner: "d1",
+                label: "Incident analysis",
+                trashed: true,
+              },
+              {
+                kind: "undo",
+                owner: "history",
+                label: "Undo history",
+                trashed: false,
+              },
+            ],
+          },
+        },
+  );
+  render(
+    <AttachmentPreview
+      target={{ id: file.id, initial: file }}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findByRole("heading", { name: "Used in 3" });
+  expect(screen.getByText("T-1 · Checkout failure")).toBeTruthy();
+  expect(screen.getByText("Incident analysis")).toBeTruthy();
+  expect(screen.getByText(/Document · Trash/)).toBeTruthy();
+  expect(screen.getByText("Undo history")).toBeTruthy();
+});
+
 test("a failed image retains metadata and explicit actions, with retry instead of an invented cause", async () => {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_workspace_id") return "workspace";
@@ -103,6 +154,7 @@ test("a failed image retains metadata and explicit actions, with retry instead o
         media_type: "image/png",
         message: null,
         can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     return null;
   });

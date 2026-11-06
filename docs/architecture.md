@@ -147,6 +147,12 @@ identity and changes only the selected Markdown occurrence or direct association
 Reader replacement preserves surrounding source, labels and image syntax; a changed
 draft requires reselection. Direct replacement is one replayable core transaction,
 so failure leaves the old association intact and other uses retain their snapshots.
+Before draft mutation, replacement awaits the shared durable Undo protection for
+the chosen identity. Reader replacements retain their own conservative history
+claim until that reader unmounts; ordinary reading creates no claim. Cancellation
+and failed protection leave the selected reference unchanged. Preview usage is a
+display projection of `attachment_usage`, with the full count and at most 20 labeled
+entries, including drafts, Undo and Trash; the display subset never decides cleanup.
 
 ## Document editing
 

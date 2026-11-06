@@ -330,6 +330,7 @@ test("rich attachment inspection and close leave the unsent editor draft untouch
         media_type: null,
         message: "Preview unavailable for this format.",
         can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     return null;
   });

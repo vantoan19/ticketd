@@ -68,7 +68,9 @@ mod activities;
 mod attachment_previews;
 mod attachment_retention;
 mod attachments;
-pub use attachment_previews::{AttachmentMedia, AttachmentPreview, PreviewStatus};
+pub use attachment_previews::{
+    AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
+};
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{Attachment, AttachmentKind, DEFAULT_ATTACHMENT_LIMIT};

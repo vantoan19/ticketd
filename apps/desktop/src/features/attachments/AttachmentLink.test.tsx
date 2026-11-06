@@ -29,6 +29,7 @@ test("reading keeps authored attachment text inline and resolves only on explici
         media_type: null,
         message: "Preview unavailable for this format.",
         can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     return file;
   });

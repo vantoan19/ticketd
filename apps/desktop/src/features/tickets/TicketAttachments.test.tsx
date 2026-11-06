@@ -98,6 +98,7 @@ test("a direct preview replaces only its selected ticket association through the
         media_type: null,
         message: "Stored bytes are missing",
         can_open: false,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     if (command === "list_attachments") return [replacement];
     if (command === "inspect_attachment") return replacement;

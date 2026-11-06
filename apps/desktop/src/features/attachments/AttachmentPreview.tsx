@@ -24,6 +24,14 @@ export type ReferenceReplacement = (
   requestId: string,
   signal: AbortSignal,
 ) => Promise<void>;
+const usageKinds: Record<string, string> = {
+  ticket_attachment: "Direct ticket attachment",
+  ticket_body: "Ticket description",
+  document_body: "Document",
+  activity_brief: "Update brief",
+  draft: "Recoverable draft",
+  undo: "Retained for Undo",
+};
 
 function Media({
   file,
@@ -254,6 +262,37 @@ export function AttachmentPreview({
                   <dt>Storage</dt>
                   <dd>Local snapshot</dd>
                 </dl>
+                {info && (
+                  <section className="attachment-preview-usage">
+                    <h3>Used in {info.usage.total}</h3>
+                    <ul aria-label="Attachment usage">
+                      {info.usage.entries.map((entry) => (
+                        <li key={`${entry.kind}:${entry.owner}`}>
+                          <strong>{entry.label}</strong>
+                          <small>
+                            {usageKinds[entry.kind] ?? entry.kind}
+                            {entry.trashed ? " · Trash" : ""}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                    {info.usage.total > info.usage.entries.length && (
+                      <p className="attachment-hint">
+                        Showing {info.usage.entries.length} of{" "}
+                        {info.usage.total} uses.
+                      </p>
+                    )}
+                    {info.usage.total === 0 && (
+                      <p className="attachment-hint">No recorded uses.</p>
+                    )}
+                    {info.usage.legacy_drafts_pending && (
+                      <p className="attachment-hint">
+                        Older recovery drafts still need review. These are the
+                        recorded uses.
+                      </p>
+                    )}
+                  </section>
+                )}
                 {onReplace && (
                   <Button
                     variant="outline"
