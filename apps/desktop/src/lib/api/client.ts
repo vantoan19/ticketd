@@ -800,9 +800,14 @@ export const client = {
       project_id?: string | null;
       status?: string;
     },
+    requestId?: string,
   ) {
     return ticketSchema.parse(
-      await invoke("change_ticket", { reference, patch }),
+      await invoke("change_ticket", {
+        reference,
+        patch,
+        ...(requestId !== undefined && { requestId }),
+      }),
     );
   },
 };

@@ -3537,6 +3537,127 @@ fn leaving_duplicate_removes_the_link_and_keeps_the_chosen_status() {
 }
 
 #[test]
+fn replayable_single_status_change_leaves_duplicate_without_replaying_its_effects() {
+    use ticketd_core::{DependencyChoice, DependencyDecision, WriteRequest, WriteResult};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let source = workspace.create_ticket("Source").unwrap();
+    let canonical = workspace.create_ticket("Canonical").unwrap();
+    let dependent = workspace.create_ticket("Dependent").unwrap();
+    workspace
+        .add_dependency(&source.reference, &dependent.reference, None)
+        .unwrap();
+    let mark_duplicate = |workspace: &mut Workspace| {
+        let preview = workspace
+            .preview_duplicate_dependencies(&source.reference, &canonical.reference)
+            .unwrap();
+        let decisions = preview
+            .edges
+            .into_iter()
+            .map(|edge| DependencyDecision {
+                edge,
+                choice: DependencyChoice::Retain,
+            })
+            .collect();
+        workspace
+            .mark_duplicate_reviewed(
+                &source.reference,
+                &canonical.reference,
+                &preview.canonical,
+                decisions,
+                None,
+            )
+            .unwrap();
+    };
+    mark_duplicate(&mut workspace);
+    let request = |status| WriteRequest::ChangeTicket {
+        reference: source.reference.clone(),
+        patch: TicketPatch {
+            status: Some(status),
+            ..Default::default()
+        },
+    };
+    let original = workspace
+        .write(Some("leave-duplicate"), request(Status::Done))
+        .unwrap();
+    let WriteResult::Ticket(saved) = &original else {
+        panic!("expected ticket")
+    };
+    assert_eq!(saved.status, Status::Done);
+    assert_eq!(saved.duplicate_of, None);
+    assert!(
+        workspace
+            .show_ticket(&canonical.reference)
+            .unwrap()
+            .duplicates
+            .is_empty()
+    );
+    let waiting = workspace.show_ticket(&dependent.reference).unwrap();
+    assert_eq!(waiting.prerequisites[0].reference, source.reference);
+    assert!(!waiting.prerequisites[0].unresolved);
+    let after_save = workspace.ticket_history(&source.reference).unwrap();
+    assert_eq!(
+        after_save
+            .iter()
+            .filter(|entry| entry.kind == "relationship:duplicate" && entry.to_value.is_empty())
+            .count(),
+        1
+    );
+    assert_eq!(
+        after_save
+            .iter()
+            .filter(|entry| entry.kind == "status"
+                && entry.from_value == "Duplicate"
+                && entry.to_value == "Done")
+            .count(),
+        1
+    );
+
+    // The response can be lost across a restart; both the edit and its replay outcome persist.
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .write(Some("leave-duplicate"), request(Status::Done))
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        workspace.ticket_history(&source.reference).unwrap(),
+        after_save
+    );
+    let reopened = workspace.show_ticket(&source.reference).unwrap();
+    assert_eq!(reopened.status, Status::Done);
+    assert_eq!(reopened.duplicate_of, None);
+
+    // A historical replay must not clear a later designation or change its dependencies.
+    mark_duplicate(&mut workspace);
+    let current = workspace.show_ticket(&source.reference).unwrap();
+    let current_waiting = workspace.show_ticket(&dependent.reference).unwrap();
+    let current_history = workspace.ticket_history(&source.reference).unwrap();
+    assert_eq!(
+        workspace
+            .write(Some("leave-duplicate"), request(Status::Done))
+            .unwrap(),
+        original
+    );
+    assert!(matches!(
+        workspace.write(Some("leave-duplicate"), request(Status::Canceled)),
+        Err(ticketd_core::Error::RequestConflict(_))
+    ));
+    assert_eq!(workspace.show_ticket(&source.reference).unwrap(), current);
+    assert_eq!(
+        workspace.show_ticket(&dependent.reference).unwrap(),
+        current_waiting
+    );
+    assert_eq!(
+        workspace.ticket_history(&source.reference).unwrap(),
+        current_history
+    );
+}
+
+#[test]
 fn a_duplicate_blocker_stays_unresolved_and_is_neither_ready_nor_blocked() {
     use ticketd_core::{Availability, DependencyChoice, DependencyDecision, TicketFilter};
     let dir = tempfile::tempdir().unwrap();
