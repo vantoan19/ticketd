@@ -179,7 +179,11 @@ impl Workspace {
             &reported_workspace,
             &format!("{}{}.sqlite3", backup::SAFETY_MARKER, Uuid::new_v4()),
         );
-        backup::save_snapshot(&current, &root, &safety, false)?;
+        backup::save_snapshot(&current, &root, &safety, false).map_err(|source| {
+            Error::SafetyCopy {
+                source: Box::new(source),
+            }
+        })?;
         drop(current);
         let journal = RestoreJournal {
             token: Uuid::new_v4(),

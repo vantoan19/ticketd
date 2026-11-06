@@ -1,4 +1,59 @@
 #[test]
+fn cli_restores_to_an_explicit_recovery_target_without_replacing_the_current_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("current.sqlite3");
+    let source = dir.path().join("source.sqlite3");
+    let target = dir.path().join("recovered.sqlite3");
+    let backup = dir.path().join("complete.sqlite3");
+    ticketd_core::Workspace::open(&current)
+        .unwrap()
+        .create_ticket("Keep original")
+        .unwrap();
+    let mut source_workspace = ticketd_core::Workspace::open(&source).unwrap();
+    source_workspace
+        .create_ticket("Recover separately")
+        .unwrap();
+    source_workspace.backup(&backup).unwrap();
+    drop(source_workspace);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args([
+            "restore-workspace",
+            backup.to_str().unwrap(),
+            "--target",
+            target.to_str().unwrap(),
+        ])
+        .env("TICKETD_TEST_WORKSPACE", &current)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .starts_with("Restored workspace. Safety backup:")
+    );
+    assert_eq!(
+        ticketd_core::Workspace::open(current)
+            .unwrap()
+            .show_ticket("T-1")
+            .unwrap()
+            .title,
+        "Keep original"
+    );
+    assert_eq!(
+        ticketd_core::Workspace::open(target)
+            .unwrap()
+            .show_ticket("T-1")
+            .unwrap()
+            .title,
+        "Recover separately"
+    );
+}
+
+#[test]
 fn cli_inspects_attachment_completeness_before_restore() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = dir.path().join("workspace.sqlite3");

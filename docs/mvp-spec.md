@@ -786,3 +786,9 @@ replacement is resolved before the workspace reopens. Existing supported
 attachment-free database-only backups remain usable. Attachment-bearing backups
 are versioned containers and must be restored through ticketd rather than opened
 as live workspace databases.
+
+If missing current bytes prevent a complete safety copy, restore identifies the
+missing files and leaves the current workspace unchanged. Recover the complete
+backup separately with `ticketd restore-workspace backup.sqlite3 --target
+recovered.sqlite3`. This uses the same validation and safety-copy workflow for
+the explicitly chosen destination; it does not switch the desktop workspace.

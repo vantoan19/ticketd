@@ -49,8 +49,12 @@ The computer's last-backup record is preserved, matching existing behavior.
 
 Before replacement, the complete current workspace is saved as a single safety
 backup. A complete safety copy is required; a broken current snapshot therefore
-blocks replacement rather than silently losing its retained data. The core
-publishes a synced `.restore.json` journal containing a UUID, whether the old
+blocks replacement rather than silently losing its retained data. The refusal
+names missing current files and provides a separate recovery route:
+`ticketd restore-workspace backup.sqlite3 --target recovered.sqlite3`. The CLI
+passes this explicit destination to the same core restore workflow. It neither
+changes the selected desktop workspace nor bypasses destination safety checks.
+The core publishes a synced `.restore.json` journal containing a UUID, whether the old
 attachment root existed, and the staged database digest. It renames the old root
 to a UUID-named sibling, installs the staged root, then atomically replaces the
 database file. Database replacement is the commit point.

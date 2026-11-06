@@ -137,6 +137,40 @@ fn backup_of_missing_local_bytes_is_not_published_or_recorded_as_successful() {
 }
 
 #[test]
+fn missing_current_bytes_name_the_safety_failure_and_allow_separate_target_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("important.txt");
+    fs::write(&source, b"recover me").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let file = workspace
+        .import_attachment("recover", &source, None)
+        .unwrap();
+    let backup = dir.path().join("complete.sqlite3");
+    workspace.backup(&backup).unwrap();
+    fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&file.locator),
+    )
+    .unwrap();
+    drop(workspace);
+    let error = Workspace::restore(&path, &backup).unwrap_err().to_string();
+    assert!(error.contains("current workspace"), "{error}");
+    assert!(error.contains("important.txt"), "{error}");
+    assert!(error.contains("--target"), "{error}");
+    let original = Workspace::open(&path).unwrap();
+    assert_eq!(original.attachment(&file.id).unwrap(), file);
+    assert!(original.safety_backups().unwrap().is_empty());
+    let recovered = dir.path().join("recovered.sqlite3");
+    Workspace::restore(&recovered, &backup).unwrap();
+    let recovered = Workspace::open(recovered).unwrap();
+    let output = dir.path().join("recovered.txt");
+    recovered.export_attachment(&file.id, &output).unwrap();
+    assert_eq!(fs::read(output).unwrap(), b"recover me");
+}
+
+#[test]
 fn restored_live_database_does_not_retain_packaged_byte_copies() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

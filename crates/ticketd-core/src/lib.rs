@@ -91,6 +91,13 @@ pub enum Error {
     #[error("backup or restore failed: {0}")]
     Backup(String),
     #[error(
+        "cannot save a complete safety copy of the current workspace: {source}. The current workspace is unchanged. Repair missing current files, or restore the complete backup separately with `ticketd restore-workspace <backup> --target <new-database-path>`; this does not switch the desktop workspace"
+    )]
+    SafetyCopy {
+        #[source]
+        source: Box<Error>,
+    },
+    #[error(
         "backup or restore failed: workspace is in use; close other ticketd operations and retry: {source}"
     )]
     RestoreLock {
