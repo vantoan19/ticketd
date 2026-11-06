@@ -559,7 +559,7 @@ pub(crate) fn lock_uploads(root: &Path) -> Result<File, Error> {
     Ok(lock)
 }
 
-fn sync_directory(path: &Path) -> Result<(), Error> {
+pub(crate) fn sync_directory(path: &Path) -> Result<(), Error> {
     #[cfg(unix)]
     File::open(path)?.sync_all()?;
     #[cfg(not(unix))]

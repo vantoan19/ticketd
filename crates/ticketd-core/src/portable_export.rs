@@ -199,6 +199,11 @@ impl Workspace {
             &stage.path().join("manifest.json"),
             &serde_json::to_vec_pretty(&result)?,
         )?;
+        attachments::sync_directory(&stage.path().join("files"))?;
+        attachments::sync_directory(stage.path())?;
+        if let Some(parent) = stage.path().parent() {
+            attachments::sync_directory(parent)?;
+        }
         tx.commit()?;
         let _ = stage.keep();
         Ok(result)
