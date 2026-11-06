@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -69,6 +70,7 @@ test("replacement changes only the chosen inline occurrence and preserves image 
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `Before [Keep **this**](${oldUri}) and ![Chosen label](${newUri}) after.`,
+      expect.any(AbortSignal),
     ),
   );
   expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
@@ -108,6 +110,7 @@ test("shared reference definitions stay intact when one reference-style use is r
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `Before [Chosen](${newUri}) and [Keep][file].\n\n[file]: ${oldUri}\n`,
+      expect.any(AbortSignal),
     ),
   );
 });
@@ -126,6 +129,35 @@ test("a destination-shaped label and an inline title survive selected replacemen
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `[Chosen \\](${oldUri}) label](${newUri} "keep title")`,
+      expect.any(AbortSignal),
     ),
   );
+});
+
+test("canceling a pending replacement leaves the original reference intact", async () => {
+  bridge();
+  const bridgeInvoke = vi.mocked(invoke).getMockImplementation();
+  let complete: ((value: string) => void) | undefined;
+  const pendingUri = new Promise<string>((resolve) => {
+    complete = resolve;
+  });
+  vi.mocked(invoke).mockImplementation((command, args, options) =>
+    command === "attachment_uri"
+      ? pendingUri
+      : bridgeInvoke!(command, args, options),
+  );
+  const change = vi.fn();
+  render(<MarkdownDocument source={`[Chosen](${oldUri})`} onChange={change} />);
+  fireEvent.click(screen.getByRole("button", { name: "Chosen" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose a replacement" }),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("attachment_uri", { id: "new" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await act(async () => complete?.(newUri));
+  expect(change).not.toHaveBeenCalled();
 });

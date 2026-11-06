@@ -67,7 +67,10 @@ import {
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
-import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
+import {
+  AttachmentPreview,
+  type ReferenceReplacement,
+} from "@/features/attachments/AttachmentPreview";
 import {
   attachments,
   type Attachment,
@@ -159,7 +162,7 @@ function Element(props: PlateElementProps) {
   const path = editor.api.findPath(element);
   const [preview, setPreview] = useState<{
     uri: string;
-    replace: ((file: Attachment) => Promise<void>) | undefined;
+    replace: ReferenceReplacement | undefined;
   } | null>(null);
   const tags = {
     p: "p",
@@ -251,8 +254,9 @@ function Element(props: PlateElementProps) {
                   replace:
                     readOnly || !path
                       ? undefined
-                      : async (file) => {
+                      : async (file, _requestId, signal) => {
                           const uri = await attachments.uri(file.id);
+                          signal.throwIfAborted();
                           if (writeMarkdown(editor.children) !== before)
                             throw new Error(
                               "The content changed while choosing a replacement. Close the preview and select the reference again.",

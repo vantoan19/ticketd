@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
-import { AttachmentPreview } from "./AttachmentPreview";
-import type { Attachment } from "@/lib/api/attachments";
+import {
+  AttachmentPreview,
+  type ReferenceReplacement,
+} from "./AttachmentPreview";
 
 /** An authored inline label. Opening captures the exact selected reference. */
 export function AttachmentLink({
@@ -10,8 +12,7 @@ export function AttachmentLink({
 }: {
   uri: string;
   children: ReactNode;
-  onReplace?:
-    ((file: Attachment, requestId: string) => Promise<void>) | undefined;
+  onReplace?: ReferenceReplacement | undefined;
 }) {
   const [preview, setPreview] = useState<{
     uri: string;

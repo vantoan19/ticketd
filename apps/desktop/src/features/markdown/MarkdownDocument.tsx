@@ -22,6 +22,7 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
@@ -35,10 +36,7 @@ import {
 
 const MarkdownSource = createContext("");
 const AttachmentReplacement = createContext<
-  (
-    node: ExtraProps["node"],
-    uri: string,
-  ) => ((file: Attachment) => Promise<void>) | undefined
+  (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
 type MdNode = { type: string; value?: string; children?: MdNode[] };
 /**
@@ -384,7 +382,8 @@ export function MarkdownDocument({
   revision?: number | undefined;
   /** A passage to mark: highlighted, focusable and described. */
   mention?: MentionMark | undefined;
-  onChange?: ((source: string) => void) | undefined;
+  onChange?:
+    ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
 }) {
   const currentSource = useRef(source);
   useLayoutEffect(() => {
@@ -394,16 +393,22 @@ export function MarkdownDocument({
     const start = node?.position?.start.offset;
     const end = node?.position?.end.offset;
     if (!onChange || start === undefined || end === undefined) return undefined;
-    return async (file: Attachment) => {
+    return async (
+      file: Attachment,
+      _requestId: string,
+      signal: AbortSignal,
+    ) => {
       const nextUri = await attachments.uri(file.id);
+      signal.throwIfAborted();
       if (currentSource.current !== source)
         throw new Error(
           "The content changed while choosing a replacement. Close the preview and select the reference again.",
         );
-      onChange(
+      await onChange(
         source.slice(0, start) +
           replaceDestination(source.slice(start, end), uri, nextUri) +
           source.slice(end),
+        signal,
       );
     };
   }

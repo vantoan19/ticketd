@@ -19,6 +19,11 @@ import "./attachment-preview.css";
 
 export type PreviewTarget =
   { uri: string } | { id: string; initial?: Attachment };
+export type ReferenceReplacement = (
+  file: Attachment,
+  requestId: string,
+  signal: AbortSignal,
+) => Promise<void>;
 
 function Media({
   file,
@@ -81,8 +86,7 @@ export function AttachmentPreview({
 }: {
   target: PreviewTarget;
   onClose: () => void;
-  onReplace?:
-    ((file: Attachment, requestId: string) => Promise<void>) | undefined;
+  onReplace?: ReferenceReplacement | undefined;
   actions?: ReactNode;
 }) {
   const [file, setFile] = useState<Attachment | null>(
@@ -96,6 +100,12 @@ export function AttachmentPreview({
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState(false);
   const generation = useRef(0);
+  const replacementRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => replacementRequest.current?.abort(), []);
+  function close() {
+    replacementRequest.current?.abort();
+    onClose();
+  }
   const id = "id" in target ? target.id : undefined;
   const uri = "uri" in target ? target.uri : undefined;
   useEffect(() => {
@@ -149,7 +159,7 @@ export function AttachmentPreview({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) close();
       }}
     >
       <DialogContent className="attachment-preview-dialog">
@@ -224,7 +234,11 @@ export function AttachmentPreview({
                   <Button
                     variant="outline"
                     disabled={busy}
-                    onClick={() => setPicker(true)}
+                    onClick={() => {
+                      replacementRequest.current?.abort();
+                      replacementRequest.current = new AbortController();
+                      setPicker(true);
+                    }}
                   >
                     Choose a replacement
                   </Button>
@@ -277,7 +291,7 @@ export function AttachmentPreview({
                 </Button>
               </>
             )}
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={close}>
               Done
             </Button>
           </div>
@@ -291,15 +305,24 @@ export function AttachmentPreview({
         {picker && onReplace && (
           <AttachmentPicker
             open
-            onOpenChange={setPicker}
+            onOpenChange={(open) => {
+              if (!open) replacementRequest.current?.abort();
+              setPicker(open);
+            }}
             single
             onPick={async (replacement, requestId) => {
               if (replacement.id === file?.id)
                 throw new Error(
                   "Choose a different attachment identity for this reference.",
                 );
-              await onReplace(replacement, requestId);
-              onClose();
+              const signal = replacementRequest.current?.signal;
+              if (!signal)
+                throw new Error(
+                  "Select the reference again before replacing it.",
+                );
+              signal.throwIfAborted();
+              await onReplace(replacement, requestId, signal);
+              close();
             }}
           />
         )}
