@@ -8,6 +8,9 @@ mod provider;
 pub use provider::*;
 mod oauth;
 pub use oauth::*;
+mod uploads;
+pub use uploads::*;
+mod upload_provider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -21,6 +24,7 @@ pub enum DriveErrorKind {
     Unsupported,
     InvalidResponse,
     Cancelled,
+    Uncertain,
 }
 
 #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]

@@ -52,7 +52,8 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 51] = [
+const TABLES: [(&str, i64); 52] = [
+    ("drive_upload_operations", 52),
     ("drive_references", 51),
     ("attachment_draft_cutover", 50),
     ("attachment_drafts", 50),
@@ -150,6 +151,8 @@ pub(crate) fn missing_tables(
         ("plan_graph_fts_delete", 43),
         ("plan_graph_fts_update", 43),
         ("embedded_activity_delete", 48),
+        ("drive_upload_request_namespace", 52),
+        ("write_drive_request_namespace", 52),
     ] {
         let exists: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?1)",

@@ -47,6 +47,33 @@ fn cli_explains_and_changes_the_shared_workspace_upload_limit() {
 }
 
 #[test]
+fn cli_exposes_upload_recovery_without_desktop_or_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        run(dir.path(), &["attachment", "drive-uploads"]),
+        serde_json::json!([])
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "drive-upload-status", "unknown"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("operation not found"));
+    let help = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["attachment", "drive-upload", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let text = String::from_utf8_lossy(&help.stdout);
+    assert!(text.contains("--folder"));
+    assert!(text.contains("--request-id"));
+}
+
+#[test]
 fn independent_cli_processes_add_inspect_reuse_export_and_detach_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let ticket = run(dir.path(), &["create", "Investigate"]);

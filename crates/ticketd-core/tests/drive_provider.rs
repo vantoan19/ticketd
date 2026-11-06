@@ -32,8 +32,8 @@ impl DriveTransport for Http {
 #[test]
 fn native_metadata_uses_only_token_exchange_and_metadata_get_with_redacted_credentials() {
     let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
-        DriveResponse { status: 200, body: br#"{"access_token":"secret-access","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() },
-        DriveResponse { status: 200, body: br#"{"id":"doc-123","name":"Plan","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/doc-123/edit","isAppAuthorized":true}"#.to_vec() },
+        DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"secret-access","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() },
+        DriveResponse { headers: vec![], status: 200, body: br#"{"id":"doc-123","name":"Plan","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/doc-123/edit","isAppAuthorized":true}"#.to_vec() },
     ]) };
     let provider = GoogleDrive::new("connection", &Vault, &transport);
     let file = provider.metadata("doc-123", None).unwrap();
@@ -57,10 +57,12 @@ fn unselected_file_has_explicit_picker_guidance_instead_of_broader_authorization
         requests: Mutex::new(vec![]),
         responses: Mutex::new(vec![
             DriveResponse {
+                headers: vec![],
                 status: 200,
                 body: br#"{"access_token":"secret-access"}"#.to_vec(),
             },
             DriveResponse {
+                headers: vec![],
                 status: 403,
                 body: br#"{"error":{"errors":[{"reason":"appNotAuthorizedToFile"}]}}"#.to_vec(),
             },
@@ -83,6 +85,7 @@ fn ambiguous_missing_offline_rate_limit_and_invalid_scope_are_not_misreported() 
         let transport = Http {
             requests: Mutex::new(vec![]),
             responses: Mutex::new(vec![DriveResponse {
+                headers: vec![],
                 status,
                 body: br#"{"error":"invalid_grant","sensitive":"must-not-echo"}"#.to_vec(),
             }]),
@@ -114,10 +117,12 @@ fn ambiguous_missing_offline_rate_limit_and_invalid_scope_are_not_misreported() 
             requests: Mutex::new(vec![]),
             responses: Mutex::new(vec![
                 DriveResponse {
+                    headers: vec![],
                     status: 200,
                     body: br#"{"access_token":"access"}"#.to_vec(),
                 },
                 DriveResponse {
+                    headers: vec![],
                     status,
                     body: body.to_vec(),
                 },
@@ -129,7 +134,7 @@ fn ambiguous_missing_offline_rate_limit_and_invalid_scope_are_not_misreported() 
         assert_eq!(error.kind, expected);
     }
     let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
-        DriveResponse { status: 200, body: br#"{"access_token":"must-not-use","scope":"https://www.googleapis.com/auth/drive"}"#.to_vec() },
+        DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"must-not-use","scope":"https://www.googleapis.com/auth/drive"}"#.to_vec() },
     ]) };
     assert_eq!(
         GoogleDrive::new("connection", &Vault, &transport)
@@ -158,8 +163,8 @@ fn native_types_and_resource_keys_need_no_download_or_conversion_capability() {
         ),
     ] {
         let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
-            DriveResponse { status: 200, body: br#"{"access_token":"access"}"#.to_vec() },
-            DriveResponse { status: 200, body: serde_json::to_vec(&serde_json::json!({"id":"file", "name":"Native file", "mimeType":mime, "webViewLink":url})).unwrap() },
+            DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"access"}"#.to_vec() },
+            DriveResponse { headers: vec![], status: 200, body: serde_json::to_vec(&serde_json::json!({"id":"file", "name":"Native file", "mimeType":mime, "webViewLink":url})).unwrap() },
         ]) };
         let file = GoogleDrive::new("connection", &Vault, &transport)
             .metadata("file", Some("resource-key"))
@@ -193,8 +198,8 @@ fn invalid_viewer_hosts_and_unsupported_folders_cannot_become_references() {
         ),
     ] {
         let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
-            DriveResponse { status: 200, body: br#"{"access_token":"access"}"#.to_vec() },
-            DriveResponse { status: 200, body: serde_json::to_vec(&serde_json::json!({"id":"file", "name":"File", "mimeType":mime, "webViewLink":url})).unwrap() },
+            DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"access"}"#.to_vec() },
+            DriveResponse { headers: vec![], status: 200, body: serde_json::to_vec(&serde_json::json!({"id":"file", "name":"File", "mimeType":mime, "webViewLink":url})).unwrap() },
         ]) };
         assert_eq!(
             GoogleDrive::new("connection", &Vault, &transport)

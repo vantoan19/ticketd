@@ -66,6 +66,7 @@ impl std::fmt::Debug for DriveRequest {
 pub struct DriveResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    pub headers: Vec<(String, String)>,
 }
 pub trait DriveTransport: Send + Sync {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError>;
@@ -90,8 +91,10 @@ impl Default for GoogleTransport {
 impl DriveTransport for GoogleTransport {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
         // Defense in depth: never forward bearer/refresh credentials to redirects or caller URLs.
+        let upload_url = super::upload_provider::safe_session_url(&request.url);
         let allowed = request.method == "POST"
             && request.url == "https://oauth2.googleapis.com/token"
+            || matches!(request.method, "POST" | "PUT") && upload_url
             || request.method == "GET"
                 && (request
                     .url
@@ -110,6 +113,12 @@ impl DriveTransport for GoogleTransport {
                 builder = builder.header(name, value);
             }
             builder.call()
+        } else if request.method == "PUT" {
+            let mut builder = self.agent.put(&request.url);
+            for (name, value) in &request.headers {
+                builder = builder.header(name, value);
+            }
+            builder.send(&request.body)
         } else {
             let mut builder = self.agent.post(&request.url);
             for (name, value) in &request.headers {
@@ -119,20 +128,33 @@ impl DriveTransport for GoogleTransport {
         };
         let mut response = response.map_err(|_| DriveError::new(DriveErrorKind::Offline, "cannot reach Google Drive; check your connection and retry; last-known details remain available"))?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|v| (k.as_str().to_owned(), v.to_owned()))
+            })
+            .collect();
         let body = response
             .body_mut()
             .with_config()
             .limit(1024 * 1024)
             .read_to_vec()
             .map_err(|_| invalid_response())?;
-        Ok(DriveResponse { status, body })
+        Ok(DriveResponse {
+            status,
+            body,
+            headers,
+        })
     }
 }
 
 pub struct GoogleDrive<'a> {
     connection_id: &'a str,
     vault: &'a dyn CredentialStore,
-    transport: &'a dyn DriveTransport,
+    pub(super) transport: &'a dyn DriveTransport,
 }
 impl<'a> GoogleDrive<'a> {
     pub fn new(
@@ -209,6 +231,20 @@ impl AttachmentProvider for GoogleDrive<'_> {
         if !valid_file_id(id) || resource_key.is_some_and(|key| !valid_file_id(key)) {
             return Err(invalid_response());
         }
+        let mut headers = self.authorization()?;
+        if let Some(key) = resource_key {
+            headers.push(("X-Goog-Drive-Resource-Keys".into(), format!("{id}/{key}")));
+        }
+        let response = self.transport.send(DriveRequest { method: "GET", url: format!("https://www.googleapis.com/drive/v3/files/{id}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,resourceKey,trashed,isAppAuthorized"), headers, body: vec![] })?;
+        if response.status != 200 {
+            return Err(metadata_error(&response));
+        }
+        parse_metadata(id, resource_key, &response.body)
+    }
+}
+
+impl GoogleDrive<'_> {
+    pub(super) fn authorization(&self) -> Result<Vec<(String, String)>, DriveError> {
         // The secure-store lock serializes refresh-token rotation across CLI/desktop.
         let _lock = credential_lock(self.connection_id)?;
         let mut credential = self.vault.load(self.connection_id)?;
@@ -225,58 +261,57 @@ impl AttachmentProvider for GoogleDrive<'_> {
             credential.refresh_token = refresh;
             self.vault.save(self.connection_id, &credential)?;
         }
-        let mut headers = vec![(
+        Ok(vec![(
             "Authorization".into(),
             format!("Bearer {}", token.access_token),
-        )];
-        if let Some(key) = resource_key {
-            headers.push(("X-Goog-Drive-Resource-Keys".into(), format!("{id}/{key}")));
-        }
-        let response = self.transport.send(DriveRequest { method: "GET", url: format!("https://www.googleapis.com/drive/v3/files/{id}?supportsAllDrives=true&fields=id,name,mimeType,size,webViewLink,resourceKey,trashed,isAppAuthorized"), headers, body: vec![] })?;
-        if response.status != 200 {
-            return Err(metadata_error(&response));
-        }
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct File {
-            id: String,
-            name: String,
-            mime_type: String,
-            size: Option<String>,
-            web_view_link: Option<String>,
-            resource_key: Option<String>,
-            trashed: Option<bool>,
-            is_app_authorized: Option<bool>,
-        }
-        let file: File = serde_json::from_slice(&response.body).map_err(|_| invalid_response())?;
-        if file.is_app_authorized == Some(false) {
-            return Err(select_file());
-        }
-        if file.trashed == Some(true) {
-            return Err(DriveError::new(
-                DriveErrorKind::InaccessibleOrMissing,
-                "the file is in Drive trash; restore it in Drive or choose another file",
-            ));
-        }
-        let metadata = DriveMetadata {
-            id: file.id,
-            name: file.name,
-            mime_type: file.mime_type,
-            size_bytes: file
-                .size
-                .map(|v| v.parse())
-                .transpose()
-                .map_err(|_| invalid_response())?,
-            web_url: file
-                .web_view_link
-                .unwrap_or_else(|| format!("https://drive.google.com/file/d/{id}/view")),
-            resource_key: file
-                .resource_key
-                .or_else(|| resource_key.map(str::to_owned)),
-        };
-        validate_metadata(id, &metadata)?;
-        Ok(metadata)
+        )])
     }
+}
+pub(super) fn parse_metadata(
+    id: &str,
+    resource_key: Option<&str>,
+    body: &[u8],
+) -> Result<DriveMetadata, DriveError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct File {
+        id: String,
+        name: String,
+        mime_type: String,
+        size: Option<String>,
+        web_view_link: Option<String>,
+        resource_key: Option<String>,
+        trashed: Option<bool>,
+        is_app_authorized: Option<bool>,
+    }
+    let file: File = serde_json::from_slice(body).map_err(|_| invalid_response())?;
+    if file.is_app_authorized == Some(false) {
+        return Err(select_file());
+    }
+    if file.trashed == Some(true) {
+        return Err(DriveError::new(
+            DriveErrorKind::InaccessibleOrMissing,
+            "the file is in Drive trash; restore it in Drive or choose another file",
+        ));
+    }
+    let metadata = DriveMetadata {
+        id: file.id,
+        name: file.name,
+        mime_type: file.mime_type,
+        size_bytes: file
+            .size
+            .map(|v| v.parse())
+            .transpose()
+            .map_err(|_| invalid_response())?,
+        web_url: file
+            .web_view_link
+            .unwrap_or_else(|| format!("https://drive.google.com/file/d/{id}/view")),
+        resource_key: file
+            .resource_key
+            .or_else(|| resource_key.map(str::to_owned)),
+    };
+    validate_metadata(id, &metadata)?;
+    Ok(metadata)
 }
 
 pub(crate) fn credential_lock(id: &str) -> Result<std::fs::File, DriveError> {
@@ -311,7 +346,7 @@ fn select_file() -> DriveError {
         "this file is not authorized for ticketd; open the Google Drive tab in the attachment picker and select this file; account access alone does not authorize it",
     )
 }
-fn metadata_error(response: &DriveResponse) -> DriveError {
+pub(super) fn metadata_error(response: &DriveResponse) -> DriveError {
     let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap_or_default();
     let reasons: Vec<&str> = body["error"]["errors"]
         .as_array()

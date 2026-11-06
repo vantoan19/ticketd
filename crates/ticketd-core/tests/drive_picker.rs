@@ -9,6 +9,21 @@ use ticketd_core::drive::{
     DriveTransport, PickerSession,
 };
 
+#[test]
+fn upload_folder_selection_requests_one_explicit_folder_with_only_drive_file_scope() {
+    let session = PickerSession::begin_folder(
+        DesktopOAuthClient::new("client.apps.googleusercontent.com".into(), None).unwrap(),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let url = url::Url::parse(session.authorization_url()).unwrap();
+    let pairs: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(pairs["allow_folder_selection"], "true");
+    assert_eq!(pairs["allow_multiple"], "false");
+    assert_eq!(pairs["mimetypes"], "application/vnd.google-apps.folder");
+    assert_eq!(pairs["scope"], "https://www.googleapis.com/auth/drive.file");
+}
+
 struct Vault;
 impl CredentialStore for Vault {
     fn load(&self, _: &str) -> Result<DriveCredential, DriveError> {
@@ -32,6 +47,7 @@ impl DriveTransport for Http {
                 "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)"
             );
             return Ok(DriveResponse {
+                headers: vec![],
                 status: 200,
                 body: br#"{"user":{"permissionId":"account-123"}}"#.to_vec(),
             });
@@ -43,7 +59,7 @@ impl DriveTransport for Http {
         assert_eq!(form["code"], "authorization-secret");
         assert_eq!(form["grant_type"], "authorization_code");
         assert!(form["code_verifier"].len() >= 43);
-        Ok(DriveResponse { status: 200, body: br#"{"access_token":"access-secret","refresh_token":"refresh-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() })
+        Ok(DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"access-secret","refresh_token":"refresh-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() })
     }
 }
 
@@ -53,7 +69,7 @@ impl DriveTransport for Reconnect {
         if request.method == "GET" {
             return Http.send(request);
         }
-        Ok(DriveResponse { status: 200, body: br#"{"access_token":"access-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() })
+        Ok(DriveResponse { headers: vec![], status: 200, body: br#"{"access_token":"access-secret","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() })
     }
 }
 struct DifferentAccount;
@@ -61,6 +77,7 @@ impl DriveTransport for DifferentAccount {
     fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
         if request.method == "GET" {
             return Ok(DriveResponse {
+                headers: vec![],
                 status: 200,
                 body: br#"{"user":{"permissionId":"other-account"}}"#.to_vec(),
             });
