@@ -49,6 +49,7 @@ export function DialogShell({
         {...(returnFocus && { returnFocus })}
       >
         <form
+          className="dialog-shell-form"
           onSubmit={(event) => {
             event.preventDefault();
             if (!blocked) onSubmit();
@@ -62,7 +63,9 @@ export function DialogShell({
               {description ?? title}
             </DialogDescription>
           </div>
-          <div className="flex flex-col gap-2 px-6 pt-5 pb-6">{children}</div>
+          <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
+            {children}
+          </div>
           <div className="flex items-center gap-2 bg-(--recessed) px-6 py-3.5 shadow-[0_-1px_0_0_var(--border)]">
             <p id={reasonId} className="flex-1 text-xs text-muted-foreground">
               {blockedReason}
