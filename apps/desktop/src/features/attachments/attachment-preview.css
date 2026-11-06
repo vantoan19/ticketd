@@ -113,7 +113,7 @@
   gap: 12px;
 }
 .attachment-preview-usage li {
-  font-size: 13px;
+  font-size: 14px;
 }
 .attachment-preview-usage strong {
   font-weight: 500;
@@ -174,7 +174,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .attachment-preview-footer > .attachment-hint {
-    font-size: 11px;
+    font-size: 12px;
   }
   .attachment-preview-footer .attachment-actions {
     width: 100%;
