@@ -50,66 +50,73 @@ export function MarkDuplicateDialog({
   function change(next: boolean) {
     onOpenChange(next);
   }
+  const finish = () => {
+    discard();
+    change(false);
+  };
+  if (chosen && open)
+    return (
+      <Duplicates
+        ticket={chosen}
+        refresh={refresh}
+        open={open}
+        // Escape keeps the typed search and chosen ticket for when it reopens.
+        onOpenChange={change}
+        title={`Mark ${chosen.reference} as a duplicate`}
+        description={`${chosen.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
+        onDone={() => {
+          onMarked?.(chosen.reference);
+          finish();
+        }}
+        onCancel={finish}
+      />
+    );
   return (
     <Dialog open={open} onOpenChange={change}>
       <DialogContent className="duplicate-dialog">
         <DialogHeader>
           <DialogTitle>Mark a ticket as duplicate</DialogTitle>
           <DialogDescription>
-            {chosen
-              ? `Choose the canonical ticket for ${chosen.reference} and review its dependencies.`
-              : "Choose the ticket that duplicates another one. You choose the canonical ticket next."}
+            Choose the ticket that duplicates another one. You choose the
+            canonical ticket next.
           </DialogDescription>
         </DialogHeader>
-        {chosen ? (
-          <Duplicates
-            ticket={chosen}
-            refresh={refresh}
-            onDone={() => {
-              onMarked?.(chosen.reference);
-              discard();
-              change(false);
-            }}
-            onCancel={() => setChosen(null)}
-          />
-        ) : (
-          <div className="duplicate-pick">
-            <Field>
-              <FieldLabel htmlFor="duplicate-pick-query">
-                Ticket to mark
-              </FieldLabel>
-              <Input
-                id="duplicate-pick-query"
-                value={query}
-                autoComplete="off"
-                placeholder="Reference or words from the title"
-                aria-invalid={error ? true : undefined}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              {error && <FieldError>{error}</FieldError>}
-            </Field>
-            {query.trim() && results.length === 0 && !error && (
-              <p role="status">No tickets to mark match that search.</p>
-            )}
-            {results.length > 0 && (
-              <ul className="duplicate-pick-results" aria-label="Matches">
-                {results.map((item) => (
-                  <li key={item.reference}>
-                    <Button
-                      variant="ghost"
-                      className="duplicate-pick-result"
-                      onClick={() => setChosen(item)}
-                    >
-                      <StatusIcon status={item.status} size={14} decorative />
-                      <span className="ticket-ref">{item.reference}</span>
-                      <span className="truncate">{item.title}</span>
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        <div className="duplicate-pick">
+          <Field>
+            <FieldLabel htmlFor="duplicate-pick-query">
+              Ticket to mark
+            </FieldLabel>
+            <Input
+              id="duplicate-pick-query"
+              value={query}
+              autoComplete="off"
+              placeholder="Reference or words from the title"
+              aria-invalid={error ? true : undefined}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {error && <FieldError>{error}</FieldError>}
+          </Field>
+          {query.trim() && results.length === 0 && !error && (
+            <p role="status">No tickets to mark match that search.</p>
+          )}
+          {results.length > 0 && (
+            <ul className="duplicate-pick-results" aria-label="Matches">
+              {results.map((item) => (
+                <li key={item.reference}>
+                  <Button
+                    variant="ghost"
+                    className="duplicate-pick-result"
+                    onClick={() => setChosen(item)}
+                  >
+                    <StatusIcon status={item.status} size={14} decorative />
+                    <span className="ticket-ref">{item.reference}</span>
+                    <span className="truncate">{item.title}</span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

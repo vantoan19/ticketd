@@ -1,28 +1,38 @@
 import { FileText, Layers, Ticket } from "lucide-react";
 import { edgeStyles } from "./graph-text";
 
-/** One sample per line style, naming the relationships it stands for; arrows point source to target. */
+/** One sample per line style: the label and the line pattern carry the meaning, never colour. */
 export function GraphLegend() {
   return (
-    <ul className="graph-legend" aria-label="Legend">
-      {edgeStyles.map((style) => (
-        <li key={style.name}>
-          <svg width="28" height="8" aria-hidden="true" color={style.color}>
-            <line
-              x1="0"
-              y1="4"
-              x2="22"
-              y2="4"
-              stroke="currentColor"
-              strokeWidth={style.width}
-              {...(style.dash ? { strokeDasharray: style.dash } : {})}
-            />
-            <polygon points="22,0 28,4 22,8" fill="currentColor" />
-          </svg>
-          {style.name}
-        </li>
-      ))}
-    </ul>
+    <div className="graph-legend">
+      <span className="graph-legend-title" aria-hidden="true">
+        Legend
+      </span>
+      <ul aria-label="Legend">
+        {edgeStyles.map((style) => (
+          <li key={style.name}>
+            <svg width="28" height="8" aria-hidden="true">
+              <line
+                x1={style.name === "parent of" ? 3 : 0}
+                y1="4"
+                x2={style.name.startsWith("blocks") ? 22 : 28}
+                y2="4"
+                stroke="currentColor"
+                strokeWidth={style.width}
+                {...(style.dash ? { strokeDasharray: style.dash } : {})}
+              />
+              {style.name.startsWith("blocks") && (
+                <polygon points="22,0 28,4 22,8" fill="currentColor" />
+              )}
+              {style.name === "parent of" && (
+                <circle cx="3" cy="4" r="2.5" fill="currentColor" />
+              )}
+            </svg>
+            {style.name}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

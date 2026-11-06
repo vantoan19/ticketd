@@ -11,7 +11,7 @@
   min-height: 0;
 }
 .documents-page {
-  padding: 24px 32px;
+  padding: 24px var(--page-gutter);
   overflow: auto;
 }
 .documents-page {
@@ -22,17 +22,16 @@
 .documents-list-view {
   width: 100%;
   max-width: 936px;
-  margin: 0 auto;
 }
 .documents-list-view h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   line-height: 32px;
   font-weight: 600;
   letter-spacing: -0.6px;
   margin-bottom: 24px;
 }
 .documents-list-view h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   margin-bottom: 8px;
 }
 .documents-list-view ul {
@@ -61,17 +60,11 @@
 .document-dialog .editor-mode {
   flex-wrap: wrap;
 }
-@media (max-width: 767px) {
-  .document-dialog {
-    max-height: 100dvh;
-    border-radius: 0;
-  }
-}
 
 .document-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  gap: 48px;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  gap: 0 48px;
   padding: 12px 0 32px;
   align-items: start;
 }
@@ -93,7 +86,7 @@
 }
 .document-main > header h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-title);
   overflow-wrap: anywhere;
 }
 .document-eyebrow {
@@ -101,7 +94,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -129,7 +122,8 @@
   align-items: center;
   gap: 4px;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .document-status svg {
   width: 14px;
@@ -137,11 +131,11 @@
 }
 .document-main > .document-body {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 .document-main > .document-body .markdown-document {
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 .document-main > footer {
@@ -178,7 +172,7 @@
 .document-save-error details {
   flex-basis: 100%;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-save-error pre {
   white-space: pre-wrap;
@@ -193,7 +187,7 @@
   gap: 12px;
 }
 .document-dialog #document-title {
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .document-rail {
   display: flex;
@@ -202,7 +196,7 @@
 }
 .document-rail dt {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin-top: 12px;
 }
 .document-rail dd {
@@ -223,14 +217,13 @@
 }
 .document-rail li p {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-rail .document-direction {
   margin: 0 0 4px;
 }
 /* Connected items line up with their section label; long titles stop at two lines. */
-.document-rail [aria-label="Connected items"] li > button {
-  padding-inline: 0;
+.document-rail [aria-label="Connections"] li > button {
   justify-content: flex-start;
 }
 .document-rail .connected-label {
@@ -238,6 +231,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  line-height: 20px;
 }
 @media (max-width: 767px) {
   .document-workspace {
@@ -305,7 +299,8 @@
 .documents-count {
   margin: 0 0 8px;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .documents-list-view section {
   margin-bottom: 24px;
@@ -337,7 +332,7 @@
 }
 .document-list-content p {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
@@ -350,7 +345,7 @@
 }
 .document-list-content .document-origin,
 .document-list-content .document-list-tags {
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-list-tags {
   display: flex;
@@ -390,7 +385,7 @@
   flex: none;
   margin-top: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   white-space: nowrap;
 }
 .document-list > li > button {
@@ -437,8 +432,264 @@
 .document-rail .document-passage p {
   margin: 4px 0 12px;
 }
+
+/* The one header: breadcrumb back, save status, Read/Edit, pin and actions. */
+.document-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.document-bar .document-crumb {
+  color: var(--muted-foreground);
+}
+.document-crumb-sep {
+  color: var(--disabled-foreground);
+}
+.document-crumb-title {
+  min-width: 0;
+  padding-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.document-bar .document-actions {
+  gap: 8px;
+}
+.document-bar .document-status {
+  margin-left: 0;
+  font-size: var(--text-caption);
+}
+.document-title {
+  margin: 0;
+  font-size: var(--text-section);
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -1.28px;
+  overflow-wrap: anywhere;
+}
+.document-title .document-title-input {
+  height: 44px;
+  margin-left: -8px;
+  padding: 0 8px;
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: -1.28px;
+}
+.document-rail {
+  background: var(--background);
+  border-radius: 8px;
+  padding: 24px 20px;
+  gap: 20px;
+}
+.document-rail h2 {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  font-weight: 400;
+}
+.document-rail li > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: -8px;
+  padding: 6px 8px;
+}
+.document-rail li > button svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+.document-rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  box-shadow: 0 -1px 0 0 var(--border);
+}
+.document-rail-actions > button {
+  justify-content: flex-start;
+  margin-left: -8px;
+  color: var(--muted-foreground);
+}
+.document-shared-passage > p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
 @media (max-width: 767px) {
   .documents-page {
     padding: 20px 16px;
   }
+}
+.document-subtitle {
+  margin: -12px 0 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.document-title .document-title-input {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Board F: the open Document fills the pane. The header rule sits 48px from
+   the top, the body scrolls on the left, and a flat 272px rail (250px of
+   content once its 20px padding is taken) hangs off a hairline on the right. */
+.documents-page:has(> .document-workspace) {
+  padding: 0;
+  overflow: hidden;
+}
+.document-workspace {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  grid-template-rows: 48px minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+.document-bar {
+  margin-bottom: 0;
+  padding: 0 8px 0 12px;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.document-workspace > .document-main {
+  padding: 40px 48px;
+  overflow-y: auto;
+}
+.document-workspace > .document-rail {
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: 0;
+  background: var(--background);
+  box-shadow: inset 1px 0 0 0 var(--border);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.document-rail h2 {
+  line-height: 16px;
+}
+.document-rail dd {
+  font-size: var(--text-ui);
+}
+.document-rail .document-timestamps {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+/* One quoted line: Both from “See T-1 and T-3.” */
+.document-rail .document-passage-caption {
+  margin: 4px 0 0;
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.document-title .document-title-input {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+/* The Document's body is plain text, not a bordered card. */
+.document-workspace .document-body .markdown-editor {
+  margin-top: 6px;
+  background: transparent;
+  box-shadow: none;
+}
+.document-workspace .document-body .rich-document {
+  min-height: 0;
+  padding: 0;
+}
+.document-workspace
+  .document-body
+  .markdown-editor:has(.rich-document:focus-visible) {
+  outline: none;
+}
+/* In Edit a diagram is one line of source; the diagram itself is for Read. */
+.document-workspace .document-body .diagram-editor > .mermaid-block {
+  display: none;
+}
+.document-workspace .document-body .diagram-editor summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--recessed);
+  list-style: none;
+}
+.document-workspace
+  .document-body
+  .diagram-editor
+  summary::-webkit-details-marker {
+  display: none;
+}
+.document-workspace .document-body .diagram-editor summary svg {
+  width: 14px;
+  height: 14px;
+}
+.diagram-summary-action {
+  margin-left: auto;
+  color: var(--foreground);
+}
+/* Read mode: a grey header bar, no outer border, white boxes. */
+.document-workspace .document-body .mermaid-block {
+  box-shadow: none;
+}
+
+/* Edit: the title field's caption and the trailing block prompt. */
+.document-title-hint {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+/* .document-main's 20px flex gap is frame F-2's 20px; the 2px lowers the glyph
+   to the frame's ink position (25.5px under the diagram row). */
+.document-block-hint {
+  margin: 0;
+  padding-top: 2px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  user-select: none;
+}
+.document-rail .document-tags:empty {
+  display: none;
+}
+
+.document-rail .document-passage-caption .document-passage,
+.document-rail .document-passage-caption .document-passage * {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+/* Rail rows sit 4px apart, as the label sits 4px above its first row (frame F). */
+.document-workspace .document-rail ul {
+  margin: 0;
+}
+.document-workspace .document-rail li {
+  margin: 0 0 4px;
+}
+.document-workspace .document-rail li:last-child {
+  margin-bottom: 0;
+}
+/* Frame F-2: a bordered 36px row, 8px radius, 10px between glyph and label. */
+.document-workspace .document-body .diagram-editor {
+  margin-top: 25px;
+}
+.document-workspace .document-body .diagram-editor summary {
+  gap: 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--foreground) 14%, transparent);
 }

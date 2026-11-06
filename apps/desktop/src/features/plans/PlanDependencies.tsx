@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, Link2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Layers, Link2, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -304,44 +305,97 @@ export function PlanDependencies({
   const members = graph?.nodes.filter((node) => !node.boundary) ?? [];
   const outside = graph ? graph.nodes.length - members.length : 0;
   const total = graph?.total_members ?? members.length;
+  const empty =
+    graph !== null && members.length > 0 && graph.edges.length === 0;
+  const key = (
+    <p className="plan-dependencies-key">
+      <span>
+        <svg width="40" height="10" viewBox="0 0 40 10" aria-hidden="true">
+          <line
+            x1="2"
+            y1="5"
+            x2="31"
+            y2="5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <path d="M30 1.5l7 3.5-7 3.5z" fill="currentColor" />
+        </svg>
+        blocks: arrow points at the ticket that waits
+      </span>
+      <span>
+        <span className="plan-dependencies-key-box" aria-hidden="true" />
+        outside this Plan
+      </span>
+    </p>
+  );
   return (
     <section className="plan-dependencies" aria-label="Plan dependencies">
-      <header className="plan-dependencies-header">
-        <h2>Plan dependencies</h2>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <ArrowLeft aria-hidden="true" />
-          Return to list
-        </Button>
-      </header>
+      {!empty && key}
       {error && <p role="alert">{error}</p>}
       {!graph && !error && <p role="status">Loading dependencies…</p>}
-      {graph && members.length === 0 && <p>No tickets in this Plan.</p>}
+      {graph && members.length === 0 && (
+        <EmptyState
+          icon={<Layers />}
+          title="No tickets in this Plan"
+          description="Add tickets to the Plan to see how they depend on each other."
+        />
+      )}
       {graph && members.length > 0 && (
         <>
-          <div className="plan-graph-canvas">
-            <Canvas
-              graph={graph}
-              origin=""
-              selected={selected}
-              onSelect={setSelected}
-              projects={projects}
-              readable
-            />
-          </div>
-          {graph.nodes.find((node) => node.reference === selected) && (
-            <SelectionPanel
-              ticket={graph.nodes.find((node) => node.reference === selected)!}
-              origin=""
-              projects={projects}
-              nodes={graph.nodes}
-              version={graph}
-              onOpen={onOpen}
-            />
+          {graph.edges.length === 0 ? (
+            // Nothing to draw: say what the arrows will mean and how to get one.
+            <div className="plan-dependencies-card">
+              {key}
+              <EmptyState
+                icon={<Network />}
+                title="Nothing blocks anything in this Plan yet"
+                description={`${
+                  members.length === 1
+                    ? `${members[0]?.reference} is its only ticket. `
+                    : `None of its ${members.length} tickets waits on another. `
+                }When one ticket must finish before another, add a blocker and the order appears here.`}
+                action={
+                  !archived && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-expanded={selected === members[0]?.reference}
+                      onClick={() => setSelected(members[0]?.reference ?? null)}
+                    >
+                      <Link2 data-icon="inline-start" aria-hidden="true" />
+                      Add blocker…
+                    </Button>
+                  )
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="plan-graph-canvas">
+                <Canvas
+                  graph={graph}
+                  origin=""
+                  selected={selected}
+                  onSelect={setSelected}
+                  projects={projects}
+                  readable
+                />
+              </div>
+              {graph.nodes.find((node) => node.reference === selected) && (
+                <SelectionPanel
+                  ticket={graph.nodes.find(
+                    (node) => node.reference === selected,
+                  )!}
+                  origin=""
+                  projects={projects}
+                  nodes={graph.nodes}
+                  version={graph}
+                  onOpen={onOpen}
+                />
+              )}
+            </>
           )}
-          <p className="plan-note plan-legend">
-            Arrows run from blocker to the ticket that waits. Dashed tickets are
-            outside this Plan.
-          </p>
           {total > members.length && (
             <p className="plan-callout" role="status">
               Showing {members.length} of {total} tickets.{" "}
@@ -358,58 +412,60 @@ export function PlanDependencies({
               · not included in the {total} member tickets
             </p>
           )}
-          <ul className="plan-dependency-rows" aria-label="Plan tickets">
-            {members.map((member) => {
-              // Only blockers that are not Done still hold the ticket back.
-              const count = graph.edges.filter(
-                (edge) =>
-                  edge.dependent === member.reference &&
-                  graph.nodes.find((node) => node.reference === edge.blocker)
-                    ?.status !== "Done",
-              ).length;
-              const open = selected === member.reference;
-              const label =
-                count > 0
-                  ? `${count} open ${count === 1 ? "blocker" : "blockers"}`
-                  : archived
-                    ? "No blockers"
-                    : "Add blocker";
-              return (
-                <li key={member.reference}>
-                  <div className="plan-dependency-row">
-                    <StatusIcon status={member.status} size={14} decorative />
-                    <span className="plan-dependency-title">
-                      <span className="ticket-ref">{member.reference}</span>{" "}
-                      {member.title}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-expanded={open}
-                      aria-label={`${member.reference}: ${label}`}
-                      onClick={() =>
-                        setSelected(open ? null : member.reference)
-                      }
-                    >
-                      <Link2 aria-hidden="true" />
-                      {label}
-                    </Button>
-                  </div>
-                  {open && (
-                    <Blockers
-                      key={member.reference}
-                      member={member}
-                      graph={graph}
-                      projects={projects}
-                      refresh={refresh}
-                      onOpen={onOpen}
-                      archived={archived}
-                    />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          {(graph.edges.length > 0 || members.length > 1 || selected) && (
+            <ul className="plan-dependency-rows" aria-label="Plan tickets">
+              {members.map((member) => {
+                // Only blockers that are not Done still hold the ticket back.
+                const count = graph.edges.filter(
+                  (edge) =>
+                    edge.dependent === member.reference &&
+                    graph.nodes.find((node) => node.reference === edge.blocker)
+                      ?.status !== "Done",
+                ).length;
+                const open = selected === member.reference;
+                const label =
+                  count > 0
+                    ? `${count} open ${count === 1 ? "blocker" : "blockers"}`
+                    : archived
+                      ? "No blockers"
+                      : "Add blocker";
+                return (
+                  <li key={member.reference}>
+                    <div className="plan-dependency-row">
+                      <StatusIcon status={member.status} size={14} decorative />
+                      <span className="plan-dependency-title">
+                        <span className="ticket-ref">{member.reference}</span>{" "}
+                        {member.title}
+                      </span>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        aria-expanded={open}
+                        aria-label={`${member.reference}: ${label}`}
+                        onClick={() =>
+                          setSelected(open ? null : member.reference)
+                        }
+                      >
+                        <Link2 aria-hidden="true" />
+                        {label}
+                      </Button>
+                    </div>
+                    {open && (
+                      <Blockers
+                        key={member.reference}
+                        member={member}
+                        graph={graph}
+                        projects={projects}
+                        refresh={refresh}
+                        onOpen={onOpen}
+                        archived={archived}
+                      />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </>
       )}
     </section>

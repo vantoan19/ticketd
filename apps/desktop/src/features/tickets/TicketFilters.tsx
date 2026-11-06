@@ -1,32 +1,28 @@
+import { useEffect, useState, type ReactNode } from "react";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@/components/ui/field";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
+import { Picker } from "@/components/ui/picker";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Layers, Search, SlidersHorizontal, X } from "lucide-react";
+import { client, type Ticket } from "@/lib/api/client";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { StatusDot } from "@/components/ui/status-dot";
 import { ticketStatuses } from "@/lib/statuses";
+import { useFilterDock } from "./filter-dock";
 import "./ticket-filters.css";
 
 type Props = {
   part?: "controls" | "chips";
+  /** Show the Filter control with its word, as a Plan's toolbar does. */
+  labeledFilter?: boolean;
   query: string;
   setQuery: (value: string) => void;
   plan: string;
@@ -47,13 +43,28 @@ type Props = {
     plan: string;
   };
   clearFilters: () => void;
+  /** Name of the scope the list shows, for the search count. */
+  scopeName: string;
+  /** Tickets matching now, and what the scope holds before narrowing. */
+  total: number;
+  scopeTotal: number | null;
 };
 
 export function TicketFilters(p: Props) {
+  const [searching, setSearching] = useState(false);
+  const dock = useFilterDock();
+  const [localOpen, setLocalOpen] = useState(false);
+  const filtersOpen = dock ? dock.open : localOpen;
+  const setFiltersOpen = dock ? dock.setOpen : setLocalOpen;
   const update = (setter: (value: string) => void, value: string) => {
     setter(value);
     p.setOffset(0);
   };
+  const tagList = p.tags
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  const setTagList = (next: string[]) => update(p.setTags, next.join(", "));
   const chips = [
     p.query.trim() && {
       label: `Search: ${p.query.trim()}`,
@@ -61,159 +72,224 @@ export function TicketFilters(p: Props) {
     },
     !p.navigation.plan &&
       p.plan && {
-        label: `Plan: ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
+        label: `Plan is ${p.plans.find((item) => item.id === p.plan)?.name ?? p.plan}`,
         clear: () => update(p.setPlan, ""),
       },
     p.navigation.kind !== "progress" &&
       p.status && {
-        label: `Status: ${p.status}`,
+        label: `Status is ${p.status}`,
         clear: () => update(p.setStatus, ""),
       },
-    ...p.tags
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean)
-      .map((tag, index, all) => ({
-        label: `Tag: ${tag}`,
-        clear: () =>
-          update(
-            p.setTags,
-            all.filter((_, position) => position !== index).join(", "),
-          ),
-      })),
+    ...tagList.map((tag) => ({
+      label: `Tag is ${tag}`,
+      clear: () => setTagList(tagList.filter((item) => item !== tag)),
+    })),
     p.navigation.kind !== "ready" &&
       p.availability && {
-        label: `Availability: ${p.availability}`,
+        label: `Availability is ${p.availability}`,
         clear: () => update(p.setAvailability, ""),
       },
     p.family && {
-      label: `Family: ${p.family}`,
+      label: `Parent is ${p.family}`,
       clear: () => update(p.setFamily, ""),
     },
   ].filter((chip): chip is { label: string; clear: () => void } =>
     Boolean(chip),
   );
   const filterCount = chips.length - (p.query.trim() ? 1 : 0);
+  const ofTotal = `${p.total} of ${p.scopeTotal ?? p.total}`;
   return (
     <>
       {p.part !== "chips" && (
         <div className="list-controls">
-          <Popover>
-            <PopoverTrigger asChild>
+          {searching ? (
+            <div className="header-search" role="search">
+              <Search size={16} aria-hidden="true" />
+              <Input
+                aria-label="Search tickets"
+                placeholder="Search tickets…"
+                autoFocus
+                value={p.query}
+                onChange={(event) => update(p.setQuery, event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.stopPropagation();
+                    setSearching(false);
+                  }
+                }}
+              />
+              {p.query.trim() && (
+                <span role="status" className="header-search-count">
+                  {p.total} {p.total === 1 ? "result" : "results"}
+                  <span className="sr-only"> in {p.scopeName}</span>
+                </span>
+              )}
+              <Kbd>Esc</Kbd>
               <IconButton
-                label={
-                  p.query ? `Search tickets: ${p.query}` : "Search tickets"
-                }
+                label="Close search"
+                onClick={() => setSearching(false)}
               >
-                <Search />
+                <X />
               </IconButton>
-            </PopoverTrigger>
-            <PopoverContent align="end" aria-label="Search tickets">
-              <label className="search">
-                <Search size={16} />
-                <span className="sr-only">Search tickets</span>
-                <Input
-                  aria-label="Search tickets"
-                  placeholder="Search tickets…"
-                  value={p.query}
-                  onChange={(event) => update(p.setQuery, event.target.value)}
-                />
-              </label>
-            </PopoverContent>
-          </Popover>
-          <Popover>
+            </div>
+          ) : (
+            <IconButton
+              label={p.query ? `Search tickets: ${p.query}` : "Search tickets"}
+              onClick={() => setSearching(true)}
+            >
+              <Search />
+            </IconButton>
+          )}
+          <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+            {dock && <PopoverAnchor virtualRef={dock.anchor} />}
             <PopoverTrigger asChild>
-              <IconButton
-                label={
-                  filterCount ? `Filters, ${filterCount} active` : "Filters"
-                }
-                aria-label={
-                  filterCount ? `Filters, ${filterCount} active` : "Filters"
-                }
-              >
-                <SlidersHorizontal />
-                {filterCount > 0 && (
-                  <span className="filter-count">{filterCount}</span>
-                )}
-              </IconButton>
+              {p.labeledFilter ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="filter-trigger"
+                  data-active={filtersOpen || filterCount > 0 ? "" : undefined}
+                  aria-label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                >
+                  <SlidersHorizontal data-icon="inline-start" />
+                  Filter
+                  {filterCount > 0 && (
+                    <span className="filter-count">{filterCount}</span>
+                  )}
+                </Button>
+              ) : (
+                <IconButton
+                  label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                  aria-label={
+                    filterCount ? `Filters, ${filterCount} active` : "Filters"
+                  }
+                >
+                  <SlidersHorizontal />
+                  {filterCount > 0 && (
+                    <span className="filter-count">{filterCount}</span>
+                  )}
+                </IconButton>
+              )}
             </PopoverTrigger>
             <PopoverContent
               className="filters-content"
-              align="end"
+              side="right"
+              align="start"
+              sideOffset={8}
+              alignOffset={dock ? 8 : 0}
+              collisionPadding={8}
+              avoidCollisions={!dock}
               aria-label="Ticket filters"
             >
-              <FieldSet>
-                <FieldLegend>Filters</FieldLegend>
-                <FieldGroup>
-                  {!p.navigation.plan && (
-                    <FilterSelect
+              <div className="filters-head">
+                <h2>Filters</h2>
+                <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+                  Clear all
+                </Button>
+              </div>
+              <div className="filters-body">
+                {p.navigation.kind !== "progress" && (
+                  <FilterSection label="Status">
+                    <div className="toggle-chips">
+                      {ticketStatuses.map((value) => (
+                        <ToggleChip
+                          key={value}
+                          pressed={p.status === value}
+                          onToggle={() =>
+                            update(p.setStatus, p.status === value ? "" : value)
+                          }
+                        >
+                          <StatusIcon status={value} size={16} decorative />
+                          {value}
+                        </ToggleChip>
+                      ))}
+                    </div>
+                  </FilterSection>
+                )}
+                {p.navigation.kind !== "ready" && (
+                  <FilterSection label="Availability">
+                    <SegmentedControl
+                      aria-label="Availability"
+                      value={p.availability || "Any"}
+                      onValueChange={(value) =>
+                        update(p.setAvailability, value === "Any" ? "" : value)
+                      }
+                      options={[
+                        { value: "Any", label: "Any" },
+                        {
+                          value: "Ready",
+                          label: "Ready",
+                          icon: <StatusDot tone="ready" size={8} />,
+                        },
+                        {
+                          value: "Blocked",
+                          label: "Blocked",
+                          icon: <StatusDot tone="blocked" size={8} />,
+                        },
+                      ]}
+                    />
+                  </FilterSection>
+                )}
+                {!p.navigation.plan && (
+                  <FilterSection label="Plan">
+                    <Picker
                       label="Plan"
-                      value={p.plan}
-                      onChange={(value) => update(p.setPlan, value)}
-                      all="All Plans"
-                      options={p.plans.map((item) => ({
-                        value: item.id,
-                        label: `${item.name}${item.archived ? " (archived)" : ""}`,
-                      }))}
-                    />
-                  )}
-                  {p.navigation.kind !== "progress" && (
-                    <FilterSelect
-                      label="Status"
-                      value={p.status}
-                      onChange={(value) => update(p.setStatus, value)}
-                      all="All statuses"
-                      options={ticketStatuses.map((value) => ({
-                        value,
-                        label: value,
-                      }))}
-                    />
-                  )}
-                  <Field>
-                    <FieldLabel htmlFor="filter-tags">
-                      Tags (comma separated; all tags required)
-                    </FieldLabel>
-                    <Input
-                      id="filter-tags"
-                      value={p.tags}
-                      onChange={(event) =>
-                        update(p.setTags, event.target.value)
+                      icon={<Layers aria-hidden="true" />}
+                      value={p.plan || "__any"}
+                      onValueChange={(value) =>
+                        update(p.setPlan, value === "__any" ? "" : value)
                       }
+                      options={[
+                        { value: "__any", label: "Any Plan" },
+                        ...p.plans.map((item) => ({
+                          value: item.id,
+                          label: `${item.name}${item.archived ? " (archived)" : ""}`,
+                        })),
+                      ]}
                     />
-                  </Field>
-                  {p.navigation.kind !== "ready" && (
-                    <FilterSelect
-                      label="Availability"
-                      value={p.availability}
-                      onChange={(value) => update(p.setAvailability, value)}
-                      all="All availability"
-                      options={["Ready", "Blocked"].map((value) => ({
-                        value,
-                        label: value,
-                      }))}
-                    />
-                  )}
-                  <Field>
-                    <FieldLabel htmlFor="filter-family">
-                      Parent ticket
-                    </FieldLabel>
-                    <Input
-                      id="filter-family"
-                      value={p.family}
-                      onChange={(event) =>
-                        update(p.setFamily, event.target.value)
-                      }
-                    />
-                  </Field>
-                </FieldGroup>
-              </FieldSet>
+                  </FilterSection>
+                )}
+                <FilterSection label="Tags">
+                  <TagChips
+                    open={filtersOpen}
+                    selected={tagList}
+                    onChange={setTagList}
+                  />
+                  <p className="filter-hint">
+                    Tickets must have every tag you pick.
+                  </p>
+                </FilterSection>
+                <FilterSection label="Parent ticket">
+                  <ParentSearch
+                    value={p.family}
+                    onChange={(value) => update(p.setFamily, value)}
+                  />
+                </FilterSection>
+              </div>
+              <div className="filters-foot">
+                <span role="status">
+                  {ofTotal} {p.total === 1 ? "ticket matches" : "tickets match"}
+                </span>
+                <span className="filters-actions">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFiltersOpen(false)}
+                  >
+                    Done
+                  </Button>
+                </span>
+              </div>
             </PopoverContent>
           </Popover>
         </div>
       )}
       {p.part !== "controls" && chips.length > 0 && (
         <div className="filter-chips" aria-label="Active filters">
-          <span>Filters</span>
           {chips.map((chip, index) => (
             <Button
               key={`${chip.label}-${index}`}
@@ -226,8 +302,13 @@ export function TicketFilters(p: Props) {
               <X data-icon="inline-end" />
             </Button>
           ))}
-          <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-            Clear filters
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Clear filters"
+            onClick={p.clearFilters}
+          >
+            Clear
           </Button>
         </div>
       )}
@@ -235,41 +316,170 @@ export function TicketFilters(p: Props) {
   );
 }
 
-function FilterSelect({
+function FilterSection({
   label,
-  value,
-  onChange,
-  all,
-  options,
+  children,
 }: {
   label: string;
-  value: string;
-  onChange: (value: string) => void;
-  all: string;
-  options: { value: string; label: string }[];
+  children: ReactNode;
 }) {
-  const id = `filter-${label.toLowerCase()}`;
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Select
-        value={value || "__all"}
-        onValueChange={(next) => onChange(next === "__all" ? "" : next)}
+    <section className="filter-section" aria-label={label}>
+      <h3>{label}</h3>
+      {children}
+    </section>
+  );
+}
+
+function ToggleChip({
+  pressed,
+  onToggle,
+  children,
+}: {
+  pressed: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      variant={pressed ? "default" : "outline"}
+      size="sm"
+      aria-pressed={pressed}
+      onClick={onToggle}
+    >
+      {children}
+    </Button>
+  );
+}
+
+/** Every tag in the workspace as a toggle; picked tags stay shown if unknown. */
+function TagChips({
+  open,
+  selected,
+  onChange,
+}: {
+  open: boolean;
+  selected: string[];
+  onChange: (tags: string[]) => void;
+}) {
+  const [vocabulary, setVocabulary] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void client.searchTags("").then(
+      (tags) => {
+        if (active) setVocabulary(tags);
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [open]);
+  const all = [...new Set([...vocabulary, ...selected])];
+  if (all.length === 0) return <p className="filter-hint">No tags yet.</p>;
+  return (
+    <div className="toggle-chips tag-chips">
+      {all.map((tag) => (
+        <ToggleChip
+          key={tag}
+          pressed={selected.includes(tag)}
+          onToggle={() =>
+            onChange(
+              selected.includes(tag)
+                ? selected.filter((item) => item !== tag)
+                : [...selected, tag],
+            )
+          }
+        >
+          {tag}
+        </ToggleChip>
+      ))}
+    </div>
+  );
+}
+
+/** Finds a parent by title or T-number and sets its reference as the filter. */
+function ParentSearch({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (reference: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [found, setFound] = useState<Ticket[]>([]);
+  useEffect(() => {
+    const query = text.trim();
+    if (!query) return;
+    let active = true;
+    void client
+      .findTickets({
+        query,
+        project: null,
+        unlinked: false,
+        plan: null,
+        status: null,
+        tags: [],
+        availability: null,
+        family: null,
+        order: "Newest",
+        limit: 5,
+        offset: 0,
+      })
+      .then(
+        (tickets) => {
+          if (active) setFound(tickets);
+        },
+        () => {},
+      );
+    return () => {
+      active = false;
+    };
+  }, [text]);
+  if (value)
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        aria-label={`Remove parent ${value}`}
+        onClick={() => onChange("")}
       >
-        <SelectTrigger id={id}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem value="__all">{all}</SelectItem>
-            {options.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-    </Field>
+        {value}
+        <X data-icon="inline-end" />
+      </Button>
+    );
+  const results = text.trim() ? found : [];
+  return (
+    <div className="parent-search">
+      <Search aria-hidden="true" className="parent-search-icon" />
+      <Input
+        aria-label="Find a parent ticket"
+        placeholder="Find a parent by title or T-number"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+      />
+      {results.length > 0 && (
+        <ul aria-label="Parent matches">
+          {results.map((ticket) => (
+            <li key={ticket.reference}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  onChange(ticket.reference);
+                  setText("");
+                }}
+              >
+                <span className="text-muted-foreground">
+                  {ticket.reference}
+                </span>{" "}
+                {ticket.title}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

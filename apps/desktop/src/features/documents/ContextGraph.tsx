@@ -2,9 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
 import { Button } from "@/components/ui/button";
+import { ListHeader } from "@/components/ui/list-header";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
 import { client, type ContextGraph as Graph } from "@/lib/api/client";
-import { GraphLegend, KindIcon } from "./GraphLegend";
+import { useKeepPaneScroll } from "./keep-scroll";
+import { KindIcon } from "./GraphLegend";
 import {
+  cardParts,
+  nodeAriaLabel,
   connectionRows,
   edgeLabels,
   flowEdges,
@@ -36,6 +42,7 @@ export function ContextGraph({
   onBack: (origin: Graph["nodes"][number] | null) => void;
   onOpen: (node: Graph["nodes"][number]) => void;
 }) {
+  const keepScroll = useKeepPaneScroll();
   const changeVersion = useWorkspaceChange();
   const [center, setCenter] = useState(origin);
   const [selected, setSelected] = useState<string | null>(null);
@@ -129,7 +136,7 @@ export function ContextGraph({
   useEffect(() => {
     if (graph && restoreFocus.current) {
       restoreFocus.current = false;
-      previewHeading.current?.focus();
+      previewHeading.current?.focus({ preventScroll: true });
     }
   }, [graph]);
   function focus(id: string) {
@@ -282,211 +289,224 @@ export function ContextGraph({
       </>
     );
   }
+  const relationships = graph?.edges.length ?? 0;
+  const panel = preview ? (
+    <>
+      <p>{kindNames[preview.kind]}</p>
+      <h2 ref={previewHeading} tabIndex={-1}>
+        {preview.label}
+      </h2>
+      <p>{stateLine(preview)}</p>
+      <Button onClick={() => onOpen(preview)}>Open item</Button>
+      {actions(preview)}
+      <p>Selecting previews an item. Center it to explore its connections.</p>
+    </>
+  ) : (
+    <p>Select an item to preview it.</p>
+  );
   return (
     <section className="context-graph-page" aria-label="Context graph">
-      <div className="context-graph-heading">
-        <h1>Context graph</h1>
-        <Button disabled={!preview} onClick={() => preview && onOpen(preview)}>
-          Open item
-        </Button>
-      </div>
-      <div className="context-graph-toolbar">
-        <Button variant="ghost" onClick={back}>
-          {history.length
-            ? `Back to ${history.at(-1)!.label}`
-            : `Back to ${originLabel ?? originNode?.ticket_reference ?? originNode?.label ?? "source"}`}
-        </Button>
+      <ListHeader
+        title="Context graph"
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={back}>
+              {history.length
+                ? `Back to ${history.at(-1)!.label}`
+                : `Back to ${originLabel ?? originNode?.ticket_reference ?? originNode?.label ?? "source"}`}
+            </Button>
+            <label className="context-graph-switch">
+              <Switch
+                aria-label="Include update details"
+                checked={includeDetails}
+                // Expand choices stay; ones whose item disappears are dropped
+                // when the graph reloads.
+                onCheckedChange={setIncludeDetails}
+              />
+              Update details
+            </label>
+            {neighbours > 0 && !tooDense && (
+              <SegmentedControl
+                aria-label="View"
+                value={showMap ? "graph" : "list"}
+                onValueChange={(value) => setMapChoice(value === "graph")}
+                options={[
+                  { value: "graph", label: "Graph" },
+                  { value: "list", label: "List" },
+                ]}
+              />
+            )}
+          </>
+        }
+      >
         {centerLabel && (
-          <span className="context-graph-scope">Centered on {centerLabel}</span>
+          <span className="context-graph-subject">{centerLabel}</span>
         )}
-        {neighbours > 0 && !tooDense && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMapChoice(!showMap)}
-          >
-            {showMap ? "Show list" : "Show map"}
-          </Button>
+        {graph && (
+          <p>
+            {graph.nodes.length} {graph.nodes.length === 1 ? "item" : "items"} ·{" "}
+            {relationships}{" "}
+            {relationships === 1 ? "relationship" : "relationships"}
+          </p>
         )}
-        <label>
-          <input
-            type="checkbox"
-            checked={includeDetails}
-            onChange={(event) => {
-              const include = event.target.checked;
-              // Expand choices stay; ones whose item disappears are dropped when
-              // the graph reloads.
-              setIncludeDetails(include);
-            }}
-          />{" "}
-          Include update details
-        </label>
-      </div>
-      {error && <p role="alert">{error}</p>}
-      {layoutError && <p role="alert">{layoutError}</p>}
-      {!showMap && preview && (
-        <div className="context-graph-strip">
-          <span>{kindNames[preview.kind]}</span>
-          <strong ref={previewHeading} tabIndex={-1}>
-            {preview.label}
-          </strong>
-          <span>{stateLine(preview)}</span>
-          {actions(preview)}
-        </div>
-      )}
-      {showMap && (
-        <div className="context-graph-main">
-          {active && (
-            <ContextGraphCanvas
-              nodes={(graph?.nodes ?? []).map((node) => ({
-                id: node.id,
-                label: `${kindNames[node.kind].toUpperCase()} · ${node.label}`,
-              }))}
-              edges={edges}
-              selected={selected}
-              positions={positions}
-              onPositions={(value) => {
-                setLayoutError("");
-                setPositions(value);
-              }}
-              viewport={viewport}
-              onViewport={setViewport}
-              onSelect={setSelected}
-              onError={setLayoutError}
-              fit={fit}
-              centerOn={centerOn}
-              centerId={graph?.center}
-              onFitted={() => {
-                setFit(false);
-                setCenterOn(null);
-              }}
-            />
-          )}
-          <aside className="context-graph-preview">
-            {preview ? (
-              <>
-                <p>{kindNames[preview.kind]}</p>
-                <h2 ref={previewHeading} tabIndex={-1}>
-                  {preview.label}
-                </h2>
-                <p>{stateLine(preview)}</p>
-                {actions(preview)}
-                <p>
-                  Selecting previews an item. Center it to explore its
-                  connections.
-                </p>
-              </>
-            ) : (
-              <p>Select an item to preview it.</p>
-            )}
-          </aside>
-        </div>
-      )}
-      {groupSummary && neighbours > 12 && (
-        <p className="context-graph-groups">
-          {groupSummary}
-          {tooDense &&
-            " · Too many connections for a map; use the list or center on an item."}
-        </p>
-      )}
-      <div className="context-graph-toolbar">
-        <GraphLegend />
-      </div>
-      {graph && (
-        <p role="status" className="context-graph-status">
-          Showing {graph.nodes.length}{" "}
-          {graph.nodes.length === 1 ? "item" : "items"} · {graph.edges.length}{" "}
-          {graph.edges.length === 1 ? "connection" : "connections"}
-          {hiddenDetails
-            ? " · update details hidden; tick Include update details to show them"
-            : ""}
-          {moreExists && !canLoadMore
-            ? " · View limit reached; center on an item to explore further"
-            : ""}
-          {canLoadMore && (
-            <>
-              {" · "}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setPages((previous) => [
-                    ...previous,
-                    ...loadable.slice(0, room).map((item) => ({
-                      anchor: item.anchor,
-                      group: item.group,
-                      offset: item.next_offset!,
-                    })),
-                  ])
-                }
-              >
-                Load more
-              </Button>
-            </>
-          )}
-        </p>
-      )}
-      <h2>Connected items</h2>
-      {graph && kindGroups.length === 0 && (
-        <p role="status">
-          Nothing is connected to this item yet. Mention it with T-n or attach
-          it to a ticket to connect it.
-        </p>
-      )}
-      {kindGroups.map((group) => {
-        const limit = shownPerKind[group.key] ?? GROUP_PAGE;
-        return (
-          <div key={group.key}>
-            <h3>
-              {group.title}{" "}
-              <span className="context-graph-count">{group.nodes.length}</span>
-            </h3>
-            <ul className="context-graph-list">
-              {group.nodes.slice(0, limit).map((node) => (
-                <li key={node.id}>
-                  <KindIcon kind={node.kind} />
-                  <button type="button" onClick={() => setSelected(node.id)}>
-                    {node.label}
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Center on ${node.label}`}
-                    title="Center on this item"
-                    onClick={() => focus(node.id)}
-                  >
-                    <Crosshair aria-hidden="true" />
-                  </Button>
-                  {graph &&
-                    connectionRows(node.id, graph)
-                      .filter((row) => !group.kind || row.kind === group.kind)
-                      .map((row) => (
-                        <p key={row.key}>
-                          <strong>{edgeLabels[row.kind] ?? row.kind}</strong> ·{" "}
-                          {row.text}
-                        </p>
-                      ))}
-                </li>
-              ))}
-            </ul>
-            {group.nodes.length > limit && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={`Load more ${group.title}`}
-                onClick={() =>
-                  setShownPerKind((value) => ({
-                    ...value,
-                    [group.key]: limit + GROUP_PAGE,
-                  }))
-                }
-              >
-                Load more
-              </Button>
-            )}
+      </ListHeader>
+      <div className="context-graph-body">
+        {error && <p role="alert">{error}</p>}
+        {layoutError && <p role="alert">{layoutError}</p>}
+        {!showMap && preview && (
+          <div className="context-graph-strip">
+            <span>{kindNames[preview.kind]}</span>
+            <strong ref={previewHeading} tabIndex={-1}>
+              {preview.label}
+            </strong>
+            <span>{stateLine(preview)}</span>
+            <Button onClick={() => onOpen(preview)}>Open item</Button>
+            {actions(preview)}
           </div>
-        );
-      })}
+        )}
+        {showMap && (
+          <div className="context-graph-main">
+            {active && (
+              <ContextGraphCanvas
+                nodes={(graph?.nodes ?? []).map((node) => ({
+                  id: node.id,
+                  label: nodeAriaLabel(node),
+                  ...cardParts(node),
+                  kind: node.kind,
+                  status: node.state?.split(" · ")[0] ?? "",
+                }))}
+                edges={edges}
+                selected={selected}
+                positions={positions}
+                onPositions={(value) => {
+                  setLayoutError("");
+                  setPositions(value);
+                }}
+                viewport={viewport}
+                onViewport={setViewport}
+                onSelect={setSelected}
+                onError={setLayoutError}
+                fit={fit}
+                centerOn={centerOn}
+                centerId={graph?.center}
+                loading={!graph}
+                onFitted={() => {
+                  setFit(false);
+                  setCenterOn(null);
+                }}
+              />
+            )}
+            <aside className="context-graph-preview">{panel}</aside>
+          </div>
+        )}
+        {groupSummary && neighbours > 12 && (
+          <p className="context-graph-groups">
+            {groupSummary}
+            {tooDense &&
+              " · Too many connections for a map; use the list or center on an item."}
+          </p>
+        )}
+        {graph && (
+          <p role="status" className="context-graph-status">
+            Showing {graph.nodes.length}{" "}
+            {graph.nodes.length === 1 ? "item" : "items"} · {graph.edges.length}{" "}
+            {graph.edges.length === 1 ? "connection" : "connections"}
+            {hiddenDetails
+              ? " · update details hidden; turn on Update details to show them"
+              : ""}
+            {moreExists && !canLoadMore
+              ? " · View limit reached; center on an item to explore further"
+              : ""}
+            {canLoadMore && (
+              <>
+                {" · "}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setPages((previous) => [
+                      ...previous,
+                      ...loadable.slice(0, room).map((item) => ({
+                        anchor: item.anchor,
+                        group: item.group,
+                        offset: item.next_offset!,
+                      })),
+                    ])
+                  }
+                >
+                  Load more
+                </Button>
+              </>
+            )}
+          </p>
+        )}
+        <h2>Connected items</h2>
+        {graph && kindGroups.length === 0 && (
+          <p role="status">
+            Nothing is connected to this item yet. Mention it with T-n or attach
+            it to a ticket to connect it.
+          </p>
+        )}
+        {kindGroups.map((group) => {
+          const limit = shownPerKind[group.key] ?? GROUP_PAGE;
+          return (
+            <div key={group.key}>
+              <h3>
+                {group.title}{" "}
+                <span className="context-graph-count">
+                  {group.nodes.length}
+                </span>
+              </h3>
+              <ul className="context-graph-list">
+                {group.nodes.slice(0, limit).map((node) => (
+                  <li key={node.id}>
+                    <KindIcon kind={node.kind} />
+                    <button
+                      type="button"
+                      {...keepScroll(() => setSelected(node.id))}
+                    >
+                      {node.label}
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Center on ${node.label}`}
+                      title="Center on this item"
+                      onClick={() => focus(node.id)}
+                    >
+                      <Crosshair aria-hidden="true" />
+                    </Button>
+                    {graph &&
+                      connectionRows(node.id, graph)
+                        .filter((row) => !group.kind || row.kind === group.kind)
+                        .map((row) => (
+                          <p key={row.key}>
+                            <strong>{edgeLabels[row.kind] ?? row.kind}</strong>{" "}
+                            · {row.text}
+                          </p>
+                        ))}
+                  </li>
+                ))}
+              </ul>
+              {group.nodes.length > limit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Load more ${group.title}`}
+                  onClick={() =>
+                    setShownPerKind((value) => ({
+                      ...value,
+                      [group.key]: limit + GROUP_PAGE,
+                    }))
+                  }
+                >
+                  Load more
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

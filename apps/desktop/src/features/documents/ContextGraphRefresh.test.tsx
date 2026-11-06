@@ -74,8 +74,12 @@ test("the newest refresh wins when answers arrive out of order", async () => {
   await act(async () =>
     resolvers[1]!(graph([node("a", "Older"), node("b", "B")])),
   );
-  expect(screen.getByText("Centered on Renamed")).toBeTruthy();
-  expect(screen.queryByText("Centered on Old")).toBeNull();
+  expect(
+    screen.getByText("Renamed", { selector: ".context-graph-subject" }),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText("Old", { selector: ".context-graph-subject" }),
+  ).toBeNull();
 });
 
 test("the map or list choice holds after centring on another item", async () => {
@@ -88,12 +92,14 @@ test("the map or list choice holds after centring on another item", async () => 
         : graph(many),
     );
   render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Show map" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Graph" }));
   expect(screen.getByText("Canvas")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Center on Item 1" }));
-  await screen.findByText("Centered on Item 1");
+  await screen.findByText("Item 1", { selector: ".context-graph-subject" });
   expect(screen.getByText("Canvas")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
+  expect(
+    screen.getByRole("radio", { name: "Graph", checked: true }),
+  ).toBeTruthy();
 });
 
 test("a very dense neighbourhood stays a list and groups rows by relationship", async () => {
@@ -110,7 +116,7 @@ test("a very dense neighbourhood stays a list and groups rows by relationship", 
     await screen.findByRole("heading", { name: "Mentions 36" }),
   ).toBeTruthy();
   expect(screen.queryByText("Canvas")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Show map" })).toBeNull();
+  expect(screen.queryByRole("radiogroup", { name: "View" })).toBeNull();
   expect(
     screen.queryByRole("button", { name: "Center on Ticket 10" }),
   ).toBeNull();
@@ -125,7 +131,7 @@ test("the group summary sits below the map so the canvas never moves", async () 
     .mockReset()
     .mockResolvedValue(graph(many));
   render(<ContextGraph origin="n0" onBack={vi.fn()} onOpen={vi.fn()} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Show map" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Graph" }));
   const canvas = screen.getByText("Canvas");
   const summary = screen.getByText(/Mentions 13/, { selector: "p" });
   expect(
@@ -143,13 +149,13 @@ test("Back names the item it returns to, and hidden details have one control", a
       hidden_details: true,
     }));
   render(<ContextGraph origin="a" onBack={vi.fn()} onOpen={vi.fn()} />);
-  await screen.findByText("Centered on A");
+  await screen.findByText("A", { selector: ".context-graph-subject" });
   expect(
     screen.queryByRole("button", { name: "Show update details" }),
   ).toBeNull();
   expect(screen.getByText(/update details hidden/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Center on B" }));
-  await screen.findByText("Centered on B");
+  await screen.findByText("B", { selector: ".context-graph-subject" });
   expect(screen.getByRole("button", { name: "Back to A" })).toBeTruthy();
 });
 

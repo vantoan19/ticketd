@@ -3,18 +3,24 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 24px 12px;
+  min-height: 44px;
+  padding: 0 20px 0 16px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
+/* The text link sits on the row's left edge when it wraps. */
+.filter-chips > .ui-button[data-variant="ghost"] {
+  padding-inline: 0;
+}
+/* Inline after the word, clear of the glyph: the labeled "Filter | 1". */
 .filter-count {
   min-width: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  color: var(--foreground);
-  background: var(--accent);
-  font-size: 12px;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  font-size: var(--text-caption);
   line-height: 16px;
   text-align: center;
 }
@@ -22,7 +28,7 @@
   padding: 12px 24px;
   color: var(--muted-foreground);
   background: var(--recessed);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .filters-content [data-slot="field-group"] {
@@ -30,4 +36,208 @@
 }
 .filters-content [data-slot="field"] {
   gap: 8px;
+}
+.filters-head,
+.filters-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* Docked panel (board C): 340px, flat, 1px ring, beside the list. It stays
+   at its content height; the detail pane's empty state re-centres in the
+   space to its right. */
+.filters-content {
+  width: 340px;
+  max-height: calc(100dvh - 44px - 16px);
+  box-shadow: 0 0 0 1px #00000014;
+  border-radius: 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.filters-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+.filters-head {
+  flex: none;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 #0000000f;
+}
+/* The Filter control keeps a filled pill while the panel is open or filters apply. */
+.filter-trigger {
+  gap: 6px;
+  padding-inline: 8px;
+}
+.filter-chips > [aria-label="Clear filters"] {
+  margin-left: auto;
+}
+.filter-trigger[data-active],
+.filter-trigger[data-state="open"] {
+  background: var(--accent);
+}
+.filters-head h2 {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+}
+.filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.filters-content .toggle-chips button {
+  height: 28px;
+  gap: 6px;
+  padding: 0 10px 0 8px;
+  border-radius: 9999px;
+  font-size: var(--text-code);
+}
+.filters-content .tag-chips button {
+  height: 26px;
+  padding: 0 10px;
+}
+.filters-content .filter-section [data-slot="select-trigger"],
+.filters-content .ui-picker-field {
+  width: 100%;
+  height: 32px;
+}
+.filter-section h3 {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 16px;
+}
+.toggle-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filter-hint {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.filters-foot {
+  flex: none;
+  height: 52px;
+  padding: 0 12px 0 16px;
+  background: var(--background);
+  box-shadow: 0 -1px 0 0 #0000000f;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+}
+.filters-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.parent-search ul {
+  margin-top: 4px;
+  list-style: none;
+  padding: 0;
+}
+.parent-search li button {
+  width: 100%;
+  justify-content: flex-start;
+}
+.header-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+.header-search input {
+  flex: 1 1 120px;
+  min-width: 120px;
+  height: 32px;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.header-search-count {
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--text-caption);
+}
+.list-header:has(.header-search) > :not(.list-controls) {
+  display: none;
+}
+.list-header:has(.header-search) .list-controls {
+  flex: 1;
+}
+/* Narrow list: the result count stays for screen readers only and the Esc
+   hint goes, so the Filter trigger always keeps its place. */
+.list-header {
+  container-type: inline-size;
+}
+@container (max-width: 420px) {
+  .header-search-count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .header-search > kbd,
+  .header-search > [data-slot="kbd"] {
+    display: none;
+  }
+}
+.parent-search {
+  position: relative;
+}
+.parent-search-icon {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.parent-search input {
+  height: 32px;
+  padding-left: 34px;
+}
+
+/* Board C geometry. Availability is three equal thirds; labels in the panel,
+   its footer and the list's filter row are 13px; the constraint chip is 28px
+   tall (26 plus the 1px ring on each side); the parent field's placeholder and
+   glyph are #8F8F8F. */
+.filters-content [data-slot="segmented-control"] {
+  display: flex;
+  width: 100%;
+  gap: 0;
+}
+.filters-content [data-slot="segmented-control"] > button {
+  flex: 1 1 0;
+  justify-content: center;
+  font-size: var(--text-code);
+}
+.filters-head .ui-button,
+.filters-foot .ui-button,
+.filter-chips > .ui-button,
+.filter-trigger {
+  font-size: var(--text-code);
+}
+.filter-chips > .ui-button[data-variant="outline"] {
+  height: 26px;
+  padding-inline: 8px 4px;
+}
+.parent-search input::placeholder {
+  color: var(--control-boundary);
+}
+.parent-search-icon {
+  color: var(--control-boundary);
 }

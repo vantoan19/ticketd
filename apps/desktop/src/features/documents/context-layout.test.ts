@@ -1,6 +1,37 @@
 import { expect, test } from "vitest";
 import { CARD_HEIGHT, CARD_WIDTH, layoutContextGraph } from "./context-layout";
 
+test("leaves every line room for its label and arrowhead between the cards", () => {
+  const edges = [
+    { source: "t3", target: "t1", label: "blocks" },
+    { source: "t2", target: "t1", label: "mentions" },
+    { source: "spec", target: "t1", label: "mentions" },
+    { source: "spec", target: "t3", label: "mentions" },
+  ];
+  const points = layoutContextGraph({
+    nodes: ["t1", "t2", "t3", "spec"],
+    edges,
+    positions: {},
+    center: "t1",
+  });
+  for (const edge of edges) {
+    const a = points[edge.source]!;
+    const b = points[edge.target]!;
+    // Free stretch of the line outside both cards, measured along it.
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    const ux = Math.abs(b.x - a.x) / d;
+    const uy = Math.abs(b.y - a.y) / d;
+    const reach = Math.min(
+      ux ? CARD_WIDTH / 2 / ux : Infinity,
+      uy ? CARD_HEIGHT / 2 / uy : Infinity,
+    );
+    const label = edge.label.length * 6.8 + 16;
+    expect(d - 2 * reach, `${edge.source}->${edge.target}`).toBeGreaterThan(
+      label * ux + 18 * uy + 14,
+    );
+  }
+});
+
 test("lays out cycles deterministically and preserves existing positions", () => {
   const input = {
     nodes: ["a", "b", "c"],

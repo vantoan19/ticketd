@@ -137,11 +137,9 @@ function Comparison({
       </caption>
       <thead>
         <tr>
-          <th scope="col">
-            <span className="sr-only">Item</span>
-          </th>
-          <th scope="col">This workspace</th>
-          <th scope="col">Backup</th>
+          <th scope="col">Replaces</th>
+          <th scope="col">Current workspace</th>
+          <th scope="col">This backup</th>
         </tr>
       </thead>
       <tbody>
@@ -272,25 +270,34 @@ export function RestoreDialog({
       }}
     >
       <DialogContent
-        className="restore-dialog sm:max-w-[600px]"
+        className="restore-dialog sm:max-w-[640px]"
         showCloseButton={phase.name !== "restoring"}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <div className="restore-head">
-          <DialogTitle>Restore from a backup</DialogTitle>
+          <DialogTitle>Restore from backup</DialogTitle>
           <DialogDescription>
             {done
               ? "The workspace now matches the backup."
-              : "Check what you're restoring. Nothing changes until you replace the workspace."}
+              : "Check what this backup contains. Nothing changes until you confirm."}
           </DialogDescription>
         </div>
 
-        <div className="restore-body">
+        {/* Focusable so End, Page Down and the arrow keys scroll the review; focus is otherwise on the buttons outside it. */}
+        <div
+          className="restore-body"
+          role="region"
+          aria-label="Backup review"
+          tabIndex={0}
+        >
           <div className="restore-file">
             <Database aria-hidden="true" />
             <span className="restore-file-text">
               <code aria-label="Chosen backup file">{name}</code>
-              <span aria-label="Backup folder">{folder}</span>
+              <span>
+                <span aria-label="Backup folder">{folder}</span>
+                {valid ? " · integrity checked" : ""}
+              </span>
             </span>
             {!done && (
               <Button
@@ -352,23 +359,6 @@ export function RestoreDialog({
                 follows, reminders, and inbox state.{" "}
                 {differences(inspection.current, valid.summary)}
               </p>
-              <div className="restore-notes">
-                <p>
-                  <strong>A safety backup comes first.</strong>{" "}
-                  <span className="restore-muted">
-                    ticketd saves a backup of this workspace next to it before
-                    replacing anything. Restore that backup the same way to
-                    undo.
-                  </span>
-                </p>
-                <p>
-                  <strong>Pause ticketd CLI commands.</strong>{" "}
-                  <span className="restore-muted">
-                    Stop other ticketd commands, such as an agent recording
-                    activities, until the restore finishes.
-                  </span>
-                </p>
-              </div>
             </>
           )}
 
@@ -437,12 +427,33 @@ export function RestoreDialog({
           )}
         </div>
 
+        {valid && (
+          <div className="restore-pinned">
+            <div className="restore-notes">
+              <p>
+                <strong>A safety backup comes first.</strong>{" "}
+                <span className="restore-muted">
+                  ticketd saves a backup of this workspace next to it before
+                  replacing anything. Restore that backup the same way to undo.
+                </span>
+              </p>
+              <p>
+                <strong>Pause ticketd CLI commands.</strong>{" "}
+                <span className="restore-muted">
+                  Stop other ticketd commands, such as an agent recording
+                  activities, until the restore finishes.
+                </span>
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="restore-footer">
           <span className="restore-muted">
             {done
               ? "To undo, restore the safety backup from Settings."
               : valid
-                ? "You can undo this with the safety backup."
+                ? ""
                 : "Choose a backup saved by this version or earlier."}
           </span>
           {done ? (
@@ -467,7 +478,7 @@ export function RestoreDialog({
                 <RotateCcw aria-hidden="true" />
                 {phase.name === "restoring"
                   ? "Restoring…"
-                  : "Replace workspace"}
+                  : "Replace workspace with backup"}
               </Button>
             </span>
           )}

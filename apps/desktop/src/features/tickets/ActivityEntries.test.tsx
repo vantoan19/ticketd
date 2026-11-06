@@ -99,9 +99,11 @@ test("shows an editing agent only when one was recorded and words history as sen
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-20" />);
-  await screen.findByText("Status changed from Todo to In progress");
-  expect(screen.getByText("Only in ticketd")).toBeTruthy();
-  expect(screen.getAllByText(/^Agent:/)).toHaveLength(1);
+  await screen.findByText("Status Todo → In progress");
+  expect(screen.queryByText(/Only in ticketd/)).toBeNull();
+  // The agent names its update; an agentless one is the person's own.
+  expect(screen.getAllByText(/^update ·/)).toHaveLength(2);
+  expect(screen.getAllByText("You")).toHaveLength(1);
   expect(screen.queryByText(/status:/)).toBeNull();
 });
 
@@ -162,7 +164,7 @@ test("Activity puts the composer before labelled notes and quiet relative histor
   expect(
     screen.getByText("Only in ticketd · never sent to GitHub"),
   ).toBeTruthy();
-  expect(screen.getByText("Latest update")).toBeTruthy();
+  expect(screen.getByText("Latest")).toBeTruthy();
   expect(screen.getByText("2 h ago")).toBeTruthy();
   expect(
     screen

@@ -3,7 +3,7 @@
 }
 .ticket-rows {
   margin: 0;
-  padding: 0 8px 24px;
+  padding: 0 0 24px;
   list-style: none;
 }
 .ticket-rows li {
@@ -11,8 +11,10 @@
   align-items: flex-start;
   min-width: 0;
   margin-block: 0;
-  padding-left: 0;
-  border-radius: 6px;
+  /* Bands and the selected row run the full pane width (board A: x 224-608);
+     row content keeps its 8px / 6px insets inside them. */
+  padding-inline: 8px 6px;
+  border-radius: 0;
 }
 .ticket-rows li:hover {
   background: var(--recessed);
@@ -23,13 +25,14 @@
 }
 .ticket-list .ticket-row {
   display: grid;
-  grid-template-columns: 16px 56px minmax(0, 1fr) auto;
-  column-gap: 8px;
+  grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+  column-gap: 4px;
   row-gap: 2px;
   width: 100%;
   min-width: 0;
-  min-height: 48px;
-  padding: 8px 12px 8px 0;
+  /* Two lines: 8 + 20 + 2 + 16 + 6 = 52px (design frame A). */
+  min-height: 52px;
+  padding: 8px 6px 6px 0;
   text-align: left;
   border-radius: 6px;
   background: transparent;
@@ -49,7 +52,7 @@
 .ticket-title {
   min-width: 0;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
   overflow: hidden;
@@ -63,9 +66,10 @@
   gap: 8px;
   min-width: 0;
   color: var(--muted-foreground);
-  font-size: 14px;
-  line-height: 20px;
-  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: clip;
+  overflow-clip-margin: 2px;
 }
 .ticket-row-state {
   display: inline-flex;
@@ -97,18 +101,19 @@
   gap: 0 8px;
   min-width: 0;
   height: 16px;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 1px;
 }
 .ticket-tag {
   flex: none;
+  height: 18px;
+  margin-block: -1px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--recessed);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  line-height: 18px;
   white-space: nowrap;
-}
-.ticket-rows li:hover .ticket-tag,
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-tag {
-  background: var(--surface);
 }
 .ticket-list .ticket-row:focus-visible {
   position: relative;
@@ -159,38 +164,104 @@
 }
 .bulk-controls {
   position: sticky;
-  bottom: 16px;
+  bottom: 0;
   z-index: 10;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  max-width: calc(100% - 16px);
-  margin: 0 auto 16px;
-  padding: 6px 4px;
-  border-radius: 12px;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
   color: var(--popover-foreground);
   background: var(--popover);
-  box-shadow: var(--shadow-menu);
+  box-shadow: 0 -1px 0 0 var(--border);
+}
+.bulk-controls {
+  container-type: inline-size;
 }
 .bulk-bar {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 8px 0 12px;
 }
-/* One row at the narrowest list width: the bar sits over the list, so a second
-   row would cover another ticket. */
+.bulk-spacer {
+  flex: 1;
+}
+.bulk-kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.bulk-menu-label {
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.bulk-status-check {
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+}
 .bulk-bar .ui-button {
   padding-inline: 8px;
 }
+/* Keeps the two outline triggers apart when the narrow rule drops the bar gap. */
+.bulk-bar .bulk-organize {
+  margin-inline-start: 4px;
+}
 .bulk-count {
   padding-inline: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   white-space: nowrap;
+}
+.bulk-short,
+.bulk-clear-icon {
+  display: none;
+}
+/* Narrow list (the default width is ~387pt, the floor 360pt): these blocks
+   follow the base rules so they win. Below 480pt Select all shortens; below
+   440pt Clear becomes an icon and the Esc hint goes, so every control fits
+   one 48pt row. */
+@container (width < 480px) {
+  .bulk-long {
+    display: none;
+  }
+  .bulk-short {
+    display: inline;
+  }
+}
+@container (width < 440px) {
+  .bulk-kbd,
+  .bulk-clear-text {
+    display: none;
+  }
+  .bulk-clear-icon {
+    display: block;
+  }
+  .bulk-bar {
+    gap: 0;
+    padding-inline: 4px;
+  }
+  .bulk-bar .ui-button {
+    padding-inline: 6px;
+  }
+  .bulk-bar .bulk-clear {
+    padding-inline: 0;
+    width: 32px;
+  }
+  .bulk-count {
+    padding-inline: 4px;
+  }
 }
 .bulk-message {
   display: flex;
@@ -199,7 +270,7 @@
   gap: 8px;
   margin: 0;
   padding-inline: 8px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .bulk-error {
@@ -223,7 +294,7 @@
   margin-left: auto;
   padding-left: 16px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .bulk-tag-form {
   display: grid;
@@ -250,7 +321,8 @@
 }
 .bulk-tag-note {
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 
 .ticket-row-action {
@@ -269,6 +341,21 @@
   .ticket-rows li:focus-within .ticket-row-action {
     opacity: 1;
   }
+  /* The action floats over the trailing edge instead of reserving a column,
+     so the time stays on that edge in every list. It takes the time's place
+     only while it is shown. */
+  .ticket-rows li:has(.ticket-row-action) {
+    position: relative;
+  }
+  .ticket-row-action {
+    position: absolute;
+    top: 0;
+    right: 8px;
+  }
+  .ticket-rows li:hover:has(.ticket-row-action) .ticket-row-time,
+  .ticket-rows li:focus-within:has(.ticket-row-action) .ticket-row-time {
+    opacity: 0;
+  }
 }
 /* Reveal selection without moving the identifier or title columns. */
 @media (hover: hover) and (pointer: fine) {
@@ -281,36 +368,41 @@
     opacity: 1;
   }
 }
-/* A status group's header is a 32px band on the canvas surface. Rows and
+/* A status group's header is a 32px recessed band with a hairline above and below. Rows and
    headers share one list, so a row that changes group is not remounted. */
 .ticket-rows li.ticket-group-header {
   align-items: center;
   gap: 8px;
   height: 32px;
-  margin-top: 12px;
-  margin-bottom: 2px;
-  padding: 0 4px 0 32px;
-  background: var(--background);
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: 0 4px 0 36px;
+  background: var(--recessed);
+  box-shadow:
+    0 1px 0 0 var(--group-hairline),
+    0 -1px 0 0 var(--group-hairline);
 }
 .ticket-rows li.ticket-group-header:hover {
-  background: var(--background);
+  background: var(--recessed);
 }
 .ticket-rows li.ticket-group-header:first-child {
   margin-top: 0;
+  /* The first band starts flush under the header rule. */
+  box-shadow: 0 1px 0 0 var(--group-hairline);
 }
 .ticket-group-header svg {
   flex: none;
   color: var(--muted-foreground);
 }
 .ticket-group-header h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .ticket-group-count {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-group-add {
@@ -330,7 +422,7 @@
   box-shadow: var(--shadow-border-base);
   color: var(--secondary-foreground);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -364,18 +456,18 @@
 }
 .segmented-count {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .source-refresh {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-row-time {
   flex: none;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -383,7 +475,7 @@
   flex-wrap: wrap;
 }
 .ticket-row-tags {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .ticket-rows li:has(.ticket-row:focus-visible) {
@@ -396,38 +488,83 @@
 .ticket-row-contextual {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  max-height: 20px;
-  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 2px;
 }
-.ticket-row-contextual .ticket-row-tags {
-  display: contents;
+/* Priority when the line is tight: the state keeps its words, the context and
+   tags shrink with an ellipsis and never to nothing. */
+.ticket-row-contextual .ticket-row-state {
+  flex: 0 0 auto;
 }
 .ticket-row-contextual .ticket-row-context {
+  flex: 0 1 auto;
+  min-width: 6ch;
+}
+.ticket-row-contextual .ticket-row-tags {
+  display: flex;
+  flex: 0 100 auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 4ch;
+  height: auto;
+}
+.ticket-row-contextual .ticket-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
+.ticket-row-contextual .ticket-row-tags {
+  flex: none;
+  min-width: 0;
+  max-width: 50%;
+}
+/* The first tag is never the part that gives: the context name truncates first. */
+.ticket-row-contextual .ticket-tag:first-child {
   flex: none;
   max-width: 100%;
+}
+.ticket-row-contextual .ticket-tag-more {
+  flex: none;
+}
+/* The context item carries its type icon: layers for a Plan, a folder for a
+   project, so the two names are never mistaken for each other. */
+.ticket-row-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ticket-row-context svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.ticket-row-context-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ticket-row-meta:has(.ticket-row-time) {
   flex-wrap: nowrap;
 }
 
-.ticket-row-brief {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Active rows use the full second line for the source warning and report. */
-.ticket-row-meta-active {
-  grid-column: 1 / -1;
-}
 .refresh-failed {
   margin: 0;
   padding: 4px 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
+}
+
+/* Two classes: the generic `.ticket-list > p` padding must not win, or the note
+   starts 4px right of the header title. */
+.ticket-list > .list-description {
+  margin: 0;
+  padding: 24px 20px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
 }

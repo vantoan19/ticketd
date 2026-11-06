@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -121,7 +122,7 @@ test("the property rail holds Status, Source, Project, Plan, Tags, Relationships
     within(rail).getByRole("combobox", { name: "Status: In progress" }),
   ).toBeTruthy();
   expect(
-    within(rail).getByRole("button", { name: "Project: Unlinked" }),
+    within(rail).getByRole("button", { name: "Project: No project" }),
   ).toBeTruthy();
 });
 
@@ -159,14 +160,16 @@ test("Follow, the reminder, and the properties live in the rail, not the header"
   const rail = await screen.findByRole("complementary", {
     name: "Ticket properties",
   });
-  const follow = await within(rail).findByRole("button", { name: "Follow" });
-  expect(follow.getAttribute("aria-pressed")).toBe("false");
+  const follow = await within(rail).findByRole("switch", { name: "Follow" });
+  expect(follow.getAttribute("aria-checked")).toBe("false");
   fireEvent.click(follow);
-  expect(
-    (
-      await within(rail).findByRole("button", { name: "Following" })
-    ).getAttribute("aria-pressed"),
-  ).toBe("true");
+  await waitFor(() =>
+    expect(
+      within(rail)
+        .getByRole("switch", { name: "Follow" })
+        .getAttribute("aria-checked"),
+    ).toBe("true"),
+  );
   expect(
     within(rail).getByRole("button", { name: "Manage reminder" }),
   ).toBeTruthy();
@@ -243,11 +246,83 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   const heading = screen.getByRole("heading", { name: "Latest update" });
   fireEvent.click(
     await within(heading.closest("section")!).findByRole("button", {
-      name: "Open update",
+      name: "Go to update",
     }),
   );
   expect(
     (await screen.findByLabelText("Selected update")).textContent,
   ).toContain("Reported progress");
   expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
+});
+
+test("Edit is a real button with its shortcut, and E starts editing", async () => {
+  renderDetails({ ...ticket, body: "Some text" });
+  const edit = await screen.findByRole("button", { name: "Edit description" });
+  expect(edit.textContent).toContain("E");
+  fireEvent.keyDown(document.body, { key: "e" });
+  expect(
+    await screen.findByRole("button", { name: "Done editing" }),
+  ).toBeTruthy();
+});
+
+test("Subtickets and Evidence own their add actions even when empty", async () => {
+  renderDetails();
+  const subtickets = (
+    await screen.findByRole("heading", { name: "Subtickets" })
+  ).closest("section")!;
+  expect(
+    within(subtickets).getByRole("button", { name: "Add subticket" }),
+  ).toBeTruthy();
+  const evidence = screen.getByRole("heading", { name: /^Evidence/ });
+  expect(
+    within(evidence.closest("section")!).getByRole("button", {
+      name: "Add evidence",
+    }),
+  ).toBeTruthy();
+});
+
+test("showing another ticket starts its rail and document at the top", async () => {
+  const other: Ticket = { ...ticket, id: "2", reference: "T-2" };
+  const props = {
+    mention: null,
+    expanded: false,
+    onExpand: vi.fn(),
+    onReturn: vi.fn(),
+    setSelected: vi.fn(),
+    details: { "T-1": ticket, "T-2": other },
+    projects: [],
+    plans: [],
+    revision: 0,
+    refresh: vi.fn(async () => {}),
+    updateTicket: vi.fn(),
+    position: { index: 2, total: 11 },
+    onAdjacent: vi.fn(),
+  };
+  // jsdom never scrolls: store the offset so a reset is observable.
+  const offsets = new WeakMap<Element, number>();
+  vi.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(function (
+    this: Element,
+  ) {
+    return offsets.get(this) ?? 0;
+  });
+  vi.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (
+    this: Element,
+    value: number,
+  ) {
+    offsets.set(this, value);
+  });
+  const view = render(<TicketDetails {...props} selected="T-2" />);
+  await screen.findAllByRole("complementary", { hidden: true });
+  const scrollers = () => {
+    const [shown] = document.querySelectorAll<HTMLElement>(".detail-content");
+    return [
+      document.querySelector<HTMLElement>(".detail-scroll")!,
+      shown!.querySelector<HTMLElement>(".detail-document")!,
+      shown!.querySelector<HTMLElement>(".ticket-properties")!,
+    ];
+  };
+  for (const node of scrollers()) node.scrollTop = 120;
+  view.rerender(<TicketDetails {...props} selected="T-1" />);
+  for (const node of scrollers()) expect(node.scrollTop).toBe(0);
+  vi.restoreAllMocks();
 });

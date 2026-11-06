@@ -2,8 +2,8 @@ import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FileText, Pin, Plus, Search } from "lucide-react";
-import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
+import { FileText, Pin, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   documents,
   type Document,
@@ -411,7 +411,22 @@ export function Documents({
             {!trashLoaded ? (
               <p role="status">Loading Trash…</p>
             ) : (
-              trash.length === 0 && <p>Trash is empty.</p>
+              trash.length === 0 && (
+                <EmptyState
+                  icon={<Trash2 />}
+                  title="Trash is empty"
+                  description="Documents you move to Trash wait here until you restore them."
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setView("all")}
+                    >
+                      Browse Documents
+                    </Button>
+                  }
+                />
+              )
             )}
             {list(trash, "", true)}
             {(trashOffset > 0 || trash.length >= 50) && (
@@ -503,7 +518,13 @@ export function Documents({
                   <p role="status">Loading Documents…</p>
                 ) : (
                   all.length === 0 &&
-                  allOffset === 0 && <p>No Documents yet.</p>
+                  allOffset === 0 && (
+                    <EmptyState
+                      icon={<FileText />}
+                      title="No Documents yet"
+                      description="Capture a thought or create a Document to start."
+                    />
+                  )
                 )}
                 {list(all)}
                 {(allOffset > 0 || all.length >= 50) && (
@@ -531,13 +552,11 @@ export function Documents({
                 ) : (
                   recent.length === 0 &&
                   recentOffset === 0 && (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyDescription>
-                          Your captured thoughts will appear here.
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
+                    <EmptyState
+                      icon={<FileText />}
+                      title="No recent Documents"
+                      description="Your captured thoughts will appear here."
+                    />
                   )
                 )}
                 {list(
@@ -653,7 +672,8 @@ export function Documents({
                     disabled={trashed}
                     onClick={() => setAddingTag(true)}
                   >
-                    Add tag
+                    <Tag data-icon="inline-start" aria-hidden="true" />
+                    Add tags
                   </Button>
                 ) : (
                   <form

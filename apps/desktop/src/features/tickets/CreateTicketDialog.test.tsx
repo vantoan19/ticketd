@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { Project } from "@/lib/api/client";
@@ -133,7 +134,7 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
     [],
     false,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: "New ticket" }));
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
@@ -142,15 +143,29 @@ test("editor modes and toolbar actions never create a ticket; explicit submissio
   expect(screen.getByText(/Draft restored/)).toBeTruthy();
 });
 
-test("creating without a title shows an inline error, keeps focus, and creates nothing", () => {
+test("the empty description says what to write and that Markdown works", async () => {
+  render(<Harness create={vi.fn()} />);
+  const editor = await screen.findByRole("textbox", {
+    name: "Description rich text",
+  });
+  expect(editor.style.getPropertyValue("--editor-placeholder")).toBe(
+    '"Steps, acceptance criteria, or a checklist"',
+  );
+  expect(screen.getByText("Markdown works · type / for blocks")).toBeTruthy();
+});
+
+test("Create ticket stays disabled with its reason until there is a title", () => {
   const create = vi.fn();
   render(<Harness create={create} />);
-  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
-  const title = screen.getByRole("textbox", { name: "Title" });
-  expect(screen.getByText("Enter a title")).toBeTruthy();
-  expect(title.getAttribute("aria-invalid")).toBe("true");
-  expect(document.activeElement).toBe(title);
-  expect(create).not.toHaveBeenCalled();
+  const button = screen.getByRole("button", { name: "Create ticket" });
+  expect(button).toHaveProperty("disabled", true);
+  expect(screen.getByText("Add a title to create")).toBeTruthy();
+  expect(button.getAttribute("aria-describedby")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
+    target: { value: "Ready" },
+  });
+  expect(button).toHaveProperty("disabled", false);
+  expect(screen.queryByText("Add a title to create")).toBeNull();
 });
 
 test("opening from a project scope preselects that project", () => {
@@ -162,7 +177,7 @@ test("opening from a project scope preselects that project", () => {
     />,
   );
   expect(
-    screen.getByRole("button", { name: "Project: Desktop app" }),
+    screen.getByRole("combobox", { name: "Project: Desktop app" }),
   ).toBeTruthy();
 });
 
@@ -261,7 +276,7 @@ test("Create more keeps the dialog open, clears text, keeps properties, refocuse
   expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
   expect(title).toHaveProperty("value", "");
   expect(document.activeElement).toBe(title);
-  expect(screen.getByRole("button", { name: "Plan: Sprint 1" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Plan: Sprint 1" })).toBeTruthy();
   fireEvent.change(title, { target: { value: "Second" } });
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
@@ -277,21 +292,21 @@ test("tags are chips that can be added and removed", () => {
   fireEvent.change(input, { target: { value: "Bug" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(screen.getByText("bug")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove tag bug" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove bug" }));
   expect(screen.queryByText("bug")).toBeNull();
 });
 
-test("Escape closes only the foremost surface: the tag suggestions, then the dialog", async () => {
+test("suggested tags are options in the field's dropdown, not chips beside it", async () => {
   answers.tags = ["alpha", "beta"];
   render(<Harness create={vi.fn()} />);
-  const tags = screen.getByRole("textbox", { name: "Add tag" });
-  await screen.findByRole("list", { name: "Tag suggestions" });
-  tags.focus();
-  fireEvent.keyDown(tags, { key: "Escape" });
-  await waitFor(() =>
-    expect(screen.queryByRole("list", { name: "Tag suggestions" })).toBeNull(),
-  );
-  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
-  fireEvent.keyDown(tags, { key: "Escape" });
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  const input = screen.getByRole("textbox", { name: "Add tag" });
+  expect(screen.queryByRole("listbox")).toBeNull();
+  fireEvent.focus(input);
+  const list = await screen.findByRole("listbox", {
+    name: "Add tag suggestions",
+  });
+  fireEvent.click(within(list).getByRole("option", { name: "alpha" }));
+  expect(screen.getByRole("button", { name: "Remove alpha" })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: "alpha" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
 });

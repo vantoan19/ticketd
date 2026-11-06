@@ -1,6 +1,8 @@
 import { useEffect, useId, useState } from "react";
+import { Code, Maximize2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +15,13 @@ import { CopySourceButton } from "./CopySourceButton";
 import { renderDiagram } from "./mermaid-renderer";
 import { useDarkTheme } from "@/lib/preferences";
 
-type Result = { source: string; dark: boolean; svg: string; error: string };
+type Result = {
+  source: string;
+  dark: boolean;
+  svg: string;
+  error: string;
+  detail?: string;
+};
 
 export function MermaidDiagram({ source }: { source: string }) {
   const dark = useDarkTheme();
@@ -21,6 +29,7 @@ export function MermaidDiagram({ source }: { source: string }) {
   const [showSource, setShowSource] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [zoom, setZoom] = useState(100);
+  const [attempt, setAttempt] = useState(0);
   const sourceId = useId();
   useEffect(() => {
     let active = true;
@@ -34,6 +43,7 @@ export function MermaidDiagram({ source }: { source: string }) {
             source,
             dark,
             svg: "",
+            detail: reason instanceof Error ? reason.message : String(reason),
             error: `Could not render this diagram. ${reason instanceof Error && /limit|configuration|external resources/.test(reason.message) ? reason.message : "Check its source in the editor."}`,
           });
       },
@@ -41,9 +51,23 @@ export function MermaidDiagram({ source }: { source: string }) {
     return () => {
       active = false;
     };
-  }, [source, dark]);
+  }, [source, dark, attempt]);
   const current =
     result?.source === source && result.dark === dark ? result : null;
+  const unpainted = !current || Boolean(current.error);
+  // A window that was hidden while the diagram rendered paints it when shown again.
+  useEffect(() => {
+    if (!unpainted) return;
+    const retry = () => {
+      if (document.visibilityState !== "hidden") setAttempt((n) => n + 1);
+    };
+    window.addEventListener("focus", retry);
+    document.addEventListener("visibilitychange", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      document.removeEventListener("visibilitychange", retry);
+    };
+  }, [unpainted]);
   const sourceVisible = showSource || Boolean(current?.error);
   const zoomControls = (
     <div className="markdown-block-toolbar">
@@ -104,7 +128,7 @@ export function MermaidDiagram({ source }: { source: string }) {
     >
       <Dialog open={expanded} onOpenChange={setExpanded}>
         <div className="markdown-block-toolbar">
-          <span>Mermaid</span>
+          <span>Mermaid diagram</span>
           <Button
             type="button"
             variant="ghost"
@@ -114,9 +138,10 @@ export function MermaidDiagram({ source }: { source: string }) {
             disabled={Boolean(current?.error)}
             onClick={() => setShowSource((value) => !value)}
           >
-            {sourceVisible ? "Hide source" : "Show source"}
+            <Code aria-hidden="true" />
+            Source
           </Button>
-          <CopySourceButton label="Copy source" source={source} />
+          <CopySourceButton label="Copy" icon source={source} />
           <DialogTrigger asChild>
             <Button
               type="button"
@@ -124,23 +149,23 @@ export function MermaidDiagram({ source }: { source: string }) {
               size="sm"
               disabled={!current?.svg}
             >
-              Expand diagram
+              <Maximize2 aria-hidden="true" />
+              Expand
             </Button>
           </DialogTrigger>
         </div>
         {current?.error ? (
-          <Alert variant="destructive">
+          <Alert variant="destructive" data-reason={current.detail}>
             <AlertDescription>{current.error}</AlertDescription>
           </Alert>
         ) : !current ? (
-          <p role="status" className="p-3 text-muted-foreground">
-            Rendering diagram…
-          </p>
+          // A block-sized skeleton: the diagram arrives in place without moving the text below.
+          <div role="status" className="mermaid-pending">
+            <Skeleton aria-hidden="true" className="h-full w-full" />
+            <span className="sr-only">Rendering diagram…</span>
+          </div>
         ) : !expanded ? (
-          <>
-            {zoomControls}
-            {diagram}
-          </>
+          diagram
         ) : null}
         {sourceVisible && (
           <pre
@@ -162,7 +187,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           </DialogHeader>
           {zoomControls}
           {diagram}
-          <CopySourceButton label="Copy source" source={source} />
+          <CopySourceButton label="Copy source" icon source={source} />
         </DialogContent>
       </Dialog>
     </section>

@@ -21,11 +21,23 @@ function FieldNote({
   id,
   field,
   errors,
+  pending = "",
 }: {
   id: string;
   field: SchemaField;
   errors: string[];
+  /** Text typed into a selector but not yet added to it. */
+  pending?: string;
 }) {
+  const text = pending.trim();
+  const explained = text !== "" && errors.length > 0;
+  if (explained) {
+    const shape =
+      field.type === "multi_select" && field.format === "owner_name"
+        ? "is not a repository; expected owner/name, then press Enter to add it."
+        : "has not been added; press Enter to add it.";
+    errors = [`“${text}” ${shape}`];
+  }
   return (
     <>
       {field.help && (
@@ -35,7 +47,7 @@ function FieldNote({
       )}
       {errors.map((message) => (
         <p key={message} role="alert" className="settings-failure">
-          {field.label} {message}
+          {explained ? message : `${field.label} ${message}`}
         </p>
       ))}
     </>
@@ -164,9 +176,7 @@ function MultiSelectField({
     >
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && (
-          <span className="source-required"> (optional)</span>
-        )}
+        {!field.required && <span className="source-required">Optional</span>}
       </Label>
       <div className="source-chip-input">
         {value.length > 0 && (
@@ -192,9 +202,9 @@ function MultiSelectField({
           disabled={disabled || full}
           placeholder={
             field.key === "repositories"
-              ? "Add a repository…"
+              ? "e.g. acme/billing-api"
               : field.key === "labels"
-                ? "Any label"
+                ? "e.g. bug, payments"
                 : "Search or type, then press Enter"
           }
           aria-describedby={field.help ? `${id}-help` : undefined}
@@ -259,7 +269,7 @@ function MultiSelectField({
           )}
         </div>
       )}
-      <FieldNote id={id} field={field} errors={errors} />
+      <FieldNote id={id} field={field} errors={errors} pending={query} />
     </div>
   );
 }
@@ -339,16 +349,18 @@ function TextField({
     <div className="source-field" data-field={field.key}>
       <Label htmlFor={id}>
         {field.label}
-        {!field.required && (
-          <span className="source-required"> (optional)</span>
-        )}
+        {!field.required && <span className="source-required">Optional</span>}
       </Label>
       <Input
         id={id}
         value={value}
         disabled={disabled}
         placeholder={
-          field.key === "assignee" ? "Anyone" : (field.placeholder ?? undefined)
+          field.key === "assignee"
+            ? "e.g. octocat"
+            : field.placeholder
+              ? `e.g. ${field.placeholder}`
+              : undefined
         }
         aria-describedby={field.help ? `${id}-help` : undefined}
         aria-invalid={errors.length > 0 || undefined}

@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
+import { workspaceClient } from "@/lib/api/workspace";
 import { Projects } from "./Projects";
 
 afterEach(() => {
@@ -20,48 +21,48 @@ const project = {
   id: "p1",
   name: "Original",
   path: "/old",
-  paths: ["/old", "/other/checkout"],
+  paths: ["/Users/me/src/old", "/other/checkout"],
 };
 const props = {
   projects: [project],
   loading: false,
-  filter: "all",
-  onFilter: () => {},
   onChange: async () => {},
 };
 
-test("keeps a project draft while adopting an untouched path from refresh", () => {
-  const { rerender } = render(<Projects {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Original" }));
-  fireEvent.change(screen.getByLabelText("Project name"), {
-    target: { value: "Draft" },
+function openMenu(name: string) {
+  fireEvent.pointerDown(screen.getByRole("button", { name }), {
+    button: 0,
+    ctrlKey: false,
   });
-  rerender(<Projects {...props} projects={[{ ...project, path: "/new" }]} />);
-  expect(screen.getByLabelText("Project name")).toHaveProperty(
-    "value",
-    "Draft",
-  );
-  expect(screen.getByLabelText("Repository path")).toHaveProperty(
-    "value",
-    "/new",
-  );
+}
+
+test("shows checkouts home-relative on one line with the full path on hover", () => {
+  render(<Projects {...props} />);
+  const list = screen.getByRole("list", { name: "Checkouts of Original" });
+  const path = within(list).getByTitle("/Users/me/src/old");
+  expect(path.textContent).toBe("~/src/old");
+  expect(within(list).getByTitle("/other/checkout")).toBeTruthy();
 });
 
-test("shows the explanation, project ID and checkouts with Copy actions", () => {
+test("copies a checkout path and the project ID, and shows the folder in the file manager", () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText },
     configurable: true,
   });
+  const reveal = vi.spyOn(workspaceClient, "reveal").mockResolvedValue();
   render(<Projects {...props} />);
   expect(screen.getByText(/identity survives moves and renames/)).toBeTruthy();
-  expect(screen.getByText("p1")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Copy project ID/ }));
   expect(writeText).toHaveBeenCalledWith("p1");
   fireEvent.click(
     screen.getByRole("button", { name: "Copy checkout path /other/checkout" }),
   );
   expect(writeText).toHaveBeenCalledWith("/other/checkout");
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Show \/other\/checkout in / }),
+  );
+  expect(reveal).toHaveBeenCalledWith("/other/checkout");
 });
 
 test("empty state explains and offers New project", () => {
@@ -71,46 +72,70 @@ test("empty state explains and offers New project", () => {
   expect(screen.getByRole("dialog", { name: "New project" })).toBeTruthy();
 });
 
-test("validates a new project inline before saving", async () => {
-  const create = vi.spyOn(client, "createProject");
-  render(<Projects {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-  expect(screen.getByText("Enter a project name.")).toBeTruthy();
-  expect(screen.getByText("Enter a repository path.")).toBeTruthy();
-  expect(
-    screen.getByLabelText("Project name").getAttribute("aria-invalid"),
-  ).toBe("true");
-  expect(create).not.toHaveBeenCalled();
-});
-
-test("creates a project, refreshes, and closes the dialog", async () => {
+test("a new project waits for a folder, fills its name from it, then saves", async () => {
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue(
+    "/Users/me/src/mobile-app",
+  );
   const create = vi.spyOn(client, "createProject").mockResolvedValue(project);
   const onChange = vi.fn().mockResolvedValue(undefined);
   render(<Projects {...props} onChange={onChange} />);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  fireEvent.change(screen.getByLabelText("Project name"), {
-    target: { value: " New " },
+  const dialog = screen.getByRole("dialog", { name: "New project" });
+  const create_ = within(dialog).getByRole("button", {
+    name: "Create project",
   });
-  fireEvent.change(screen.getByLabelText("Repository path"), {
-    target: { value: "/repo" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-  await waitFor(() => expect(create).toHaveBeenCalledWith("New", "/repo"));
+  expect(create_).toHaveProperty("disabled", true);
+  expect(within(dialog).getByText("No folder chosen")).toBeTruthy();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Choose folder…" }),
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog).getByRole("button", { name: "Change…" }),
+    ).toBeTruthy(),
+  );
+  expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveProperty(
+    "value",
+    "Mobile App",
+  );
+  expect(create_).toHaveProperty("disabled", false);
+  fireEvent.click(create_);
+  await waitFor(() =>
+    expect(create).toHaveBeenCalledWith(
+      "Mobile App",
+      "/Users/me/src/mobile-app",
+    ),
+  );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(onChange).toHaveBeenCalled();
 });
 
-test("shows a save failure inside the dialog and keeps it open", async () => {
+test("cancelling the folder picker keeps Create project disabled", async () => {
+  const choose = vi
+    .spyOn(workspaceClient, "chooseFolder")
+    .mockResolvedValue(null);
+  render(<Projects {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose folder…" }));
+  await waitFor(() => expect(choose).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "Create project" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+});
+
+test("renames a project from its menu and shows a save failure in the dialog", async () => {
   vi.spyOn(client, "editProject").mockRejectedValue("Name already used");
   render(<Projects {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Original" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
-  const dialog = await screen.findByRole("dialog", { name: "Edit project" });
+  openMenu("Actions for Original");
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+  const dialog = await screen.findByRole("dialog", { name: "Rename project" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
   expect(await within(dialog).findByText("Name already used")).toBeTruthy();
 });
 
-test("registers a checkout from a dialog with inline validation", async () => {
+test("registers a checkout by choosing a folder", async () => {
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/tree");
   const register = vi
     .spyOn(client, "registerCheckout")
     .mockResolvedValue(project);
@@ -118,21 +143,16 @@ test("registers a checkout from a dialog with inline validation", async () => {
   fireEvent.click(
     screen.getByRole("button", { name: "Register checkout for Original" }),
   );
-  fireEvent.click(
-    within(screen.getByRole("dialog")).getByRole("button", {
-      name: "Register checkout",
-    }),
-  );
-  expect(screen.getByText("Enter a checkout path.")).toBeTruthy();
-  expect(register).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Checkout path"), {
-    target: { value: "/work/tree" },
+  const dialog = screen.getByRole("dialog", { name: "Register checkout" });
+  const submit = within(dialog).getByRole("button", {
+    name: "Register checkout",
   });
+  expect(submit).toHaveProperty("disabled", true);
   fireEvent.click(
-    within(screen.getByRole("dialog")).getByRole("button", {
-      name: "Register checkout",
-    }),
+    within(dialog).getByRole("button", { name: "Choose folder…" }),
   );
+  await waitFor(() => expect(submit).toHaveProperty("disabled", false));
+  fireEvent.click(submit);
   await waitFor(() =>
     expect(register).toHaveBeenCalledWith("p1", "/work/tree"),
   );
@@ -141,9 +161,8 @@ test("registers a checkout from a dialog with inline validation", async () => {
 test("removing a checkout asks first and says tickets are unchanged", async () => {
   const remove = vi.spyOn(client, "removeCheckout").mockResolvedValue(project);
   render(<Projects {...props} />);
-  fireEvent.click(
-    screen.getByRole("button", { name: "Remove checkout /other/checkout" }),
-  );
+  openMenu("Actions for checkout /other/checkout");
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
   expect(remove).not.toHaveBeenCalled();
   const confirm = screen.getByRole("group", {
     name: "Remove checkout /other/checkout",
@@ -151,9 +170,8 @@ test("removing a checkout asks first and says tickets are unchanged", async () =
   expect(within(confirm).getByText(/tickets are unchanged/)).toBeTruthy();
   fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
   expect(remove).not.toHaveBeenCalled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Remove checkout /other/checkout" }),
-  );
+  openMenu("Actions for checkout /other/checkout");
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Remove/ }));
   fireEvent.click(
     within(
       screen.getByRole("group", { name: "Remove checkout /other/checkout" }),
@@ -162,4 +180,37 @@ test("removing a checkout asks first and says tickets are unchanged", async () =
   await waitFor(() =>
     expect(remove).toHaveBeenCalledWith("p1", "/other/checkout"),
   );
+});
+
+test("opens the tickets of a project from its card", () => {
+  const onOpenTickets = vi.fn();
+  render(<Projects {...props} onOpenTickets={onOpenTickets} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Open tickets of Original" }),
+  );
+  expect(onOpenTickets).toHaveBeenCalledWith(project);
+});
+
+test("says how many tickets have no project and shows them", async () => {
+  vi.spyOn(client, "countTickets").mockImplementation(
+    async (filter) =>
+      ({
+        total: filter.unlinked ? 4 : 1,
+        done: 0,
+        canceled: 0,
+        duplicate: 0,
+      }) as Awaited<ReturnType<typeof client.countTickets>>,
+  );
+  const onShowUnassigned = vi.fn();
+  render(<Projects {...props} onShowUnassigned={onShowUnassigned} />);
+  expect(await screen.findByText(/4 tickets have no project/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Show them" }));
+  expect(onShowUnassigned).toHaveBeenCalled();
+});
+
+test("a long checkout path keeps all its text for the middle to truncate", () => {
+  const long =
+    "/private/tmp/claude-501/-Users-me-Projects/8b654d0c-8f7d/repo-api";
+  render(<Projects {...props} projects={[{ ...project, paths: [long] }]} />);
+  expect(screen.getByTitle(long).textContent).toBe(long);
 });

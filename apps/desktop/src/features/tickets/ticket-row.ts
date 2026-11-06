@@ -44,25 +44,59 @@ export function readinessShortLabel(value: Readiness) {
   return `Blocked by ${value.by}${value.trashed ? " (in Trash)" : ""} +${value.more}`;
 }
 
+export type RowContextKind = "duplicate" | "subticket" | "plan" | "project";
+
 /** At most one context item: duplicate, parent, Plan, then project. */
-export function rowContext(ticket: Ticket, scope: RowScope): string | null {
-  if (ticket.duplicate_of) return `Duplicate of ${ticket.duplicate_of}`;
+export function rowContextItem(
+  ticket: Ticket,
+  scope: RowScope,
+): { kind: RowContextKind; label: string } | null {
+  if (ticket.duplicate_of)
+    return { kind: "duplicate", label: `Duplicate of ${ticket.duplicate_of}` };
   // An externally closed duplicate names the source's canonical issue, or says it is unknown.
   const target = externalDuplicateTarget(ticket);
   if (target)
-    return target.kind === "external"
-      ? `Duplicate of ${target.ticket ?? target.display}`
-      : "Duplicate · target unknown";
+    return {
+      kind: "duplicate",
+      label:
+        target.kind === "external"
+          ? `Duplicate of ${target.ticket ?? target.display}`
+          : "Duplicate · target unknown",
+    };
   if (ticket.parent)
-    return `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`;
+    return {
+      kind: "subticket",
+      label: `Subticket of ${ticket.parent.reference}${ticket.parent.trashed ? " (trashed)" : ""}`,
+    };
   const plan =
     scope.showPlan && ticket.plan_id
       ? scope.plans.find((item) => item.id === ticket.plan_id)
       : undefined;
-  if (plan) return plan.name;
+  if (plan) return { kind: "plan", label: plan.name };
   const project =
     scope.showProject && ticket.project_id
       ? scope.projects.find((item) => item.id === ticket.project_id)
       : undefined;
-  return project?.name ?? null;
+  return project ? { kind: "project", label: project.name } : null;
+}
+
+/** Gap between pills, and the room the "+N" pill needs, in px. */
+const GAP = 8;
+const MORE_WIDTH = 32;
+
+/**
+ * How many of the pills fit in `room` px. The first always shows; "+N" takes
+ * the place of the rest when some are left out.
+ */
+export function fittingTags(widths: readonly number[], room: number): number {
+  let used = 0;
+  let fit = 0;
+  for (const [index, width] of widths.entries()) {
+    used += width + (index > 0 ? GAP : 0);
+    const rest = widths.length - index - 1;
+    const needed = used + (rest > 0 ? GAP + MORE_WIDTH : 0);
+    if (needed > room) break;
+    fit = index + 1;
+  }
+  return Math.max(1, fit);
 }

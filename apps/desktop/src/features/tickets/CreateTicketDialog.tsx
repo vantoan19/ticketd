@@ -1,38 +1,22 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type RefObject,
-} from "react";
-import { Layers, Folder, Tag, X } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-  FieldError,
-} from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
-import { modifierKeyLabel } from "@/lib/platform";
+import { Folder, Layers } from "lucide-react";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { TokenField } from "@/components/ui/token-field";
 import { client, type Project } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import { directStatuses } from "@/lib/statuses";
-import { PropertyPicker } from "./TicketProperties";
 import "./create-ticket.css";
+
+// Select items cannot have an empty value, so "none" stands for no Project or Plan.
+const NONE = "none";
 
 type Draft = {
   title: string;
@@ -73,7 +57,6 @@ export function CreateTicketDialog({
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState("");
-  const [titleError, setTitleError] = useState("");
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
   // Title is disabled while creating, and a disabled field cannot take focus,
@@ -85,14 +68,10 @@ export function CreateTicketDialog({
       titleRef.current?.focus();
     }
   }, [pending]);
-  const [tagQuery, setTagQuery] = useState("");
   const [vocabulary, setVocabulary] = useState<string[]>([]);
   const [createMore, setCreateMore] = useState(false);
-  // Escape in the tag field puts the suggestions away before it closes the dialog.
-  const [suggestionsHidden, setSuggestionsHidden] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
-  const tagInputRef = useRef<HTMLInputElement>(null);
   // Opening from a status group's Add action sets that status, even on a
   // draft kept from an earlier close.
   const [wasOpen, setWasOpen] = useState(open);
@@ -119,7 +98,7 @@ export function CreateTicketDialog({
     let active = true;
     const timer = window.setTimeout(() => {
       void client
-        .searchTags(tagQuery)
+        .searchTags("")
         .then((tags) => {
           if (active) setVocabulary(tags);
         })
@@ -131,7 +110,7 @@ export function CreateTicketDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, tagQuery]);
+  }, [open]);
   if (!draft) return null;
   const update = (patch: Partial<Draft>) =>
     setDraft((old) => old && { ...old, ...patch });
@@ -142,21 +121,8 @@ export function CreateTicketDialog({
     setAnnouncement("");
     onOpenChange(false);
   }
-  function addTag(raw: string) {
-    const tag = raw.trim().toLowerCase();
-    setTagQuery("");
-    if (tag && !draft!.tags.includes(tag))
-      update({ tags: [...draft!.tags, tag] });
-  }
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (event.target !== event.currentTarget || lock.current) return;
-    if (!draft!.title.trim()) {
-      setTitleError("Enter a title");
-      titleRef.current?.focus();
-      return;
-    }
-    setTitleError("");
+  async function submit() {
+    if (lock.current || !draft!.title.trim()) return;
     setError("");
     lock.current = true;
     setPending(true);
@@ -182,292 +148,188 @@ export function CreateTicketDialog({
       setPending(false);
     }
   }
-  const suggestions = suggestionsHidden
-    ? []
-    : vocabulary.filter((tag) => !draft.tags.includes(tag)).slice(0, 6);
-  const projectName =
-    projects.find((p) => p.id === draft.project)?.name ??
-    (draft.project || "Unlinked");
-  const planName =
-    plans.find((e) => e.id === draft.plan)?.name ?? (draft.plan || "No Plan");
+  const suggestions = vocabulary
+    .filter((tag) => !draft.tags.includes(tag))
+    .slice(0, 6);
+  const blockedReason = !draft.title.trim()
+    ? "Add a title to create"
+    : pending
+      ? "Creating…"
+      : null;
   return (
-    <Dialog
+    <DialogShell
       open={open}
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
+      title="New ticket"
+      primaryLabel="Create ticket"
+      primaryHint="⌘↵"
+      footerLeading={
+        <label className="create-more">
+          <Switch
+            checked={createMore}
+            onCheckedChange={setCreateMore}
+            disabled={pending}
+            aria-label="Create more"
+          />
+          <span>Create more</span>
+        </label>
+      }
+      blockedReason={blockedReason}
+      onSubmit={() => void submit()}
+      returnFocus={triggerRef}
     >
-      <DialogContent
-        className="create-panel"
-        showCloseButton={false}
-        aria-describedby={undefined}
-        onEscapeKeyDown={(event) => {
-          // Escape closes only the foremost surface: the open suggestions.
-          if (
-            suggestions.length > 0 &&
-            document.activeElement === tagInputRef.current
-          ) {
+      <div
+        className="create-form flex flex-col gap-4"
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
             event.preventDefault();
-            setSuggestionsHidden(true);
+            event.currentTarget.closest("form")?.requestSubmit();
           }
         }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          triggerRef.current?.focus();
-        }}
       >
-        <div className="panel-heading">
-          <DialogTitle>New ticket</DialogTitle>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close new ticket"
-            onClick={close}
-          >
-            <X />
-          </Button>
-        </div>
-        <form
-          className="create-form"
-          onSubmit={(event) => void submit(event)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              event.currentTarget.requestSubmit();
-            }
-          }}
-          noValidate
-        >
-          <FieldGroup>
-            <Field data-invalid={!!titleError} data-disabled={pending}>
-              <FieldLabel htmlFor="create-title">Title</FieldLabel>
-              <Input
-                id="create-title"
-                ref={titleRef}
-                autoFocus
-                placeholder="e.g. Export fails on large workspaces"
-                disabled={pending}
-                value={draft.title}
-                onChange={(event) => {
-                  update({ title: event.target.value });
-                  setTitleError("");
-                }}
-                aria-invalid={!!titleError}
-                aria-describedby={titleError ? "create-title-error" : undefined}
-              />
-              {titleError && (
-                <FieldError id="create-title-error">{titleError}</FieldError>
-              )}
-            </Field>
-            <Field data-disabled={pending}>
-              <FieldLabel asChild>
-                <span>
-                  Description{" "}
-                  <small>Optional. Markdown and checklists work.</small>
-                </span>
-              </FieldLabel>
-              <div
-                // The editor owns its keys (Enter, slash menu, IME, Escape,
-                // CodeMirror bindings), so they stop here. The one exception is
-                // a Cmd/Ctrl+Enter that the rich editor left unhandled: it
-                // creates the ticket. Nested UI (slash menu, link field, source
-                // editors) handles or ignores it first, so it never reaches here
-                // as an unhandled rich-editor event.
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter" &&
-                    event.ctrlKey !== event.metaKey &&
-                    !event.shiftKey &&
-                    !event.altKey &&
-                    !event.defaultPrevented &&
-                    !event.nativeEvent.isComposing &&
-                    event.keyCode !== 229 &&
-                    (event.target as HTMLElement).closest(".rich-document")
-                  ) {
-                    event.preventDefault();
-                    event.currentTarget.closest("form")?.requestSubmit();
-                  }
-                  event.stopPropagation();
-                }}
-              >
-                <LazyMarkdownEditor
-                  label="Description"
-                  readOnly={pending}
-                  value={draft.body}
-                  onChange={(body) => update({ body })}
-                />
-              </div>
-            </Field>
-          </FieldGroup>
-          {draft.restored && (
-            <p className="create-restored" role="status">
-              Draft restored.{" "}
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                onClick={() => {
-                  update({ title: "", body: "", restored: false });
-                  titleRef.current?.focus();
-                }}
-              >
-                Discard draft
-              </Button>
-            </p>
-          )}
+        <Field data-disabled={pending}>
+          <FieldLabel htmlFor="create-title">Title</FieldLabel>
+          <Input
+            id="create-title"
+            ref={titleRef}
+            autoFocus
+            placeholder="e.g. Export fails on large workspaces"
+            disabled={pending}
+            value={draft.title}
+            onChange={(event) => update({ title: event.target.value })}
+          />
+        </Field>
+        <Field data-disabled={pending}>
+          <FieldLabel asChild>
+            <span>
+              Description <small>Optional</small>
+            </span>
+          </FieldLabel>
           <div
-            className="create-properties"
-            role="group"
-            aria-label="Initial properties"
+            // The editor owns its keys (Enter, slash menu, IME, Escape,
+            // CodeMirror bindings), so they stop here. The one exception is
+            // a Cmd/Ctrl+Enter that the rich editor left unhandled: it
+            // creates the ticket. Nested UI (slash menu, link field, source
+            // editors) handles or ignores it first, so it never reaches here
+            // as an unhandled rich-editor event.
+            // The box keeps its 112px height while the editor loads, and the
+            // hint sits inside it at the bottom.
+            className="create-description"
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                event.ctrlKey !== event.metaKey &&
+                !event.shiftKey &&
+                !event.altKey &&
+                !event.defaultPrevented &&
+                !event.nativeEvent.isComposing &&
+                event.keyCode !== 229 &&
+                (event.target as HTMLElement).closest(".rich-document")
+              ) {
+                event.preventDefault();
+                event.currentTarget.closest("form")?.requestSubmit();
+              }
+              event.stopPropagation();
+            }}
           >
-            <div className="create-property">
-              <span>Status</span>
-              <Select
-                value={draft.status}
-                onValueChange={(status) => update({ status })}
-                disabled={pending}
-              >
-                <SelectTrigger size="sm" aria-label="Status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {directStatuses.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {status}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="create-property">
-              <span>Project</span>
-              <PropertyPicker
-                label="Project"
-                icon={Folder}
-                value={projectName}
-                disabled={pending}
-                choices={[
-                  { value: "", label: "Unlinked" },
-                  ...projects.map((p) => ({ value: p.id, label: p.name })),
-                ]}
-                onChoose={(project) => update({ project })}
-              />
-            </div>
-            <div className="create-property">
-              <span>Plan</span>
-              <PropertyPicker
-                label="Plan"
-                icon={Layers}
-                value={planName}
-                disabled={pending}
-                choices={[
-                  { value: "", label: "No Plan" },
-                  ...plans
-                    .filter((e) => !e.archived)
-                    .map((e) => ({ value: e.id, label: e.name })),
-                ]}
-                onChoose={(plan) => update({ plan })}
-              />
-            </div>
-            <div className="create-property create-tags">
-              <span>Tags</span>
-              <div className="create-tag-chips">
-                {draft.tags.map((tag) => (
-                  <span key={tag} className="create-tag-chip">
-                    <Tag aria-hidden />
-                    {tag}
-                    <button
-                      type="button"
-                      aria-label={`Remove tag ${tag}`}
-                      disabled={pending}
-                      onClick={() =>
-                        update({ tags: draft.tags.filter((t) => t !== tag) })
-                      }
-                    >
-                      <X aria-hidden />
-                    </button>
-                  </span>
-                ))}
-                <Input
-                  ref={tagInputRef}
-                  className="create-tag-input"
-                  aria-label="Add tag"
-                  placeholder="Add a tag"
-                  disabled={pending}
-                  value={tagQuery}
-                  onFocus={() => setSuggestionsHidden(false)}
-                  onChange={(event) => {
-                    setSuggestionsHidden(false);
-                    setTagQuery(event.target.value);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === ",") {
-                      if (event.ctrlKey || event.metaKey) return;
-                      event.preventDefault();
-                      addTag(tagQuery);
-                    } else if (
-                      event.key === "Backspace" &&
-                      !tagQuery &&
-                      draft.tags.length
-                    )
-                      update({ tags: draft.tags.slice(0, -1) });
-                  }}
-                />
-              </div>
-              {suggestions.length > 0 && (
-                <ul
-                  className="create-tag-suggestions"
-                  aria-label="Tag suggestions"
-                >
-                  {suggestions.map((tag) => (
-                    <li key={tag}>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={() => {
-                          addTag(tag);
-                          tagInputRef.current?.focus();
-                        }}
-                      >
-                        {tag}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <p className="sr-only" role="status" aria-live="polite">
-            {announcement}
-          </p>
-          <div className="create-actions">
-            <label className="create-more">
-              <Switch
-                checked={createMore}
-                onCheckedChange={setCreateMore}
-                disabled={pending}
-                aria-label="Create more"
-              />
-              <span>Create more</span>
-            </label>
-            <small className="create-hint">
-              <Kbd>{modifierKeyLabel()}</Kbd>
-              <Kbd>Enter</Kbd> to create
+            <LazyMarkdownEditor
+              label="Description"
+              placeholder="Steps, acceptance criteria, or a checklist"
+              readOnly={pending}
+              value={draft.body}
+              onChange={(body) => update({ body })}
+            />
+            <small className="create-description-hint">
+              Markdown works · type / for blocks
             </small>
-            <Button type="button" variant="ghost" onClick={close}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Creating…" : "Create ticket"}
-            </Button>
           </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </Field>
+        {draft.restored && (
+          <p className="create-restored" role="status">
+            Draft restored.{" "}
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={() => {
+                update({ title: "", body: "", restored: false });
+                titleRef.current?.focus();
+              }}
+            >
+              Discard draft
+            </Button>
+          </p>
+        )}
+        <div
+          className="create-properties"
+          role="group"
+          aria-label="Initial properties"
+        >
+          <Picker
+            label="Status"
+            stacked
+            icon={<StatusIcon status={draft.status} size={16} decorative />}
+            value={draft.status}
+            disabled={pending}
+            onValueChange={(status) => update({ status })}
+            options={directStatuses.map((status) => ({
+              value: status,
+              label: status,
+            }))}
+          />
+          <Picker
+            label="Project"
+            stacked
+            icon={<Folder aria-hidden="true" />}
+            value={draft.project || NONE}
+            disabled={pending}
+            onValueChange={(project) =>
+              update({ project: project === NONE ? "" : project })
+            }
+            options={[
+              { value: NONE, label: "No project" },
+              ...projects.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+          />
+          <Picker
+            label="Plan"
+            stacked
+            icon={<Layers aria-hidden="true" />}
+            value={draft.plan || NONE}
+            disabled={pending}
+            onValueChange={(plan) =>
+              update({ plan: plan === NONE ? "" : plan })
+            }
+            options={[
+              { value: NONE, label: "No Plan" },
+              ...plans
+                .filter((e) => !e.archived)
+                .map((e) => ({ value: e.id, label: e.name })),
+            ]}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <span aria-hidden="true">Tags</span>
+          <TokenField
+            label="Add tag"
+            chevron
+            placeholder="Add a tag"
+            suggestions={suggestions}
+            values={draft.tags}
+            onChange={(tags) =>
+              update({ tags: tags.map((tag) => tag.toLowerCase()) })
+            }
+          />
+        </div>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <p className="sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
+      </div>
+    </DialogShell>
   );
 }

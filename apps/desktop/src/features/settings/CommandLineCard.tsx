@@ -35,8 +35,8 @@ function InstallGuideLink() {
   return (
     <Button
       type="button"
-      variant="link"
-      size="xs"
+      variant="secondary"
+      size="sm"
       onClick={() =>
         void workspaceClient.openLink(INSTALL_GUIDE_URL).catch(() => {})
       }

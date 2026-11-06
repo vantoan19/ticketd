@@ -312,6 +312,23 @@ describe("Toolbar layout and links", () => {
     expect(toolbar?.getAttribute("data-visible")).toBe("false");
     expect(toolbar?.hasAttribute("inert")).toBe(true);
   });
+  it("floats a focus-only toolbar above the frame but keeps a persistent one in it (L6)", () => {
+    const idle = render(<MarkdownEditor value="text" onChange={vi.fn()} />);
+    expect(
+      idle.container
+        .querySelector(".rich-toolbar")
+        ?.hasAttribute("data-floating"),
+    ).toBe(true);
+    idle.unmount();
+    const kept = render(
+      <MarkdownEditor value="text" onChange={vi.fn()} persistentToolbar />,
+    );
+    expect(
+      kept.container
+        .querySelector(".rich-toolbar")
+        ?.hasAttribute("data-floating"),
+    ).toBe(false);
+  });
   it("offers one row of essentials and keeps the rest in More", () => {
     render(<MarkdownEditor value="text" onChange={vi.fn()} />);
     fireEvent.focus(
@@ -329,5 +346,51 @@ describe("Toolbar layout and links", () => {
       "Inline code",
       "More formatting",
     ]);
+  });
+  it("shows the placeholder only while the editor is empty (K10)", async () => {
+    const Harness = () => {
+      const [value, setValue] = useState("");
+      return (
+        <MarkdownEditor
+          value={value}
+          onChange={setValue}
+          placeholder="Write a thought…"
+        />
+      );
+    };
+    render(<Harness />);
+    const editable = screen.getByRole("textbox", {
+      name: "Markdown document rich text",
+    });
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    await waitFor(() => expect(editable.hasAttribute("data-empty")).toBe(true));
+    expect(editable.style.getPropertyValue("--editor-placeholder")).toBe(
+      '"Write a thought…"',
+    );
+    // The hint is never text inside the editable, so native input cannot keep or save it.
+    expect(editable.textContent).not.toContain("Write a thought");
+    editable.focus();
+    fireEvent(
+      editable,
+      createEvent.paste(editable, {
+        clipboardData: { getData: () => "Checkout idea for retries\n" },
+      }),
+    );
+    await waitFor(() =>
+      expect(editable.textContent).toContain("Checkout idea for retries"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(editable.hasAttribute("data-empty")).toBe(false);
+  });
+  it("hides the placeholder beside content that has no text (K10)", async () => {
+    const view = render(
+      <MarkdownEditor
+        value="---"
+        onChange={vi.fn()}
+        placeholder="Write a thought…"
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(view.container.querySelector("[data-empty]")).toBeNull();
   });
 });

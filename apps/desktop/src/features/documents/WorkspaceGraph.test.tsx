@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
@@ -13,11 +14,23 @@ import { WorkspaceGraph } from "./WorkspaceGraph";
 afterEach(cleanup);
 
 vi.mock("./ContextGraphCanvas", () => ({
-  ContextGraphCanvas: ({ edges }: { edges: { label?: string }[] }) => (
-    <div>
+  ContextGraphCanvas: ({
+    edges,
+    nodes,
+    overlay,
+  }: {
+    edges: { label?: string }[];
+    nodes: { id: string }[];
+    overlay?: import("react").ReactNode;
+  }) => (
+    <div data-testid="canvas">
+      {nodes.map((node) => (
+        <i key={node.id} data-card={node.id} />
+      ))}
       {edges.map((edge, index) => (
         <span key={index}>{edge.label}</span>
       ))}
+      {overlay}
     </div>
   ),
 }));
@@ -58,8 +71,12 @@ test("filters workspace results and focuses a selected item deliberately", async
       onOpen={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Discovery" }));
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(
+    (await screen.findAllByRole("button", { name: "Discovery" })).at(-1)!,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
   expect(focus).toHaveBeenCalledWith("doc");
   fireEvent.change(screen.getByLabelText("Search"), {
     target: { value: "needle" },
@@ -99,7 +116,9 @@ test("expands omitted connections while retaining the selected item", async () =
       onOpen={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "T-1 · First" }));
+  fireEvent.click(
+    (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!,
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "Show more connections" }),
   );
@@ -108,7 +127,9 @@ test("expands omitted connections while retaining the selected item", async () =
       expect.objectContaining({ adjacency_limit: 6 }),
     ),
   );
-  expect(screen.getByRole("button", { name: "Context graph" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  ).toBeTruthy();
 });
 
 test("connects visible items across candidate pages", async () => {
@@ -165,7 +186,7 @@ test("connects visible items across candidate pages", async () => {
       expect.objectContaining({ cursor: "cursor", visible_ids: ["one"] }),
     ),
   );
-  expect((await screen.findAllByText("Blocks")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("blocks")).length).toBeGreaterThan(0);
 });
 
 test("a filter with no matches says so and can be cleared", async () => {
@@ -240,10 +261,10 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
     onOpen: vi.fn(),
   };
   const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
-  await screen.findByRole("button", { name: "T-1 · First" });
+  (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!;
   rerender(<WorkspaceGraph {...props} revision={1} />);
   fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-  await screen.findByRole("button", { name: "T-2 · Second" });
+  await screen.findAllByRole("button", { name: "T-2 · Second" });
   releaseHydrate(graphOf([first], "cursor"));
   await waitFor(() =>
     expect(client.workspaceGraph).toHaveBeenCalledWith(
@@ -253,7 +274,9 @@ test("a slow refresh does not erase pages loaded after it started", async () => 
       }),
     ),
   );
-  expect(screen.getByRole("button", { name: "T-2 · Second" })).toBeTruthy();
+  expect(
+    screen.getAllByRole("button", { name: "T-2 · Second" }).length,
+  ).toBeGreaterThan(0);
   expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
 });
 
@@ -302,8 +325,120 @@ test("a crowded workspace opens as a list and the map is one click away", async 
       onOpen={vi.fn()}
     />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Show map" }));
-  expect(screen.getByRole("button", { name: "Show list" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Show list" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Graph" }));
+  expect(screen.getByRole("radio", { name: "List" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "List" }));
   expect(screen.getByText(/49 connections/)).toBeTruthy();
+});
+
+test("items with no relationship leave the canvas for a Not connected list", async () => {
+  vi.mocked(client.workspaceGraph)
+    .mockReset()
+    .mockResolvedValue({
+      ...graphOf(
+        [
+          nodeOf("one", "T-1 · First"),
+          nodeOf("two", "T-2 · Second"),
+          nodeOf("lone", "T-4 · Dark mode"),
+        ],
+        null,
+      ),
+      edges: [
+        { source: "one", target: "two", kind: "blocks", explanation: null },
+      ],
+    });
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={vi.fn()}
+      onOpen={vi.fn()}
+    />,
+  );
+  await screen.findByText("3 items · 1 relationship");
+  const canvas = screen.getByTestId("canvas");
+  expect(canvas.querySelectorAll("[data-card]")).toHaveLength(2);
+  expect(canvas.querySelector('[data-card="lone"]')).toBeNull();
+  const group = screen.getByRole("group", { name: "Not connected" });
+  expect(group.textContent).toContain("Not connected · 1");
+  fireEvent.click(
+    within(group).getByRole("button", { name: "T-4 · Dark mode" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Open ticket" }),
+  ).toBeTruthy();
+});
+
+test("an item created while the graph is open is added, not left counted but unseen", async () => {
+  const first = nodeOf("one", "T-1 · First");
+  const created = nodeOf("new", "Untitled");
+  vi.mocked(client.workspaceGraph)
+    .mockReset()
+    .mockImplementation((request) => {
+      // Hydration only refreshes the shown items, but the total already counts the new one.
+      if (request.hydrate_only)
+        return Promise.resolve({ ...graphOf([first], null), total: 2 });
+      if (request.visible_ids.length)
+        return Promise.resolve(graphOf([first, created], null));
+      return Promise.resolve(graphOf([first], null));
+    });
+  const props = {
+    active: true,
+    onBack: vi.fn(),
+    onFocus: vi.fn(),
+    onOpen: vi.fn(),
+  };
+  const { rerender } = render(<WorkspaceGraph {...props} revision={0} />);
+  await screen.findByText(/Showing 1 of 1 item/);
+  rerender(<WorkspaceGraph {...props} revision={1} />);
+  await screen.findByText(/Showing 2 of 2 items/);
+  expect(screen.getByText("2 items · 0 relationships")).toBeTruthy();
+  expect(
+    within(screen.getByRole("group", { name: "Not connected" })).getByRole(
+      "button",
+      { name: "Untitled" },
+    ),
+  ).toBeTruthy();
+});
+
+test("a selected ticket offers Open ticket and Show only its neighbors", async () => {
+  vi.mocked(client.workspaceGraph).mockResolvedValue({
+    node_tags: {},
+    total: 1,
+    nodes: [
+      {
+        id: "one",
+        kind: "ticket",
+        label: "T-1 · First",
+        state: "Todo",
+        trashed: false,
+        activity_detail: false,
+      },
+    ],
+    edges: [],
+    next_cursor: null,
+    omitted: false,
+    omitted_groups: [],
+  });
+  const open = vi.fn();
+  const focus = vi.fn();
+  render(
+    <WorkspaceGraph
+      active
+      revision={0}
+      onBack={vi.fn()}
+      onFocus={focus}
+      onOpen={open}
+    />,
+  );
+  fireEvent.click(
+    (await screen.findAllByRole("button", { name: "T-1 · First" })).at(-1)!,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open ticket" }));
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: "one" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
+  expect(focus).toHaveBeenCalledWith("one");
 });

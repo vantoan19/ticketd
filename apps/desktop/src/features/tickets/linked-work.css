@@ -13,13 +13,13 @@
 .linked-work-state {
   margin-left: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .linked-work-confirm {
   display: grid;
   gap: 12px;
   width: 20rem;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .linked-work-confirm p {
   margin: 0;
@@ -87,7 +87,7 @@
 .linked-work-label,
 .linked-work-status {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .linked-work-label {
@@ -98,7 +98,7 @@
 .linked-work-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 13px;
+  font-size: var(--text-code);
 }
 .linked-work-title {
   height: auto;
@@ -163,7 +163,10 @@
 /* Compact rail groups: a label followed by one icon/reference/title row. */
 @container (max-width: 260px) {
   .linked-work-row {
-    grid-template-columns: 16px 3rem minmax(0, 1fr);
+    /* The reference hugs its text so the title starts beside it and a wrapped
+       title lines up under its own first line. */
+    grid-template-columns: 16px auto minmax(0, 1fr);
+    align-items: start;
     min-height: 32px;
     padding: 0;
     gap: 4px 8px;
@@ -174,13 +177,24 @@
   }
   .linked-work-icon {
     grid-column: 1;
+    margin-top: 2px;
   }
   .linked-work-reference {
     grid-column: 2;
+    line-height: 20px;
   }
+  /* A long related title wraps so the ticket can still be told apart. */
   .linked-work-title {
     grid-column: 3;
-    white-space: nowrap;
+    white-space: normal;
+    overflow: visible;
+    align-items: flex-start;
+  }
+  .linked-work-title .truncate {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .linked-work-remove {
     position: absolute;
@@ -203,7 +217,8 @@
   .linked-work-row[data-kind="blocked_by"] .linked-work-status,
   .linked-work-row[data-kind="blocks"] .linked-work-status {
     display: block;
-    grid-column: 2 / -1;
+    /* Same column as the title, never under the reference. */
+    grid-column: 3;
     white-space: normal;
   }
   .linked-work-external {
@@ -224,7 +239,7 @@
 .link-ticket-note {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .link-ticket-sentence {
   display: flex;
@@ -246,7 +261,7 @@
   width: 100%;
   padding: 6px 8px;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .link-ticket-results button:hover,
 .link-ticket-results button:focus-visible {
@@ -261,7 +276,7 @@
 .link-ticket-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .link-ticket-chosen {
   display: flex;
@@ -282,5 +297,5 @@
 }
 .linked-work-note {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }

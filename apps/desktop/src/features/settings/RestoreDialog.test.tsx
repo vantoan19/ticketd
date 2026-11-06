@@ -84,14 +84,31 @@ afterEach(() => {
 async function openReview(onRestore: () => Promise<void> = async () => {}) {
   render(<SettingsView onRestore={onRestore} onOpenInbox={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Restore from backup…" }));
-  return screen.findByRole("dialog", { name: "Restore from a backup" });
+  return screen.findByRole("dialog", { name: "Restore from backup" });
 }
 
 function replaceButton(dialog: HTMLElement) {
   return within(dialog).getByRole("button", {
-    name: "Replace workspace",
+    name: "Replace workspace with backup",
   }) as HTMLButtonElement;
 }
+
+test("the comparison names what will be replaced, current workspace first", async () => {
+  const dialog = await openReview();
+  await within(dialog).findByText("Backup checked.");
+  const headers = within(within(dialog).getByRole("table"))
+    .getAllByRole("columnheader")
+    .map((cell) => cell.textContent);
+  expect(headers).toEqual(["Replaces", "Current workspace", "This backup"]);
+});
+
+test("the review scrolls from the keyboard: its body is a focusable region", async () => {
+  const dialog = await openReview();
+  await within(dialog).findByText("Backup checked.");
+  const body = within(dialog).getByRole("region", { name: "Backup review" });
+  expect(body.tabIndex).toBe(0);
+  expect(within(body).getByRole("table")).toBeTruthy();
+});
 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);
@@ -232,7 +249,7 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   ]);
   fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Show safety backups" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Safety backups/ }));
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText(safety)).toBeTruthy();
   expect(within(region).getByText("Before a restore")).toBeTruthy();
@@ -268,7 +285,7 @@ test("Show safety backups lists pre-migration and safety copies with their times
     },
   ]);
   render(<SettingsView onRestore={async () => {}} onOpenInbox={() => {}} />);
-  fireEvent.click(screen.getByRole("button", { name: "Show safety backups" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Safety backups/ }));
   const region = await screen.findByRole("region", { name: "Safety backups" });
   expect(await within(region).findByText("/w/a.safety-1.sqlite3")).toBeTruthy();
   expect(within(region).getByText("Before an upgrade")).toBeTruthy();

@@ -7,10 +7,13 @@ export function CopySourceButton({
   source,
   label,
   compact = false,
+  icon = false,
 }: {
   source: string;
   label: string;
   compact?: boolean;
+  /** Show the copy icon beside the visible label. */
+  icon?: boolean;
 }) {
   const [message, setMessage] = useState("");
   async function copy() {
@@ -30,7 +33,18 @@ export function CopySourceButton({
         {...(compact ? { "aria-label": label, title: label } : {})}
         onClick={() => void copy()}
       >
-        {compact ? message === "Copied" ? <Check /> : <Copy /> : label}
+        {compact ? (
+          message === "Copied" ? (
+            <Check />
+          ) : (
+            <Copy />
+          )
+        ) : (
+          <>
+            {icon && (message === "Copied" ? <Check /> : <Copy />)}
+            {label}
+          </>
+        )}
       </Button>
       <span role="status" className="text-muted-foreground text-xs">
         {compact && message === "Copied" ? "" : message}

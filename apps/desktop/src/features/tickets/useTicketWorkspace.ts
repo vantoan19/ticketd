@@ -88,6 +88,9 @@ export function useTicketWorkspace(
   // The counts describe the whole filtered result; they are null in Trash,
   // which lists tickets flat.
   const [counts, setCounts] = useState<StatusCounts | null>(null);
+  // How many tickets the scope holds without search or filters; null while
+  // nothing is narrowing it.
+  const [scopeTotal, setScopeTotal] = useState<number | null>(null);
   // The offset the displayed tickets were read at, for page-edge navigation.
   const [loadedOffset, setLoadedOffset] = useState(0);
   const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null);
@@ -118,6 +121,10 @@ export function useTicketWorkspace(
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
   const detailGeneration = useRef(0);
+  // Only the scope's own fields matter to a fetch; depending on the object would
+  // refetch whenever the same scope is chosen again.
+  const scopeKind = navigation.kind;
+  const scopePlan = navigation.plan;
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     let timeout = 0;
@@ -146,6 +153,20 @@ export function useTicketWorkspace(
         limit: PAGE_SIZE,
         offset,
       };
+      // What the scope alone would list, so a filtered list can say "N of M".
+      const unfiltered: FindFilter = {
+        ...filterArgs,
+        query: "",
+        plan: scopePlan || null,
+        status: scopeKind === "progress" ? "In progress" : null,
+        tags: [],
+        availability: scopeKind === "ready" ? "Ready" : null,
+        family: null,
+        order: "Workflow",
+      };
+      const scoped =
+        JSON.stringify({ ...unfiltered, order: 0 }) ===
+        JSON.stringify({ ...filterArgs, order: 0 });
       const result = await Promise.race([
         Promise.all([
           trash ? client.listTrash() : client.findTickets(filterArgs),
@@ -156,6 +177,9 @@ export function useTicketWorkspace(
           trash
             ? Promise.resolve(null)
             : client.countBySource(filterArgs).catch(() => null),
+          trash || scoped
+            ? Promise.resolve(null)
+            : client.countTickets(unfiltered).catch(() => null),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -190,6 +214,7 @@ export function useTicketWorkspace(
       setLoadedOffset(offset);
       setCounts(result[3]);
       setSourceCounts(result[4]);
+      setScopeTotal(result[5]?.total ?? null);
       setProjects(result[1]);
       setPlans(result[2]);
       setRevision((value) => value + 1);
@@ -218,6 +243,8 @@ export function useTicketWorkspace(
     availability,
     family,
     source,
+    scopeKind,
+    scopePlan,
   ]);
   useEffect(() => {
     let active = true;
@@ -397,7 +424,7 @@ export function useTicketWorkspace(
     navigation.kind === "trash"
       ? "Trash"
       : navigation.project === "unlinked"
-        ? "Unlinked"
+        ? "No project"
         : navigation.project !== "all"
           ? (projects.find((p) => p.id === navigation.project)?.name ??
             "Project")
@@ -427,8 +454,14 @@ export function useTicketWorkspace(
     // sit beside it as "outside the current results", so entering or leaving
     // Trash starts without a selection.
     if ((next === "trash") !== trash) selectTicket(null);
-    // Another Plan opens on its own list, not on the previous Plan's open ticket.
-    if (planId && planId !== navigation.plan) setSelected(null);
+    // A new scope opens on its own list, not on a ticket left over from the
+    // previous one (it would sit full-width as "outside the current results").
+    if (
+      next !== navigation.kind ||
+      project !== navigation.project ||
+      planId !== navigation.plan
+    )
+      setSelected(null);
     setNavigation({ kind: next, project, plan: planId });
     setView("tickets");
     setTrash(next === "trash");
@@ -473,6 +506,7 @@ export function useTicketWorkspace(
     setTrash,
     tickets,
     counts,
+    scopeTotal,
     total,
     grouped: !trash && !query,
     position,

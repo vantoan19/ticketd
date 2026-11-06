@@ -78,8 +78,18 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
+async function openManageMenu(label: string, item: string) {
+  fireEvent.keyDown(screen.getByRole("button", { name: label }), {
+    key: "Enter",
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+}
+
 async function openNewTicket(
-  trigger = screen.getByRole("button", { name: "New" }),
+  trigger = screen.getByRole("button", { name: "New ticket" }),
 ) {
   fireEvent.keyDown(trigger, { key: "Enter" });
   await act(async () => {
@@ -330,9 +340,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  await openManageMenu("Manage projects", "All projects");
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Project name" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
   });
   // Escape closes the dialog without discarding the draft.
@@ -346,7 +356,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to tickets" }));
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
-  expect(screen.getByRole("textbox", { name: "Project name" })).toHaveProperty(
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
     "Draft",
   );
@@ -358,9 +368,12 @@ test("retains project drafts and clears filters when navigating scopes", async (
   );
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   expect(screen.getByRole("dialog", { name: "Ticket filters" })).toBeTruthy();
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   expect(
     screen.getByRole("button", { name: "Filters, 1 active" }),
   ).toBeTruthy();
@@ -401,6 +414,80 @@ test("an idle workspace costs one token poll per tick and refetches only when th
   bridge.token.next = () => ++tokenCalls;
 });
 
+test("lists No project after the named projects and shows a quiet hint with nothing selected", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) =>
+      command === "list_projects"
+        ? [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }]
+        : bridgeDefault(command, args),
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const scopes = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  ).getAllByRole("button");
+  expect(scopes.map((item) => item.textContent?.trim())).toEqual([
+    "Billing API",
+    "No project",
+  ]);
+  expect(screen.queryByText("Unlinked")).toBeNull();
+  expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
+});
+
+test("changing the scope drops an open ticket that is outside it", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  let scoped = false;
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_projects")
+        return [{ id: "p1", name: "Billing API", path: "/b", paths: ["/b"] }];
+      if (command === "find_tickets") return scoped ? [] : [ticket];
+      if (command === "show_ticket") return ticket;
+      return bridgeDefault(command, args);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getByRole("textbox", { name: "Title" })).toBeTruthy();
+  scoped = true;
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Project scopes" }),
+    ).getByRole("button", { name: "Billing API" }),
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+  expect(
+    screen.queryByText("This ticket is outside the current results."),
+  ).toBeNull();
+});
+
 test("new ticket dialog focuses title and restores focus on Escape", async () => {
   vi.useFakeTimers();
   bridge.invoke.mockImplementation(async (command: string) =>
@@ -412,7 +499,7 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
   });
   for (const name of ["New ticket", "Create your first ticket"]) {
     const trigger = screen.getByRole("button", {
-      name: name === "New ticket" ? "New" : name,
+      name,
     });
     trigger.focus();
     if (name === "New ticket") await openNewTicket(trigger);
@@ -428,6 +515,26 @@ test("new ticket dialog focuses title and restores focus on Escape", async () =>
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   }
+});
+
+test("choosing New ticket closes the New ticket tooltip", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "count_tickets" ? bridgeDefault(command) : [],
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const trigger = screen.getByRole("button", { name: "New ticket" });
+  trigger.focus();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.queryAllByRole("tooltip").length).toBeGreaterThan(0);
+  await openNewTicket(trigger);
+  expect(screen.getByRole("dialog", { name: "New ticket" })).toBeTruthy();
+  expect(screen.queryAllByRole("tooltip")).toHaveLength(0);
 });
 
 test("moves focus between ticket rows without opening them until Enter, and retains selection on refresh", async () => {
@@ -528,17 +635,24 @@ test("clears additional filters while preserving the selected Plan", async () =>
   });
   fireEvent.click(screen.getByRole("button", { name: "Launch" }));
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
-  expect(screen.getByRole("button", { name: "Remove Tag: bug" })).toBeTruthy();
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
+  expect(
+    screen.getByRole("button", { name: "Remove Status is Todo" }),
+  ).toBeTruthy();
   fireEvent.click(
     within(screen.getByLabelText("Active filters")).getByRole("button", {
       name: "Clear filters",
     }),
   );
   expect(screen.getByRole("heading", { name: "Launch" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Remove Status is Todo" }),
+  ).toBeNull();
 });
 
 test("removes one filter chip and shows the query when nothing matches", async () => {
@@ -547,6 +661,7 @@ test("removes one filter chip and shows the query when nothing matches", async (
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans" || command === "list_projects") return [];
       if (command === "find_tickets") return [];
+      if (command === "search_tags") return ["bug", "ui"];
       return bridgeDefault(command, args);
     },
   );
@@ -559,22 +674,76 @@ test("removes one filter chip and shows the query when nothing matches", async (
     target: { value: "zebra" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug, ui" },
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
   });
+  const filters = within(
+    screen.getByRole("dialog", { name: "Ticket filters" }),
+  );
+  fireEvent.click(filters.getByRole("button", { name: "bug" }));
+  fireEvent.click(filters.getByRole("button", { name: "ui" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10);
   });
-  expect(screen.getByText("No matching tickets")).toBeTruthy();
-  expect(screen.getByText("zebra", { selector: "q" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Tag: bug" }));
-  expect(screen.queryByRole("button", { name: "Remove Tag: bug" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Remove Tag: ui" })).toBeTruthy();
+  expect(screen.getByText("No tickets match “zebra”")).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Searched titles, descriptions and updates in All tickets, with 2 filters on/,
+    ),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Clear search" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Remove Tag is bug" }));
+  expect(
+    screen.queryByRole("button", { name: "Remove Tag is bug" }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove Tag is ui" })).toBeTruthy();
   fireEvent.click(
     screen.getAllByRole("button", { name: "Clear filters" }).at(-1)!,
   );
-  expect(screen.queryByText("zebra", { selector: "q" })).toBeNull();
+  expect(screen.queryByText(/Searched titles/)).toBeNull();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
+});
+
+test("a filter applies live, counts N of M, and Done closes the panel", async () => {
+  vi.useFakeTimers();
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { filter?: { status: string | null } }) => {
+      if (command === "count_tickets")
+        return {
+          ...(bridgeDefault(command) as object),
+          total: args?.filter?.status ? 3 : 7,
+        };
+      return bridgeDefault(command);
+    },
+  );
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  const panel = within(screen.getByRole("dialog", { name: "Ticket filters" }));
+  fireEvent.click(panel.getByRole("button", { name: "Todo" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  // The count sits beside the title, not in the constraint row.
+  expect(screen.getByLabelText("Active filters").textContent).not.toContain(
+    "of 7",
+  );
+  expect(
+    screen.getByRole("heading", { name: "All tickets" }).parentElement!
+      .textContent,
+  ).toContain("3 of 7");
+  expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
+  // Clear all sits in the header (board C); the footer has the count and Done.
+  expect(
+    within(
+      panel.getByRole("heading", { name: "Filters" }).parentElement!,
+    ).getByRole("button", { name: "Clear all" }),
+  ).toBeTruthy();
+  // The Done status chip shares the name; the footer button comes last.
+  fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
+  expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
 });
 
 test("preserves a creation draft when submission fails and the dialog is reopened", async () => {
@@ -626,7 +795,7 @@ test("preserves a creation draft when submission fails and the dialog is reopene
       tags: [],
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Close new ticket" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await openNewTicket();
   fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
   expect(
@@ -670,9 +839,12 @@ test("keeps ticket rows mounted while a filter refresh is pending", async () => 
   const row = screen.getByRole("button", { name: /First/ });
   fireEvent.click(row);
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-  fireEvent.change(screen.getByRole("textbox", { name: /Tags \(comma/ }), {
-    target: { value: "bug" },
-  });
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Ticket filters" })).getByRole(
+      "button",
+      { name: "Todo" },
+    ),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
@@ -971,19 +1143,78 @@ test("removes an Plan and adds or removes a tag from the Organize menu", async (
   await act(async () => {});
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
   openMenu("Organize selected tickets");
-  fireEvent.click(
-    screen.getByRole("menuitem", { name: "Add or remove tags…" }),
-  );
+  expect(screen.queryByRole("menuitem", { name: /Add or remove/ })).toBeNull();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Remove tag…" }));
   await act(async () => {});
-  const dialog = screen.getByRole("dialog", {
-    name: "Add or remove tags",
-  });
+  const dialog = screen.getByRole("dialog", { name: "Remove tag" });
+  expect(within(dialog).queryByRole("button", { name: "Add tag" })).toBeNull();
   fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
     target: { value: "old" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Remove tag" }));
   await act(async () => {});
   expect(changes).toEqual([{ plan_id: null }, { remove_tags: ["old"] }]);
+});
+
+test("Organize has a separate Add tag action", async () => {
+  const changes: unknown[] = [];
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    bulk_change: (args: { change: unknown }) => {
+      changes.push(args.change);
+      return [];
+    },
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  openMenu("Organize selected tickets");
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add tag…" }));
+  await act(async () => {});
+  const dialog = screen.getByRole("dialog", { name: "Add tag" });
+  expect(
+    within(dialog).queryByRole("button", { name: "Remove tag" }),
+  ).toBeNull();
+  fireEvent.change(within(dialog).getByRole("combobox", { name: "Tag name" }), {
+    target: { value: "new" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Add tag" }));
+  await act(async () => {});
+  expect(changes).toEqual([{ add_tags: ["new"] }]);
+});
+
+test("the status menu counts tickets per status and checks the one all share", async () => {
+  await renderBulk({
+    find_tickets: () => [
+      bulkTicket(1),
+      bulkTicket(2),
+      bulkTicket(3, { status: "Done" }),
+    ],
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-2" }));
+  openMenu("Status of selected tickets");
+  expect(screen.getByText("Set status for 2 tickets")).toBeTruthy();
+  const todo = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(todo.textContent).toContain("both");
+  expect(todo.querySelector("svg.bulk-status-check")).not.toBeNull();
+  expect(screen.getByRole("menuitem", { name: "Done" })).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-3" }));
+  openMenu("Status of selected tickets");
+  const mixed = screen.getByRole("menuitem", { name: /^Todo/ });
+  expect(mixed.textContent).toContain("2 of 3");
+  expect(mixed.querySelector("svg.bulk-status-check")).toBeNull();
+});
+
+test("Escape clears the selection and the bar shows the shortcut", async () => {
+  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select T-1" }));
+  expect(
+    screen.getByRole("button", { name: "Clear selection" }).textContent,
+  ).toContain("Esc");
+  fireEvent.keyDown(document.body, { key: "Escape" });
+  expect(screen.queryByText("1 selected")).toBeNull();
 });
 
 test("shows attention for a reminder while another view is active and after reopening", async () => {
@@ -1006,7 +1237,7 @@ test("shows attention for a reminder while another view is active and after reop
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "Manage projects" }));
+  await openManageMenu("Manage projects", "All projects");
   unread = 3;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2000);
@@ -1196,7 +1427,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
     count_tickets: counted({ in_progress: 1, todo: 119 }),
   });
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
-  expect(screen.getByText("120 tickets")).toBeTruthy();
+  expect(screen.getByText("120", { selector: ".list-header p" })).toBeTruthy();
   // One Todo ticket is on this page of the 119 in the result.
   expect(screen.getByText("1 of 119")).toBeTruthy();
   expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
@@ -1208,9 +1439,27 @@ test("totals and group counts describe the whole result, not the loaded page", a
     .map(([, args]) => args.filter.order);
   expect(new Set(asked)).toEqual(new Set(["Workflow"]));
   const countCall = bridge.invoke.mock.calls.find(
-    ([command]) => command === "count_tickets",
+    // The Projects page counts tickets without a project; skip that one.
+    ([command, args]) =>
+      command === "count_tickets" && args.filter.unlinked === false,
   );
   expect(countCall?.[1].filter.order).toBe("Workflow");
+});
+
+test("single-status views say in one line what they list", async () => {
+  await renderBulk({});
+  const settle = () =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  expect(screen.getByText(/nothing left to wait on/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
+  await settle();
+  expect(screen.getByText(/working on right now/)).toBeTruthy();
+  expect(screen.queryByText(/nothing left to wait on/)).toBeNull();
 });
 
 test("the source filter narrows list and counts together and Refresh imports on demand", async () => {
@@ -1427,8 +1676,8 @@ test("a group's Add action starts a ticket in that status", async () => {
   await act(async () => {});
   const dialog = screen.getByRole("dialog", { name: "New ticket" });
   expect(
-    within(dialog).getByRole("combobox", { name: "Status" }).textContent,
-  ).toContain("In review");
+    within(dialog).getByRole("combobox", { name: "Status: In review" }),
+  ).toBeTruthy();
 });
 
 test("the Duplicate group's Add action chooses a ticket and then reviews its canonical ticket", async () => {
@@ -1451,13 +1700,26 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     await vi.advanceTimersByTimeAsync(200);
   });
   fireEvent.click(within(dialog).getByRole("button", { name: /Second/ }));
+  await act(async () => {});
+  const review = screen.getByRole("dialog", {
+    name: "Mark T-2 as a duplicate",
+  });
   expect(
-    within(dialog).getByText(/Choose the canonical ticket for T-2/),
+    within(review).getByText(/T-2 keeps its description and history/),
   ).toBeTruthy();
   // The cursor is where the next answer goes, not on the dialog's frame.
   expect(document.activeElement).toBe(
-    within(dialog).getByLabelText("Canonical ticket reference"),
+    within(review).getByLabelText("Canonical ticket reference"),
   );
+  // One flow: Cancel, and a primary that waits for the canonical ticket.
+  expect(within(review).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  expect(
+    (
+      within(review).getByRole("button", {
+        name: "Mark duplicate",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
   // Nothing is marked until the review names a canonical ticket.
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
@@ -1599,7 +1861,7 @@ test("a later page that empties moves back to the last page that exists", async 
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offsets.at(-1)).toBe(0);
-  expect(screen.getByText("50 tickets")).toBeTruthy();
+  expect(screen.getByText("50", { selector: ".list-header p" })).toBeTruthy();
   expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });
 
@@ -1640,8 +1902,12 @@ test.each(["ticket", "document", "plan"] as const)(
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open item" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Open (ticket|item)$/ }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Back to workspace graph" }),
     );
@@ -1691,7 +1957,7 @@ test("opening the workspace graph from Plans does not stack the Plans list", asy
       omitted_groups: [],
     }),
   });
-  fireEvent.click(screen.getByRole("button", { name: "Manage Plans" }));
+  await openManageMenu("Manage Plans", "All Plans");
   expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Workspace graph" }));
   await act(async () => {
@@ -1741,13 +2007,17 @@ test("returns to local graph state after opening an item", async () => {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  fireEvent.click(screen.getByRole("button", { name: "T-1 · First" }));
-  fireEvent.click(screen.getByRole("button", { name: "Context graph" }));
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "T-1 · First" }).at(-1)!,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show only its neighbors" }),
+  );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(
-    screen.getByRole("checkbox", { name: "Include update details" }),
+    screen.getByRole("switch", { name: "Include update details" }),
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
@@ -1757,12 +2027,10 @@ test("returns to local graph state after opening an item", async () => {
     screen.getByRole("button", { name: "Back to context graph" }),
   );
   expect(
-    (
-      screen.getByRole("checkbox", {
-        name: "Include update details",
-      }) as HTMLInputElement
-    ).checked,
-  ).toBe(true);
+    screen
+      .getByRole("switch", { name: "Include update details" })
+      .getAttribute("aria-checked"),
+  ).toBe("true");
 });
 
 test("opens Capture from anywhere with the global shortcut", async () => {
@@ -1772,4 +2040,49 @@ test("opens Capture from anywhere with the global shortcut", async () => {
   render(<App />);
   fireEvent.keyDown(window, { key: "N", shiftKey: true, ctrlKey: true });
   expect(await screen.findByRole("dialog")).toBeTruthy();
+});
+
+test("the ticket detail bounds its height so the document and rail can scroll on their own", async () => {
+  vi.useFakeTimers();
+  const ticket = {
+    id: "1",
+    reference: "T-1",
+    title: "First",
+    body: "",
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return ticket;
+    return command === "count_tickets" ? bridgeDefault(command) : [];
+  });
+  const { container } = render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: /First/ }));
+  const panel = container.querySelector<HTMLElement>(".detail-panel")!;
+  // The panel clips; if it scrolled, its child would have no bounded height.
+  expect(panel.style.overflow).toBe("hidden");
+  expect(panel.style.display).toBe("flex");
+  const detail = panel.querySelector<HTMLElement>(".ticket-detail")!;
+  const bounded = detail.querySelectorAll(".detail-scroll");
+  expect(bounded).toHaveLength(1);
+  expect(bounded[0]!.parentElement).toBe(detail);
+  // The document column and the rail are siblings, each scrolling by its own
+  // overflow (styles.css) once the pane is wide enough for both.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
+  expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
+  expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
 });

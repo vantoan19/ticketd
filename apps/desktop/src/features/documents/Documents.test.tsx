@@ -212,11 +212,42 @@ it("disables tagging and ticket creation for a trashed Document", async () => {
   );
   await screen.findByText("In Trash");
   expect(
-    (screen.getByRole("button", { name: "Add tag" }) as HTMLButtonElement)
+    (screen.getByRole("button", { name: "Add tags" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   expect(
-    (screen.getByRole("button", { name: "Create ticket" }) as HTMLButtonElement)
-      .disabled,
+    (
+      screen.getByRole("button", {
+        name: "Create ticket from this",
+      }) as HTMLButtonElement
+    ).disabled,
   ).toBe(true);
+});
+
+it("offers Browse Documents from an empty Trash", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.trash).mockResolvedValue([]);
+  (documents as unknown as { all: ReturnType<typeof vi.fn> }).all = vi
+    .fn()
+    .mockResolvedValue([]);
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Browse Documents" }),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "All documents" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
 });

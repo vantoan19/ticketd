@@ -20,7 +20,16 @@
   padding: 4px 76px 4px 4px;
   background: var(--background);
 }
-/* Hidden by visibility, never removed: controls below must not move when the editor loses focus. */
+/* A toolbar that appears on focus is docked inside the frame's top edge and grows the frame, so it
+   can never cover a neighbour. While idle it takes no space: the frame stays tight. */
+.rich-toolbar[data-floating] {
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 1px 0 var(--border);
+}
+.rich-toolbar[data-floating][data-visible="false"] {
+  display: none;
+}
+/* A persistent toolbar is hidden by visibility, never removed: controls below must not move. */
 .rich-toolbar[data-visible="false"] {
   visibility: hidden;
 }
@@ -47,32 +56,48 @@
   visibility: visible;
   transition-delay: 0s;
 }
+/* A persistent toolbar (the capture dialog) keeps its copy/source pair too. */
+.editor-mode--inline[data-persistent] {
+  opacity: 1;
+  visibility: visible;
+}
 .rich-document .code-language[data-editing="false"]:not(:focus-within) {
   display: none;
 }
 .rich-document {
   padding: 16px;
   min-height: 160px;
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: normal;
   overflow-wrap: anywhere;
   outline: none;
 }
+/* The ring sits on the rounded frame, not the square text area inside it. */
 .rich-document:focus-visible {
+  outline: none;
+}
+.markdown-editor:has(.rich-document:focus-visible) {
   outline: 1px solid var(--input-focus);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 .rich-document > * {
   margin-block: 12px;
 }
+/* The frame's own padding is the only space above the first block and below the last. */
+.rich-document > :first-child {
+  margin-top: 0;
+}
+.rich-document > :last-child {
+  margin-bottom: 0;
+}
 .rich-document h1 {
-  font-size: 32px;
+  font-size: var(--text-section);
   font-weight: 600;
   line-height: 40px;
   letter-spacing: -1.28px;
 }
 .rich-document :is(h2, h3, h4, h5, h6) {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -88,19 +113,29 @@
   list-style-type: decimal;
   padding-left: 20px;
 }
+.rich-document li + li {
+  margin-top: 4px;
+}
 .rich-document li:has(> input[type="checkbox"]) {
   list-style: none;
   margin-left: -20px;
 }
-.rich-document [data-slate-placeholder] {
+.rich-document[data-empty] > :first-child::before {
+  content: var(--editor-placeholder);
+  position: absolute;
+  inset: 0 auto auto 0;
+  max-width: 100%;
   color: var(--muted-foreground);
-  opacity: 1 !important;
+  pointer-events: none;
+  user-select: none;
 }
 .rich-document li > input {
   margin-right: 8px;
   accent-color: var(--primary);
 }
-.rich-document li > div[data-slate-node] {
+/* Only a task item keeps its text inline beside the checkbox; a plain item's
+   text stays a block so the engine anchors the bullet to its first line. */
+.rich-document li:has(> input[type="checkbox"]) > div[data-slate-node] {
   display: inline;
 }
 .rich-document a {
@@ -120,7 +155,7 @@
   padding: 12px;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
   white-space: pre;
@@ -130,7 +165,7 @@
   padding-inline: 4px;
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -155,12 +190,12 @@
   height: 1px;
   box-shadow: 0 1px var(--border);
 }
+/* The diagram draws its own frame; the wrapper adds none, so Edit shows one border. */
 .diagram-editor {
-  box-shadow: var(--shadow-border);
-  padding: 12px;
-  border-radius: 6px;
+  padding: 0;
 }
 .diagram-editor summary {
+  padding-top: 8px;
   cursor: pointer;
   color: var(--muted-foreground);
 }
@@ -188,7 +223,7 @@
 }
 .markdown-editor .cm-scroller {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -202,4 +237,12 @@
 }
 .markdown-editor :is(.cm-activeLine, .cm-activeLineGutter) {
   background: var(--recessed);
+}
+.mermaid-pending {
+  height: 160px;
+  padding: 12px;
+}
+.diagram-summary-action,
+.diagram-summary-label {
+  font-size: var(--text-caption);
 }

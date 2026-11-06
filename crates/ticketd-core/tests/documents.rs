@@ -767,11 +767,34 @@ fn list_rows_carry_plain_snippet_tags_and_date_so_same_titled_documents_differ()
     workspace.open_document(&second.id).unwrap();
     let rows = workspace.recent_documents().unwrap();
     let row = rows.iter().find(|row| row.id == first.id).unwrap();
-    assert_eq!(row.snippet, "Heading Bold link item");
+    // The leading heading is the row title, not part of the excerpt.
+    assert_eq!(row.snippet, "Bold link item");
     assert_eq!(row.tags, ["a", "b"]);
     assert!(!row.updated_at.is_empty());
     let found = workspace.search_documents("link", None, 10, 0).unwrap();
     assert!(found[0].snippet.contains("link item"));
+}
+
+#[test]
+fn snippet_leaves_out_the_repeated_heading_and_the_capture_placeholder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let derived = workspace
+        .create_document(None, "Checkout idea for retries\n\nWrite a thought…")
+        .unwrap();
+    let titled = workspace
+        .create_document(Some("Retries"), "Retries\n\nBackoff matters")
+        .unwrap();
+    let rows = workspace.all_documents_page(50, 0, false).unwrap();
+    let snippet = |id: &str| {
+        rows.iter()
+            .find(|row| row.id == id)
+            .unwrap()
+            .snippet
+            .clone()
+    };
+    assert_eq!(snippet(&derived.id), "");
+    assert_eq!(snippet(&titled.id), "Backoff matters");
 }
 
 #[test]

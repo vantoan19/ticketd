@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { FileText } from "lucide-react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import { Input } from "@/components/ui/input";
@@ -51,6 +52,8 @@ export function DocumentPicker({
     };
   }, [query, includeSupport]);
   const shown = (results ?? []).filter((item) => !exclude.includes(item.id));
+  // Everything on offer is already chosen, which is not the same as nothing existing.
+  const allChosen = !query.trim() && (results?.length ?? 0) > 0;
   return (
     <div className="document-picker">
       <Input
@@ -88,9 +91,23 @@ export function DocumentPicker({
         ))}
       </ul>
       {results !== null && shown.length === 0 && !error && (
-        <p className="document-picker-empty" role="status">
-          {query.trim() ? "No Documents match." : "No Documents yet."}
-        </p>
+        <EmptyState
+          inline
+          role="status"
+          icon={<FileText />}
+          title={
+            query.trim()
+              ? "No Documents match"
+              : allChosen
+                ? "All Documents are already linked"
+                : "No Documents yet"
+          }
+          description={
+            query.trim()
+              ? "Try a different search."
+              : "Documents you create appear here."
+          }
+        />
       )}
     </div>
   );

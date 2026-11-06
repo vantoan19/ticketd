@@ -555,3 +555,21 @@ test("discovery uses the core's imported references and Discard restores saved r
     true,
   );
 });
+
+test("optional fields show grey examples and an Optional marker, not saved-looking values", () => {
+  render(<SourceCard entry={entry} />);
+  expect(screen.getByPlaceholderText("e.g. acme/billing-api")).toBeTruthy();
+  expect(screen.getByPlaceholderText("e.g. octocat")).toBeTruthy();
+  expect(screen.queryByPlaceholderText("Anyone")).toBeNull();
+  expect(screen.getAllByText("Optional").length).toBeGreaterThan(0);
+});
+
+test("the section list groups Sources after Workspace and before Help", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
+  render(<SettingsNav onBack={() => {}} />);
+  await screen.findByRole("group", { name: "Sources" });
+  const groups = screen
+    .getAllByRole("group")
+    .map((group) => group.getAttribute("aria-label"));
+  expect(groups).toEqual(["Preferences", "Workspace", "Sources", "Help"]);
+});

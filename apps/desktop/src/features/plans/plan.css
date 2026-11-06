@@ -1,52 +1,137 @@
 .plan-header {
   display: flex;
+  flex: none;
   flex-direction: column;
-  gap: 12px;
-  padding: 20px 20px 12px;
+  gap: 10px;
+  padding: 20px 16px 16px 24px;
+  /* A border, not a shadow: the panes below paint over a shadow, which left
+     the rule over the list column only. */
+  border-bottom: 1px solid var(--header-boundary);
 }
-/* The name and actions share the first line; the context line runs the full
-   width beneath them instead of wrapping in the space the actions leave. */
-.plan-title-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "name actions"
-    "context context";
+.plan-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.plan-workspace[hidden] {
+  display: none !important;
+}
+.plan-rename-hint {
+  margin: 0;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.plan-list-toolbar {
+  display: flex;
   align-items: center;
-  gap: 4px 16px;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
 }
-.plan-title {
-  display: contents;
+.plan-list-spacer {
+  flex: 1;
 }
-.plan-name-row {
-  grid-area: name;
+.ui-button-outline[aria-expanded="true"] {
+  box-shadow: var(--shadow-small);
 }
-.plan-title p {
-  grid-area: context;
-}
-.plan-actions {
-  grid-area: actions;
-}
-@container (max-width: 440px) {
-  .plan-title-row {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "name"
-      "context"
-      "actions";
-  }
-}
-.plan-name-row {
+/* One full-width row: name and state, then the actions. The rename input
+   takes the title's place at the same size, so nothing below moves. */
+.plan-title-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
+  min-height: 32px;
+}
+.plan-title-row[data-renaming="true"] {
+  flex-wrap: nowrap;
+}
+.plan-list-summary {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  white-space: nowrap;
+}
+.plan-title-spacer {
+  flex: 1;
+}
+.plan-name-input {
+  flex: 1 1 240px;
+  max-width: 480px;
+  height: 36px;
+  margin: -2px 0 -2px -8px;
+  padding: 0 8px;
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+}
+.plan-name-error {
+  color: var(--destructive);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.plan-purpose-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.plan-purpose-edit {
+  margin-left: -8px;
+  color: var(--muted-foreground);
+}
+.plan-purpose-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* One row: progress, counts, then the spec chip at the right end. The counts
+   wrap inside their own cell, so the header never grows a second row. */
+.plan-summary {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.plan-progress {
+  display: inline-flex;
+  flex: none;
+  white-space: nowrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+}
+.plan-progress-bar {
+  width: 96px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--accent);
+}
+.plan-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--foreground);
+}
+.plan-summary-rule {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
 }
 .plan-header h1,
 .plan-index h1 {
   margin: 0;
   color: var(--foreground);
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -57,34 +142,34 @@
   align-items: center;
   gap: 6px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
-}
-.plan-title p {
-  margin: 0;
-  color: var(--muted-foreground);
 }
 .plan-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
 }
 .plan-counts {
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 4px 0 0;
+  gap: 4px 16px;
+  margin: 0;
+}
+.plan-counts > div[data-zero="true"] {
+  opacity: 0.6;
 }
 .plan-counts > div {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 .plan-counts dt {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted-foreground);
 }
 .plan-counts dd {
   margin: 0;
@@ -94,17 +179,15 @@
 .plan-note {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
-.plan-rename,
 .plan-create {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
 }
-.plan-rename [data-slot="field"],
 .plan-create [data-slot="field"] {
   flex: 1 1 200px;
   max-width: 360px;
@@ -116,13 +199,12 @@
   gap: 16px;
   width: 100%;
   max-width: 768px;
-  margin-inline: auto;
-  padding: 32px 24px 48px;
+  padding: 32px var(--page-gutter) 48px;
   overflow-y: auto;
 }
 .plan-index > h1 + .plan-note {
   margin-top: -12px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .plan-index-list {
@@ -192,17 +274,54 @@
 }
 .plan-add-title small {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .plan-add-error {
   margin: 0;
   color: var(--destructive);
 }
-.plan-documents p,
-.plan-documents summary {
+.plan-documents {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 4px 8px;
+  margin-left: auto;
+  text-align: left;
+}
+.plan-document-picker,
+.plan-documents-popover {
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+}
+.plan-documents-more {
+  flex: none;
+  padding-inline: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.plan-spec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.plan-spec-label {
   color: var(--muted-foreground);
-  font-size: 12px;
+}
+.plan-spec-title {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .plan-documents ul {
   list-style: none;
@@ -220,19 +339,12 @@
 }
 .plan-dependencies {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
   padding: 12px 24px 24px;
-}
-.plan-dependencies-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.plan-dependencies-header h2 {
-  color: var(--muted-foreground);
-  font-size: 14px;
-  font-weight: 500;
+  overflow-y: auto;
 }
 .plan-graph-canvas {
   height: 440px;
@@ -245,7 +357,7 @@
   padding: 8px 12px;
   border-radius: 6px;
   background: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .plan-callout button {
@@ -318,29 +430,19 @@
 }
 .plan-purpose {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
-}
-.plan-rename {
-  align-items: flex-start;
-}
-.plan-rename-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 22px;
 }
 .plan-blocker-form {
   margin-top: 4px;
-}
-.plan-view-switch {
-  padding: 0 20px;
 }
 .plan-undo {
   display: flex;
   align-items: center;
   gap: 4px;
   margin: 0 20px;
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 .plan-empty-actions {
   display: flex;
@@ -349,7 +451,8 @@
 .plan-add-done {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
 }
 
 /* A Document row reads title (left, truncating) then its actions on one line. */
@@ -363,4 +466,142 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
+}
+
+.plan-dependencies-key {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.plan-dependencies-key > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-dependencies-key svg {
+  color: var(--foreground);
+}
+.plan-dependencies-key-box {
+  width: 28px;
+  height: 14px;
+  border-radius: 4px;
+  outline: 1px dashed var(--muted-foreground);
+  outline-offset: -1px;
+}
+
+.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-header {
+  display: none;
+}
+
+/* The Plan actions menu is 237px wide, rows 30px (board E). */
+.plan-actions-menu {
+  box-sizing: border-box;
+  width: 235.5px;
+  padding: 6px;
+  font-size: var(--text-code);
+}
+/* Frame E: 30px rows with 8px inset, 14px icons, and a hairline that runs edge to edge. */
+.plan-actions-menu [data-slot="dropdown-menu-item"] {
+  height: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: var(--text-code);
+  line-height: 20px;
+}
+.plan-actions-menu [data-slot="dropdown-menu-item"] svg:not([class*="size-"]) {
+  width: 14px;
+  height: 14px;
+}
+.plan-actions-menu [data-slot="dropdown-menu-separator"] {
+  height: 1px;
+  margin: 6px -6px;
+}
+.plan-actions [aria-expanded="true"] {
+  background: var(--accent);
+}
+/* Nothing is selected: the hint sits at the centre of the whole pane. */
+.ticket-detail[data-empty] .detail-scroll {
+  display: flex;
+}
+.ticket-detail[data-empty] .detail-empty {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Nothing to draw: legend strip over a centred empty state, in a 760 x 420
+   card (board E-2). */
+.plan-dependencies-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: min(100%, 760px);
+  height: 420px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.plan-dependencies-card .plan-dependencies-key {
+  flex: none;
+  height: 44px;
+  padding: 0 16px;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.plan-dependencies-card [data-slot="empty-state"] {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+}
+.plan-dependencies-card [data-slot="empty-header"] {
+  max-width: 420px;
+}
+.plan-dependencies-card [data-slot="empty-description"] {
+  max-width: 420px;
+}
+.plan-dependencies-card [data-slot="empty-content"] .ui-button {
+  gap: 6px;
+  font-size: var(--text-code);
+}
+.plan-dependencies-card [data-slot="empty-content"] .ui-button svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
+}
+.plan-dependencies-card [data-slot="empty-icon"] svg {
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+/* Board E-2: the "Add blocker…" button is 32px tall; its 1px ring makes the
+   34px outer edge measured in the frame. */
+.plan-dependencies-card [data-slot="empty-content"] .ui-button {
+  height: 32px;
+}
+.plan-dependencies-key-box {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+}
+
+/* Header rows match board E: purpose 28px, counts row 28px with the spec chip at its right end. */
+.plan-purpose-edit {
+  height: 28px;
+}
+.plan-summary {
+  min-height: 28px;
+  gap: 8px 16px;
+}
+.plan-documents {
+  gap: 0;
+  flex: none;
+}
+.plan-documents .plan-document-row [aria-haspopup="menu"],
+.plan-documents .plan-add-context {
+  width: 28px;
+  height: 28px;
+}
+.plan-counts {
+  flex-wrap: nowrap;
+  gap: 4px 16px;
 }

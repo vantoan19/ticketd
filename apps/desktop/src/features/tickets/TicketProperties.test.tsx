@@ -45,7 +45,7 @@ test("keeps the saved project and reports a failed change", async () => {
       refresh={async () => {}}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Project: Unlinked/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
   const search = await screen.findByLabelText("Search Project");
   fireEvent.change(search, {
     target: { value: "Project" },
@@ -60,7 +60,7 @@ test("keeps the saved project and reports a failed change", async () => {
   );
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: /Project: Unlinked/ }),
+      screen.getByRole("button", { name: /Project: No project/ }),
     ),
   );
 });
@@ -133,7 +133,7 @@ test("choosing Duplicate from the status menu opens the duplicate review instead
     await screen.findByRole("option", { name: "Mark as duplicate…" }),
   );
   expect(
-    await screen.findByRole("heading", { name: "Mark as duplicate" }),
+    await screen.findByRole("heading", { name: "Mark T-1 as a duplicate" }),
   ).toBeTruthy();
   expect(bridge.invoke).not.toHaveBeenCalledWith(
     "change_ticket",
@@ -193,4 +193,37 @@ test("changing the status of a duplicate asks before removing its link", async (
       }),
     ),
   );
+});
+
+test("a trashed ticket's rail says it is locked", () => {
+  bridge.invoke.mockResolvedValue([]);
+  render(
+    <TicketProperties
+      ticket={{
+        id: "1",
+        reference: "T-1",
+        title: "Ticket",
+        body: "",
+        status: "Todo",
+        tags: [],
+        project_id: null,
+        plan_id: null,
+        trashed: true,
+        availability: null,
+        parent: null,
+        children: [],
+        prerequisites: [],
+      }}
+      projects={[]}
+      plans={[]}
+      onSaved={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  expect(screen.getByRole("note").textContent).toMatch(
+    /In Trash\. Restore it to edit/,
+  );
+  expect(
+    screen.getByRole("img", { name: "Locked while in Trash" }),
+  ).toBeTruthy();
 });

@@ -1,8 +1,11 @@
 import { describe, expect, it, test } from "vitest";
 import {
+  cardParts,
   centerZoom,
   connectionRows,
   describeEdge,
+  flowEdges,
+  labelledConnections,
   opensAsMap,
   panToInclude,
   plainText,
@@ -65,10 +68,12 @@ test("every relationship kind has a style and styles differ by dash and colour",
   const { edgeStyle, edgeStyles, edgeLabels } = await import("./graph-text");
   for (const kind of Object.keys(edgeLabels))
     expect(edgeStyle(kind)).toBeTruthy();
-  expect(new Set(edgeStyles.map((s) => `${s.dash}|${s.color}`)).size).toBe(
+  // Colour never carries the meaning: every style is neutral and differs by dash and width.
+  expect(new Set(edgeStyles.map((s) => `${s.dash}|${s.width}`)).size).toBe(
     edgeStyles.length,
   );
-  expect(edgeStyle("spec").name).toMatch(/Primary spec/);
+  expect(edgeStyles.every((s) => s.color === "currentColor")).toBe(true);
+  expect(edgeStyle("spec").name).toMatch(/spec of/);
 });
 
 describe("map rules", () => {
@@ -199,4 +204,66 @@ test("a passage differing from the title only by punctuation is not repeated", (
       nodes,
     ),
   ).not.toContain("“");
+});
+
+test("every edge is labeled on the line and nodes have no all-caps type prefix", () => {
+  const edges = flowEdges(
+    (["blocks", "mention", "subticket", "membership", "spec"] as const).map(
+      (kind) => ({ source: "a", target: "b", kind, explanation: null }),
+    ),
+  );
+  expect(edges.map((edge) => edge.label)).toEqual([
+    "blocks",
+    "mentions",
+    "parent of",
+    "in Plan",
+    "spec of",
+  ]);
+  expect(
+    cardParts({
+      id: "t",
+      kind: "ticket",
+      label: "T-3 · Redesign pricing page",
+      state: "Todo",
+      trashed: false,
+      activity_detail: false,
+    }),
+  ).toEqual({
+    ref: "T-3",
+    title: "Redesign pricing page",
+    caption: "Ticket · Todo",
+  });
+});
+
+test("a selection lists its connections under labelled rows, each item once", () => {
+  const node = (id: string, ref: string, label: string) =>
+    ({
+      id,
+      kind: "ticket",
+      label: `${ref} · ${label}`,
+      ticket_reference: ref,
+      state: "Todo",
+      trashed: false,
+      activity_detail: false,
+    }) as never;
+  const edge = (kind: string, source: string, target: string) =>
+    ({ kind, source, target, explanation: "" }) as never;
+  const graph = {
+    nodes: [
+      node("a", "T-1", "Add retries"),
+      node("b", "T-3", "Pricing"),
+      node("c", "T-8", "Jitter"),
+    ],
+    edges: [
+      edge("blocks", "b", "a"),
+      edge("subticket", "a", "c"),
+      edge("mention", "b", "a"),
+      edge("mention", "b", "a"),
+    ],
+  };
+  expect(labelledConnections("a", graph)).toEqual([
+    { label: "Blocked by", items: [{ id: "b", text: "T-3 Pricing" }] },
+    { label: "Parent of", items: [{ id: "c", text: "T-8 Jitter" }] },
+    { label: "Mentioned by", items: [{ id: "b", text: "T-3 Pricing" }] },
+  ]);
 });

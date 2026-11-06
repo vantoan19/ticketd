@@ -4,7 +4,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import { SchemaForm } from "@/features/settings/sources/SchemaForm";
 import type { SchemaField } from "@/lib/api/sources";
 
-const multi = (key: string, label: string): SchemaField => ({
+const multi = (
+  key: string,
+  label: string,
+): Extract<SchemaField, { type: "multi_select" }> => ({
   key,
   label,
   required: false,
@@ -73,4 +76,28 @@ test("pressing outside the field, such as Save, closes the list", () => {
   fireEvent.focus(input("Repositories"));
   fireEvent.pointerDown(screen.getByRole("button", { name: "Save" }));
   expect(list("Repositories")).toBeNull();
+});
+
+test("text typed but not added says what is wrong instead of 'are required'", () => {
+  const repositories: SchemaField = {
+    ...multi("repositories", "Repositories"),
+    required: true,
+    allow_custom: true,
+    format: "owner_name",
+  };
+  render(
+    <SchemaForm
+      fields={[repositories]}
+      draft={{ repositories: [] }}
+      errors={{ repositories: ["are required"] }}
+      disabled={false}
+      loadOptions={async () => []}
+      onChange={vi.fn()}
+    />,
+  );
+  fireEvent.change(input("Repositories"), { target: { value: "not a repo" } });
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toContain("“not a repo” is not a repository");
+  expect(alert.textContent).toContain("owner/name");
+  expect(screen.queryByText(/are required/)).toBeNull();
 });

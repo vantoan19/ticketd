@@ -8,7 +8,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Folder, Layers, Tag, type LucideIcon } from "lucide-react";
+import {
+  ChevronDown,
+  Folder,
+  Layers,
+  Lock,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -59,8 +66,13 @@ export function PropertyPicker({
   readOnly = false,
   icon: Icon,
   align = "start",
+  display,
+  className,
 }: {
   label: string;
+  /** Shown in the trigger in place of the value text (the label stays the accessible name). */
+  display?: ReactNode;
+  className?: string;
   /** Which edge of the trigger the choices line up with. */
   align?: "start" | "end";
   compact?: boolean;
@@ -90,9 +102,10 @@ export function PropertyPicker({
           readOnly={readOnly}
           disabled={disabled}
           aria-label={`${label}: ${value}`}
+          {...(className ? { className } : {})}
         >
           {Icon && <Icon data-icon="inline-start" />}
-          <span className="truncate">{value}</span>
+          {display ?? <span className="truncate">{value}</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -253,11 +266,11 @@ export function TicketProperties({
   const statusChoices = owner ? owner.status_choices : ticketStatuses;
   const projectName =
     projects.find((p) => p.id === ticket.project_id)?.name ??
-    (ticket.project_id || "Unlinked");
+    (ticket.project_id || "No project");
   const plan = plans.find((e) => e.id === ticket.plan_id);
   const planName = plan
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`
-    : ticket.plan_id || "No Plan";
+    : ticket.plan_id || "Add to a Plan";
   function property(label: string, control: ReactNode) {
     return (
       <RailSection label={label}>
@@ -273,7 +286,15 @@ export function TicketProperties({
       className="ticket-properties"
       data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
+      tabIndex={0}
     >
+      {ticket.trashed && (
+        <p role="note" className="rail-trash-note">
+          <Trash2 aria-hidden="true" />
+          <span>In Trash. Restore it to edit; its relationships are kept.</span>
+          <Lock aria-label="Locked while in Trash" role="img" />
+        </p>
+      )}
       {property(
         "Status",
         <>
@@ -454,31 +475,17 @@ export function TicketProperties({
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
-        <DialogContent
-          className="duplicate-dialog"
-          onCloseAutoFocus={(event) => {
-            // The Status choice that opened this unmounts with its menu, so
-            // focus returns to the Status control explicitly.
-            event.preventDefault();
-            statusTrigger.current?.focus();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Mark as duplicate</DialogTitle>
-            <DialogDescription>
-              Choose the canonical ticket for {ticket.reference} and review its
-              dependencies.
-            </DialogDescription>
-          </DialogHeader>
-          <Duplicates
-            ticket={ticket}
-            refresh={refresh}
-            onDone={() => setDuplicateOpen(false)}
-            onCancel={() => setDuplicateOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {duplicateOpen && (
+        <Duplicates
+          ticket={ticket}
+          refresh={refresh}
+          open
+          onOpenChange={setDuplicateOpen}
+          title={`Mark ${ticket.reference} as a duplicate`}
+          description={`${ticket.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
+          returnFocus={statusTrigger}
+        />
+      )}
       <SourceRail ticket={ticket} refresh={refresh} />
       {property(
         "Project",
@@ -491,7 +498,7 @@ export function TicketProperties({
           value={projectName}
           disabled={disabled}
           choices={[
-            { value: "", label: "Unlinked" },
+            { value: "", label: "No project" },
             ...projects.map((p) => ({ value: p.id, label: p.name })),
           ]}
           onChoose={(value) =>
@@ -529,39 +536,65 @@ export function TicketProperties({
       {property(
         "Tags",
         <>
-          <div className="rail-tags">
-            {ticket.tags.map((tag) => (
-              <span className="rail-tag" key={tag}>
-                {tag}
-              </span>
-            ))}
-          </div>
-          <PropertyPicker
-            compact
-            align="end"
-            readOnly={ticket.trashed}
-            icon={Tag}
-            label="Tags"
-            value={ticket.tags.length ? "Edit tags" : "Add tags"}
-            disabled={disabled}
-            allowCreate
-            onSearch={setTagQuery}
-            choices={[...new Set([...vocabulary, ...ticket.tags])].map(
-              (tag) => ({
-                value: tag,
-                label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
-              }),
-            )}
-            onChoose={(tag) =>
-              void save("Tags", () =>
-                client.changeTag(
-                  ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
-                  ticket.reference,
-                  tag,
-                ),
-              )
-            }
-          />
+          {ticket.trashed ? (
+            <>
+              <div className="rail-tags">
+                {ticket.tags.map((tag) => (
+                  <span className="rail-tag" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              {!ticket.tags.length && (
+                <span className="rail-none">No tags</span>
+              )}
+            </>
+          ) : (
+            <PropertyPicker
+              compact
+              align="end"
+              className="rail-tags-picker"
+              display={
+                <>
+                  {ticket.tags.length ? (
+                    <span className="rail-tags">
+                      {ticket.tags.map((tag) => (
+                        <span className="rail-tag" key={tag}>
+                          {tag}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">Add tags</span>
+                  )}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className="rail-tags-chevron"
+                  />
+                </>
+              }
+              label="Tags"
+              value={ticket.tags.length ? "Edit tags" : "Add tags"}
+              disabled={disabled}
+              allowCreate
+              onSearch={setTagQuery}
+              choices={[...new Set([...vocabulary, ...ticket.tags])].map(
+                (tag) => ({
+                  value: tag,
+                  label: ticket.tags.includes(tag) ? `✓ ${tag}` : tag,
+                }),
+              )}
+              onChoose={(tag) =>
+                void save("Tags", () =>
+                  client.changeTag(
+                    ticket.tags.includes(tag) ? "remove_tag" : "add_tag",
+                    ticket.reference,
+                    tag,
+                  ),
+                )
+              }
+            />
+          )}
         </>,
       )}
       {vocabularyError && !ticket.trashed && (

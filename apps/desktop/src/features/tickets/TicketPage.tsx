@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
 import { Follow } from "@/features/tickets/Inbox";
@@ -59,14 +57,22 @@ export function TicketPage({
 }) {
   const now = useNow();
   const [updateTarget, setUpdateTarget] = useState<NoteTarget | null>(null);
-  const [noEvidence, setNoEvidence] = useState(false);
-  const [composeKey, setComposeKey] = useState(0);
   const work = useLinkedWork(ticket, revision, refresh, active);
-  const links = work.current?.links;
-  const noSubtickets =
-    !!links &&
-    links.children_progress.total === 0 &&
-    !work.rows.some((row) => row.kind === "subticket");
+  // Pages stay mounted while hidden and the shared scrollers keep their
+  // offset, so showing a ticket starts it at the top: document, rail, detail.
+  const page = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const content = page.current;
+    if (!active || !content) return;
+    for (const node of [
+      content.parentElement,
+      content,
+      content.querySelector(".detail-document"),
+      content.querySelector(":scope > .ticket-properties"),
+    ]) {
+      if (node) node.scrollTop = 0;
+    }
+  }, [active]);
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
   const source = externalSource(ticket);
@@ -124,7 +130,15 @@ export function TicketPage({
           )}
         </>
       ) : (
-        "Local ticket"
+        <span>
+          Local ticket
+          {ticket.updated_at && (
+            <span title={formatDateTime(ticket.updated_at)}>
+              {" "}
+              · updated {relativeDateTime(ticket.updated_at, now)}
+            </span>
+          )}
+        </span>
       )}
     </p>
   );
@@ -132,6 +146,7 @@ export function TicketPage({
   const contentLocked = Boolean(source?.content_locked);
   return (
     <div
+      ref={page}
       className="detail-content"
       hidden={!active}
       data-trashed={ticket.trashed || undefined}
@@ -159,7 +174,7 @@ export function TicketPage({
                 />
               ) : (
                 <>
-                  <p className="description-heading">Description</p>
+                  <p className="sr-only">Description</p>
                   <div className="markdown-preview description-document">
                     {ticket.body.trim() ? (
                       <MarkdownDocument
@@ -187,12 +202,7 @@ export function TicketPage({
           </TicketEditor>
         )}
         {active && !ticket.trashed && (
-          <Subtickets
-            work={work}
-            select={select}
-            external={Boolean(source)}
-            quiet
-          />
+          <Subtickets work={work} select={select} external={Boolean(source)} />
         )}
         {active && (
           <Evidence
@@ -200,34 +210,7 @@ export function TicketPage({
             revision={revision}
             trashed={ticket.trashed}
             refresh={refresh}
-            quiet
-            onEmptyChange={setNoEvidence}
-            composeKey={composeKey}
           />
-        )}
-        {active && !ticket.trashed && (noSubtickets || noEvidence) && (
-          <div className="detail-quiet-actions">
-            {noSubtickets && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => work.openLink("subticket")}
-              >
-                <Plus aria-hidden="true" />
-                Link subticket
-              </Button>
-            )}
-            {noEvidence && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setComposeKey((value) => value + 1)}
-              >
-                <Plus aria-hidden="true" />
-                Add evidence
-              </Button>
-            )}
-          </div>
         )}
         {active && (
           <Backlinks

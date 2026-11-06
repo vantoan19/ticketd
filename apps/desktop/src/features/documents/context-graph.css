@@ -1,9 +1,67 @@
 .context-graph-page {
-  padding: 24px;
+  padding: 0;
   overflow: auto;
 }
+/* Room below the last line, so the status line is never clipped by the pane. */
+.context-graph-body {
+  padding: 16px 20px 48px;
+}
+.context-graph-page .list-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--background);
+}
+.context-graph-page .list-header {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.context-graph-page .list-header > * {
+  flex: none;
+  white-space: nowrap;
+}
+/* The title is the one item that gives way, so the row stays one line. */
+.context-graph-page .list-header > .context-graph-subject {
+  flex: 0 1 auto;
+}
+.context-graph-page .list-header > p {
+  margin: 0;
+}
+.context-graph-page .list-header > .flex-1 {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.context-graph-page {
+  scroll-padding-top: 56px;
+  overflow-anchor: none;
+}
+.context-graph-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-edge-label {
+  position: absolute;
+  /* Opaque and above the cards: a label that must cross a card stays readable. */
+  z-index: 2000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+  line-height: var(--text-caption-line);
+}
 .context-graph-heading h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   line-height: 32px;
   margin: 0;
 }
@@ -33,18 +91,55 @@
   gap: 12px;
   margin-bottom: 16px;
 }
+/* Fixed height: selecting an item never moves the canvas or the legend. */
 .context-graph-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   border: 1px solid var(--border);
-  min-height: 500px;
+  height: clamp(420px, calc(100vh - 220px), 640px);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+/* The canvas, then the legend and the not-connected list in a row of their own. */
+.context-graph-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 .context-graph-canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
   min-width: 0;
-  min-height: 500px;
+  min-height: 0;
+  overflow: hidden;
+}
+/* The map fills the canvas above the zoom control, which gets a row of its own
+   so a card is never drawn under it at any zoom. */
+.context-graph-flow {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* The whole canvas (cards, edges, labels, grid, zoom control) fades in as one once its first fit is painted. */
+.context-graph-canvas {
+  transition: opacity 160ms ease-out;
+}
+.context-graph-canvas[data-pending] {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-graph-canvas {
+    transition: none;
+  }
 }
 .context-graph-preview {
-  padding: 20px;
+  padding: 16px 20px;
+  overflow: auto;
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -82,7 +177,7 @@
   background: none;
   color: var(--foreground);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   text-align: left;
@@ -106,7 +201,7 @@
   grid-column: 2;
   margin: 2px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .context-graph-list li > p strong {
@@ -115,11 +210,10 @@
 @media (max-width: 700px) {
   .context-graph-main {
     grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
+    height: auto;
   }
-  .context-graph-canvas {
-    min-height: 320px;
-    height: 320px;
+  .context-graph-stage {
+    height: 420px;
   }
   /* The selected item's details come before the map on narrow screens. */
   .context-graph-preview {
@@ -129,21 +223,13 @@
   }
 }
 
-.context-graph-page .react-flow__node-default {
-  background: var(--surface);
-  color: var(--foreground);
-  border-color: var(--border);
-  /* Cards are drawn small to fit a map, so their text starts larger than usual. */
-  font-size: 14px;
-  line-height: 1.25;
-  overflow: hidden;
-  /* A long unbroken title wraps inside the card instead of spilling out. */
-  overflow-wrap: anywhere;
-  max-height: 110px;
-}
 .context-graph-heading,
 .context-graph-toolbar {
   flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.context-graph-grow {
+  flex: 1;
 }
 .context-graph-preview {
   min-width: 0;
@@ -158,35 +244,317 @@
 }
 .graph-legend {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.graph-legend-title {
+  font-weight: 500;
+}
+.graph-legend ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   list-style: none;
   margin: 0;
   padding: 0;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
 }
 .graph-legend li {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+.graph-legend svg {
+  flex: none;
 }
 
-/* Selection and keyboard focus read in both themes. */
-.context-graph-page .react-flow__node-default {
-  border-radius: var(--radius);
-}
-.context-graph-page .react-flow__node-default.selected,
-.context-graph-page .react-flow__node-default.selectable:focus,
-.context-graph-page .react-flow__node-default.selectable.selected:hover {
-  border: 2px solid var(--ring);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
+/* Legend and the not-connected list have their own row under the canvas. */
+.context-graph-pinned {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 16px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
   background: var(--surface);
 }
-.context-graph-page .react-flow__node-default:focus-visible {
+.context-graph-pinned .graph-legend {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 0;
+  box-shadow: none;
+  background: none;
+}
+.context-graph-pinned .graph-legend ul {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+/* Items with no relationship: a heading and a list that scrolls inside the side panel. */
+.context-graph-unconnected {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+.context-graph-unconnected strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+/* Up to five whole rows (24px each); the edge that is cut fades out. */
+.context-graph-unconnected-list {
+  --rows: 5;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: calc(var(--rows) * 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+  border-radius: 6px;
+}
+/* A mask on the scroll container itself follows the container's edges and works
+   on any background, light or dark. useScrollFade sets data-more-above/below. */
+/* No mask at all unless content is cut off at an edge: an unconditional gradient mask
+   rendered a stray strip at scroll top in WebKit. */
+.context-graph-unconnected-list,
+.context-graph-preview-body {
+  --fade: 16px;
+}
+:is(.context-graph-unconnected-list, .context-graph-preview-body):is(
+  [data-more-above],
+  [data-more-below]
+) {
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent
+  );
+}
+:is(
+  .context-graph-unconnected-list,
+  .context-graph-preview-body
+)[data-more-above] {
+  --fade-top: var(--fade);
+}
+:is(
+  .context-graph-unconnected-list,
+  .context-graph-preview-body
+)[data-more-below] {
+  --fade-bottom: var(--fade);
+}
+/* A mask would clip an outer ring, so the focus ring sits inside the box. */
+.context-graph-unconnected-list:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.context-graph-unconnected button {
+  flex: none;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 24px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  scroll-snap-align: start;
+  cursor: pointer;
+}
+.context-graph-unconnected button:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+/* One control: zoom out, percentage, zoom in, Fit. */
+.context-graph-zoom {
+  flex: none;
+  align-self: flex-start;
+  margin: 0 16px 16px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.context-graph-zoom button {
+  height: 32px;
+  min-width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.context-graph-zoom button:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.context-graph-zoom button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.context-graph-zoom svg {
+  width: 14px;
+  height: 14px;
+}
+.context-graph-zoom > span:not(.context-graph-zoom-rule) {
+  width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.context-graph-zoom-rule {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+}
+
+/* Cards: reference, title, then the kind and state. Theme tokens only. */
+.context-graph-page .react-flow__node-card {
+  width: 200px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-border-base);
+}
+.context-graph-page .react-flow__node-card.selected {
+  background: var(--recessed);
+  box-shadow: 0 0 0 1.5px var(--foreground);
+}
+.context-graph-card {
+  min-height: 56px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-card-title {
+  font-size: var(--text-code);
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-graph-card-ref {
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.context-graph-card-caption {
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.context-graph-page .react-flow__node-card:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 3px;
 }
+
+/* Toolbar of pickers and the selection panel. */
+.context-graph-search {
+  width: 260px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-search:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.context-graph-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-ui);
+  color: var(--muted-foreground);
+  line-height: var(--text-ui-line);
+}
+.context-graph-eyebrow {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.context-graph-selected {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.context-graph-selected h2 {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  letter-spacing: -0.28px;
+}
+.context-graph-selected p {
+  margin: 0;
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.context-graph-selected-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, ui-monospace, Menlo, monospace);
+  font-size: var(--text-code);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.context-graph-connection {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+
 .context-graph-page .react-flow__edges {
   color: var(--muted-foreground);
 }
@@ -194,24 +562,13 @@
   stroke: currentColor;
 }
 .context-graph-page .react-flow__edge-text {
-  fill: var(--foreground);
+  fill: var(--secondary-foreground, var(--foreground));
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .context-graph-page .react-flow__edge-textbg {
   fill: var(--surface);
-}
-.context-graph-page .react-flow__controls {
-  box-shadow: var(--shadow-border);
-}
-.context-graph-page .react-flow__controls-button {
-  background: var(--surface);
-  color: var(--foreground);
-  border-bottom: 1px solid var(--border);
-}
-.context-graph-page .react-flow__controls-button:hover {
-  background: var(--accent);
-}
-.context-graph-page .react-flow__controls-button svg {
-  fill: currentColor;
+  stroke: var(--border);
 }
 .context-graph-page .react-flow__attribution {
   background: transparent;
@@ -229,22 +586,7 @@
   opacity: 0;
   pointer-events: none;
 }
-/* The preview sits below the map on medium widths so it never covers it. */
-@media (max-width: 1100px) {
-  .context-graph-main {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
-  }
-  .context-graph-preview {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-}
 @media (max-width: 700px) {
-  .context-graph-canvas {
-    min-height: 420px;
-    height: 420px;
-  }
   .context-graph-preview {
     border-top: 0;
   }
@@ -253,19 +595,213 @@
   margin: 0 0 16px;
   color: var(--muted-foreground);
 }
-.context-graph-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 
 .context-graph-page h3 {
   margin: 20px 0 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 600;
 }
 .context-graph-count {
   margin-left: 4px;
   color: var(--muted-foreground);
   font-weight: 400;
+}
+.context-graph-toolbar {
+  min-height: 48px;
+}
+
+.context-graph-page > .context-graph-toolbar {
+  min-height: 48px;
+  margin: 0;
+  padding: 8px 20px;
+  box-shadow: 0 1px 0 0 var(--header-boundary);
+}
+.context-graph-page .context-graph-body .context-graph-strip {
+  margin-top: 0;
+}
+
+/* The map's side panel: the selection scrolls inside its own area and the Not connected list stays in view below it. */
+.context-graph-preview-split {
+  overflow: hidden;
+}
+.context-graph-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.context-graph-preview-actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 16px;
+}
+/* Frame G: 32px buttons. */
+.context-graph-preview-actions > button {
+  height: 32px;
+}
+.context-graph-strip .context-graph-preview-actions {
+  flex-direction: row;
+  gap: 8px;
+}
+/* The list is never squeezed to a part-row; the selection above it gives way instead. */
+.context-graph-preview-split .context-graph-unconnected {
+  flex: none;
+  margin-top: 0;
+}
+@media (max-width: 700px) {
+  /* The panel sits above the map at its natural height, nothing is cut. */
+  .context-graph-preview-split {
+    overflow: auto;
+  }
+}
+
+/* Board G: the map fills the pane edge to edge. The toolbar is one 48px row,
+   the legend and the Not connected card sit on the canvas top-right, and the
+   selection panel is a 300px column. */
+.context-graph-page {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.context-graph-page .context-graph-toolbar {
+  flex: none;
+  height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  flex-wrap: nowrap;
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.context-graph-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 0 24px;
+  overflow-y: auto;
+}
+.context-graph-body > .context-graph-status,
+.context-graph-body > h2,
+.context-graph-body > .context-graph-list,
+.context-graph-body > [role="alert"] {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+.context-graph-main {
+  height: max(420px, 100%);
+  margin-bottom: 16px;
+  border: 0;
+}
+.context-graph-main .context-graph-preview {
+  background: var(--surface);
+}
+/* Frame G: Open ticket sits 12px higher than the panel's default inset. */
+@media (min-width: 701px) {
+  .context-graph-main .context-graph-preview {
+    padding-bottom: 28px;
+  }
+}
+.context-graph-stage {
+  position: relative;
+}
+.context-graph-overlay {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 200px;
+}
+.context-graph-overlay .graph-legend {
+  padding: 12px;
+}
+.context-graph-overlay .context-graph-unconnected {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.context-graph-search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.context-graph-search-field svg {
+  position: absolute;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.context-graph-search-field .context-graph-search {
+  padding-left: 32px;
+}
+.context-graph-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.context-graph-connections dt {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-connections dd {
+  margin: 2px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.context-graph-page .react-flow__node-card {
+  background: var(--surface);
+}
+.context-graph-card {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.context-graph-card-icon {
+  display: flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.context-graph-card-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.context-graph-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Board G: the canvas fills the pane edge to edge; nothing frames it or sits below it. */
+.context-graph-body[data-map] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.context-graph-body[data-map] > .context-graph-main {
+  flex: 1 1 0;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  border: 0;
+}
+.context-graph-body[data-map] > .context-graph-status:not(.sr-only) {
+  flex: none;
+  margin: 8px 20px;
+}
+.context-graph-page .react-flow__node-card {
+  width: 200px;
 }

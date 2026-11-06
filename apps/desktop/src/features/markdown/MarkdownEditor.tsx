@@ -3,6 +3,7 @@ import {
   useId,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -292,7 +293,15 @@ function Diagram(props: PlateElementProps) {
       <div contentEditable={false} className="diagram-editor">
         <MermaidDiagram source={source} />
         <details>
-          <summary>Diagram source</summary>
+          <summary>
+            <Code aria-hidden="true" />
+            <span className="diagram-summary-label">
+              Mermaid diagram
+              {diagramLabels(source) && ` · ${diagramLabels(source)}`}
+            </span>
+            <span className="diagram-summary-action">Edit source</span>
+            <span className="sr-only">Diagram source</span>
+          </summary>
           <CodeMirror
             value={source}
             readOnly={readOnly}
@@ -380,7 +389,13 @@ function insert(editor: PlateEditor, type: string) {
   );
 }
 
-function Toolbar({ visible }: { visible: boolean }) {
+function Toolbar({
+  visible,
+  floating,
+}: {
+  visible: boolean;
+  floating: boolean;
+}) {
   const editor = useEditorRef();
   const selected = useEditorSelector(
     (current) => !!current.selection && !current.api.isCollapsed(),
@@ -413,9 +428,11 @@ function Toolbar({ visible }: { visible: boolean }) {
   ] as const;
   return (
     // Never `hidden`: a collapsed toolbar would move everything below it, so a first click
-    // on Post/Done/Retry (which blurs the editor) would land on the wrong element.
+    // on Post/Done/Retry (which blurs the editor) would land on the wrong element. A toolbar that
+    // appears only on focus floats above the frame instead of holding an empty band inside it.
     <div
       className="rich-toolbar"
+      data-floating={floating || undefined}
       data-visible={visible}
       aria-hidden={!visible}
       inert={!visible}
@@ -667,6 +684,15 @@ export interface MarkdownEditorProps {
   focusLink?: string;
   /** With a focus request, start an empty paragraph below a trailing quote so typing lands outside it. */
   paragraphAfterQuote?: boolean;
+  /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
+  persistentToolbar?: boolean;
+}
+
+let pointerDown = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("pointerdown", () => (pointerDown = true), true);
+  for (const type of ["pointerup", "pointercancel"])
+    document.addEventListener(type, () => (pointerDown = false), true);
 }
 
 /** Controlled draft editor. Persistence and external-update decisions belong to its caller. */
@@ -680,6 +706,7 @@ export function MarkdownEditor({
   focusRequest = 0,
   focusLink,
   paragraphAfterQuote = false,
+  persistentToolbar = false,
 }: MarkdownEditorProps) {
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
@@ -910,10 +937,24 @@ export function MarkdownEditor({
             ))
         )
           return;
+        // The toolbar docks in the frame, so hiding it moves everything below. A press elsewhere
+        // (Post, Done) blurs on pointer down; collapse only after the pointer is released so the
+        // click still lands on the control that was pressed.
+        if (pointerDown) {
+          globalThis.document.addEventListener(
+            "pointerup",
+            () => setTimeout(() => setActive(false), 0),
+            { once: true },
+          );
+          return;
+        }
         setActive(false);
       }}
     >
-      <div className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}>
+      <div
+        className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
+        data-persistent={persistentToolbar || undefined}
+      >
         <CopySourceButton
           compact
           source={value}
@@ -1004,10 +1045,25 @@ export function MarkdownEditor({
             }
           }}
         >
-          {!readOnly && <Toolbar visible={active} />}
+          {!readOnly && (
+            <Toolbar
+              visible={active || persistentToolbar}
+              floating={!persistentToolbar}
+            />
+          )}
           <PlateContent
             readOnly={readOnly}
-            {...(placeholder ? { placeholder } : {})}
+            // Drawn by CSS from this property, never as Slate's placeholder node: that node is text
+            // inside the editable, so native input (autocorrect, dictation) could keep it beside
+            // typed text or fold it into what is saved. Only while the document is empty.
+            {...(placeholder && value.trim() === ""
+              ? {
+                  "data-empty": "",
+                  style: {
+                    "--editor-placeholder": JSON.stringify(placeholder),
+                  } as CSSProperties,
+                }
+              : {})}
             aria-label={`${label} rich text`}
             role={slash ? "combobox" : "textbox"}
             aria-autocomplete={slash ? "list" : undefined}
@@ -1119,4 +1175,26 @@ export function MarkdownEditor({
       )}
     </section>
   );
+}
+
+/** The node labels of a flowchart ("Cart, Pay, Receipt"), so a collapsed diagram says what it holds. */
+function diagramLabels(source: string) {
+  const labels: string[] = [];
+  for (const match of source.matchAll(
+    /\b[\w-]+\s*(?:\[\[?|\(\(?|\{)\s*"?([^\])}"]+?)"?\s*(?:\]\]?|\)\)?|\})/g,
+  ))
+    if (match[1] && !labels.includes(match[1].trim()))
+      labels.push(match[1].trim());
+  // Bare node names (Cart-->Pay-->Receipt) read as their own labels.
+  if (labels.length === 0)
+    for (const part of source.split(/\s*(?:-->|---|==>|-\.->|;|\n)\s*/)) {
+      const name = part.replace(/^\|[^|]*\|\s*/, "").trim();
+      if (
+        /^[A-Za-z][\w-]*$/.test(name) &&
+        !/^(graph|flowchart|TD|TB|LR|RL|BT)$/i.test(name) &&
+        !labels.includes(name)
+      )
+        labels.push(name);
+    }
+  return labels.slice(0, 4).join(", ");
 }

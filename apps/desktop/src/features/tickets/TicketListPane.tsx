@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Plus, RefreshCw, X } from "lucide-react";
+import {
+  AlertCircle,
+  Layers,
+  Plus,
+  RefreshCw,
+  SearchX,
+  Ticket as TicketIcon,
+  Trash2,
+  X,
+} from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PlanHeader } from "@/features/plans/PlanHeader";
-import { usePlanView } from "@/features/plans/usePlanView";
+import type { PlanViewState } from "@/features/plans/usePlanView";
 import { plansClient } from "@/lib/api/plans";
+import { planSummary } from "@/features/plans/plan-summary";
 import { BulkControls } from "@/features/tickets/BulkControls";
 import { MarkDuplicateDialog } from "@/features/tickets/MarkDuplicateDialog";
 import { TicketFilters } from "@/features/tickets/TicketFilters";
@@ -24,16 +33,14 @@ export function TicketListPane({
   workspace,
   bulk,
   listRef,
-  planMode,
-  setPlanMode,
+  planState,
   onOpen,
   onCreate,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
   listRef: RefObject<HTMLElement | null>;
-  planMode: "list" | "dependencies";
-  setPlanMode: (mode: "list" | "dependencies") => void;
+  planState: PlanViewState;
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
@@ -64,6 +71,7 @@ export function TicketListPane({
     trash,
     tickets,
     counts,
+    scopeTotal,
     total,
     grouped,
     selected,
@@ -74,7 +82,6 @@ export function TicketListPane({
     clearFilters,
     queryError,
     refreshFailed,
-    revision,
   } = workspace;
   // An Plan scope shows the Plan's own header instead of a plain title.
   const [markingDuplicate, setMarkingDuplicate] = useState(false);
@@ -94,13 +101,15 @@ export function TicketListPane({
   // An archived Plan is read-only: no new tickets into it, no removing from it.
   const planWritable = scopedPlan !== undefined && !scopedPlan.archived;
   const addDisabled = scopedPlan?.archived === true;
-  const planState = usePlanView(planScope, revision, refresh);
   const filtered =
     navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
     availability !== (navigation.kind === "ready" ? "Ready" : "") ||
     Boolean(query || tags || family) ||
     source !== "all";
+  const filterCount =
+    [plan, status, availability, family].filter(Boolean).length +
+    tags.split(",").filter((tag) => tag.trim()).length;
   const visibleTickets = tickets.filter(
     (item) =>
       filter === "all" ||
@@ -152,6 +161,12 @@ export function TicketListPane({
   const showBulk =
     !trash &&
     (bulk.selection.length > 0 || bulk.failure || bulk.notice || bulk.pending);
+  const singleStatusNote =
+    navigation.kind === "ready"
+      ? "Todo tickets with nothing left to wait on."
+      : navigation.kind === "progress"
+        ? "Tickets someone is working on right now."
+        : null;
   const filterProps = {
     query,
     setQuery,
@@ -169,6 +184,9 @@ export function TicketListPane({
     setOffset,
     navigation,
     clearFilters,
+    scopeName,
+    total,
+    scopeTotal,
   };
   return (
     <section
@@ -178,22 +196,30 @@ export function TicketListPane({
       aria-labelledby="tickets-heading"
     >
       {scopedPlan ? (
-        <PlanHeader
-          key={scopedPlan.id}
-          plan={scopedPlan}
-          plans={plans}
-          projects={projects}
-          state={planState}
-        >
-          <TicketFilters part="controls" {...filterProps} />
-        </PlanHeader>
+        <div className="plan-list-toolbar">
+          {planState.view && (
+            <span className="plan-list-summary">
+              {planSummary(planState.view.members, projects)}
+            </span>
+          )}
+          <span className="plan-list-spacer" />
+          <TicketFilters part="controls" labeledFilter {...filterProps} />
+        </div>
       ) : (
         <div className="list-header">
           <h1 id="tickets-heading" tabIndex={-1}>
             {scopeName}
           </h1>
           <p>
-            {total} {total === 1 ? "ticket" : "tickets"}
+            {filtered && scopeTotal !== undefined
+              ? `${total} of ${scopeTotal}`
+              : total}
+            {!(filtered && scopeTotal !== undefined) && (
+              <span className="sr-only">
+                {" "}
+                {total === 1 ? "ticket" : "tickets"}
+              </span>
+            )}
           </p>
           <IconButton
             className="list-refresh"
@@ -205,7 +231,9 @@ export function TicketListPane({
           >
             <RefreshCw />
           </IconButton>
-          {!trash && <TicketFilters part="controls" {...filterProps} />}
+          {!trash && (
+            <TicketFilters part="controls" labeledFilter {...filterProps} />
+          )}
           {configuredSources.length > 0 && (
             <SourceRefresh
               providers={configuredSources}
@@ -215,18 +243,8 @@ export function TicketListPane({
           )}
         </div>
       )}
-      {scopedPlan && (
-        <div className="plan-view-switch">
-          <SegmentedControl
-            aria-label="Plan view"
-            value={planMode}
-            onValueChange={setPlanMode}
-            options={[
-              { value: "list", label: "List" },
-              { value: "dependencies", label: "Dependencies" },
-            ]}
-          />
-        </div>
+      {singleStatusNote && (
+        <p className="list-description">{singleStatusNote}</p>
       )}
       {removed && removed.plan === planScope && (
         <p className="plan-undo" role="status">
@@ -270,85 +288,128 @@ export function TicketListPane({
             </p>
           )}
           {queryError ? (
-            <div className="empty-state" role="alert">
-              <strong>Could not load tickets</strong>
-              <p>Try refreshing the current view.</p>
-              <Button variant="outline" onClick={() => void refresh()}>
-                Retry
-              </Button>
-            </div>
+            <EmptyState
+              role="alert"
+              icon={<AlertCircle />}
+              title="Could not load tickets"
+              description="Try refreshing the current view."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refresh()}
+                >
+                  Retry
+                </Button>
+              }
+            />
           ) : loading && tickets.length === 0 ? (
             <TicketRowsSkeleton />
           ) : tickets.length === 0 ? (
-            <div className="empty-state">
-              {trash ? (
-                <p>No tickets in trash.</p>
-              ) : filtered ? (
-                <>
-                  <strong>No matching tickets</strong>
-                  {query ? (
-                    <p>
-                      Nothing matches <q>{query}</q>
-                      {tags || status || availability || family || plan
-                        ? " with the current filters"
-                        : ""}
-                      .
-                    </p>
-                  ) : (
-                    <p>Nothing matches the current filters.</p>
-                  )}
-                  <Button variant="outline" onClick={clearFilters}>
-                    {query &&
-                    !tags &&
-                    !status &&
-                    !availability &&
-                    !family &&
-                    !plan
-                      ? "Clear search"
-                      : "Clear filters"}
-                  </Button>
-                </>
-              ) : planScope ? (
-                <>
-                  <strong>No tickets in this Plan</strong>
-                  <p>Start with a new ticket, or bring in existing ones.</p>
+            trash ? (
+              <EmptyState
+                icon={<Trash2 />}
+                title="Trash is empty"
+                description="Trashed tickets wait here until you restore them."
+              />
+            ) : filtered ? (
+              <EmptyState
+                icon={<SearchX />}
+                title={
+                  query ? `No tickets match “${query}”` : "No matching tickets"
+                }
+                description={
+                  query
+                    ? `Searched titles, descriptions and updates in ${scopeName}${
+                        filterCount
+                          ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
+                          : ""
+                      }.`
+                    : "Nothing matches the current filters."
+                }
+                action={
+                  query || tags || status || availability || family || plan ? (
+                    <div className="plan-empty-actions">
+                      {query && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setQuery("");
+                            setOffset(0);
+                          }}
+                        >
+                          Clear search
+                        </Button>
+                      )}
+                      {(tags || status || availability || family || plan) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={clearFilters}
+                        >
+                          Clear filters
+                        </Button>
+                      )}
+                    </div>
+                  ) : undefined
+                }
+              />
+            ) : planScope ? (
+              <EmptyState
+                icon={<Layers />}
+                title="No tickets in this Plan"
+                description="Start with a new ticket, or bring in existing ones."
+                action={
                   <div className="plan-empty-actions">
-                    <Button onClick={(event) => onCreate(event.currentTarget)}>
+                    <Button
+                      size="sm"
+                      onClick={(event) => onCreate(event.currentTarget)}
+                    >
                       <Plus data-icon="inline-start" /> Create ticket
                     </Button>
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => planState.setAdding(true)}
                     >
                       Add existing tickets
                     </Button>
                   </div>
-                </>
-              ) : navigation.project !== "all" ||
-                navigation.plan ||
-                navigation.kind !== "all" ? (
-                <>
-                  <strong>No tickets in this scope</strong>
-                  <p>Create a ticket or choose another view.</p>
+                }
+              />
+            ) : navigation.project !== "all" ||
+              navigation.plan ||
+              navigation.kind !== "all" ? (
+              <EmptyState
+                icon={<TicketIcon />}
+                title="No tickets in this scope"
+                description="Create a ticket or choose another view."
+                action={
                   <Button
                     variant="outline"
+                    size="sm"
                     onClick={(event) => onCreate(event.currentTarget)}
                   >
                     Create ticket
                   </Button>
-                </>
-              ) : (
-                <>
-                  <strong>Your workspace is ready</strong>
-                  <p>
-                    Create your first ticket to start keeping track of work.
-                  </p>
-                  <Button onClick={(event) => onCreate(event.currentTarget)}>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={<TicketIcon />}
+                title="Your workspace is ready"
+                description="Create your first ticket to start keeping track of work."
+                action={
+                  <Button
+                    size="sm"
+                    onClick={(event) => onCreate(event.currentTarget)}
+                  >
                     <Plus data-icon="inline-start" /> Create your first ticket
                   </Button>
-                </>
-              )}
-            </div>
+                }
+              />
+            )
           ) : (
             <>
               {showBulk && bulk.selection.length > 0 && (
@@ -373,6 +434,12 @@ export function TicketListPane({
                   projects,
                 }}
                 selected={selected}
+                readyView={navigation.kind === "ready"}
+                // A status filter keeps its group header (board C); only the
+                // dedicated Ready and In progress views drop it.
+                singleStatus={
+                  navigation.kind === "ready" || navigation.kind === "progress"
+                }
                 {...(grouped &&
                   counts && {
                     grouping: {

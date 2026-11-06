@@ -18,6 +18,21 @@ export const edgeLabels: Record<string, string> = {
   discovered: "Discovered",
 };
 
+/** Short names written on the line itself; the lists below spell each connection out. */
+export const edgeLineLabels: Record<string, string> = {
+  blocks: "blocks",
+  membership: "in Plan",
+  document: "document of",
+  spec: "spec of",
+  mention: "mentions",
+  attached: "attached",
+  activity: "update mentions",
+  support: "update cites",
+  subticket: "parent of",
+  related: "related",
+  discovered: "discovered",
+};
+
 /**
  * Four line styles, each with its own dash and colour so they differ without
  * relying on either alone: rules (blocks), plan structure, work hierarchy and
@@ -32,37 +47,37 @@ export type EdgeStyle = {
 };
 export const edgeStyles: EdgeStyle[] = [
   {
-    name: "Blocks",
+    name: "blocks (arrow = waits)",
     kinds: ["blocks"],
     dash: undefined,
-    width: 2.5,
+    width: 2,
     color: "currentColor",
   },
   {
-    name: "Plan membership, documents, Primary spec",
-    kinds: ["membership", "document", "spec"],
-    dash: "2 4",
-    width: 1.5,
-    color: "#4f8ef7",
-  },
-  {
-    name: "Subticket, Related, Discovered",
+    name: "parent of",
     kinds: ["subticket", "related", "discovered"],
-    dash: "10 4",
+    dash: undefined,
     width: 1.5,
-    color: "#b07cf0",
+    color: "currentColor",
   },
   {
-    name: "Mentions, Attached, Update mentions, Update cites",
+    name: "mentions",
     kinds: ["mention", "attached", "activity", "support"],
-    dash: "4 3 1 3",
+    dash: "2 3",
     width: 1.5,
-    color: "#e0a030",
+    color: "currentColor",
+  },
+  {
+    name: "in Plan, spec of",
+    kinds: ["membership", "document", "spec"],
+    dash: "6 4",
+    width: 1.5,
+    color: "currentColor",
   },
 ];
 export function edgeStyle(kind: string): EdgeStyle {
   return (
-    edgeStyles.find((style) => style.kinds.includes(kind)) ?? edgeStyles[3]!
+    edgeStyles.find((style) => style.kinds.includes(kind)) ?? edgeStyles[2]!
   );
 }
 
@@ -146,15 +161,15 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
     id: `${index}`,
     source: edge.source,
     target: edge.target,
-    label: edgeLabels[edge.kind] ?? edge.kind,
+    label: edgeLineLabels[edge.kind] ?? edge.kind,
     animated: false,
     // currentColor follows the themed .react-flow__edges color.
     markerEnd: {
       type: MarkerType.ArrowClosed,
       color: edgeStyle(edge.kind).color,
     },
-    // Straight lines between card centres never loop around a card.
-    type: "straight",
+    // Drawn by RoutedEdge, which bends each line around the cards in its way.
+    type: "routed",
     style: {
       strokeWidth: edgeStyle(edge.kind).width,
       stroke: edgeStyle(edge.kind).color,
@@ -163,6 +178,22 @@ export function flowEdges(edges: GraphEdge[]): Edge[] {
         : {}),
     },
   }));
+}
+
+/** The parts a map card shows: a reference, a title and a "Ticket · Todo" caption. */
+export function cardParts(node: GraphNode): {
+  ref: string;
+  title: string;
+  caption: string;
+} {
+  const match = /^(\S+-\d+) · (.*)$/.exec(node.label);
+  const ref = node.ticket_reference ?? match?.[1] ?? "";
+  const title = match && match[1] === ref ? match[2]! : node.label;
+  return {
+    ref,
+    title: node.trashed ? `${title} (Trash)` : title,
+    caption: [kindNames[node.kind], node.state].filter(Boolean).join(" · "),
+  };
 }
 
 /** Connections touching a node, one row per relationship between the same pair. */
@@ -188,6 +219,44 @@ export function connectionRows(
     text:
       describeEdge(row.edge, byId) + (row.extra ? ` (+${row.extra} more)` : ""),
   }));
+}
+
+const ROLE_LABELS: Record<string, [outgoing: string, incoming: string]> = {
+  blocks: ["Blocks", "Blocked by"],
+  subticket: ["Parent of", "Subticket of"],
+  related: ["Related to", "Related to"],
+  discovered: ["Discovered", "Discovered from"],
+  mention: ["Mentions", "Mentioned by"],
+  attached: ["Has", "Attached to"],
+  activity: ["Update mentions", "Mentioned in an update on"],
+  support: ["Update cites", "Cited in an update on"],
+  membership: ["Contains", "In Plan"],
+  document: ["Has document", "Document of"],
+  spec: ["Has spec", "Spec of"],
+};
+
+/** A node's connections as labelled rows ("Blocked by", "Parent of", "Mentioned by"), each item once. */
+export function labelledConnections(
+  nodeId: string,
+  graph: Pick<ContextGraph, "nodes" | "edges">,
+): { label: string; items: { id: string; text: string }[] }[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const rows = new Map<string, { id: string; text: string }[]>();
+  for (const edge of graph.edges) {
+    if (edge.source !== nodeId && edge.target !== nodeId) continue;
+    const outgoing = edge.source === nodeId;
+    const other = byId.get(outgoing ? edge.target : edge.source);
+    if (!other) continue;
+    const pair = ROLE_LABELS[edge.kind] ?? [edge.kind, edge.kind];
+    const label = outgoing ? pair[0] : pair[1];
+    const parts = cardParts(other);
+    const text = [parts.ref, parts.title].filter(Boolean).join(" ");
+    const items = rows.get(label) ?? [];
+    if (!items.some((item) => item.id === other.id))
+      items.push({ id: other.id, text });
+    rows.set(label, items);
+  }
+  return [...rows].map(([label, items]) => ({ label, items }));
 }
 
 /** More neighbours than this open as a grouped list; the map is one click away. */
@@ -286,4 +355,9 @@ export function stateLine(node: {
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** A graph card accessible name: its kind, its label, and a Trash suffix. */
+export function nodeAriaLabel(node: GraphNode): string {
+  return `${kindNames[node.kind]}: ${node.label}${node.trashed ? " (Trash)" : ""}`;
 }

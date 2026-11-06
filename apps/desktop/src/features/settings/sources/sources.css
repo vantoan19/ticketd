@@ -12,6 +12,7 @@
   gap: 6px;
 }
 .source-required {
+  font-size: var(--text-caption);
   font-weight: 400;
   color: var(--muted-foreground);
 }
@@ -35,7 +36,7 @@
   border-radius: 6px;
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .source-chip button {
   position: relative;
@@ -108,7 +109,7 @@
   margin: 12px 0 0;
   padding: 0;
   list-style: none;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .source-preview-list li {
   display: flex;
@@ -165,6 +166,12 @@
   padding: 0;
   box-shadow: none;
 }
+.source-chip-input:has(> input[aria-invalid="true"]) {
+  box-shadow: 0 0 0 1px var(--destructive);
+}
+.source-chip-input > input[aria-invalid="true"] {
+  box-shadow: none;
+}
 .source-chip-input > input:focus-visible {
   outline: none;
 }
@@ -172,7 +179,7 @@
   border-radius: 9999px;
   box-shadow: none;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
 }
 .source-chip button {
@@ -201,7 +208,7 @@
   margin-bottom: 8px;
 }
 .source-preview-heading h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
 }
@@ -217,14 +224,14 @@
 .source-preview table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-preview th {
   text-align: left;
   background: var(--background);
   color: var(--secondary-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 400;
 }
 .source-preview :is(th, td) {
@@ -242,7 +249,8 @@
 }
 .source-preview .source-preview-ref {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
+  font-weight: 500;
 }
 .source-status {
   display: inline-flex;

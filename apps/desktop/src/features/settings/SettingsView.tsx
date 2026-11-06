@@ -8,6 +8,7 @@ import {
   Monitor,
   Moon,
   Sun,
+  ChevronDown,
 } from "lucide-react";
 import { RadioGroup } from "radix-ui";
 import { client } from "@/lib/api/client";
@@ -17,6 +18,8 @@ import {
   type WorkspaceInfo,
 } from "@/lib/api/workspace";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { PathText } from "@/features/projects/PathText";
 import { APP_VERSION } from "@/lib/app-version";
 import {
   setPreference,
@@ -130,7 +133,10 @@ function AppearanceCard() {
               className="layout-choice"
             >
               <LayoutPreview kind={option.value} />
-              <span className="layout-choice-label">{option.label}</span>
+              <span className="layout-choice-label">
+                <span className="layout-choice-dot" aria-hidden="true" />
+                {option.label}
+              </span>
               <span className="settings-hint">{option.hint}</span>
             </RadioGroup.Item>
           ))}
@@ -188,18 +194,18 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
   const manager = fileManagerName();
   const facts = info && [
     ["Tickets", String(info.tickets)],
-    ["Documents (including details and Trash)", String(info.documents)],
+    ["Documents", String(info.documents)],
     ["Projects", String(info.projects)],
     ["Active Plans", String(info.active_plans)],
     ["File size", formatSize(info.size_bytes)],
-    ["Workspace format version", String(info.format_version)],
+    ["Format version", String(info.format_version)],
   ];
   return (
-    <SettingsCard id="location" title="Location">
-      <p className="settings-hint">
-        The desktop app and the ticketd command line read and write this same
-        workspace for your user.
-      </p>
+    <SettingsCard
+      id="location"
+      title="Location"
+      description="The desktop app and the ticketd command line read and write this workspace."
+    >
       {loadFailure && (
         <p role="alert" className="settings-failure">
           {loadFailure}
@@ -207,19 +213,17 @@ function LocationCard({ refreshKey }: { refreshKey: number }) {
       )}
       {info && facts && (
         <>
-          <p className="workspace-path" aria-label="Workspace path">
-            {info.path}
-          </p>
-          <div className="settings-actions">
-            <Button
+          <div className="workspace-location">
+            <p className="workspace-path" aria-label="Workspace path">
+              <PathText path={info.path} />
+            </p>
+            <IconButton
               type="button"
-              variant="outline"
-              size="sm"
+              label="Copy path"
               onClick={() => void copyPath(info.path)}
             >
               <Copy aria-hidden="true" />
-              Copy path
-            </Button>
+            </IconButton>
             <Button
               type="button"
               variant="outline"
@@ -262,6 +266,20 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
   const [restoring, setRestoring] = useState<string | null>(null);
   const [showSafety, setShowSafety] = useState(false);
   const [restoredCount, setRestoredCount] = useState(0);
+  const [safetyCount, setSafetyCount] = useState(0);
+  useEffect(() => {
+    let current = true;
+    void Promise.resolve(workspaceClient.safetyBackups())
+      .then((value) => {
+        if (current && Array.isArray(value)) setSafetyCount(value.length);
+      })
+      .catch(() => {
+        // The count is informational; the list reports its own failure.
+      });
+    return () => {
+      current = false;
+    };
+  }, [restoredCount]);
   useEffect(() => {
     let current = true;
     workspaceClient
@@ -328,12 +346,11 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     }
   }
   return (
-    <SettingsCard id="backups" title="Backups">
-      <p className="settings-hint">
-        A backup is a complete copy of the workspace, checked for integrity
-        after it is saved. It never replaces an existing file.
-      </p>
-      <div className="settings-actions">
+    <SettingsCard
+      id="backups"
+      title="Backups"
+      description="A complete copy of the workspace, checked for integrity after it is saved. It never replaces an existing file."
+      actions={
         <Button
           type="button"
           size="sm"
@@ -349,7 +366,8 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             "Back up now…"
           )}
         </Button>
-      </div>
+      }
+    >
       <div className="backup-status" role="group" aria-label="Last backup">
         {last ? (
           <>
@@ -379,7 +397,10 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             </div>
           </>
         ) : (
-          <p className="settings-hint">No backup has been made yet.</p>
+          <p className="settings-hint">
+            No backups yet. Your first one will be listed here with its date and
+            size.
+          </p>
         )}
       </div>
       {failure && (
@@ -394,7 +415,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
         <div>
           <p className="settings-label">Restore from a backup</p>
           <p className="settings-hint">
-            Review what a backup contains before anything changes.
+            You review what the backup contains before anything changes.
           </p>
         </div>
         <Button
@@ -416,10 +437,12 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
             type="button"
             variant="ghost"
             size="sm"
+            className="safety-toggle"
             aria-expanded={showSafety}
             onClick={() => setShowSafety((shown) => !shown)}
           >
-            {showSafety ? "Hide safety backups" : "Show safety backups"}
+            Safety backups · {safetyCount}
+            <ChevronDown aria-hidden="true" data-open={showSafety} />
           </Button>
         </div>
         {showSafety && <SafetyBackups key={restoredCount} />}
@@ -501,10 +524,8 @@ function ExportCard() {
       </p>
       <div className="backup-footer">
         <p className="settings-hint">
-          An export is a readable JSON snapshot (workspace export format 1) that
-          includes Trash. It cannot be imported and is not a full backup; use
-          Backups to keep a restorable copy. Exports never replace an existing
-          file.
+          A readable JSON snapshot that includes Trash. It is not a backup and
+          cannot be imported.
         </p>
         <p className="settings-hint">From the command line:</p>
         <div className="settings-actions">

@@ -5,8 +5,8 @@ import {
   ListTodo,
   Trash2,
   Settings,
-  Settings2,
-  Plus,
+  Ellipsis,
+  SquarePen,
   Folder,
   Layers,
   Archive,
@@ -23,7 +23,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,6 +48,30 @@ function SidebarCount({ value }: { value: number }) {
   );
 }
 
+/** The heading's "..." menu: a place to manage the list below it. */
+function ManageMenu({
+  label,
+  item,
+  onSelect,
+}: {
+  label: string;
+  item: string;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton label={label}>
+          <Ellipsis aria-hidden="true" size={16} />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onSelect}>{item}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 type View =
   | "tickets"
   | "projects"
@@ -62,6 +85,7 @@ export function WorkspaceSidebar({
   workspaceGraphOpen = false,
   onCapture,
   counts,
+  activePlanCount,
   setView,
   projects,
   plans,
@@ -80,6 +104,8 @@ export function WorkspaceSidebar({
   workspaceGraphOpen?: boolean;
   onCapture: (from: HTMLElement | null) => void;
   counts: SidebarCounts | null;
+  /** The open Plan's ticket count; Plans carry no counts of their own. */
+  activePlanCount?: number | undefined;
   setView: (view: View) => void;
   projects: Project[];
   plans: { id: string; name: string; archived: boolean }[];
@@ -111,16 +137,13 @@ export function WorkspaceSidebar({
           <strong>ticketd</strong>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button
+              <IconButton
                 ref={newTrigger}
                 className="new-ticket"
-                variant="ghost"
-                size="sm"
-                aria-label="New"
+                label="New ticket"
               >
-                <Plus aria-hidden="true" />
-                New
-              </Button>
+                <SquarePen aria-hidden="true" />
+              </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -213,27 +236,19 @@ export function WorkspaceSidebar({
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
-            <div className="sidebar-heading">
+            <div
+              className="sidebar-heading"
+              data-active={view === "projects" || undefined}
+            >
               Projects{" "}
-              <IconButton
+              <ManageMenu
                 label="Manage projects"
-                onClick={() => setView("projects")}
-              >
-                <Settings2 size={16} />
-              </IconButton>
+                item="All projects"
+                onSelect={() => setView("projects")}
+              />
             </div>
             <nav aria-label="Project scopes" className="sidebar-nav">
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={
-                      navigation.project === "unlinked" && view === "tickets"
-                    }
-                    onClick={() => scope("all", "unlinked")}
-                  >
-                    <Folder size={16} /> Unlinked
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
                 {projects.map((p) => (
                   <SidebarMenuItem key={p.id}>
                     <SidebarMenuButton
@@ -246,6 +261,21 @@ export function WorkspaceSidebar({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={
+                      navigation.project === "unlinked" && view === "tickets"
+                    }
+                    onClick={() => scope("all", "unlinked")}
+                  >
+                    {/* Dashed: not a project, the tickets that have none. */}
+                    <Folder
+                      size={16}
+                      style={{ strokeDasharray: "2.5 2.5" }}
+                    />{" "}
+                    No project
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               </SidebarMenu>
             </nav>
           </SidebarGroup>
@@ -275,9 +305,11 @@ export function WorkspaceSidebar({
           <SidebarGroup className="sidebar-group">
             <div className="sidebar-heading">
               Plans{" "}
-              <IconButton label="Manage Plans" onClick={() => setView("plans")}>
-                <Settings2 size={16} />
-              </IconButton>
+              <ManageMenu
+                label="Manage Plans"
+                item="All Plans"
+                onSelect={() => setView("plans")}
+              />
             </div>
             <nav aria-label="Plan scopes" className="sidebar-nav">
               <SidebarMenu>
@@ -293,6 +325,11 @@ export function WorkspaceSidebar({
                       >
                         <Layers size={16} />{" "}
                         <span title={e.name}>{e.name}</span>
+                        {navigation.plan === e.id &&
+                          view === "tickets" &&
+                          activePlanCount !== undefined && (
+                            <SidebarCount value={activePlanCount} />
+                          )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}

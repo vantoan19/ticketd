@@ -140,7 +140,7 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
   expect(props.onOpenGraph).toHaveBeenCalled();
   await chooseAction("Mark as duplicate…");
   expect(
-    await screen.findByRole("dialog", { name: "Mark as duplicate" }),
+    await screen.findByRole("dialog", { name: "Mark T-1 as a duplicate" }),
   ).toBeTruthy();
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -157,7 +157,11 @@ test("the actions menu opens the graph, the duplicate dialog, and trash", async 
 
 test("a trashed ticket offers Restore without graph or duplicate actions", async () => {
   header({ ticket: { ...ticket, trashed: true } });
-  expect(screen.getByRole("button", { name: "Restore" })).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: "Restore" })
+      .getAttribute("data-variant"),
+  ).toBe("default");
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Ticket actions" }),
     {

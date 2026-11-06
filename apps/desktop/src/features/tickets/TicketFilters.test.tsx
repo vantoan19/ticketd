@@ -2,6 +2,40 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TicketFilters } from "./TicketFilters";
+import { FilterDockContext } from "./filter-dock";
+
+test("the Filters panel reports its open state to the workspace that docks it", () => {
+  const setOpen = vi.fn();
+  render(
+    <FilterDockContext.Provider
+      value={{ open: false, setOpen, anchor: { current: document.body } }}
+    >
+      <TicketFilters
+        query=""
+        setQuery={vi.fn()}
+        plan=""
+        setPlan={vi.fn()}
+        status=""
+        setStatus={vi.fn()}
+        tags=""
+        setTags={vi.fn()}
+        availability=""
+        setAvailability={vi.fn()}
+        family=""
+        setFamily={vi.fn()}
+        plans={[]}
+        setOffset={vi.fn()}
+        navigation={{ kind: "all", project: "all", plan: "" }}
+        clearFilters={vi.fn()}
+        scopeName="All tickets"
+        total={7}
+        scopeTotal={null}
+      />
+    </FilterDockContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  expect(setOpen).toHaveBeenCalledWith(true);
+});
 
 afterEach(cleanup);
 test("Search and Filters start as named icon buttons and search opens on demand", () => {
@@ -24,6 +58,9 @@ test("Search and Filters start as named icon buttons and search opens on demand"
       setOffset={vi.fn()}
       navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
+      scopeName="All tickets"
+      total={7}
+      scopeTotal={null}
     />,
   );
   expect(screen.queryByRole("textbox", { name: "Search tickets" })).toBeNull();
@@ -33,6 +70,7 @@ test("Search and Filters start as named icon buttons and search opens on demand"
     target: { value: "cache" },
   });
   expect(setQuery).toHaveBeenCalledWith("cache");
+  expect(screen.getByRole("search")).toBeTruthy();
   expect(screen.queryByLabelText("Active filters")).toBeNull();
 });
 
@@ -57,6 +95,9 @@ test("an active search shows as a removable chip", () => {
       setOffset={vi.fn()}
       navigation={{ kind: "all", project: "all", plan: "" }}
       clearFilters={vi.fn()}
+      scopeName="All tickets"
+      total={1}
+      scopeTotal={7}
     />,
   );
   fireEvent.click(

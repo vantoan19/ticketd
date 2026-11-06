@@ -6,13 +6,17 @@
 }
 .activity-heading {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px 12px;
+  min-height: 28px;
+}
+.activity-heading > span:last-child {
+  margin-inline-start: auto;
 }
 .activity-heading h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -29,7 +33,7 @@
 }
 .activity-meta {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .activity-list {
@@ -59,15 +63,20 @@
   margin-inline-start: auto;
   margin-block: -6px;
 }
+.activity-history > time {
+  margin-inline-start: auto;
+  white-space: nowrap;
+  order: 2;
+}
 .activity-history {
-  margin-top: 8px;
-  padding-inline: 4px;
+  min-height: 28px;
+  padding-inline: 0;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 12px;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   overflow-wrap: anywhere;
 }
@@ -77,11 +86,13 @@
   min-height: 40px;
   padding: 8px 12px;
   border: 0;
-  box-shadow: var(--shadow-border-base);
+  /* Frame: a 1px #DBDBDB edge, a step stronger than the base border. */
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--foreground) 16%, transparent);
   border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   text-align: start;
   cursor: text;
@@ -95,6 +106,12 @@
 }
 .activity-note {
   margin: 0;
+}
+/* Expanded, an update reads at the document's reading size (frame B). */
+.ticket-detail[data-expanded] .activity-note,
+.ticket-detail[data-expanded] .activity-note :is(p, li) {
+  font-size: var(--text-reading);
+  line-height: 24px;
 }
 .activity-note:not([data-expanded]) {
   max-height: 20rem;
@@ -120,7 +137,7 @@
 .activity-caption {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.4;
 }
 .activity-attached {
@@ -128,7 +145,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .activity-attached svg {
   flex: none;
@@ -141,7 +158,7 @@
   align-items: center;
   gap: 8px;
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .activity-empty {
   padding: 12px 0;
@@ -173,4 +190,47 @@
   z-index: 1;
   padding-block: 8px;
   background: var(--background);
+}
+
+.activity-meta .activity-latest {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--foreground);
+}
+
+/* Board B: entries are a 28px header row (agent, "update · time", Latest,
+   actions), the update text indented under the name, events on 28px rows. */
+.activity-list {
+  gap: 0;
+}
+.activity-entry {
+  padding-block: 4px 8px;
+}
+/* Board B: events sit 12px under the update they follow (the section gap). */
+.activity-entry + .activity-history {
+  margin-top: 12px;
+}
+.activity-meta {
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-height: 24px;
+}
+.activity-author-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  align-self: center;
+}
+.activity-entry .activity-note,
+.activity-entry > .activity-details-link {
+  margin-inline-start: 22px;
+}
+.ticket-detail[data-expanded] .activity-note {
+  font-size: var(--text-reading);
+  line-height: 24px;
 }

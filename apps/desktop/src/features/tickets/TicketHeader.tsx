@@ -14,13 +14,6 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { useCopy } from "@/components/ui/use-copy";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -120,7 +113,24 @@ export function TicketHeader({
   return (
     <div className="detail-header">
       <div className="detail-title-group">
-        {selected && (
+        {selected && expanded && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="breadcrumb-back"
+              aria-label="Return to ticket list"
+              onClick={onReturn}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              All tickets
+            </Button>
+            <span className="breadcrumb-separator" aria-hidden="true">
+              /
+            </span>
+          </>
+        )}
+        {selected && !expanded && (
           <IconButton
             className="return-to-list"
             label="Return to ticket list"
@@ -132,7 +142,7 @@ export function TicketHeader({
         <h2
           id="detail-heading"
           tabIndex={-1}
-          className={selected ? "detail-reference" : undefined}
+          className={selected ? "detail-reference" : "sr-only"}
         >
           {selected ?? "Ticket details"}
         </h2>
@@ -195,7 +205,6 @@ export function TicketHeader({
           )}
           {ticket.trashed && (
             <Button
-              variant="outline"
               size="sm"
               disabled={pending}
               onClick={() => void setTrashed(false)}
@@ -330,30 +339,16 @@ export function TicketHeader({
           onOpenChange={setPublishing}
         />
       )}
-      {ticket && (
-        <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
-          <DialogContent
-            className="duplicate-dialog"
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              actionsTrigger.current?.focus();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Mark as duplicate</DialogTitle>
-              <DialogDescription>
-                Choose the canonical ticket for {ticket.reference} and review
-                its dependencies.
-              </DialogDescription>
-            </DialogHeader>
-            <Duplicates
-              ticket={ticket}
-              refresh={refresh}
-              onDone={() => setDuplicateOpen(false)}
-              onCancel={() => setDuplicateOpen(false)}
-            />
-          </DialogContent>
-        </Dialog>
+      {ticket && duplicateOpen && (
+        <Duplicates
+          ticket={ticket}
+          refresh={refresh}
+          open
+          onOpenChange={setDuplicateOpen}
+          title={`Mark ${ticket.reference} as a duplicate`}
+          description={`${ticket.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
+          returnFocus={actionsTrigger}
+        />
       )}
     </div>
   );

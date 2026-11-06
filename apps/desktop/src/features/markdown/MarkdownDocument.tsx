@@ -231,7 +231,7 @@ function CodeBlock({ node }: ExtraProps) {
     <div className="markdown-code-block">
       <div className="markdown-block-toolbar">
         <span>{language || "Code"}</span>
-        <CopySourceButton label="Copy code" source={content} />
+        <CopySourceButton compact label="Copy code" source={content} />
       </div>
       <pre tabIndex={0}>
         <SyntaxCode source={content} language={language} />

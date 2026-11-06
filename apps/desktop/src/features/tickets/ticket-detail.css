@@ -8,8 +8,8 @@
 .detail-header-message {
   flex-basis: 100%;
   padding-bottom: 8px;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--text-ui);
+  line-height: 20px;
 }
 .detail-header-message[role="alert"] {
   color: var(--destructive);
@@ -38,23 +38,35 @@
 .ticket-detail[data-graph] > :not(.dependency-graph-view, .graph-loading) {
   display: none;
 }
-/* Expanded: the document column stays at most 800px and centered, and the
-   rail keeps its place beside it. */
-/* A 420px document and 232px rail share a row only where both fit. */
+/* Expanded: the document column is 800px (32px inset) and the rail takes the
+   rest, at least 232px. Beside the list the rail is a flat 232px. */
 @container ticket-detail (min-width: 652px) {
   .ticket-detail[data-expanded] .detail-content {
-    grid-template-columns: minmax(420px, 1fr) 232px;
+    grid-template-columns: minmax(420px, 800px) minmax(232px, 1fr);
   }
-  .ticket-detail[data-expanded] .detail-document {
-    width: 100%;
-    max-width: 800px;
-    justify-self: center;
-  }
+}
+.ticket-detail[data-expanded] .detail-document {
+  padding: 32px 32px 40px;
+}
+.ticket-detail[data-expanded]
+  .description-document
+  :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading);
+  line-height: 24px;
+}
+.breadcrumb-back {
+  /* Board B: the back arrow sits 12px left of the button's own inset. */
+  margin-left: -12px;
+  gap: 6px;
+  color: var(--secondary-foreground);
+}
+.breadcrumb-separator {
+  color: var(--disabled-foreground);
 }
 .ticket-detail[data-expanded] .description-document,
 .ticket-detail[data-expanded] .description-document :is(p, li),
 .ticket-detail[data-expanded] .editor-body [role="textbox"] {
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 24px;
 }
 .ticket-state-line {
@@ -62,9 +74,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 12px;
-  margin: 0 0 24px;
+  margin: 8px 0 0;
   color: var(--secondary-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .ticket-source-state {
@@ -79,11 +91,11 @@
 .list-position {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 .list-position-text {
-  padding-inline: 4px;
-  font-size: 12px;
+  padding-inline: 0 4px;
+  font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;
 }
@@ -100,7 +112,7 @@
   align-items: center;
   gap: 4px;
   color: var(--link-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   text-align: left;
   text-decoration: none;
@@ -130,7 +142,7 @@
   padding: 4px 4px 4px 16px;
   background: var(--background);
   color: var(--secondary-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .source-card .description-document {
@@ -148,7 +160,7 @@
   box-shadow: var(--shadow-border-base);
   background: var(--recessed);
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-unavailable-notice p {
@@ -175,13 +187,13 @@
   gap: 6px;
   margin: 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-caption {
   margin: 8px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 
@@ -193,7 +205,7 @@
 .source-number,
 .rail-source-identity .source-link {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
 }
 .header-source-link {
@@ -214,14 +226,14 @@
   display: grid;
   gap: 8px;
   box-shadow: var(--shadow-tooltip);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
 .source-card-header .source-link {
-  font-size: 12px;
+  font-size: var(--text-caption);
   white-space: nowrap;
 }
 .source-description-clip[data-collapsed] {
@@ -236,7 +248,7 @@
   margin-left: auto;
 }
 .source-card-actions .ui-button {
-  font-size: 12px;
+  font-size: var(--text-caption);
   gap: 4px;
   padding: 0 4px;
 }
@@ -266,15 +278,8 @@
   box-shadow: var(--shadow-large);
 }
 .take-ownership-title {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
-}
-
-.detail-quiet-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 16px;
 }

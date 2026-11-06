@@ -1,4 +1,95 @@
 import DOMPurify from "dompurify";
+import type { MermaidConfig } from "mermaid";
+
+/** One stuck render must not leave every later diagram on its skeleton. */
+const RENDER_TIMEOUT_MS = 10000;
+function withTimeout<T>(work: Promise<T>, ms: number) {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            "Diagram rendering timed out. Check its source in the editor.",
+          ),
+        ),
+      ms,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (reason: unknown) => {
+        clearTimeout(timer);
+        reject(reason instanceof Error ? reason : new Error(String(reason)));
+      },
+    );
+  });
+}
+
+export function mermaidConfig(dark: boolean): MermaidConfig {
+  return {
+    startOnLoad: false,
+    look: "classic",
+    layout: "dagre",
+    securityLevel: "strict",
+    theme: dark ? "dark" : "neutral",
+    themeVariables: {
+      fontFamily: "Geist, ui-sans-serif, system-ui, sans-serif",
+      fontSize: "14px",
+      // White boxes with a grey outline and a grey line (board F).
+      ...(dark
+        ? {}
+        : {
+            primaryColor: "#ffffff",
+            mainBkg: "#ffffff",
+            nodeBorder: "#cccccc",
+            primaryBorderColor: "#cccccc",
+            lineColor: "#4d4d4d",
+          }),
+    },
+    htmlLabels: false,
+    maxTextSize: 20000,
+    maxEdges: 500,
+    suppressErrorRendering: true,
+    // 40 px boxes on a 76 px pitch (board F).
+    flowchart: {
+      htmlLabels: false,
+      padding: 10.9,
+      rankSpacing: 36,
+      minNodeWidth: 108,
+      nodeSpacing: 50,
+      useMaxWidth: false,
+    },
+    secure: [
+      "secure",
+      "securityLevel",
+      "startOnLoad",
+      "look",
+      "layout",
+      "maxTextSize",
+      "maxEdges",
+      "suppressErrorRendering",
+      "htmlLabels",
+      "flowchart",
+      "theme",
+      "themeCSS",
+      "themeVariables",
+    ],
+  };
+}
+
+/** A module fetch that fails while the app is still settling gets two more tries. */
+async function loadMermaid() {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return (await import("mermaid")).default;
+    } catch (reason) {
+      if (attempt >= 2) throw reason;
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+}
 
 let queue = Promise.resolve();
 let nextId = 0;
@@ -25,39 +116,20 @@ export function renderDiagram(
       throw new Error(
         "Diagrams with external resources are unsupported. Remove image resources to render locally.",
       );
-    const { default: mermaid } = await import("mermaid");
+    const mermaid = await loadMermaid();
     if (!active()) return "";
     const id = `ticketd-mermaid-${++nextId}`;
     const scratch = document.createElement("div");
     scratch.setAttribute("aria-hidden", "true");
     scratch.style.cssText =
-      "position:absolute;visibility:hidden;pointer-events:none;";
+      "position:absolute;left:-10000px;top:0;width:1200px;visibility:hidden;pointer-events:none;";
     document.body.append(scratch);
     try {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        theme: dark ? "dark" : "default",
-        htmlLabels: false,
-        maxTextSize: 20000,
-        maxEdges: 500,
-        suppressErrorRendering: true,
-        flowchart: { htmlLabels: false },
-        secure: [
-          "secure",
-          "securityLevel",
-          "startOnLoad",
-          "maxTextSize",
-          "maxEdges",
-          "suppressErrorRendering",
-          "htmlLabels",
-          "flowchart",
-          "theme",
-          "themeCSS",
-          "themeVariables",
-        ],
-      });
-      const { svg } = await mermaid.render(id, source, scratch);
+      mermaid.initialize(mermaidConfig(dark));
+      const { svg } = await withTimeout(
+        mermaid.render(id, source, scratch),
+        RENDER_TIMEOUT_MS,
+      );
       const sanitized = DOMPurify.sanitize(svg, {
         USE_PROFILES: { svg: true, svgFilters: true },
         FORBID_TAGS: [

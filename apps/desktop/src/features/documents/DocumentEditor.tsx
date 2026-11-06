@@ -1,8 +1,23 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Check, MoreHorizontal, Pin, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  FileText,
+  Layers,
+  CircleDashed,
+  Link2,
+  MoreHorizontal,
+  Network,
+  Pin,
+  SquarePen,
+  X,
+} from "lucide-react";
 import { client } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,7 +62,8 @@ function DocumentSurface({
       }}
     >
       <DialogContent
-        className="document-dialog inset-0 max-w-none translate-x-0 translate-y-0 sm:max-w-none md:inset-y-2 md:right-2 md:left-auto md:w-[min(560px,calc(100vw-16px))]"
+        // Centered like every other dialog, not a side sheet.
+        className="document-dialog sm:max-w-xl"
         showCloseButton={false}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
@@ -62,10 +78,12 @@ function DocumentDate({ value }: { value: string }) {
     value
   ) : (
     <time dateTime={value} title={value}>
-      {date.toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })}
+      {date.toDateString() === new Date().toDateString()
+        ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
+        : date.toLocaleString(undefined, {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })}
     </time>
   );
 }
@@ -74,12 +92,16 @@ const plain = (text: string) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 /** A derived heading repeats the body's first line; the reader shows it once, as the heading. */
 function withoutDerivedHeading(body: string, title: string, heading?: string) {
-  if (title.trim() || !heading) return body;
+  const explicit = title.trim();
+  if (!explicit && !heading) return body;
   const lines = body.split("\n");
   const first = lines.findIndex((line) => line.trim());
   const line = first < 0 ? "" : (lines[first] ?? "");
-  const want = plain(heading);
+  // An explicit title is the heading; a body H1 that only repeats it is not shown twice.
+  if (explicit && !/^#{1,6}\s/.test(line)) return body;
+  const want = plain(explicit || heading || "");
   if (!want || !plain(line).startsWith(want.slice(0, 120))) return body;
+  if (explicit && plain(line.replace(/^#{1,6}\s+/, "")) !== want) return body;
   return lines
     .slice(first + 1)
     .join("\n")
@@ -135,6 +157,9 @@ export function DocumentEditor({
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
   const [writing, setWriting] = useState(initial === null);
+  // The heading line the title already shows, kept out of the editor while editing
+  // and put back in front of what is typed, so the saved text never changes.
+  const [hiddenHead, setHiddenHead] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [creatingFromDocument, setCreatingFromDocument] = useState(false);
@@ -166,7 +191,7 @@ export function DocumentEditor({
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [status, setStatus] = useState(
-    initial ? "Saved locally" : "Start writing. We’ll save as you go.",
+    initial ? "Saved on this computer" : "Start writing. We’ll save as you go.",
   );
   const [savedDocument, setSavedDocument] = useState(initial);
   const [trashed, setTrashed] = useState(initial?.trashed ?? false);
@@ -317,7 +342,7 @@ export function DocumentEditor({
       };
       pending.current = null;
       saving.current = false;
-      setStatus("Saved locally");
+      setStatus("Saved on this computer");
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
@@ -340,7 +365,7 @@ export function DocumentEditor({
           const latest = await documents.show(id.current);
           pending.current = null;
           if (reconcile(latest)) {
-            setStatus("Saved locally");
+            setStatus("Saved on this computer");
             void save();
           } else setFailed(false);
           return;
@@ -532,31 +557,36 @@ export function DocumentEditor({
     savedDocument?.heading ||
     initial?.origin_brief?.trim() ||
     "Document";
+  // The heading line left out of the editor, while the body still starts with it.
+  const head =
+    writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
+  const titleInput = (
+    <Input
+      id="document-title"
+      aria-label={capture ? "Optional title" : "Title"}
+      className={capture ? undefined : "document-title-input"}
+      placeholder={capture ? "Add a title (optional)" : "Title"}
+      readOnly={locked}
+      value={title || (head ? heading : "")}
+      onChange={(event) => {
+        draft.current = { ...draft.current, title: event.target.value };
+        setTitle(event.target.value);
+      }}
+    />
+  );
   const titleField = (
     <FieldGroup>
       <Field>
         <FieldLabel htmlFor="document-title">Optional title</FieldLabel>
-        <Input
-          id="document-title"
-          placeholder={
-            capture
-              ? "Add a title (optional)"
-              : initial.origin_brief?.trim() || "Untitled"
-          }
-          readOnly={locked}
-          value={title}
-          onChange={(event) => {
-            draft.current = { ...draft.current, title: event.target.value };
-            setTitle(event.target.value);
-          }}
-        />
+        {titleInput}
       </Field>
     </FieldGroup>
   );
+  const isSaved = status === "Saved on this computer";
   const statusLine = (
     <span role="status" className="document-status">
-      {status === "Saved locally" && <Check aria-hidden="true" />}
-      {status}
+      {isSaved && <Check aria-hidden="true" />}
+      {capture && isSaved ? "Saved to Documents as you type" : status}
     </span>
   );
   const saveError = failed && (
@@ -576,69 +606,162 @@ export function DocumentEditor({
     </div>
   );
   const connected = groupConnections(links);
+  // A Plan row with no passage is a Plan attachment: the designated spec, or (attached) a supporting Document.
+  const planSpec = connected.find(
+    (item) =>
+      item.kind === "plan" && item.passages.length === 0 && !item.attached,
+  );
+  const planSupport = planSpec
+    ? undefined
+    : connected.find(
+        (item) =>
+          item.kind === "plan" && item.passages.length === 0 && item.attached,
+      );
+  // Plans this Document is the spec of (or supports) have their own section;
+  // every other connection is a mention, listed once.
+  const isAttachment = (item: (typeof connected)[number]) =>
+    item.kind === "plan" && item.passages.length === 0;
+  // Reference order (T-1 before T-3), not the order the links were recorded in.
+  const mentions = connected
+    .filter((item) => !isAttachment(item))
+    .sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { numeric: true }),
+    );
+  const attachments = connected.filter(isAttachment);
+  const attachmentLabel = planSpec ? "Spec of" : "Supporting Document of";
+  const passages = [
+    ...new Set(mentions.flatMap((item) => item.passages)),
+  ].filter((passage) => !bareLinkLabel(passage));
+  const passageView = (passage: string) => (
+    <DocumentNavigation.Provider
+      key={passage}
+      value={onOpenDocument ? (id) => navigate(() => onOpenDocument(id)) : null}
+    >
+      <PlanNavigation.Provider
+        value={onOpenPlan ? (id) => navigate(() => onOpenPlan(id)) : null}
+      >
+        <div className="document-passage">
+          <MarkdownDocument
+            revision={workspaceRevision}
+            source={passage}
+            select={
+              onOpenTicket
+                ? (reference) => navigate(() => onOpenTicket(reference))
+                : undefined
+            }
+          />
+        </div>
+      </PlanNavigation.Provider>
+    </DocumentNavigation.Provider>
+  );
+  const connectionRow = (item: (typeof connected)[number]) => (
+    <li key={`${item.kind}-${item.id}`}>
+      <Button
+        variant="ghost"
+        onClick={() => {
+          if (item.kind === "document")
+            navigate(() => onOpenDocument?.(item.id));
+          else if (item.kind === "ticket")
+            navigate(() => onOpenTicket?.(item.label));
+          else if (item.kind === "plan") navigate(() => onOpenPlan?.(item.id));
+        }}
+      >
+        <ConnectedLabel item={item} />
+      </Button>
+      {item.attached && item.passages.length === 0 && item.kind !== "plan" && (
+        <p className="document-direction">
+          {item.to ? "Attached Document" : `Attached to ${item.label}`}
+        </p>
+      )}
+    </li>
+  );
+  const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
+  const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
   return (
     <DocumentSurface capture={capture} onClose={requestClose}>
-      <div className="document-main">
-        <header>
-          {initial ? (
-            <>
-              <div className="document-eyebrow">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="document-close"
-                  aria-label="Close and return"
-                  onClick={requestClose}
-                >
-                  <ArrowLeft aria-hidden="true" />
-                </Button>
-                <span>Document</span>
-                <div className="document-actions">
-                  {onTogglePin && (
-                    <IconButton
-                      label={pinned ? "Unpin Document" : "Pin Document"}
-                      aria-pressed={pinned}
-                      onClick={onTogglePin}
-                    >
-                      <Pin fill={pinned ? "currentColor" : "none"} />
-                    </IconButton>
-                  )}
-                  {!trashed && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <IconButton
-                          label="Document actions"
-                          disabled={transitioning}
-                        >
-                          <MoreHorizontal />
-                        </IconButton>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" sideOffset={4}>
-                        <DropdownMenuItem onSelect={toggleTrash}>
-                          Move to Trash
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              </div>
-              <h1>{heading}</h1>
-            </>
-          ) : (
-            <>
-              <DialogTitle>Capture a thought</DialogTitle>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="document-close"
-                aria-label="Close and return"
-                onClick={requestClose}
+      {initial && (
+        <header className="document-bar">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="document-crumb"
+            aria-label={backLabel}
+            onClick={requestClose}
+          >
+            <ArrowLeft aria-hidden="true" />
+            {backLabel.replace(/^Back to /, "")}
+          </Button>
+          <span aria-hidden="true" className="document-crumb-sep">
+            /
+          </span>
+          <span className="document-crumb-title">{heading}</span>
+          <div className="document-actions">
+            {statusLine}
+            <SegmentedControl
+              aria-label="Document mode"
+              value={writing ? "edit" : "read"}
+              onValueChange={(value) => {
+                const edit = value === "edit";
+                const stripped = withoutDerivedHeading(
+                  body,
+                  title,
+                  savedDocument?.heading,
+                );
+                setHiddenHead(
+                  edit && initial
+                    ? body.slice(0, body.length - stripped.length)
+                    : "",
+                );
+                setWriting(edit);
+              }}
+              options={[
+                { value: "read", label: "Read" },
+                { value: "edit", label: "Edit" },
+              ]}
+            />
+            {onTogglePin && (
+              <IconButton
+                label={pinned ? "Unpin Document" : "Pin Document"}
+                aria-pressed={pinned}
+                onClick={onTogglePin}
               >
-                <X aria-hidden="true" />
-              </Button>
-            </>
-          )}
+                <Pin fill={pinned ? "currentColor" : "none"} />
+              </IconButton>
+            )}
+            {!trashed && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton label="Document actions" disabled={transitioning}>
+                    <MoreHorizontal />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={4}>
+                  <DropdownMenuItem onSelect={toggleTrash}>
+                    Move to Trash
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </header>
+      )}
+      <div className="document-main">
+        {!initial && (
+          <header>
+            <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
+              Capture a thought
+            </DialogTitle>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="document-close"
+              aria-label="Close and return"
+              onClick={requestClose}
+            >
+              <X aria-hidden="true" />
+            </Button>
+          </header>
+        )}
         {trashed && (
           <div role="status" className="document-trash-banner">
             <span>In Trash</span>
@@ -651,24 +774,28 @@ export function DocumentEditor({
             </Button>
           </div>
         )}
-        {initial && (
-          <div className="document-mode" aria-label="Document mode">
-            <Button
-              variant={writing ? "ghost" : "secondary"}
-              onClick={() => setWriting(false)}
-            >
-              Read
-            </Button>
-            <Button
-              variant={writing ? "secondary" : "ghost"}
-              onClick={() => setWriting(true)}
-            >
-              Write
-            </Button>
-            {statusLine}
-          </div>
+        {initial &&
+          (writing ? (
+            <div className="document-title">
+              {titleInput}
+              <p className="document-title-hint">
+                Title · the Document’s heading
+              </p>
+            </div>
+          ) : (
+            <h1 className="document-title">{heading}</h1>
+          ))}
+        {initial && !writing && (
+          <p className="document-subtitle">
+            Updated{" "}
+            <DocumentDate
+              value={savedDocument?.updated_at ?? initial.updated_at}
+            />
+            {planSpec && ` · spec of the Plan ${planSpec.label}`}
+            {planSupport &&
+              ` · supporting Document of the Plan ${planSupport.label}`}
+          </p>
         )}
-        {initial && writing && titleField}
         {suggestion && (
           <p>
             Connected to {suggestion}{" "}
@@ -760,15 +887,17 @@ export function DocumentEditor({
         <div className="document-body">
           {!initial || writing ? (
             <LazyMarkdownEditor
-              value={body}
+              value={head ? body.slice(head.length) : body}
               onChange={(value) => {
-                draft.current = { ...draft.current, body: value };
-                setBody(value);
+                const next = head + value;
+                draft.current = { ...draft.current, body: next };
+                setBody(next);
               }}
-              label="Your thought"
-              {...(capture ? { placeholder: "Write a thought…" } : {})}
+              label={capture ? "Your thought" : "Document"}
+              placeholder={capture ? "Write a thought…" : "Type / for blocks"}
               readOnly={locked}
               autoFocus={capture}
+              persistentToolbar={capture}
               focusRequest={focusRequest}
             />
           ) : (
@@ -801,35 +930,71 @@ export function DocumentEditor({
             </DocumentNavigation.Provider>
           )}
         </div>
+        {writing && !capture && !locked && body.trim() && (
+          <p className="document-block-hint" aria-hidden="true">
+            Type / for blocks
+          </p>
+        )}
         {capture && titleField}
         {!initial && saveError}
-        <footer>
-          {capture && statusLine}
-          <Button
-            variant={capture ? "default" : "outline"}
-            onClick={requestClose}
-          >
-            {capture ? "Done" : backLabel}
-          </Button>
-        </footer>
+        {capture && (
+          <footer>
+            {body.trim() ? (
+              statusLine
+            ) : (
+              <span
+                role="status"
+                id="capture-blocked"
+                className="document-status"
+              >
+                Write a thought to finish
+              </span>
+            )}
+            <Button
+              disabled={!body.trim()}
+              {...(!body.trim() && { "aria-describedby": "capture-blocked" })}
+              onClick={requestClose}
+            >
+              Done
+            </Button>
+          </footer>
+        )}
       </div>
       {initial && (
-        <aside className="document-rail">
-          <section aria-label="Document details">
-            <h2>Document details</h2>
+        <aside className="document-rail" aria-label="Document details">
+          {linkError && <p role="alert">{linkError}</p>}
+          {mentions.length > 0 && (
+            <section aria-label="Mentions">
+              <h2>Mentions</h2>
+              {links.some((group) => group.length === 100) && (
+                <p>Showing the first 100 items in each direction.</p>
+              )}
+              <ul>{mentions.map((item) => connectionRow(item))}</ul>
+              {passages.length > 0 && (
+                <div className="document-passage-caption">
+                  <span>
+                    {passages.length === 1 && mentions.length > 1
+                      ? mentions.length === 2
+                        ? "Both from"
+                        : "All from"
+                      : "From"}{" "}
+                    “
+                  </span>
+                  {passages.map((passage) => passageView(passage))}
+                  <span aria-hidden="true">”</span>
+                </div>
+              )}
+            </section>
+          )}
+          {attachments.length > 0 && (
+            <section aria-label={attachmentLabel}>
+              <h2>{attachmentLabel}</h2>
+              <ul>{attachments.map((item) => connectionRow(item))}</ul>
+            </section>
+          )}
+          {typeof children === "function" ? children({ trashed }) : children}
+          <section aria-label="Document properties">
             <dl>
-              <dt>Updated</dt>
-              <dd>
-                <DocumentDate
-                  value={savedDocument?.updated_at ?? initial.updated_at}
-                />
-              </dd>
-              <dt>Created</dt>
-              <dd>
-                <DocumentDate
-                  value={savedDocument?.created_at ?? initial.created_at}
-                />
-              </dd>
               {initial.origin_ticket && (
                 <>
                   <dt>Origin</dt>
@@ -854,131 +1019,49 @@ export function DocumentEditor({
                   : "Shown in Documents"}
               </dd>
             </dl>
-          </section>
-          {typeof children === "function" ? children({ trashed }) : children}
-          {onOpenGraph && (
-            <Button
-              variant="outline"
-              onClick={() => navigate(() => onOpenGraph(initial.id))}
-            >
-              Context graph
-            </Button>
-          )}
-          {writing && (
-            <>
-              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button disabled={locked} variant="outline">
-                    Link a Document
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start">
-                  <DocumentPicker
-                    exclude={[initial.id]}
-                    onPick={(picked) => {
-                      const link = documentLinkMarkdown(
-                        picked.id,
-                        picked.heading,
-                      );
-                      const next = draft.current.body
-                        ? `${draft.current.body}\n\n${link}`
-                        : link;
-                      draft.current = { ...draft.current, body: next };
-                      setBody(next);
-                      setLinkError("");
-                      setPickerOpen(false);
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-            </>
-          )}
-          {linkError && <p role="alert">{linkError}</p>}
-          {connected.length > 0 && (
-            <section aria-label="Connected items">
-              <h2>Connected items</h2>
-              {links.some((group) => group.length === 100) && (
-                <p>Showing the first 100 items in each direction.</p>
+            <p className="document-timestamps">
+              {updatedAt === createdAt ? (
+                <>
+                  Created and updated <DocumentDate value={updatedAt} />
+                </>
+              ) : (
+                <>
+                  Updated <DocumentDate value={updatedAt} /> · created{" "}
+                  <DocumentDate value={createdAt} />
+                </>
               )}
-              <ul>
-                {connected.map((item) => (
-                  <li key={`${item.kind}-${item.id}`}>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (item.kind === "document")
-                          navigate(() => onOpenDocument?.(item.id));
-                        else if (item.kind === "ticket")
-                          navigate(() => onOpenTicket?.(item.label));
-                        else if (item.kind === "plan")
-                          navigate(() => onOpenPlan?.(item.id));
-                      }}
-                    >
-                      <ConnectedLabel item={item} />
-                    </Button>
-                    <p className="document-direction">
-                      {item.attached && item.passages.length === 0
-                        ? item.to
-                          ? "Attached Document"
-                          : `Attached to ${item.label}`
-                        : item.to && item.from
-                          ? "Links to and linked from"
-                          : item.to
-                            ? "Links to"
-                            : item.kind === "plan" && item.passages.length === 0
-                              ? "Uses this Document as its spec"
-                              : "Linked from"}
-                    </p>
-                    {item.passages.map((passage) =>
-                      bareLinkLabel(passage) ? (
-                        // The direction above already states the link, either way.
-                        item.to || item.from ? null : (
-                          <p key={passage} className="document-passage">
-                            Links to {bareLinkLabel(passage)}
-                          </p>
-                        )
-                      ) : (
-                        <DocumentNavigation.Provider
-                          key={passage}
-                          value={
-                            onOpenDocument
-                              ? (id) => navigate(() => onOpenDocument(id))
-                              : null
-                          }
-                        >
-                          <PlanNavigation.Provider
-                            value={
-                              onOpenPlan
-                                ? (id) => navigate(() => onOpenPlan(id))
-                                : null
-                            }
-                          >
-                            <div className="document-passage">
-                              <MarkdownDocument
-                                revision={workspaceRevision}
-                                source={passage}
-                                select={
-                                  onOpenTicket
-                                    ? (reference) =>
-                                        navigate(() => onOpenTicket(reference))
-                                    : undefined
-                                }
-                              />
-                            </div>
-                          </PlanNavigation.Provider>
-                        </DocumentNavigation.Provider>
-                      ),
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <section aria-label="Create ticket">
-            <h2>Tickets</h2>
+            </p>
+          </section>
+          <div className="document-rail-actions">
+            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button disabled={locked} variant="ghost">
+                  <Link2 aria-hidden="true" />
+                  Link a Document
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start">
+                <DocumentPicker
+                  exclude={[initial.id]}
+                  onPick={(picked) => {
+                    const link = documentLinkMarkdown(
+                      picked.id,
+                      picked.heading,
+                    );
+                    const next = draft.current.body
+                      ? `${draft.current.body}\n\n${link}`
+                      : link;
+                    draft.current = { ...draft.current, body: next };
+                    setBody(next);
+                    setLinkError("");
+                    setPickerOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
             {!creatingFromDocument && (
               <Button
-                variant="outline"
+                variant="ghost"
                 disabled={locked}
                 onClick={() => {
                   // One click creates: the title starts as the Document's heading.
@@ -986,55 +1069,65 @@ export function DocumentEditor({
                   setCreatingFromDocument(true);
                 }}
               >
-                Create ticket
+                <SquarePen aria-hidden="true" />
+                Create ticket from this
               </Button>
             )}
-            <div
-              hidden={!creatingFromDocument}
-              className="document-create-ticket"
-            >
-              <Field>
-                <FieldLabel htmlFor="ticket-from-document">
-                  New ticket title
-                </FieldLabel>
-                <Input
-                  id="ticket-from-document"
-                  value={ticketTitle}
-                  onChange={(event) => setTicketTitle(event.target.value)}
-                />
-              </Field>
+            {onOpenGraph && (
               <Button
-                disabled={locked || !ticketTitle.trim()}
-                onClick={() => {
-                  if (creatingTicket.current) return;
-                  if (
-                    !ticketRequest.current ||
-                    ticketRequest.current.title !== ticketTitle
-                  )
-                    ticketRequest.current = {
-                      title: ticketTitle,
-                      id: crypto.randomUUID(),
-                    };
-                  creatingTicket.current = true;
-                  void documents
-                    .createTicket(
-                      initial.id,
-                      ticketTitle,
-                      ticketRequest.current.id,
-                    )
-                    .then((ticket) =>
-                      navigate(() => onOpenTicket?.(ticket.reference)),
-                    )
-                    .catch((error: unknown) => setLinkError(String(error)))
-                    .finally(() => {
-                      creatingTicket.current = false;
-                    });
-                }}
+                variant="ghost"
+                onClick={() => navigate(() => onOpenGraph(initial.id))}
               >
-                Create ticket
+                <Network aria-hidden="true" />
+                Open context graph
               </Button>
-            </div>
-          </section>
+            )}
+          </div>
+          <div
+            hidden={!creatingFromDocument}
+            className="document-create-ticket"
+          >
+            <Field>
+              <FieldLabel htmlFor="ticket-from-document">
+                New ticket title
+              </FieldLabel>
+              <Input
+                id="ticket-from-document"
+                value={ticketTitle}
+                onChange={(event) => setTicketTitle(event.target.value)}
+              />
+            </Field>
+            <Button
+              disabled={locked || !ticketTitle.trim()}
+              onClick={() => {
+                if (creatingTicket.current) return;
+                if (
+                  !ticketRequest.current ||
+                  ticketRequest.current.title !== ticketTitle
+                )
+                  ticketRequest.current = {
+                    title: ticketTitle,
+                    id: crypto.randomUUID(),
+                  };
+                creatingTicket.current = true;
+                void documents
+                  .createTicket(
+                    initial.id,
+                    ticketTitle,
+                    ticketRequest.current.id,
+                  )
+                  .then((ticket) =>
+                    navigate(() => onOpenTicket?.(ticket.reference)),
+                  )
+                  .catch((error: unknown) => setLinkError(String(error)))
+                  .finally(() => {
+                    creatingTicket.current = false;
+                  });
+              }}
+            >
+              Create ticket
+            </Button>
+          </div>
         </aside>
       )}
     </DocumentSurface>
@@ -1086,17 +1179,30 @@ function groupConnections(links: Awaited<ReturnType<typeof documents.links>>) {
   });
   return [...rows.values()];
 }
-/** Tickets show their title beside the reference; Plans using this Document read "Spec of …". */
+/** Looked-up ticket summaries by reference, so reopening a Document does not refetch them. */
+const ticketSummaries = new Map<string, { title: string; status: string }>();
+/** Tickets show their status and title beside the reference; Plans using this Document read "Spec of …". */
 function ConnectedLabel({ item }: { item: Connection }) {
-  const [title, setTitle] = useState("");
+  const [, refresh] = useState(0);
+  const [unresolved, setUnresolved] = useState(false);
+  const ticket =
+    item.kind === "ticket" ? ticketSummaries.get(item.label) : undefined;
+  // A ticket whose summary is still on its way shows a skeleton, not a generic icon and a bare reference.
+  const loading = item.kind === "ticket" && !ticket && !unresolved;
   useEffect(() => {
-    if (item.kind !== "ticket") return;
+    if (item.kind !== "ticket" || ticketSummaries.has(item.label)) return;
     let current = true;
     void client.showTicket(item.label).then(
-      (ticket) => {
-        if (current) setTitle(ticket.title);
+      (found) => {
+        ticketSummaries.set(item.label, {
+          title: found.title,
+          status: found.status,
+        });
+        if (current) refresh((n) => n + 1);
       },
-      () => {},
+      () => {
+        if (current) setUnresolved(true);
+      },
     );
     return () => {
       current = false;
@@ -1104,14 +1210,33 @@ function ConnectedLabel({ item }: { item: Connection }) {
   }, [item.kind, item.label]);
   const text =
     item.kind === "plan" && item.passages.length === 0
-      ? `Spec of ${item.label}`
-      : title
-        ? `${item.label} · ${title}`
+      ? item.label
+      : ticket?.title
+        ? `${item.label} · ${ticket.title}`
         : item.label;
   const shown = item.trashed ? `${text} (Trash)` : text;
   return (
-    <span className="connected-label" title={shown}>
-      {shown}
-    </span>
+    <>
+      {item.kind === "ticket" ? (
+        ticket ? (
+          <StatusIcon status={ticket.status} decorative />
+        ) : loading ? (
+          <Skeleton
+            aria-hidden="true"
+            className="size-4 shrink-0 rounded-full"
+          />
+        ) : (
+          <CircleDashed aria-hidden="true" />
+        )
+      ) : item.kind === "plan" ? (
+        <Layers aria-hidden="true" />
+      ) : (
+        <FileText aria-hidden="true" />
+      )}
+      <span className="connected-label" title={shown}>
+        {shown}
+      </span>
+      {loading && <Skeleton aria-hidden="true" className="h-3 w-24 shrink-0" />}
+    </>
   );
 }

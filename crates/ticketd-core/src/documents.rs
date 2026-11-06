@@ -113,12 +113,13 @@ fn summary_from_row(
     query: Option<&str>,
 ) -> rusqlite::Result<DocumentSummary> {
     let body: String = row.get(3)?;
+    let heading: String = row.get(1)?;
     let tags: Option<String> = row.get(5)?;
     Ok(DocumentSummary {
         id: row.get(0)?,
-        heading: row.get(1)?,
+        heading: heading.clone(),
         origin_ticket: row.get(2)?,
-        snippet: plain_snippet(&body, query),
+        snippet: plain_snippet(&body, &heading, query),
         tags: tags
             .map(|value| value.split('\u{1f}').map(str::to_owned).collect())
             .unwrap_or_default(),
@@ -126,18 +127,35 @@ fn summary_from_row(
     })
 }
 
-/// Plain text of the Markdown `body`, collapsed to one line. With a `query`, the excerpt
-/// is centred on its first match so a result shows why it matched.
-fn plain_snippet(body: &str, query: Option<&str>) -> String {
+/// The capture editor's empty-state hint. It is never meant to be saved, but a Document that
+/// already holds it as a trailing block must not show it as its excerpt.
+const CAPTURE_PLACEHOLDER: &str = "Write a thought…";
+
+/// Plain text of the Markdown `body`, collapsed to one line, without the Document's own
+/// `heading` (the row already shows it) or the capture placeholder. With a `query`, the
+/// excerpt is centred on its first match so a result shows why it matched.
+fn plain_snippet(body: &str, heading: &str, query: Option<&str>) -> String {
     const LIMIT: usize = 160;
     use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
     let mut text = String::new();
     let mut in_code_block = false;
+    // A leading heading is the Document's own heading, which the list already shows.
+    let mut skipping_heading = false;
+    let mut started = false;
     for event in Parser::new_ext(
         body,
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES,
     ) {
+        if !started && matches!(event, Event::Start(_)) {
+            started = true;
+            skipping_heading = matches!(event, Event::Start(Tag::Heading { .. }));
+            if skipping_heading {
+                continue;
+            }
+        }
         match event {
+            Event::End(TagEnd::Heading(_)) if skipping_heading => skipping_heading = false,
+            _ if skipping_heading => {}
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Text(part) | Event::Code(part) | Event::InlineMath(part) if !in_code_block => {
@@ -152,6 +170,17 @@ fn plain_snippet(body: &str, query: Option<&str>) -> String {
         }
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // A search excerpt shows why the Document matched, even when that is the heading.
+    let text = if query.is_some() {
+        text.as_str()
+    } else {
+        without_repeated_heading(&text, heading)
+    };
+    let text = text
+        .strip_suffix(CAPTURE_PLACEHOLDER)
+        .filter(|rest| rest.is_empty() || rest.ends_with(' '))
+        .map_or(text, str::trim_end)
+        .to_owned();
     let chars: Vec<char> = text.chars().collect();
     let start = query
         .and_then(|needle| {
@@ -170,6 +199,16 @@ fn plain_snippet(body: &str, query: Option<&str>) -> String {
         snippet.push('…');
     }
     snippet
+}
+
+/// A body that opens with the Document's heading (a derived heading is its first line) repeats it.
+fn without_repeated_heading<'a>(text: &'a str, heading: &str) -> &'a str {
+    match text.strip_prefix(heading.trim()) {
+        Some(rest) if !heading.trim().is_empty() && (rest.is_empty() || rest.starts_with(' ')) => {
+            rest.trim_start()
+        }
+        _ => text,
+    }
 }
 
 impl Workspace {

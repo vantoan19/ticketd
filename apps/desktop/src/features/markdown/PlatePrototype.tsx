@@ -113,7 +113,7 @@ export function PlatePrototype() {
             Simulate dirty refresh
           </Button>
         </div>
-        <h2 className="text-lg font-semibold">
+        <h2 className="text-sm font-semibold">
           Description · autosave after 500ms
         </h2>
         {conflict && (
@@ -162,7 +162,7 @@ export function PlatePrototype() {
             {draft}
           </pre>
         </details>
-        <h2 className="text-lg font-semibold">Note · explicit submission</h2>
+        <h2 className="text-sm font-semibold">Note · explicit submission</h2>
         <MarkdownEditor
           value={note}
           onChange={setNote}

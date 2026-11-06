@@ -4,13 +4,6 @@ import { Network, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -49,52 +42,34 @@ export function LinkedWorkDialogs({ work }: { work: LinkedWorkState }) {
           await refresh();
         }}
       />
-      {ticket.duplicate_redirect && (
-        <Dialog open={work.redirecting} onOpenChange={work.setRedirecting}>
-          <DialogContent className="duplicate-dialog">
-            <DialogHeader>
-              <DialogTitle>Point this duplicate at the original</DialogTitle>
-              <DialogDescription>
-                {ticket.duplicate_of} became a duplicate of{" "}
-                {ticket.duplicate_redirect}. Review the dependencies, then mark{" "}
-                {ticket.reference} as a duplicate of {ticket.duplicate_redirect}{" "}
-                instead.
-              </DialogDescription>
-            </DialogHeader>
-            <Duplicates
-              ticket={ticket}
-              initialCanonical={ticket.duplicate_redirect}
-              refresh={async () => {
-                retry();
-                await refresh();
-              }}
-              onDone={() => work.setRedirecting(false)}
-              onCancel={() => work.setRedirecting(false)}
-            />
-          </DialogContent>
-        </Dialog>
+      {ticket.duplicate_redirect && work.redirecting && (
+        <Duplicates
+          ticket={ticket}
+          initialCanonical={ticket.duplicate_redirect}
+          refresh={async () => {
+            retry();
+            await refresh();
+          }}
+          open
+          onOpenChange={work.setRedirecting}
+          title="Point this duplicate at the original"
+          description={`${ticket.duplicate_of} became a duplicate of ${ticket.duplicate_redirect}. Review the dependencies, then mark ${ticket.reference} as a duplicate of ${ticket.duplicate_redirect} instead.`}
+        />
       )}
-      <Dialog open={work.reviewing} onOpenChange={work.setReviewing}>
-        <DialogContent className="duplicate-dialog">
-          <DialogHeader>
-            <DialogTitle>Review dependency changes</DialogTitle>
-            <DialogDescription>
-              Move dependencies between {ticket.reference} and another ticket
-              after a duplicate link was removed.
-            </DialogDescription>
-          </DialogHeader>
-          <Duplicates
-            ticket={ticket}
-            startSeparate
-            refresh={async () => {
-              retry();
-              await refresh();
-            }}
-            onDone={() => work.setReviewing(false)}
-            onCancel={() => work.setReviewing(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {work.reviewing && (
+        <Duplicates
+          ticket={ticket}
+          startSeparate
+          refresh={async () => {
+            retry();
+            await refresh();
+          }}
+          open
+          onOpenChange={work.setReviewing}
+          title="Review dependency changes"
+          description={`Move dependencies between ${ticket.reference} and another ticket after a duplicate link was removed.`}
+        />
+      )}
     </>
   );
 }
@@ -143,6 +118,7 @@ export function LinkedWork({
     return (
       <RailSection label="Relationships">
         <div id={`linked-work-${reference}`} className="linked-work" data-empty>
+          {linkAction}
           {current?.links && openContextGraph && (
             <Button
               variant="ghost"
@@ -150,10 +126,9 @@ export function LinkedWork({
               onClick={() => openContextGraph(reference)}
             >
               <Network aria-hidden="true" />
-              Context graph
+              Open context graph
             </Button>
           )}
-          {linkAction}
           {!current && (
             <span className="linked-work-state" role="status">
               Loading relationships…
@@ -301,6 +276,7 @@ export function LinkedWork({
           </Button>
         )}
         <div className="linked-work-actions">
+          {linkAction}
           <Button
             variant="ghost"
             size="sm"
@@ -309,9 +285,8 @@ export function LinkedWork({
             }
           >
             <Network aria-hidden="true" />
-            {openContextGraph ? "Context graph" : "Dependencies"}
+            {openContextGraph ? "Open context graph" : "Dependencies"}
           </Button>
-          {linkAction}
         </div>
       </div>
     </RailSection>

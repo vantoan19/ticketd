@@ -8,7 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { client, type Ticket } from "@/lib/api/client";
 import { charSpanToUtf16, mentionStillAt, withoutBom } from "./mention-passage";
 import { revealInDetail } from "./detail-scroll";
@@ -181,6 +183,27 @@ export function TicketEditor({
     return () => window.removeEventListener("ticketd:edit-description", edit);
   }, [reference]);
   const editButton = useRef<HTMLButtonElement>(null);
+  // E edits the description of the ticket in view, unless typing or another dialog has focus.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "e" || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      const button = editButton.current;
+      if (!button || button.closest("[hidden]")) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          "input, textarea, select, [contenteditable], [role=dialog], [role=menu], [role=listbox]",
+        )
+      )
+        return;
+      event.preventDefault();
+      button.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const inFlight = useRef(false);
   const [saving, setSaving] = useState(false);
   // Which field the last save carried, so the status line names it.
@@ -495,16 +518,6 @@ export function TicketEditor({
             >
               Done editing
             </Button>
-          ) : draft.body ? (
-            <Button
-              ref={editButton}
-              variant="ghost"
-              size="sm"
-              type="button"
-              onClick={() => setBodyMode("editing")}
-            >
-              Edit description
-            </Button>
           ) : null}
         </div>
         {bodyConflict && (
@@ -542,28 +555,32 @@ export function TicketEditor({
         )}
         {!editingBody &&
           (draft.body ? (
-            <div
-              ref={documentRef}
-              className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
-              onClick={(event) => {
-                const target = event.target;
-                if (
-                  target instanceof Element &&
-                  target.closest(
-                    "a, button, input, select, textarea, summary, [role=button]",
-                  )
-                )
-                  return;
-                if (window.getSelection()?.toString()) return;
-                setBodyMode("editing");
-              }}
-            >
-              <MarkdownDocument
-                source={rendered}
-                select={select}
-                revision={revision}
-                mention={mark}
-              />
+            <div className="description-reading">
+              <Button
+                ref={editButton}
+                variant="outline"
+                size="sm"
+                type="button"
+                className="description-edit"
+                aria-label="Edit description"
+                aria-keyshortcuts="E"
+                onClick={() => setBodyMode("editing")}
+              >
+                <Pencil data-icon="inline-start" aria-hidden="true" />
+                Edit
+                <Kbd aria-hidden="true">E</Kbd>
+              </Button>
+              <div
+                ref={documentRef}
+                className={`markdown-preview description-document${bodyConflict ? " conflict-draft" : ""}`}
+              >
+                <MarkdownDocument
+                  source={rendered}
+                  select={select}
+                  revision={revision}
+                  mention={mark}
+                />
+              </div>
             </div>
           ) : (
             <Button

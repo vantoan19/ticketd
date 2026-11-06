@@ -32,13 +32,13 @@ export function describeChange(
     to ? `${added} ${to}` : `${removed} ${from}`;
   switch (kind) {
     case "status":
-      return `Status changed from ${from} to ${to}`;
+      return `Status ${from} → ${to}`;
     case "project": {
       const name = (id: string) => lookups.project(id) ?? id;
       return from && to
         ? `Project changed from ${name(from)} to ${name(to)}`
         : to
-          ? `Added to project ${name(to)}`
+          ? `Project set to ${name(to)}`
           : `Removed from project ${name(from)}`;
     }
     case "plan": {
@@ -56,7 +56,7 @@ export function describeChange(
           ? `Parent set to ${to}`
           : `Removed from parent ${from}`;
     case "dependency":
-      return addedOrRemoved("Now blocked by", "No longer blocked by");
+      return addedOrRemoved("Blocked by", "No longer blocked by");
     case "relationship:child":
       return addedOrRemoved("Added subticket", "Removed subticket");
     case "relationship:blocks":

@@ -1,3 +1,4 @@
+import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { type Project, type Ticket } from "@/lib/api/client";
@@ -93,6 +94,7 @@ export function TicketDetails({
       className="ticket-detail"
       data-expanded={expanded || undefined}
       data-graph={graphOpen || undefined}
+      data-empty={selected === null || undefined}
       aria-labelledby="detail-heading"
     >
       {graphOpen && selected && (
@@ -138,8 +140,11 @@ export function TicketDetails({
         )}
         {selected === null && (
           <div className="detail-empty">
-            <strong>Select a ticket</strong>
-            <p>Read its description, links, and activity here.</p>
+            <p>Select a ticket to read it here</p>
+            <p className="detail-empty-hint">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
+            </p>
           </div>
         )}
         {Object.values(details).map((item) => (

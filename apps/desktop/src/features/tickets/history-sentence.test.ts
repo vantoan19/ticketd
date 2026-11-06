@@ -14,14 +14,14 @@ const sentence = (kind: string, from_value: string, to_value: string) =>
 
 test("describes recorded changes as sentences without event keys", () => {
   expect(sentence("status", "Todo", "In progress")).toBe(
-    "Status changed from Todo to In progress",
+    "Status Todo → In progress",
   );
-  expect(sentence("project", "", "p1")).toBe("Added to project Platform");
+  expect(sentence("project", "", "p1")).toBe("Project set to Platform");
   expect(sentence("project", "p1", "gone")).toBe(
     "Project changed from Platform to gone",
   );
   expect(sentence("plan", "e1", "")).toBe("Plan cleared");
-  expect(sentence("dependency", "", "T-3")).toBe("Now blocked by T-3");
+  expect(sentence("dependency", "", "T-3")).toBe("Blocked by T-3");
   expect(sentence("relationship:blocks", "T-4", "")).toBe(
     "No longer blocks T-4",
   );

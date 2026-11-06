@@ -17,6 +17,7 @@ export function SegmentedControl<T extends string>({
   onValueChange,
   options,
   className,
+  compact = false,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledby,
 }: {
@@ -26,6 +27,8 @@ export function SegmentedControl<T extends string>({
   "aria-label"?: string;
   "aria-labelledby"?: string;
   className?: string;
+  /** The 28px header size: 12px labels with 8px padding. */
+  compact?: boolean;
 }) {
   return (
     <RadioGroup.Root
@@ -46,7 +49,10 @@ export function SegmentedControl<T extends string>({
           value={option.value}
           disabled={option.disabled ?? false}
           title={option.title}
-          className="inline-flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0"
+          className={cn(
+            "inline-flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
+            compact && "h-6 px-2 text-xs",
+          )}
         >
           {option.icon}
           {option.label}{" "}

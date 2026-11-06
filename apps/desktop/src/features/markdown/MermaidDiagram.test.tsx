@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test("keeps a rendered diagram and its zoom during unchanged document refreshes", async () => {
+test("keeps a rendered diagram during unchanged document refreshes", async () => {
   engine.render.mockResolvedValue({
     svg: '<svg viewBox="0 0 100 50"><text>Stable diagram</text></svg>',
   });
@@ -36,17 +36,13 @@ test("keeps a rendered diagram and its zoom during unchanged document refreshes"
   const { rerender } = render(<MarkdownDocument source={source} />);
   const diagram = await screen.findByRole("img", { name: "Mermaid diagram" });
   const svg = diagram.querySelector("svg");
-  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-
   for (let refresh = 0; refresh < 3; refresh++)
     rerender(<MarkdownDocument source={source} />);
 
   expect(screen.queryByText("Rendering diagram…")).toBeNull();
   expect(screen.getByRole("img", { name: "Mermaid diagram" })).toBe(diagram);
   expect(diagram.querySelector("svg")).toBe(svg);
-  expect(screen.getByRole("button", { name: "Reset zoom" }).textContent).toBe(
-    "125%",
-  );
+  expect(screen.queryByRole("button", { name: "Reset zoom" })).toBeNull();
   expect(engine.render).toHaveBeenCalledTimes(1);
 
   rerender(
@@ -188,11 +184,11 @@ test("offers exact source copy and an expanded keyboard-accessible zoom view wit
     </div>,
   );
   await screen.findByRole("img", { name: "Mermaid diagram" });
-  fireEvent.click(screen.getByRole("button", { name: "Show source" }));
+  fireEvent.click(screen.getByRole("button", { name: "Source" }));
   expect(screen.getByLabelText("Mermaid source").textContent).toBe(source);
-  fireEvent.click(screen.getByRole("button", { name: "Copy source" }));
+  fireEvent.click(screen.getByRole("button", { name: "Copy" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(source));
-  fireEvent.click(screen.getByRole("button", { name: "Expand diagram" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
   expect(
     screen.getByRole("dialog", { name: "Expanded Mermaid diagram" }),
   ).toBeTruthy();
@@ -216,4 +212,28 @@ test("keeps resource-loading image nodes as source without invoking the renderer
   );
   expect(screen.getByLabelText("Mermaid source").textContent).toBe(source);
   expect(engine.render).not.toHaveBeenCalled();
+});
+
+test("a stuck render times out instead of leaving the skeleton, and paints on the next focus", async () => {
+  vi.useFakeTimers();
+  try {
+    engine.render.mockReturnValueOnce(new Promise(() => {}));
+    engine.render.mockResolvedValue({
+      svg: '<svg viewBox="0 0 100 50"><text>Cart</text></svg>',
+    });
+    const { container } = render(
+      <MermaidDiagram source={"flowchart LR\n  A --> B\n"} />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10500);
+    });
+    expect(container.querySelector(".mermaid-pending")).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(screen.getByRole("img", { name: "Mermaid diagram" })).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });

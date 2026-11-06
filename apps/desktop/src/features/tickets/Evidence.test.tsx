@@ -45,9 +45,9 @@ test("adds and removes a verification result", async () => {
     />,
   );
   Element.prototype.scrollIntoView = vi.fn();
-  expect(screen.queryByLabelText("Type")).toBeNull();
+  expect(screen.queryByLabelText(/^Type: /)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
-  fireEvent.keyDown(screen.getByRole("combobox", { name: "Type" }), {
+  fireEvent.keyDown(screen.getByRole("combobox", { name: /^Type: / }), {
     key: "Enter",
   });
   fireEvent.click(await screen.findByRole("option", { name: /^Verification/ }));
@@ -251,4 +251,50 @@ test("a full commit hash is shown short, with the whole value on hover", async (
   );
   const value = await screen.findByText("0123456789");
   expect(value.getAttribute("title")).toBe(full);
+});
+
+test("Add evidence stays disabled with its reason until name and evidence are filled", () => {
+  render(
+    <Evidence
+      reference="T-1"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  const primary = screen.getByRole("button", { name: "Add evidence" });
+  expect(primary).toHaveProperty("disabled", true);
+  expect(screen.getByText("Add a name to continue")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "PR" } });
+  expect(screen.getByText("Add the evidence to continue")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("URL, reference, or path"), {
+    target: { value: "https://example.com/pr" },
+  });
+  expect(primary).toHaveProperty("disabled", false);
+});
+
+test("Cancel discards the draft but Escape keeps it", async () => {
+  render(
+    <Evidence
+      reference="T-1"
+      revision={0}
+      trashed={false}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Draft name" },
+  });
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    "Draft name",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "Add evidence" }));
+  expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
 });

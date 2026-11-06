@@ -39,6 +39,17 @@
   font-size: 16px;
   line-height: normal;
   color: var(--foreground);
+  /* The type scale (DESIGN.md section 3). Every font-size uses one of these. */
+  --text-wordmark: 15px;
+  --text-caption: 12px;
+  --text-caption-line: 16px;
+  --text-ui: 14px;
+  --text-ui-line: 20px;
+  --text-code: 13px;
+  --text-reading: 16px;
+  --text-title: 24px;
+  --text-title-line: 32px;
+  --text-section: 32px;
   background: var(--background);
   color-scheme: light;
   --background: #fafafa;
@@ -56,8 +67,11 @@
   --accent-foreground: #171717;
   --muted: #f2f2f2;
   --border: #00000014;
+  --group-hairline: #0000000d;
   --input: #00000014;
   --header-boundary: #0000001a;
+  /* Outlines and empty tracks of controls (switch, progress): 3:1 on the page. */
+  --control-boundary: #8f8f8f;
   --ring: #0072f5;
   --input-focus: #005fcc;
   --interactive: #0072f5;
@@ -123,6 +137,7 @@
   --surface: #171717;
   --link-foreground: #52aeff;
   --recessed: #1a1a1a;
+  --code-block: #171717;
   --foreground: #ededed;
   --muted-foreground: #a1a1a1;
   --disabled-foreground: #8a8a8a;
@@ -134,9 +149,13 @@
   --accent: #262626;
   --accent-foreground: #ededed;
   --muted: #1a1a1a;
-  --border: #ffffff24;
+  /* Board K: pane and section dividers are white at 12% (#272727 on the rail,
+     #333333 on the list); rings and inputs stay at 14% via --shadow-border-base. */
+  --border: #ffffff1f;
+  --group-hairline: #ffffff14;
   --input: #ffffff24;
-  --header-boundary: #ffffff24;
+  --header-boundary: #ffffff1f;
+  --control-boundary: #6b6b6b;
   --error-surface: #2b1414;
   --error-foreground: #fecaca;
   --destructive: #fecaca;
@@ -199,7 +218,7 @@
     font-family: inherit;
   }
   button {
-    font-size: 14px;
+    font-size: var(--text-ui);
     font-weight: 400;
   }
   button:disabled {
@@ -210,11 +229,11 @@
     font-weight: 500;
   }
   label {
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 20px;
   }
   small {
-    font-size: 12px;
+    font-size: var(--text-caption);
     line-height: 16px;
   }
   /* Geist Mono's contextual alternates join "--" into one stroke that covers
@@ -242,7 +261,7 @@
     border: 0;
     border-radius: 6px;
     box-shadow: var(--shadow-border);
-    font-size: 14px;
+    font-size: var(--text-ui);
     line-height: 20px;
     padding: 8px 12px;
   }
@@ -270,7 +289,7 @@
 .ui-button {
   border: 0;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 14px;
 }
@@ -325,11 +344,18 @@
 .ui-button:disabled {
   color: var(--disabled-foreground);
   background: var(--recessed);
-  box-shadow: none;
+  box-shadow: var(--shadow-border-base);
+}
+/* Board H: a blocked dialog primary keeps its #F2F2F2 fill with an inset 1px
+   ring and #8F8F8F text. */
+.dialog-shell-footer .ui-button-primary:disabled {
+  color: var(--control-boundary);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .ui-button-ghost:disabled,
 .ui-button-link:disabled {
   background: transparent;
+  box-shadow: none;
 }
 .ui-button[data-readonly]:disabled,
 .ui-select[data-readonly]:disabled {
@@ -342,7 +368,7 @@
   border: 0;
   border-radius: 6px;
   box-shadow: var(--shadow-border);
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
 }
@@ -350,6 +376,28 @@
   box-shadow: none;
   outline: 1px solid var(--input-focus);
   outline-offset: 0;
+}
+/* Every Picker wears the same outline wherever it sits (board D: #00000024).
+   :where() keeps this at the specificity of .ui-select, so the focus ring and
+   the invalid ring below still win by order. */
+.ui-select.ui-picker:where(:not([aria-invalid="true"], :disabled)) {
+  box-shadow: inset 0 0 0 1px #00000024;
+}
+/* Label, value, chevron: the value follows the label rather than centring when
+   the picker is stretched. */
+.ui-select.ui-picker > [data-slot="select-value"] {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  text-align: left;
+}
+/* Dark: a translucent black edge vanishes on #171717, and the white 14% edge of
+   inputs is only ~1.4:1, so fields wear the 3:1 control boundary. Focus and
+   invalid rings still win: the selector is excluded from them. */
+:where(:root[data-theme="dark"])
+  .ui-select.ui-picker:where(:not([aria-invalid="true"], :disabled)),
+:where(:root[data-theme="dark"])
+  .ui-input:where(:not([aria-invalid="true"], :focus-visible)) {
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
 }
 .ui-select:focus-visible {
   outline: none;
@@ -400,6 +448,10 @@
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
+/* Design frame D shows nothing of the empty detail behind a modal scrim. */
+body:has([data-slot="dialog-overlay"]) .detail-empty {
+  visibility: hidden;
+}
 .ui-popover[data-state="open"],
 .ui-menu[data-state="open"] {
   animation: overlay-enter 0.2s var(--motion-swift);
@@ -431,7 +483,7 @@
   box-shadow: var(--focus-ring);
 }
 .ui-section-title {
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -450,7 +502,7 @@
 [data-slot="select-item"],
 [data-slot="dropdown-menu-item"] {
   min-height: 32px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   border-radius: 6px;
 }
 
@@ -472,7 +524,7 @@
   background: var(--surface);
   color: var(--foreground);
   box-shadow: var(--shadow-menu);
-  font-size: 14px;
+  font-size: var(--text-ui);
   transform: translateY(-200%);
 }
 .skip-link:focus {
@@ -485,7 +537,8 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  padding: 0 12px 12px;
+  /* The nav column is 208px wide, 8px from the window edge (design frame A). */
+  padding: 0 8px 12px 8px;
   background: var(--background);
   color: var(--foreground);
 }
@@ -521,7 +574,7 @@
   gap: 8px;
   padding: 0 8px 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .sidebar-source {
@@ -557,25 +610,29 @@
   align-items: center;
   gap: 8px;
   height: 48px;
-  padding-inline: 8px 0;
+  padding-inline: 12px 0;
 }
 .brand strong {
-  font-size: 16px;
+  font-size: var(--text-wordmark);
   font-weight: 600;
+  line-height: 20px;
+  letter-spacing: -0.3px;
 }
 .new-ticket {
   margin-left: auto;
+  width: 32px;
+  padding: 0;
 }
 .sidebar-nav {
   display: grid;
-  gap: 4px;
-  margin-top: 20px;
+  gap: 0;
+  margin-top: 0;
 }
 .sidebar-nav ul {
   list-style: none;
   margin: 0;
   padding: 0;
-  gap: 2px;
+  gap: 0;
 }
 .sidebar-nav li {
   width: 100%;
@@ -586,7 +643,7 @@
   gap: 8px;
   width: 100%;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 10px 0 12px;
   border-radius: 6px;
   text-align: left;
   color: var(--muted-foreground);
@@ -603,6 +660,7 @@
   gap: 6px;
   margin-left: auto;
   font-size: 12px;
+  line-height: 16px;
   font-variant-numeric: tabular-nums;
   color: var(--muted-foreground);
 }
@@ -622,21 +680,30 @@
   flex: none;
 }
 .sidebar-heading {
-  color: var(--foreground);
+  color: var(--secondary-foreground);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 20px 8px 0;
-  font-size: 14px;
+  height: 28px;
+  margin: 20px 0 0;
+  padding-left: 12px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
+  line-height: 16px;
+}
+/* The Projects page is open: its heading reads as the selected row. */
+.sidebar-heading[data-active] {
+  height: 28px;
+  padding-left: 4px;
+  border-radius: 6px;
+  background: var(--sidebar-accent);
+  color: var(--foreground);
 }
 .sidebar-heading button {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   color: var(--muted-foreground);
 }
@@ -645,7 +712,7 @@
   color: var(--foreground);
 }
 .sidebar-heading + .sidebar-nav {
-  margin-top: 8px;
+  margin-top: 0;
 }
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {
@@ -712,36 +779,36 @@
   align-items: center;
   gap: 8px;
   height: 48px;
-  padding: 0 12px 0 20px;
+  padding: 0 8px 0 16px;
 }
 .management h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
   color: var(--foreground);
 }
 .list-header h1 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .list-header p {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .management > p {
   margin-top: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .list-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   margin-left: 0;
 }
 .search {
@@ -781,7 +848,7 @@
 }
 .filters-content legend {
   margin-bottom: 16px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
 }
 .ticket-list > p {
@@ -794,11 +861,12 @@
   gap: 12px;
   padding: 24px;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .ticket-detail {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
   display: flex;
@@ -819,21 +887,21 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0 12px;
+  gap: 0 4px;
   min-height: 48px;
-  padding: 0 24px;
+  padding: 0 8px 0 20px;
   background: var(--surface);
   color: var(--muted-foreground);
 }
 .detail-header h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
 }
 .detail-header .detail-reference {
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -858,25 +926,47 @@
   padding: 24px 32px 48px;
 }
 @container ticket-detail (min-width: 652px) {
+  /* Side by side, the document and the rail each scroll on their own. */
+  .detail-scroll {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
   .detail-content {
-    grid-template-columns: minmax(420px, 800px) minmax(232px, 1fr);
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 0;
+    grid-template-columns: minmax(0, 1fr) 232px;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .detail-document,
+  .detail-content > .ticket-properties {
+    min-height: 0;
+    overflow-y: auto;
   }
 }
 .detail-empty {
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 320px;
+  margin: 0;
   padding: 48px 24px;
-  text-align: center;
   color: var(--muted-foreground);
-}
-.detail-empty strong {
-  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
 }
 .detail-empty p {
-  font-size: 14px;
+  margin: 0;
+}
+.detail-empty-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  line-height: 16px;
 }
 .ticket-personal-actions {
   display: flex;
@@ -886,7 +976,7 @@
 }
 .ticket-ref {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
   color: var(--muted-foreground);
@@ -907,7 +997,7 @@
   border-radius: 0;
   box-shadow: none;
   color: var(--foreground);
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -920,7 +1010,7 @@
 .editor-save-state {
   margin-top: 12px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .detail-content [role="status"]:empty {
@@ -928,7 +1018,7 @@
 }
 .detail-document > .detail-title {
   margin-bottom: 8px;
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
@@ -942,7 +1032,7 @@
   margin-bottom: 8px;
 }
 .detail-section-heading h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -986,20 +1076,33 @@
   padding: 64px 24px;
   text-align: center;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .empty-state strong {
   color: var(--foreground);
-  font-size: 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+  letter-spacing: -0.28px;
+}
+/* One content gutter for the management pages (Projects, Plans, Documents):
+   their titles start at the same x, whatever each column's width. */
+:root {
+  --page-gutter: 32px;
+}
+@media (max-width: 767px) {
+  :root {
+    --page-gutter: 16px;
+  }
 }
 .management {
   width: 100%;
   max-width: 1200px;
-  padding: 32px 24px 48px;
+  padding: 32px var(--page-gutter) 48px;
   overflow-y: auto;
 }
 .management h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -1035,8 +1138,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 24px;
-  margin-top: 8px;
+  gap: 16px;
 }
 .create-form .ticket-properties {
   margin: 0;
@@ -1055,14 +1157,14 @@
   padding: 12px 24px;
   background: var(--error-surface);
   color: var(--error-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 
 /* Description and note content share a readable document surface. */
 .markdown-document {
   min-width: 0;
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   overflow-wrap: anywhere;
 }
@@ -1070,7 +1172,7 @@
   margin-top: 12px;
 }
 .markdown-document :is(h1, h2, h3, h4, h5, h6) {
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1078,18 +1180,18 @@
   font-weight: 600;
 }
 .markdown-document h1 {
-  font-size: 32px;
+  font-size: var(--text-section);
   line-height: 40px;
   font-weight: 600;
   letter-spacing: -1.28px;
 }
 .markdown-document h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   letter-spacing: -0.28px;
 }
 .markdown-document h3 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   letter-spacing: -0.28px;
 }
@@ -1140,7 +1242,7 @@
 }
 .markdown-document code {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
@@ -1157,12 +1259,21 @@
   white-space: pre;
   background: var(--recessed);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-code);
   font-weight: 500;
   line-height: 20px;
 }
 .markdown-document input {
   margin-right: 8px;
+}
+/* One monochrome block: the language caption and the icon copy button share a
+   32px row above the code (no second tone, no syntax colors). */
+.markdown-code-block {
+  background: var(--code-block, var(--recessed));
+}
+.markdown-code-block pre {
+  padding: 0 12px 12px;
+  background: transparent;
 }
 .markdown-code-block,
 .mermaid-block {
@@ -1171,15 +1282,19 @@
   box-shadow: var(--shadow-border);
   border-radius: 6px;
 }
+.markdown-code-block {
+  /* The frame's hairline sits inside the 64px box, not around it (+2px). */
+  box-shadow: inset var(--shadow-border-base);
+}
 .markdown-block-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  padding: 4px 12px;
-  background: var(--background);
-  color: var(--muted-foreground);
-  font-size: 12px;
+  min-height: 32px;
+  padding: 0 4px 0 12px;
+  color: var(--secondary-foreground);
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .markdown-block-toolbar > :first-child {
@@ -1193,7 +1308,7 @@
   border-collapse: collapse;
   width: max-content;
   min-width: 100%;
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .markdown-document :is(td, th) {
   border: 1px solid var(--border);
@@ -1210,15 +1325,37 @@
 .mermaid-viewer {
   overflow: auto;
   max-height: 420px;
-  padding: 16px;
+  padding: 28px 16px;
+}
+.mermaid-block > .markdown-block-toolbar,
+.mermaid-expanded .markdown-block-toolbar {
+  gap: 2px;
+}
+.mermaid-block > .markdown-block-toolbar {
+  min-height: 36px;
+  padding: 0 4px 0 12px;
+  background: var(--recessed);
+  box-shadow: 0 1px 0 0 var(--border);
+}
+.mermaid-block > .markdown-block-toolbar button {
+  height: 28px;
+  gap: 6px;
+  padding: 0 8px;
+}
+.mermaid-block > .markdown-block-toolbar button svg {
+  width: 14px;
+  height: 14px;
 }
 .mermaid-canvas {
   width: 100%;
   min-width: 1px;
 }
+.mermaid-canvas {
+  display: flex;
+  justify-content: center;
+}
 .mermaid-canvas > svg {
   display: block;
-  width: 100%;
   max-width: 100%;
   height: auto;
 }
@@ -1231,21 +1368,6 @@
 }
 .mermaid-source {
   max-height: 320px;
-}
-.markdown-document :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta) {
-  color: var(--syntax-keyword);
-}
-.markdown-document :is(.hljs-string, .hljs-attr, .hljs-regexp) {
-  color: var(--syntax-string);
-}
-.markdown-document :is(.hljs-number, .hljs-literal, .hljs-variable) {
-  color: var(--syntax-number);
-}
-.markdown-document :is(.hljs-comment, .hljs-quote) {
-  color: var(--syntax-comment);
-}
-.markdown-document :is(.hljs-title, .hljs-type, .hljs-built_in, .hljs-section) {
-  color: var(--syntax-title);
 }
 
 @media (max-width: 1071px) {
@@ -1350,11 +1472,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .sidebar-source-line small {
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .sidebar-source > .ui-button {
@@ -1387,4 +1509,98 @@
    beside the trigger (it hid "Clear filters" after the search popover closed). */
 [data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
   pointer-events: none;
+}
+
+/* After a pointer interaction controls show no focus ring (see
+   useInputModality); text fields keep their outline so typing stays visible. */
+html[data-input="pointer"]
+  :is(
+    button,
+    summary,
+    a,
+    [role="radio"],
+    [role="combobox"],
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    [aria-haspopup],
+    pre[tabindex],
+    [tabindex]:not(input, textarea, [contenteditable="true"])
+  ):focus-visible,
+html[data-input="pointer"] .ticket-rows li:has(.ticket-row:focus-visible),
+html[data-input="pointer"] .sidebar-nav button:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+/* A dialog opened by a click autofocuses its first control. When that is a
+   Picker the rule above would strip its only edge, so it keeps the outline. */
+html[data-input="pointer"]
+  .ui-select.ui-picker:focus-visible:where(
+    :not([aria-invalid="true"], :disabled)
+  ) {
+  box-shadow: inset 0 0 0 1px #00000024;
+}
+html[data-theme="dark"][data-input="pointer"]
+  .ui-select.ui-picker:focus-visible:where(
+    :not([aria-invalid="true"], :disabled)
+  ) {
+  box-shadow: inset 0 0 0 1px var(--control-boundary);
+}
+.rail-trash-note {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.rail-trash-note svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+.rail-trash-note span {
+  flex: 1;
+}
+.ticket-properties[data-trashed] :is(button, [role="combobox"]):disabled,
+.ticket-properties[data-trashed] :is(input, textarea)[readonly] {
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+  opacity: 1;
+  cursor: default;
+}
+
+/* The New ticket dialog grows by the docked editor toolbar on focus. Its top
+   edge is anchored at a fixed offset so it never moves (board D: 112px in the frame, 84px in the webview under the 28px title bar), and the body scrolls
+   inside a viewport-bound dialog so the growth never pushes the footer off. */
+.ui-dialog:has(.create-form) {
+  top: 84px;
+  translate: -50% 0;
+  max-height: calc(100dvh - 84px - 16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ui-dialog:has(.create-form) .dialog-shell-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.ui-dialog:has(.create-form) .dialog-shell-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Filters panel open (board C): the panel covers the left of the detail pane,
+   so the empty state centres in the space to its right (centre x 1120) and sits
+   23.5px higher, as the frame draws it. */
+.ticket-workspace[data-filters-open] .ticket-detail[data-empty] .detail-empty {
+  padding-left: calc(24px + 360px);
+  padding-bottom: calc(48px + 47px);
 }

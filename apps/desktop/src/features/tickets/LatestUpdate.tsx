@@ -1,5 +1,6 @@
 import { progressBrief } from "./progress-brief";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { latestUpdate, type LatestUpdate as Update } from "@/lib/api/progress";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
@@ -40,22 +41,6 @@ export function LatestUpdate({
     };
   }, [active, reference, revision, retry]);
   const { update, error, loading } = state;
-  const text = useRef<HTMLParagraphElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [clipped, setClipped] = useState(false);
-  const activityId = update?.activity_id;
-  // Another update starts collapsed again.
-  const [shownId, setShownId] = useState(activityId);
-  if (shownId !== activityId) {
-    setShownId(activityId);
-    setExpanded(false);
-  }
-  const briefText = update?.brief.text;
-  useLayoutEffect(() => {
-    const element = text.current;
-    if (element && !expanded)
-      setClipped(element.scrollHeight > element.clientHeight + 1);
-  }, [expanded, briefText]);
   return (
     <RailSection label="Latest update">
       {loading ? (
@@ -73,54 +58,43 @@ export function LatestUpdate({
         </>
       ) : update ? (
         <div className="latest-update">
-          <p
-            ref={text}
-            className="latest-update-text"
-            data-expanded={expanded || undefined}
-          >
+          <p className="latest-update-text">
             {progressBrief(update.brief.text)}
             {update.brief.truncated && "…"}
           </p>
-          {(clipped || expanded) && (
+          <div className="latest-update-meta">
+            <small>
+              {update.editing_agent && <>{update.editing_agent} · </>}
+              <time
+                tabIndex={0}
+                dateTime={update.reported_at}
+                title={formatDateTime(update.reported_at)}
+              >
+                {relativeDateTime(update.reported_at, now)}
+              </time>
+              {update.updated_at !== update.reported_at && (
+                <>
+                  {" "}
+                  · Edited{" "}
+                  <time
+                    tabIndex={0}
+                    dateTime={update.updated_at}
+                    title={formatDateTime(update.updated_at)}
+                  >
+                    {formatDateTime(update.updated_at)}
+                  </time>
+                </>
+              )}
+            </small>
             <Button
-              variant="link"
+              variant="ghost"
               size="sm"
-              aria-expanded={expanded}
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => onOpen?.(update.activity_id)}
             >
-              {expanded ? "Show less" : "Show more"}
+              Go to update
+              <ArrowDown data-icon="inline-end" aria-hidden="true" />
             </Button>
-          )}
-          <small>
-            {update.editing_agent && <>Agent: {update.editing_agent} · </>}
-            <time
-              tabIndex={0}
-              dateTime={update.reported_at}
-              title={formatDateTime(update.reported_at)}
-            >
-              {relativeDateTime(update.reported_at, now)}
-            </time>
-            {update.updated_at !== update.reported_at && (
-              <>
-                {" "}
-                · Edited{" "}
-                <time
-                  tabIndex={0}
-                  dateTime={update.updated_at}
-                  title={formatDateTime(update.updated_at)}
-                >
-                  {formatDateTime(update.updated_at)}
-                </time>
-              </>
-            )}
-          </small>
-          <Button
-            variant="link"
-            size="sm"
-            onClick={() => onOpen?.(update.activity_id)}
-          >
-            Open update
-          </Button>
+          </div>
         </div>
       ) : (
         <small className="rail-note">No update reported</small>
