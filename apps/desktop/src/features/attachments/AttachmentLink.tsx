@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { formatSize } from "./format-size";
+import { DriveReferenceDetails } from "./DriveReferenceDetails";
 
 /** An inline authored label. Metadata is resolved only after an explicit action. */
 export function AttachmentLink({
@@ -52,31 +53,52 @@ export function AttachmentLink({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
-            <DialogDescription>File in its owning workspace</DialogDescription>
+            <DialogDescription>
+              {file?.kind === "external_reference"
+                ? "Google Drive · External reference"
+                : "File in its owning workspace"}
+            </DialogDescription>
           </DialogHeader>
           {busy && <p role="status">Loading file…</p>}
           {error && <p role="alert">{error}</p>}
           {file && (
             <>
+              {file.kind === "external_reference" && (
+                <p>
+                  Current source content · No local snapshot. Google Docs,
+                  Sheets and Slides open in Drive.
+                </p>
+              )}
               <dl className="attachment-metadata">
+                {file.kind === "external_reference" && (
+                  <DriveReferenceDetails id={file.id} />
+                )}
                 <dt>Original filename</dt>
                 <dd>{file.original_filename}</dd>
-                <dt>Size</dt>
-                <dd>{formatSize(file.size_bytes)}</dd>
+                {file.kind === "local_snapshot" && (
+                  <>
+                    <dt>Size</dt>
+                    <dd>{formatSize(file.size_bytes)}</dd>
+                  </>
+                )}
               </dl>
               <div className="attachment-actions">
                 <Button
                   disabled={busy}
                   onClick={() => void run(() => attachments.open(file.id))}
                 >
-                  Open file
+                  {file.kind === "external_reference"
+                    ? "Open in Drive"
+                    : "Open file"}
                 </Button>
-                <Button
-                  disabled={busy}
-                  onClick={() => void run(() => attachments.export(file))}
-                >
-                  Export file
-                </Button>
+                {file.kind === "local_snapshot" && (
+                  <Button
+                    disabled={busy}
+                    onClick={() => void run(() => attachments.export(file))}
+                  >
+                    Export file
+                  </Button>
+                )}
               </div>
             </>
           )}

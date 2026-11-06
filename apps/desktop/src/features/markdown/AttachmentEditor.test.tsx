@@ -149,6 +149,91 @@ test("native file drops use physical coordinates and ignore other surfaces", asy
 });
 
 test.each(["rich", "source"])(
+  "selected Drive files retain their order at the %s caret",
+  async (mode) => {
+    const native = [
+      {
+        id: "drive-doc",
+        display_name: "Current plan",
+        original_filename: "Current plan",
+        size_bytes: null,
+        kind: "external_reference",
+        locator: "drive:connection:doc",
+      },
+      {
+        id: "drive-sheet",
+        display_name: "Current sheet",
+        original_filename: "Current sheet",
+        size_bytes: null,
+        kind: "external_reference",
+        locator: "drive:connection:sheet",
+      },
+    ];
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "attachment_workspace_id")
+        return "drive-editor-workspace";
+      if (command === "attachment_upload_limit") return 104857600;
+      if (command === "drive_configuration")
+        return { configured: true, message: "Ready" };
+      if (command === "select_drive_files")
+        return { files: native, failures: [] };
+      if (command === "attachment_uri")
+        return `ticketd://attachment/workspace/${String((args as { id: string }).id)}`;
+      throw new Error(`Unexpected command ${command}`);
+    });
+    const changed = vi.fn();
+    function Draft() {
+      const [value, setValue] = useState("Before after");
+      return (
+        <MarkdownEditor
+          persistentToolbar
+          value={value}
+          onChange={(next) => {
+            setValue(next);
+            changed(next);
+          }}
+        />
+      );
+    }
+    render(<Draft />);
+    if (mode === "source") {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Edit Markdown source" }),
+      );
+      const view = EditorView.findFromDOM(
+        screen.getByRole("textbox", { name: "Markdown document source" }),
+      )!;
+      act(() => view.dispatch({ selection: { anchor: 7 } }));
+    } else {
+      const text = screen.getByText("Before after").firstChild!;
+      const range = document.createRange();
+      range.setStart(text, 7);
+      range.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent(document, new Event("selectionchange"));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Insert attachment" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Google Drive" }));
+    const choose = await screen.findByRole("button", {
+      name: "Choose in Google Drive",
+    });
+    await waitFor(() => expect(choose.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(choose);
+    await screen.findByRole("checkbox", { name: "Current sheet" });
+    fireEvent.click(screen.getByRole("button", { name: "Add selected" }));
+    await waitFor(() =>
+      expect(changed).toHaveBeenLastCalledWith(
+        "Before [Current plan](ticketd://attachment/workspace/drive-doc)[Current sheet](ticketd://attachment/workspace/drive-sheet)after",
+      ),
+    );
+  },
+);
+
+test.each(["rich", "source"])(
   "batch retry preserves original order at the %s caret",
   async (mode) => {
     vi.mocked(open).mockResolvedValue([

@@ -1,6 +1,61 @@
 use ticketd_core::{AttachmentQuery, AttachmentState, Workspace};
 
 #[test]
+fn library_searches_available_external_metadata_and_renames_without_provider_effects() {
+    struct SelectedDocument;
+    impl ticketd_core::drive::AttachmentProvider for SelectedDocument {
+        fn metadata(
+            &self,
+            file_id: &str,
+            _: Option<&str>,
+        ) -> Result<ticketd_core::drive::DriveMetadata, ticketd_core::drive::DriveError> {
+            Ok(ticketd_core::drive::DriveMetadata {
+                id: file_id.into(),
+                name: "Current plan".into(),
+                mime_type: "application/vnd.google-apps.document".into(),
+                size_bytes: None,
+                web_url: format!("https://docs.google.com/document/d/{file_id}/edit"),
+                resource_key: None,
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let file = w
+        .reference_drive_file(&connection, "selected-plan", None, &SelectedDocument)
+        .unwrap();
+    let found = w
+        .search_attachments(&AttachmentQuery {
+            search: "google-apps.document".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].attachment.size_bytes, None);
+    assert_eq!(found[0].attachment.id, file.id);
+    let original_metadata = w.drive_reference(&file.id).unwrap();
+    w.rename_attachment(&file.id, "My readable plan").unwrap();
+    assert_eq!(w.drive_reference(&file.id).unwrap(), original_metadata);
+    assert_eq!(
+        w.reference_drive_file(&connection, "selected-plan", None, &SelectedDocument)
+            .unwrap()
+            .display_name,
+        "My readable plan"
+    );
+    assert_eq!(
+        w.search_attachments(&AttachmentQuery {
+            search: "selected-plan".into(),
+            ..Default::default()
+        })
+        .unwrap()[0]
+            .attachment
+            .id,
+        file.id
+    );
+}
+
+#[test]
 fn library_usage_keeps_draft_undo_and_trash_owners_even_when_bytes_are_missing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

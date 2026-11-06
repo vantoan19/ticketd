@@ -6,8 +6,8 @@ export const attachmentSchema = z.object({
   id: z.string(),
   display_name: z.string(),
   original_filename: z.string(),
-  size_bytes: z.number().nonnegative(),
-  kind: z.literal("local_snapshot"),
+  size_bytes: z.number().nonnegative().nullable(),
+  kind: z.enum(["local_snapshot", "external_reference"]),
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
@@ -66,7 +66,40 @@ export const draftRetention = {
   },
 };
 
+const driveReferenceSchema = z.object({
+  connection_id: z.string(),
+  metadata: z.object({
+    id: z.string(),
+    name: z.string(),
+    mime_type: z.string(),
+    size_bytes: z.number().nonnegative().nullable(),
+    web_url: z.string(),
+    resource_key: z.string().nullable(),
+  }),
+});
+export type DriveReference = z.infer<typeof driveReferenceSchema>;
+
 export const attachments = {
+  async driveInfo(id: string) {
+    return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
+  },
+  async driveConfiguration() {
+    return z
+      .object({ configured: z.boolean(), message: z.string() })
+      .parse(await invoke("drive_configuration"));
+  },
+  async selectDrive(operationId: string) {
+    return z
+      .object({
+        files: z.array(attachmentSchema),
+        failures: z.array(z.string()),
+      })
+      .parse(await invoke("select_drive_files", { operationId }));
+  },
+  async cancelDriveSelection(operationId: string) {
+    await invoke("cancel_drive_selection", { operationId });
+  },
+
   async search(query: {
     search: string;
     state: AttachmentState;

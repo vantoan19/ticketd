@@ -1,3 +1,4 @@
+import { DrivePicker } from "./DrivePicker";
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
@@ -52,7 +53,7 @@ export function AttachmentPicker({
   ) => Promise<void>;
   capture?: { sources: CaptureSource[] } | undefined;
 }) {
-  const [tab, setTab] = useState<"upload" | "existing">("upload");
+  const [tab, setTab] = useState<"upload" | "existing" | "drive">("upload");
   const [id, setId] = useState("");
   const [rows, setRows] = useState<UploadAttempt[]>([]);
   const attempts = useRef<UploadAttempt[]>([]);
@@ -307,7 +308,7 @@ export function AttachmentPicker({
           <DialogDescription>
             {purpose === "store"
               ? "Store files in this workspace for reuse across tickets and Documents."
-              : "Attach local snapshots or reuse an existing workspace file."}
+              : "Upload, reuse a workspace file, or select a Google Drive reference."}
           </DialogDescription>
         </DialogHeader>
         {purpose === "insert" && (
@@ -318,6 +319,7 @@ export function AttachmentPicker({
             options={[
               { value: "upload", label: "Upload", disabled: busy },
               { value: "existing", label: "Existing files", disabled: busy },
+              { value: "drive", label: "Google Drive", disabled: busy },
             ]}
           />
         )}
@@ -459,6 +461,10 @@ export function AttachmentPicker({
                 : "Completed files remain available if insertion is canceled or saving fails. Retry keeps the original upload identity."}
             </p>
           </>
+        ) : tab === "drive" ? (
+          open && (
+            <DrivePicker onComplete={() => changeOpen(false)} onPick={onPick} />
+          )
         ) : (
           <div className="attachment-existing">
             <Label htmlFor="reuse-attachment-id">Attachment ID</Label>

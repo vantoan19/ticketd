@@ -48,7 +48,7 @@ The public `Workspace` interface owns snapshot upload, metadata inspection,
 direct ticket associations, native-open resolution, and byte export. The CLI and
 Tauri adapters share those workflows. Attachments have their own typed records
 and association table, separate from Documents, source connectors, and
-Implementation evidence. The implemented storage kind is `local_snapshot`;
+Implementation evidence. Storage kinds are `local_snapshot` and `external_reference`;
 there is no remote deletion operation.
 
 `Workspace::search_attachments` returns bounded results and their direct,
@@ -396,7 +396,7 @@ its brief references while leaving the supporting Document and its files intact.
 Trash keeps references. Direct `ticket_attachments` remain independent, and files
 in linked Documents are not flattened into ticket attachments.
 
-`Workspace::attachment_uri` checks a completed snapshot before producing
+`Workspace::attachment_uri` checks a completed local snapshot or stored external reference before producing
 `ticketd://attachment/<workspace-id>/<attachment-id>`.
 `resolve_attachment_uri` rejects foreign workspace identities and retains metadata
 for missing local bytes. Newly introduced local links require stored bytes;
@@ -424,3 +424,41 @@ stored or inspected identity. MarkdownEditor resolves the URI through the core
 and inserts at its saved rich/source selection; the host owns persistence. Closing
 or unmounting abandons insertion without deleting uploaded bytes. The CLI's
 `attachment uri` exposes the same identity contract without the desktop.
+
+## Existing Google Drive references
+
+The core's narrow `drive::AttachmentProvider` capability resolves file metadata.
+It is separate from ticket-source connectors and has no remote mutation methods.
+The Google implementation can exchange/refresh authorization, read account
+identity and read explicitly authorized file metadata. It neither downloads nor
+converts Google-native content and cannot change sharing or delete a remote file.
+
+`Workspace::reference_drive_file` resolves outside a SQLite transaction, validates
+metadata and viewer URLs, then atomically stores/reuses a workspace attachment
+identity keyed by connection and Drive file ID. A `drive_references` row holds the
+opaque connection handle and last-known MIME, size when supplied, resource key,
+name and viewer URL. External references can be reused and inserted offline;
+resolution errors retain identity and last-known metadata. Local snapshot-byte
+validation remains mandatory. Schema 51 rebuilds the attachment kind constraint
+under the existing exclusive migration lock, checks foreign keys before commit,
+and retains pre-migration safety backup behavior and reference rows.
+
+OAuth uses the system browser, native OAuth-integrated Picker, PKCE S256 and a
+bounded one-shot IPv4 loopback callback with host/path/state validation. Only
+`drive.file` is requested; broader grants are refused. Account identity is read
+with the same scope, so reconnecting the same client/account reuses its handle,
+and another account cannot replace credentials behind existing references.
+Selection order is retained. Tauri owns browser opening and cancellation, returns
+only attachment metadata/errors to React, and never loads Google scripts in the
+WebView. The shared picker handles both direct associations and inline insertion.
+
+Refresh credentials and installed-client material live in the OS user's secure
+store, under `ticketd.google-drive.v1`, keyed by the opaque connection handle.
+Windows uses Credential Manager, macOS Keychain, and Linux encrypted Secret
+Service. There is no plaintext fallback. Cross-process file locks outside the
+workspace serialize refresh-token rotation; access tokens stay in memory.
+Transport diagnostics omit URLs, headers and bodies, and Google redirects are
+not followed. Workspace backups/JSON export contain reference metadata, never
+credentials or remote bytes. The standalone CLI uses the same core/vault namespace;
+no desktop process is needed. Portable Drive-link export and richer recovery/remote
+record cleanup are separate workflows.

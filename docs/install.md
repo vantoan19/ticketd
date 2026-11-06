@@ -40,3 +40,31 @@ installers can trigger SmartScreen or be blocked by Smart App Control. See the
 [Windows signing guide](https://v2.tauri.app/distribute/sign/windows/). Signing,
 notarization, and platform installation must be verified with real credentials
 and target systems before distribution.
+
+## Google Drive setup
+
+Local attachments work without Google configuration. To enable existing-file
+selection, enable Google Drive API and Google Picker API in your Google project,
+configure consent with only `https://www.googleapis.com/auth/drive.file`, and create
+an OAuth client of type **Desktop app**. For an External Testing app, add the test
+user. Keep its downloaded installed-app JSON outside Git and workspace/backup
+storage. Set `TICKETD_GOOGLE_OAUTH_CLIENT_FILE` to that file's path in the desktop
+process environment, then restart ticketd. No client credentials are bundled.
+The application pins Google's authorization/token/API endpoints rather than
+trusting endpoints in the JSON. It opens authorization in your default browser.
+
+Use an unlocked OS-user secure store: Windows Credential Manager, macOS Keychain,
+or a running Secret Service session on Linux. Desktop and CLI must run as the same
+OS user to share authorization. An unavailable store produces recovery guidance;
+there is no file-based credential fallback. Restoring a backup on another machine
+restores reference metadata, not credentials or remote bytes; select files again
+with the appropriate account. External Testing refresh tokens may expire after
+seven days under Google's OAuth policy.
+
+The native Picker integration requires validation with your configured desktop
+client and account before a complete Drive release is claimed. Fixture tests do
+not establish live OAuth/Picker, account policy or packaged secure-store behavior.
+Primary contracts: [native Picker](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker),
+[desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
+[per-file scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
+and [OAuth expiration](https://developers.google.com/identity/protocols/oauth2#expiration).

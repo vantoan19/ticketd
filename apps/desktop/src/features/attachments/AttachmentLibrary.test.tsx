@@ -17,6 +17,31 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("external references with unknown size stay external and are not fetched for thumbnails", async () => {
+  vi.mocked(invoke).mockResolvedValue([
+    {
+      attachment: {
+        id: "native-doc",
+        display_name: "Current plan",
+        original_filename: "Current plan",
+        size_bytes: null,
+        kind: "external_reference",
+        locator: "drive:connection:native-doc",
+      },
+      related: false,
+      usage: { eligible: true, legacy_drafts_pending: false, protections: [] },
+    },
+  ]);
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  await screen.findByRole("button", { name: "Current plan" });
+  expect(screen.getByText("External reference")).toBeTruthy();
+  expect(screen.getByText("—")).toBeTruthy();
+  expect(screen.queryByText("0 B")).toBeNull();
+  expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
+    "search_attachments",
+  ]);
+});
+
 test("library searches core metadata and state and opens the chosen stable file", async () => {
   const file = {
     id: "stable",

@@ -760,7 +760,8 @@ trash. Files in linked Documents do not become direct ticket attachments.
 
 Attachments under the sidebar's Context group opens the workspace library.
 Search matches display names, original filenames, stable IDs, storage kinds and
-known byte sizes, with All files, In use and Unused filters. In-use includes
+known byte sizes, plus cached external filenames, file IDs and MIME types, with
+All files, In use and Unused filters. Search never downloads remote content. In-use includes
 saved references, recoverable drafts, Undo and Trash. Unused is a reference state,
 not permission to delete: legacy-draft review can still withhold cleanup.
 Results are paged (50 in desktop, at most 1,000 per core query). Existing files
@@ -888,3 +889,27 @@ missing files and leaves the current workspace unchanged. Recover the complete
 backup separately with `ticketd restore-workspace backup.sqlite3 --target
 recovered.sqlite3`. This uses the same validation and safety-copy workflow for
 the explicitly chosen destination; it does not switch the desktop workspace.
+
+## 18. Existing Google Drive references
+
+The shared attachment picker has a Google Drive tab. Choose files in the system
+browser using your connected account, then add the selected references in their
+returned order. Only explicitly selected files are authorized for ticketd; account
+access does not grant application access to every file. Selection does not change
+sharing. Failed selection never creates an apparently valid reference. Selected
+references remain discoverable in Existing files if insertion fails or is abandoned.
+
+Drive references show current source content, not a local snapshot. Google Docs,
+Sheets and Slides open in Drive, without conversion or embedded editing. Last-known
+metadata and authored links survive offline/provider failures. Removing a ticket
+association or an inline link does not delete the Drive file. Local uploads keep
+their configured destination; selecting Drive content never changes it.
+
+The independent CLI can inspect/reuse a stored reference with ordinary attachment
+commands. `attachment drive-info <id>` returns last-known metadata and its opaque
+connection handle. `attachment drive-resolve <id>` refreshes current metadata.
+`attachment drive-add <connection> <file-id> [--ticket T-n] [--resource-key KEY]`
+uses the OS user's existing authorization. An unselected file gets selection
+instructions, never broader scopes. Byte export refuses external references and
+instructs the caller to open current content in Drive; portable-link export is a
+separate workflow.

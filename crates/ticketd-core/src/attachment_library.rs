@@ -95,7 +95,11 @@ impl Workspace {
              FROM attachments a
              WHERE (instr(lower(a.display_name), lower(?2)) > 0 OR instr(lower(a.original_filename), lower(?2)) > 0
                 OR instr(lower(a.kind), lower(?2)) > 0 OR instr(lower(a.id), lower(?2)) > 0
-                OR instr(CAST(a.size_bytes AS TEXT), ?2) > 0)
+                OR instr(CAST(a.size_bytes AS TEXT), ?2) > 0
+                OR EXISTS (SELECT 1 FROM drive_references d WHERE d.attachment_id=a.id
+                    AND (instr(lower(d.file_id), lower(?2)) > 0
+                        OR instr(lower(json_extract(d.metadata, '$.name')), lower(?2)) > 0
+                        OR instr(lower(json_extract(d.metadata, '$.mime_type')), lower(?2)) > 0)))
              AND (?3=0 OR (?3=1 AND a.id IN used) OR (?3=2 AND a.id NOT IN used))
              ORDER BY is_related DESC, a.rowid DESC LIMIT ?4 OFFSET ?5",
         )?;
