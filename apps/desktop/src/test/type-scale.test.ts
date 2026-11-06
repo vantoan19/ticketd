@@ -33,7 +33,7 @@ describe("type scale", () => {
       for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
         const selector = rule[1] ?? "";
         const body = rule[2] ?? "";
-        const size = body.match(/font-size:\s*([^;]+);/)?.[1].trim();
+        const size = body.match(/font-size:\s*([^;]+);/)?.[1]?.trim();
         if (
           !size ||
           size.startsWith("var(--text-") ||
