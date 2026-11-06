@@ -180,8 +180,9 @@ export function TicketFilters(p: Props) {
               side="right"
               align="start"
               sideOffset={8}
-              alignOffset={0}
+              alignOffset={dock ? 8 : 0}
               collisionPadding={8}
+              avoidCollisions={!dock}
               aria-label="Ticket filters"
             >
               <div className="filters-head">

@@ -767,7 +767,7 @@
   align-items: center;
   gap: 8px;
   height: 48px;
-  padding: 0 12px 0 20px;
+  padding: 0 8px 0 16px;
 }
 .management h1 {
   font-size: var(--text-title);
@@ -796,7 +796,7 @@
 .list-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   margin-left: 0;
 }
 .search {
@@ -877,7 +877,7 @@
   flex-wrap: wrap;
   gap: 0 12px;
   min-height: 48px;
-  padding: 0 24px;
+  padding: 0 8px 0 20px;
   background: var(--surface);
   color: var(--muted-foreground);
 }
@@ -1558,12 +1558,12 @@ html[data-theme="dark"][data-input="pointer"]
 }
 
 /* The New ticket dialog grows by the docked editor toolbar on focus. Its top
-   edge is anchored at a fixed offset so it never moves (board D: 112px), and the body scrolls
+   edge is anchored at a fixed offset so it never moves (board D: 112px in the frame, 84px in the webview under the 28px title bar), and the body scrolls
    inside a viewport-bound dialog so the growth never pushes the footer off. */
 .ui-dialog:has(.create-form) {
-  top: 112px;
+  top: 84px;
   translate: -50% 0;
-  max-height: calc(100dvh - 112px - 16px);
+  max-height: calc(100dvh - 84px - 16px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
