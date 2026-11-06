@@ -652,8 +652,11 @@
   font-weight: 400;
   letter-spacing: 0;
 }
+/* .document-main's 20px flex gap is frame F-2's 20px; the 2px lowers the glyph
+   to the frame's ink position (25.5px under the diagram row). */
 .document-block-hint {
-  margin: 20px 0 0;
+  margin: 0;
+  padding-top: 2px;
   color: var(--muted-foreground);
   pointer-events: none;
   user-select: none;
