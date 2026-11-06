@@ -764,6 +764,20 @@ response or source deletion. A failed file copy never creates a valid Attachment
 A failed database commit preserves completed bytes and a durable recovery record.
 An export refuses to replace an existing file and never leaves partial output.
 
+**Export Markdown with files** creates a new folder with portable Markdown,
+referenced local snapshots and a manifest. Ticket export includes direct
+attachments separately, without flattening files inside linked Documents.
+Repeated identities share one copy and colliding names remain distinct. Missing
+or foreign-workspace references retain readable links and explicit omissions;
+the result is `partial`. External references export current-provider links,
+without download or native conversion. A `complete` result includes files or
+links for every requested identity, not a promise of offline provider access.
+Canonical Markdown and ordinary copy-as-Markdown remain unchanged. Shared editor
+export uses its current selection, or all current content when nothing is
+selected, independently of saving. `ticketd export-markdown --ticket T-1`,
+`--document ID`, or `--markdown-file PATH` (`-` for stdin) plus `--output FOLDER`
+exposes the same workflow without a running desktop. See [export](export.md).
+
 The shared editor inserts stored files at the caret as ordinary inline Markdown
 links, including inside lists and tables. Upload and Existing files share the
 same picker in descriptions, ticket creation, Documents, and authored update

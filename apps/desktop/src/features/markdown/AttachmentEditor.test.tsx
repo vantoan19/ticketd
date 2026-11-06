@@ -71,6 +71,89 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("portable export captures only the selected source Markdown without editing the draft", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "export_markdown_with_files"
+      ? {
+          format_version: 1,
+          status: "complete",
+          directory: "C:/sharing/export",
+          markdown_path: "content.md",
+          manifest_path: "manifest.json",
+          attachments: [],
+        }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : [],
+  );
+  const changed = vi.fn();
+  render(
+    <MarkdownEditor
+      persistentToolbar
+      value="Before **selected** after"
+      onChange={changed}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit Markdown source" }));
+  const view = EditorView.findFromDOM(
+    screen.getByRole("textbox", { name: "Markdown document source" }),
+  )!;
+  act(() => view.dispatch({ selection: { anchor: 7, head: 19 } }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Export Markdown with files" }),
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
+      source: { kind: "markdown", body: "**selected**" },
+      output: "C:/sharing",
+    }),
+  );
+  expect(changed).not.toHaveBeenCalled();
+});
+
+test("portable export captures a rich selection before Slate's deferred selection update", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "export_markdown_with_files"
+      ? {
+          format_version: 1,
+          status: "complete",
+          directory: "C:/sharing/export",
+          markdown_path: "content.md",
+          manifest_path: "manifest.json",
+          attachments: [],
+        }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : [],
+  );
+  const changed = vi.fn();
+  render(
+    <MarkdownEditor
+      persistentToolbar
+      value="Before **selected** after"
+      onChange={changed}
+    />,
+  );
+  const strong = screen.getByText("selected");
+  const range = document.createRange();
+  range.selectNodeContents(strong);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Export Markdown with files" }),
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
+      source: { kind: "markdown", body: "**selected**" },
+      output: "C:/sharing",
+    }),
+  );
+  expect(changed).not.toHaveBeenCalled();
+});
+
 test("native file drops use physical coordinates and ignore other surfaces", async () => {
   vi.stubGlobal("__TAURI_INTERNALS__", {});
   vi.stubGlobal("devicePixelRatio", 2);

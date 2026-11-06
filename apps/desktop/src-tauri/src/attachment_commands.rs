@@ -11,6 +11,16 @@ use std::{
 };
 
 type Uploads = Mutex<HashMap<String, Arc<AtomicBool>>>;
+#[tauri::command(async)]
+pub fn export_markdown_with_files(
+    source: ticketd_core::MarkdownExportSource,
+    output: String,
+) -> Result<ticketd_core::MarkdownExport, String> {
+    open_workspace()
+        .and_then(|w| w.export_markdown_with_files(source, output))
+        .map_err(|e| e.to_string())
+}
+
 static UPLOADS: OnceLock<Uploads> = OnceLock::new();
 
 struct UploadGuard(String);

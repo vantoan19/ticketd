@@ -1604,3 +1604,20 @@ html[data-theme="dark"][data-input="pointer"]
   padding-left: calc(24px + 360px);
   padding-bottom: calc(48px + 47px);
 }
+/* Export results share the existing dialog tokens in light and dark themes. */
+.portable-export-dialog {
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+.portable-export-files {
+  display: grid;
+  gap: 12px;
+  font-size: var(--text-ui);
+  min-width: 0;
+}
+.portable-export-files li {
+  overflow-wrap: anywhere;
+}
+.portable-export-files p {
+  color: var(--muted-foreground);
+}

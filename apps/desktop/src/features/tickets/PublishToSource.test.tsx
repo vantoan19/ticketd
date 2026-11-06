@@ -14,6 +14,7 @@ import { SourceActivityContext } from "./source-activity";
 import { PublicationNotice, PublishDialog } from "./PublishToSource";
 import { TicketHeader } from "./TicketHeader";
 import { TicketProperties } from "./TicketProperties";
+import { open } from "@tauri-apps/plugin-dialog";
 
 window.ResizeObserver = class {
   observe() {}
@@ -23,6 +24,7 @@ window.ResizeObserver = class {
 Element.prototype.scrollIntoView = () => {};
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: vi.fn(async () => {}),
   revealItemInDir: vi.fn(),
@@ -229,6 +231,65 @@ test("publication preview explains that direct local files are not sent", async 
   expect(
     await screen.findByText(/2 directly attached files stay/),
   ).toBeTruthy();
+});
+
+test("blocked publication exports with files without initiating publication", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return {
+        ...eligible,
+        internal_attachments: [
+          {
+            uri: "ticketd://attachment/workspace/file",
+            display_name: "trace.log",
+          },
+        ],
+        eligibility: {
+          kind: "ineligible",
+          reason: "internal_attachments",
+          message: "Export with files before sharing.",
+        },
+      };
+    if (command === "export_markdown_with_files")
+      return {
+        format_version: 1,
+        status: "complete",
+        directory: "C:/sharing/export",
+        markdown_path: "content.md",
+        manifest_path: "manifest.json",
+        attachments: [],
+      };
+    return [];
+  });
+  render(
+    <PublishDialog
+      ticket={ticket()}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Export with files" }),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "Export complete" }),
+  ).toBeTruthy();
+  expect(bridge.invoke).toHaveBeenCalledWith("export_markdown_with_files", {
+    source: { kind: "ticket", reference: "T-1" },
+    output: "C:/sharing",
+  });
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(
+    screen.getByRole("dialog", {
+      name: "Resolve attachment links before publishing",
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Publish issue" })).toBeNull();
 });
 
 test("an attachment added after preview refreshes the dialog to the blocked preflight", async () => {
