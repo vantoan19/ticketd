@@ -35,6 +35,40 @@ const file = {
   locator: "drive:connection:doc-1",
 };
 
+test("unconfigured Drive keeps setup details collapsed and local sources usable", async () => {
+  const diagnostic =
+    "Set TICKETD_GOOGLE_OAUTH_CLIENT_FILE to a Desktop OAuth client JSON";
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-test-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: false, message: diagnostic };
+    throw new Error(`Unexpected command ${command}`);
+  });
+  render(<AttachmentPicker open onOpenChange={vi.fn()} onPick={vi.fn()} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Google Drive" }));
+  expect(await screen.findByRole("status")).toHaveProperty(
+    "textContent",
+    "Google Drive setup is required before connecting.",
+  );
+  const instructions = screen.getByText(diagnostic).closest("details");
+  expect(instructions).not.toBeNull();
+  expect(instructions?.open).toBe(false);
+  fireEvent.click(screen.getByText("Setup instructions", { exact: true }));
+  expect(instructions?.open).toBe(true);
+  expect(
+    screen
+      .getByRole("button", { name: "Choose in Google Drive" })
+      .hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("radio", { name: "Upload" }));
+  expect(screen.getByRole("button", { name: "Choose files" })).toBeTruthy();
+  expect(invoke).not.toHaveBeenCalledWith(
+    "select_drive_files",
+    expect.anything(),
+  );
+});
+
 test("shared picker selects Drive references without changing local upload destination", async () => {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_workspace_id") return "drive-test-workspace";

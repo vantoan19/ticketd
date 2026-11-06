@@ -139,7 +139,13 @@ export function DrivePicker({
         Slides open in Drive.
       </p>
       {configuration && !configuration.configured && (
-        <p role="status">{configuration.message}</p>
+        <>
+          <p role="status">Google Drive setup is required before connecting.</p>
+          <details className="attachment-hint">
+            <summary className="cursor-pointer">Setup instructions</summary>
+            <p className="mt-2 wrap-anywhere">{configuration.message}</p>
+          </details>
+        </>
       )}
       <Button
         disabled={busy || !configuration?.configured}
