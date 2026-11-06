@@ -90,6 +90,12 @@ pub(crate) fn index_body(tx: &Connection, id: &str, body: &str) -> Result<(), Er
     index_text(tx, id, body, false)
 }
 
+pub(crate) fn index_external_body(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
+    crate::embedded_attachments::index_external(tx, id, body)?;
+    index_numbers(tx, id, body, false)?;
+    index_text(tx, id, body, false)
+}
+
 pub(crate) fn index_activity(tx: &Connection, id: &str, body: &str) -> Result<(), Error> {
     crate::embedded_attachments::index(tx, id, body)?;
     index_numbers(tx, id, body, true)?;
