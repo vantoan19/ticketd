@@ -12,6 +12,7 @@ import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { AttachmentLink } from "./AttachmentLink";
+import { AttachmentPreview } from "./AttachmentPreview";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: (path: string) => path,
@@ -95,49 +96,70 @@ test("shared picker selects Drive references without changing local upload desti
   );
 });
 
-test("native references offer Open in Drive and describe current content without byte export", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "attachment_workspace_id") return "drive-test-workspace";
-    if (command === "attachment_upload_limit") return 104857600;
-    if (command === "resolve_attachment_uri") return file;
-    if (command === "attachment_preview")
-      return {
-        attachment: file,
-        status: "unsupported",
-        media_type: null,
-        message: "Current source content · No local snapshot.",
-        can_open: true,
-        usage: { total: 0, entries: [], legacy_drafts_pending: false },
-      };
-    if (command === "drive_reference")
-      return {
-        connection_id: "connection",
-        metadata: {
-          id: "doc-1",
-          name: "Current plan",
-          mime_type: "application/vnd.google-apps.document",
-          size_bytes: null,
-          web_url: "https://docs.google.com/document/d/doc-1/edit",
-          resource_key: null,
-        },
-      };
-    return undefined;
-  });
-  render(
-    <AttachmentLink uri="ticketd://attachment/workspace/drive-1">
-      My label
-    </AttachmentLink>,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "My label" }));
-  expect(await screen.findByText(/Current source content/)).toBeTruthy();
-  expect(await screen.findByText("Google Docs")).toBeTruthy();
-  expect(screen.getByText("Size unavailable")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Export file" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Open in Drive" }));
-  await waitFor(() =>
-    expect(invoke).toHaveBeenCalledWith("open_attachment", { id: "drive-1" }),
-  );
-});
+test.each(["inline", "library"])(
+  "%s native references offer Open in Drive and describe current content without byte export",
+  async (entry) => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "attachment_workspace_id") return "drive-test-workspace";
+      if (command === "attachment_upload_limit") return 104857600;
+      if (command === "resolve_attachment_uri") return file;
+      if (command === "attachment_preview")
+        return {
+          attachment: file,
+          status: "unsupported",
+          media_type: null,
+          message: "Current source content · No local snapshot.",
+          can_open: true,
+          usage: { total: 0, entries: [], legacy_drafts_pending: false },
+        };
+      if (command === "drive_reference")
+        return {
+          connection_id: "connection",
+          metadata: {
+            id: "doc-1",
+            name: "Current plan",
+            mime_type: "application/vnd.google-apps.document",
+            size_bytes: null,
+            web_url: "https://docs.google.com/document/d/doc-1/edit",
+            resource_key: null,
+          },
+        };
+      return undefined;
+    });
+    if (entry === "inline") {
+      render(
+        <AttachmentLink uri="ticketd://attachment/workspace/drive-1">
+          My label
+        </AttachmentLink>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "My label" }));
+    } else {
+      render(
+        <AttachmentPreview
+          target={{
+            id: file.id,
+            initial: { ...file, kind: "external_reference" },
+          }}
+          onClose={vi.fn()}
+        />,
+      );
+    }
+    expect(await screen.findByText(/Current source content/)).toBeTruthy();
+    expect(await screen.findByText("Google Docs")).toBeTruthy();
+    expect(screen.getByText("Size unavailable")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Export file" })).toBeNull();
+    expect(document.querySelector("img,video,audio,iframe,object")).toBeNull();
+    if (entry === "library")
+      expect(invoke).not.toHaveBeenCalledWith(
+        "resolve_attachment_uri",
+        expect.anything(),
+      );
+    fireEvent.click(screen.getByRole("button", { name: "Open in Drive" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("open_attachment", { id: "drive-1" }),
+    );
+  },
+);
 
 test("mixed insertion results retain failed identity and retry before the later successful file", async () => {
   const second = { ...file, id: "drive-2", display_name: "Current sheet" };

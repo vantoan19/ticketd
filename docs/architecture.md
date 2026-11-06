@@ -116,6 +116,9 @@ It returns a read handle, never a filesystem path to React. PNG, JPEG, GIF, WebP
 BMP, WAV, MP3, recognized Ogg, MP4 and WebM containers can be attempted; container
 recognition is not a codec guarantee. HTML, SVG, PDF, office files, playlists and
 unrecognized content retain metadata and explicit export/open fallback actions.
+External references use the same preview entry point with cached provider details,
+current-source wording and explicit Open in Drive. They never enter the local media
+route or offer an original-byte export; unknown provider size remains unknown.
 Images require checked dimensions of at most 16,384 per axis and 40 million pixels;
 files above 100 MiB remain usable through explicit export/open rather than preview,
 even if the configurable upload limit is higher.
