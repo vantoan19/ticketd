@@ -1395,6 +1395,11 @@ pub fn run() -> Result<(), tauri::Error> {
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             attachment_commands::import_attachment,
+            attachment_commands::capture_attachment,
+            attachment_commands::cancel_attachment_upload,
+            attachment_commands::attachment_upload_limit,
+            attachment_commands::attachment_workspace_id,
+            attachment_commands::set_attachment_upload_limit,
             attachment_commands::list_attachments,
             attachment_commands::inspect_attachment,
             attachment_commands::ticket_attachments,

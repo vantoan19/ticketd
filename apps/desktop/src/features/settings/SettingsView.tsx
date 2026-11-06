@@ -1,4 +1,5 @@
 import type { SettingsCardKey } from "./settings-sections";
+import { AttachmentSettings } from "./AttachmentSettings";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   Copy,
@@ -716,6 +717,7 @@ export function SettingsView({
           <AppearanceCard />
           <AttentionCard onOpenInbox={onOpenInbox} />
           <LocationCard refreshKey={restores} />
+          <AttachmentSettings key={restores} />
           <BackupsCard
             onRestore={async () => {
               setRestores((count) => count + 1);

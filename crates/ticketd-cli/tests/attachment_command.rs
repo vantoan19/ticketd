@@ -16,6 +16,37 @@ fn run(dir: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+fn cli_explains_and_changes_the_shared_workspace_upload_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        run(dir.path(), &["attachment", "limit"])["limit_bytes"],
+        104857600
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "limit", "--bytes", "4"])["limit_bytes"],
+        4
+    );
+    let source = dir.path().join("large.bin");
+    std::fs::write(&source, b"12345").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "add", source.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("4 bytes"), "{error}");
+    assert!(error.contains("attachment limit --bytes"), "{error}");
+    assert_eq!(
+        run(dir.path(), &["attachment", "list"]),
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn independent_cli_processes_add_inspect_reuse_export_and_detach_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let ticket = run(dir.path(), &["create", "Investigate"]);

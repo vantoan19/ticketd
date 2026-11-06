@@ -77,7 +77,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 48;
+pub const FORMAT_VERSION: i64 = 49;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -735,6 +735,9 @@ impl Workspace {
         }
         if version < 48 {
             embedded_attachments::migrate(&transaction)?;
+        }
+        if version < 49 {
+            attachments::migrate_upload_settings(&transaction)?;
         }
         transaction.commit()?;
         Ok(())

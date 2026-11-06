@@ -9,6 +9,30 @@
   padding: 0;
   margin: 0;
 }
+.attachment-uploads {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+}
+.attachment-uploads li {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-ui);
+}
+.attachment-uploads li > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.attachment-uploads progress {
+  width: 100%;
+  accent-color: var(--primary);
+}
 .attachment-row {
   display: flex;
   align-items: center;

@@ -1,6 +1,129 @@
 use ticketd_core::Workspace;
 
 #[test]
+fn upload_limit_is_workspace_configuration_and_applies_to_actual_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment_upload_limit().unwrap(), 104_857_600);
+    assert!(workspace.set_attachment_upload_limit(0).is_err());
+    workspace.set_attachment_upload_limit(8).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment_upload_limit().unwrap(), 8);
+    let source = dir.path().join("growing.bin");
+    std::fs::write(&source, b"1234").unwrap();
+    let error = workspace
+        .import_attachment_with_progress("growing", &source, None, |copied, _| {
+            if copied == 0 {
+                std::fs::write(&source, b"123456789").unwrap();
+            }
+            true
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("8 bytes"));
+    assert!(workspace.attachments(50, 0).unwrap().is_empty());
+    std::fs::write(&source, b"12345678").unwrap();
+    let stored = workspace
+        .import_attachment("growing", &source, None)
+        .unwrap();
+    assert_eq!(stored.size_bytes, 8);
+    workspace.set_attachment_upload_limit(1).unwrap();
+    std::fs::remove_file(&source).unwrap();
+    assert_eq!(
+        workspace
+            .import_attachment("growing", &source, None)
+            .unwrap(),
+        stored
+    );
+}
+
+#[test]
+fn screenshot_capture_cancels_independently_and_replays_completed_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let bytes = vec![42; 131_073];
+    let mut progress = Vec::new();
+    assert!(
+        workspace
+            .import_attachment_bytes("capture", "screenshot.png", &bytes, |copied, total| {
+                progress.push((copied, total));
+                copied < 65_536
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("canceled")
+    );
+    assert_eq!(progress, [(0, 131_073), (65_536, 131_073)]);
+    assert!(workspace.attachments(50, 0).unwrap().is_empty());
+    let stored = workspace
+        .import_attachment_bytes("capture", "screenshot.png", &bytes, |_, _| true)
+        .unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .import_attachment_bytes("capture", "screenshot.png", &bytes, |_, _| false)
+            .unwrap(),
+        stored
+    );
+    assert!(matches!(
+        workspace.import_attachment_bytes("capture", "screenshot.png", b"other", |_, _| true),
+        Err(ticketd_core::Error::RequestConflict(_))
+    ));
+    assert!(
+        workspace
+            .import_attachment_bytes("bad-name", "../escape.png", b"bytes", |_, _| true)
+            .is_err()
+    );
+    let exported = dir.path().join("export.png");
+    workspace.export_attachment(&stored.id, &exported).unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), bytes);
+    workspace.set_attachment_upload_limit(2).unwrap();
+    assert!(
+        workspace
+            .import_attachment_bytes("too-large", "large.png", b"123", |_, _| true)
+            .is_err()
+    );
+    assert_eq!(workspace.attachments(50, 0).unwrap(), [stored]);
+}
+
+#[test]
+fn upload_configuration_upgrade_and_backup_preserve_existing_snapshots_and_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("existing.txt");
+    std::fs::write(&source, b"preserve").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let file = workspace
+        .import_attachment("existing", &source, None)
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    drop(workspace);
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute_batch("DROP TABLE attachment_upload_settings; PRAGMA user_version=48;")
+        .unwrap();
+    drop(fixture);
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment_upload_limit().unwrap(), 104857600);
+    assert_eq!(workspace.attachment_uri(&file.id).unwrap(), uri);
+    workspace.set_attachment_upload_limit(17).unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, &backup).unwrap();
+    let workspace = Workspace::open(&restored).unwrap();
+    assert_eq!(workspace.attachment_upload_limit().unwrap(), 17);
+    assert_eq!(workspace.resolve_attachment_uri(&uri).unwrap(), file);
+    let export = dir.path().join("export.txt");
+    workspace.export_attachment(&file.id, &export).unwrap();
+    assert_eq!(std::fs::read(export).unwrap(), b"preserve");
+}
+
+#[test]
 fn snapshots_survive_source_deletion_reopen_and_detaching_one_ticket() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

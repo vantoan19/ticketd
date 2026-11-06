@@ -67,7 +67,12 @@ import {
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
-import { attachments, type Attachment } from "@/lib/api/attachments";
+import {
+  attachments,
+  type Attachment,
+  type CaptureSource,
+} from "@/lib/api/attachments";
+import { useNativeFileDrop } from "@/features/attachments/use-native-file-drop";
 import { upsertLink } from "@platejs/link";
 import { LinkPlugin } from "@platejs/link/react";
 import { toggleCodeBlock } from "@platejs/code-block";
@@ -756,11 +761,14 @@ export function MarkdownEditor({
     [label],
   );
   const [attachmentPicker, setAttachmentPicker] = useState(false);
+  const [capture, setCapture] = useState<{ sources: CaptureSource[] }>();
   const focusAfterInsertion = useRef(false);
   const insertion = useRef<{
     rich: PlateEditor["selection"];
     source: { from: number; to: number } | undefined;
     markdown: string;
+    links: Map<string, { uri: string; from: number; to: number }>;
+    tail?: string;
   } | null>(null);
   useEffect(
     () => () => {
@@ -843,11 +851,47 @@ export function MarkdownEditor({
       rich: rich ?? editor.selection ?? lastSelection.current,
       source: sourceEditor.current?.view?.state.selection.main,
       markdown: value,
+      links: new Map(),
     };
     focusAfterInsertion.current = true;
     setAttachmentPicker(true);
   }
-  async function insertAttachment(file: Attachment) {
+  function captureFiles(
+    sources: CaptureSource[],
+    point?: { x: number; y: number },
+  ) {
+    if (!sources.length || readOnly) return;
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      if (source) {
+        const view = sourceEditor.current?.view;
+        const pos = view?.posAtCoords(point);
+        if (view && pos !== null && pos !== undefined)
+          view.dispatch({ selection: { anchor: pos } });
+      } else {
+        const range = globalThis.document.caretRangeFromPoint?.(
+          point.x,
+          point.y,
+        );
+        if (range && container.current?.contains(range.startContainer)) {
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      }
+    }
+    beginAttachment();
+    setCapture({ sources });
+  }
+  const dropFailure = useNativeFileDrop(
+    container,
+    !readOnly && !attachmentPicker,
+    captureFiles,
+  );
+  async function insertAttachment(
+    file: Attachment,
+    _requestId: string,
+    beforeId?: string,
+  ) {
     const pending = insertion.current;
     const uri = await attachments.uri(file.id);
     if (!pending || pending !== insertion.current) return;
@@ -859,7 +903,10 @@ export function MarkdownEditor({
       const view = sourceEditor.current?.view;
       if (!view)
         throw new Error("Reopen this editor to insert the stored file.");
-      const { from, to } = pending.source ?? view.state.selection.main;
+      const before = beforeId ? pending.links.get(beforeId) : undefined;
+      const caret = pending.source ?? view.state.selection.main;
+      const from = before?.from ?? caret.from;
+      const to = before?.from ?? caret.to;
       // Source insertion may be inside a GFM table; a filename pipe must stay in its cell.
       const link = writeMarkdown([
         {
@@ -873,8 +920,32 @@ export function MarkdownEditor({
         changes: { from, to, insert: link },
         selection: { anchor: from + link.length },
       });
+      const delta = link.length - (to - from);
+      for (const existing of pending.links.values()) {
+        if (existing.from >= from) {
+          existing.from += delta;
+          existing.to += delta;
+        }
+      }
+      pending.links.set(file.id, { uri, from, to: from + link.length });
+      pending.source = before
+        ? { from: caret.from + delta, to: caret.to + delta }
+        : { from: from + link.length, to: from + link.length };
+      pending.markdown = view.state.doc.toString();
     } else {
-      if (pending.rich) editor.tf.select(pending.rich);
+      const anchor = pending.links.get(beforeId ?? pending.tail ?? "");
+      const existing =
+        anchor &&
+        editor.api.node({
+          at: [],
+          match: (node) => "url" in node && node.url === anchor.uri,
+        });
+      if (existing) {
+        const point = beforeId
+          ? editor.api.before(existing[1])
+          : editor.api.after(existing[1]);
+        if (point) editor.tf.select(point);
+      } else if (pending.rich) editor.tf.select(pending.rich);
       else editor.tf.select(editor.api.end([]) ?? [0]);
       // Insert a link node rather than upserting the surrounding link or replacing its label.
       editor.tf.insertNodes({
@@ -883,9 +954,12 @@ export function MarkdownEditor({
         children: [{ text: file.display_name }],
       });
       editor.tf.move({ distance: 1, unit: "offset" });
+      pending.links.set(file.id, { uri, from: 0, to: 0 });
+      pending.rich = editor.selection;
+      pending.markdown = writeMarkdown(editor.children);
     }
+    if (!beforeId) pending.tail = file.id;
     focusAfterInsertion.current = true;
-    insertion.current = null;
   }
   useEffect(() => {
     if (!focusRequest || readOnly) return;
@@ -1030,6 +1104,34 @@ export function MarkdownEditor({
       ref={container}
       className="markdown-editor"
       aria-label={label}
+      onPasteCapture={(event) => {
+        if (readOnly) return;
+        const screenshots = Array.from(event.clipboardData.items ?? [])
+          .filter(
+            (item) => item.kind === "file" && item.type.startsWith("image/"),
+          )
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+        if (!screenshots.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        captureFiles(screenshots);
+      }}
+      onDragOverCapture={(event) => {
+        if (!readOnly && event.dataTransfer.types.includes("Files")) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onDropCapture={(event) => {
+        if (readOnly || !event.dataTransfer.files?.length) return;
+        event.preventDefault();
+        event.stopPropagation();
+        captureFiles(Array.from(event.dataTransfer.files), {
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }}
       onFocus={() => setActive(true)}
       onBlur={(event) => {
         closeSlash();
@@ -1296,6 +1398,7 @@ export function MarkdownEditor({
       {!readOnly && (
         <AttachmentPicker
           open={attachmentPicker}
+          capture={capture}
           onOpenChange={(open) => {
             setAttachmentPicker(open);
             if (!open) insertion.current = null;
@@ -1303,6 +1406,7 @@ export function MarkdownEditor({
           onPick={insertAttachment}
         />
       )}
+      {dropFailure && <p role="alert">{dropFailure}</p>}
     </section>
   );
 }

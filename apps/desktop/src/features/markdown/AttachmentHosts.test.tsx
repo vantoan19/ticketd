@@ -17,7 +17,12 @@ import { Activity } from "@/features/tickets/Activity";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import type { Ticket } from "@/lib/api/client";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  Channel: class {
+    onmessage = () => {};
+  },
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 beforeAll(async () => {
   vi.stubGlobal(
@@ -63,6 +68,7 @@ const ticket: Ticket = {
 function bridge() {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_upload_limit") return 104857600;
     if (command === "import_attachment") return file;
     if (command === "attachment_uri") return uri;
     if (
@@ -87,7 +93,7 @@ async function insertInto(label: string) {
   fireEvent.click(
     within(editor).getByRole("button", { name: "Insert attachment" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Choose file" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await waitFor(() =>
     expect(screen.queryByRole("dialog", { name: "Attach file" })).toBeNull(),
   );

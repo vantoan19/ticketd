@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 
-const attachmentSchema = z.object({
+export const attachmentSchema = z.object({
   id: z.string(),
   display_name: z.string(),
   original_filename: z.string(),
@@ -11,8 +11,30 @@ const attachmentSchema = z.object({
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
+const progressSchema = z.object({
+  copied: z.number().nonnegative(),
+  total: z.number().nonnegative(),
+});
+export type UploadProgress = z.infer<typeof progressSchema>;
+export type CaptureSource = string | File;
 
 export const attachments = {
+  async workspaceId() {
+    return z
+      .string()
+      .min(1)
+      .parse(await invoke("attachment_workspace_id"));
+  },
+  async uploadLimit() {
+    return z
+      .number()
+      .int()
+      .positive()
+      .parse(await invoke("attachment_upload_limit"));
+  },
+  async setUploadLimit(bytes: number) {
+    await invoke("set_attachment_upload_limit", { bytes });
+  },
   async uri(id: string) {
     return z.string().parse(await invoke("attachment_uri", { id }));
   },
@@ -38,14 +60,50 @@ export const attachments = {
     const chosen = await open({
       title: "Attach file",
       directory: false,
-      multiple: false,
+      multiple: true,
     });
-    return typeof chosen === "string" ? chosen : null;
+    return typeof chosen === "string" ? [chosen] : (chosen ?? []);
   },
-  async upload(source: string, requestId: string) {
+  async upload(
+    source: CaptureSource,
+    requestId: string,
+    onProgress: (value: UploadProgress) => void,
+  ) {
+    const progress = new Channel<unknown>();
+    progress.onmessage = (value) => onProgress(progressSchema.parse(value));
+    if (typeof source !== "string") {
+      const limit = await attachments.uploadLimit();
+      if (source.size > limit)
+        throw new Error(
+          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}. Change it in Settings > Attachments.`,
+        );
+      const bytes = new Uint8Array(await source.arrayBuffer());
+      if (bytes.byteLength > limit)
+        throw new Error(
+          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}.`,
+        );
+      // Raw IPC avoids expanding screenshots into millions of JSON numbers.
+      const metadata = JSON.stringify({
+        filename: source.name,
+        requestId,
+        progress: progress.toJSON(),
+      }).replace(
+        /[\u007f-\uffff]/g,
+        (character) =>
+          `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+      );
+      return attachmentSchema.parse(
+        await invoke("capture_attachment", bytes, {
+          headers: { "x-ticketd-upload": metadata },
+        }),
+      );
+    }
     return attachmentSchema.parse(
-      await invoke("import_attachment", { source, requestId }),
+      await invoke("import_attachment", { source, requestId, progress }),
     );
+  },
+  async cancel(requestId: string) {
+    await invoke("cancel_attachment_upload", { requestId });
   },
   async setTicket(
     reference: string,
@@ -72,3 +130,7 @@ export const attachments = {
       await invoke("export_attachment", { id: file.id, destination });
   },
 };
+
+function formatUploadLimit(bytes: number) {
+  return `${bytes} bytes (${bytes / 1048576} MiB)`;
+}

@@ -88,6 +88,11 @@ pub(crate) fn index(tx: &Connection, source_id: &str, markdown: &str) -> Result<
 }
 
 impl Workspace {
+    /// Namespaces local capture recovery without exposing the database path.
+    pub fn attachment_workspace_id(&self) -> Result<String, Error> {
+        workspace_id(&self.connection)
+    }
+
     /// A stable identity that never embeds a filesystem path or provider URL.
     pub fn attachment_uri(&self, id: &str) -> Result<String, Error> {
         let file = self.attachment(id)?;

@@ -2,12 +2,147 @@ use tauri_plugin_opener::OpenerExt;
 use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+type Uploads = Mutex<HashMap<String, Arc<AtomicBool>>>;
+static UPLOADS: OnceLock<Uploads> = OnceLock::new();
+
+struct UploadGuard(String);
+impl Drop for UploadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut uploads) = UPLOADS.get_or_init(Uploads::default).lock() {
+            uploads.remove(&self.0);
+        }
+    }
+}
+fn start_upload(request_id: &str) -> Result<(UploadGuard, Arc<AtomicBool>), String> {
+    let mut uploads = UPLOADS
+        .get_or_init(Uploads::default)
+        .lock()
+        .map_err(|e| e.to_string())?;
+    if uploads.contains_key(request_id) {
+        return Err("This upload is still running; wait before retrying the same operation".into());
+    }
+    let canceled = Arc::new(AtomicBool::new(false));
+    uploads.insert(request_id.into(), canceled.clone());
+    Ok((UploadGuard(request_id.into()), canceled))
+}
+#[derive(Clone, serde::Serialize)]
+pub struct UploadProgress {
+    copied: u64,
+    total: u64,
+}
+
+fn report_progress(
+    progress: &Option<tauri::ipc::Channel<UploadProgress>>,
+    canceled: &AtomicBool,
+    copied: u64,
+    total: u64,
+) -> bool {
+    if let Some(channel) = progress {
+        let _ = channel.send(UploadProgress { copied, total });
+    }
+    !canceled.load(Ordering::Relaxed)
+}
 
 #[tauri::command]
-pub async fn import_attachment(source: String, request_id: String) -> Result<Attachment, String> {
+pub fn cancel_attachment_upload(request_id: String) -> Result<(), String> {
+    let uploads = UPLOADS
+        .get_or_init(Uploads::default)
+        .lock()
+        .map_err(|e| e.to_string())?;
+    if let Some(canceled) = uploads.get(&request_id) {
+        canceled.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn attachment_upload_limit() -> Result<u64, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_upload_limit())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn attachment_workspace_id() -> Result<String, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_workspace_id())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn set_attachment_upload_limit(bytes: u64) -> Result<(), String> {
+    open_workspace()
+        .and_then(|w| w.set_attachment_upload_limit(bytes))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn capture_attachment(
+    webview: tauri::Webview,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Attachment, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Metadata {
+        filename: String,
+        request_id: String,
+        progress: tauri::ipc::JavaScriptChannelId,
+    }
+    let metadata: Metadata = serde_json::from_str(
+        request
+            .headers()
+            .get("x-ticketd-upload")
+            .ok_or("Missing screenshot metadata")?
+            .to_str()
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Screenshot capture requires a binary payload".into());
+    };
+    let bytes = bytes.clone();
+    let Metadata {
+        filename,
+        request_id,
+        progress,
+    } = metadata;
+    let progress = Some(progress.channel_on(webview));
+    let (guard, canceled) = start_upload(&request_id)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
         open_workspace()
-            .and_then(|mut w| w.import_attachment(&request_id, source, None))
+            .and_then(|mut w| {
+                w.import_attachment_bytes(&request_id, &filename, &bytes, |copied, total| {
+                    report_progress(&progress, &canceled, copied, total)
+                })
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn import_attachment(
+    source: String,
+    request_id: String,
+    progress: Option<tauri::ipc::Channel<UploadProgress>>,
+) -> Result<Attachment, String> {
+    let (guard, canceled) = start_upload(&request_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        open_workspace()
+            .and_then(|mut w| {
+                w.import_attachment_with_progress(&request_id, source, None, |copied, total| {
+                    report_progress(&progress, &canceled, copied, total)
+                })
+            })
             .map_err(|e| e.to_string())
     })
     .await
