@@ -155,7 +155,7 @@ export function TicketDocuments({
               aria-label="Add Document"
             >
               <Plus aria-hidden="true" />
-              Add
+              Attach Document
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="ticket-documents-popover">

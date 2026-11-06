@@ -63,7 +63,12 @@ test("labels code blocks and copies their source without changing document conte
   await waitFor(() =>
     expect(writeText).toHaveBeenCalledWith('const title = "Ticket";\n'),
   );
-  expect(screen.getByRole("status").textContent).toContain("Copied");
+  // The icon button confirms with a check mark instead of a status line.
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Copy code" }).querySelector("svg"),
+    ).toBeTruthy(),
+  );
 });
 
 test("routes multiple Mermaid fences to diagrams and copies the exact original CRLF source", async () => {

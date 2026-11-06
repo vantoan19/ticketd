@@ -113,7 +113,24 @@ export function TicketHeader({
   return (
     <div className="detail-header">
       <div className="detail-title-group">
-        {selected && (
+        {selected && expanded && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="breadcrumb-back"
+              aria-label="Return to ticket list"
+              onClick={onReturn}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              All tickets
+            </Button>
+            <span className="breadcrumb-separator" aria-hidden="true">
+              /
+            </span>
+          </>
+        )}
+        {selected && !expanded && (
           <IconButton
             className="return-to-list"
             label="Return to ticket list"

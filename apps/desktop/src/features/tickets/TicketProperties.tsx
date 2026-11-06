@@ -8,14 +8,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Folder,
-  Layers,
-  Lock,
-  Tag,
-  Trash2,
-  type LucideIcon,
-} from "lucide-react";
+import { Folder, Layers, Lock, Trash2, type LucideIcon } from "lucide-react";
 import { SourceRail } from "./SourceRail";
 import {
   duplicateTargetText,
@@ -66,8 +59,13 @@ export function PropertyPicker({
   readOnly = false,
   icon: Icon,
   align = "start",
+  display,
+  className,
 }: {
   label: string;
+  /** Shown in the trigger in place of the value text (the label stays the accessible name). */
+  display?: ReactNode;
+  className?: string;
   /** Which edge of the trigger the choices line up with. */
   align?: "start" | "end";
   compact?: boolean;
@@ -97,9 +95,10 @@ export function PropertyPicker({
           readOnly={readOnly}
           disabled={disabled}
           aria-label={`${label}: ${value}`}
+          {...(className ? { className } : {})}
         >
           {Icon && <Icon data-icon="inline-start" />}
-          <span className="truncate">{value}</span>
+          {display ?? <span className="truncate">{value}</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -264,7 +263,7 @@ export function TicketProperties({
   const plan = plans.find((e) => e.id === ticket.plan_id);
   const planName = plan
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`
-    : ticket.plan_id || "No Plan";
+    : ticket.plan_id || "Add to a Plan";
   function property(label: string, control: ReactNode) {
     return (
       <RailSection label={label}>
@@ -529,20 +528,37 @@ export function TicketProperties({
       {property(
         "Tags",
         <>
-          <div className="rail-tags">
-            {ticket.tags.map((tag) => (
-              <span className="rail-tag" key={tag}>
-                {tag}
-              </span>
-            ))}
-          </div>
           {ticket.trashed ? (
-            !ticket.tags.length && <span className="rail-none">No tags</span>
+            <>
+              <div className="rail-tags">
+                {ticket.tags.map((tag) => (
+                  <span className="rail-tag" key={tag}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              {!ticket.tags.length && (
+                <span className="rail-none">No tags</span>
+              )}
+            </>
           ) : (
             <PropertyPicker
               compact
               align="end"
-              icon={Tag}
+              className="rail-tags-picker"
+              display={
+                ticket.tags.length ? (
+                  <span className="rail-tags">
+                    {ticket.tags.map((tag) => (
+                      <span className="rail-tag" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Add tags</span>
+                )
+              }
               label="Tags"
               value={ticket.tags.length ? "Edit tags" : "Add tags"}
               disabled={disabled}
