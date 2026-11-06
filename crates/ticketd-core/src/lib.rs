@@ -65,9 +65,11 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachment_retention;
 mod attachments;
 pub mod drive;
 mod embedded_attachments;
+pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
 pub use attachments::{Attachment, AttachmentKind, AttachmentOpenTarget, DEFAULT_ATTACHMENT_LIMIT};
 mod change_token;
 pub use activities::{
@@ -743,6 +745,9 @@ impl Workspace {
         }
         if version < 49 {
             attachments::migrate_upload_settings(&transaction)?;
+        }
+        if version < 50 {
+            attachment_retention::migrate(&transaction, version > 0)?;
         }
         if version < 51 {
             drive::migrate(&transaction)?;

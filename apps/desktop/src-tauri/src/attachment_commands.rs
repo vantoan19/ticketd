@@ -51,6 +51,43 @@ fn report_progress(
     !canceled.load(Ordering::Relaxed)
 }
 
+#[tauri::command(async)]
+pub fn draft_retentions() -> Result<Vec<ticketd_core::DraftRetention>, String> {
+    open_workspace()
+        .and_then(|w| w.draft_retentions())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn complete_draft_cutover() -> Result<(), String> {
+    open_workspace()
+        .and_then(|mut w| w.complete_draft_cutover())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn draft_cutover_pending() -> Result<bool, String> {
+    open_workspace()
+        .and_then(|w| w.draft_cutover_pending())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn retain_draft(
+    draft: ticketd_core::DraftRetention,
+) -> Result<ticketd_core::DraftRetention, String> {
+    open_workspace()
+        .and_then(|mut w| w.retain_draft(&draft))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn attachment_usage(id: String) -> Result<ticketd_core::AttachmentUsage, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_usage(&id))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn cancel_attachment_upload(request_id: String) -> Result<(), String> {
     let uploads = UPLOADS

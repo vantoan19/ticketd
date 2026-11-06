@@ -108,6 +108,38 @@ local file totals, and the limits of remote references through the same core.
 
 ## Document editing
 
+Draft recovery payloads and derived attachment claims commit together through
+`Workspace::retain_draft`. The core parses canonical Markdown using the saved
+reference parser. Drafts are private workspace recovery data, not published
+Documents or Activities. Desktop startup loads recovery before mounting editors;
+each host retains its existing autosave or explicit-submit behavior. Capture
+requests keep their original retry identity across restart. Backups include
+recovery prose and protections; ordinary domain JSON export excludes this private
+authoring state.
+
+Owners use compare-and-swap revisions, including release tombstones; exact
+retries of the last update are idempotent. Desktop writes serialize and failures
+remain visible and block subsequent submission until protection is durable.
+Current draft replacement and independent editor Undo use separate claims; Undo
+accumulates references until history is reset/unmounted. Normal unmount releases
+only transient history, never a recoverable draft. An interrupted history release
+leaves conservative protection for explicit review, without a time expiry.
+
+`Workspace::attachment_usage` returns a consistent snapshot of direct, embedded,
+draft and Undo protections, including recoverable Trash and unpromoted Activity
+details. Its eligibility is advisory: later cleanup must recheck it under its
+writer/file coordination. Retention never moves or deletes bytes and never takes
+the upload lock inside a database transaction. Later byte-moving operations must
+coordinate canonical writes, registration and Undo without reversing the existing
+file-lock-before-database-lock order.
+
+Only upgrades with existing attachment records require review of legacy browser
+drafts. Startup imports every recoverable slot in the current profile, including
+unopened tickets and legacy Activity details/request keys. Other profiles remain
+unknowable to the core: cleanup stays blocked until the user confirms those
+profiles were reviewed. Fresh and attachment-free upgraded workspaces have no
+such guard. See [durable draft retention](adr/0009-draft-retention.md).
+
 Rich document editing uses Plate, with Markdown remaining canonical across storage and CLI operations. Editor document trees remain transient UI state; CodeMirror provides source editing, and Mermaid renders diagrams locally. See [Plate editing with canonical Markdown](adr/0005-plate-editor-with-canonical-markdown.md) for fidelity and integration boundaries.
 
 ## Interface direction

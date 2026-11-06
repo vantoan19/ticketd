@@ -94,6 +94,9 @@ A workspace-scoped file identity with a display name, original filename, availab
 **External attachment reference**:
 An Attachment resolving current provider content rather than a local snapshot. Google Drive references use the connected person's per-file application authorization and existing sharing permissions. Google Docs, Sheets, and Slides open in Drive without conversion. Last-known metadata survives access failures; removing a reference never deletes the remote file.
 
+**Recoverable draft**:
+Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
+
 **Context graph**:
 A bounded view of explicit relationships among tickets, Documents, and Plans. Activities explain ticket-to-supporting-Document connections but are not separate graph nodes. Tags classify or color items without implying pairwise links or blocking dependencies.
 

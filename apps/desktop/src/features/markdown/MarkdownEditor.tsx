@@ -68,6 +68,10 @@ import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import {
+  useDraftRecovery,
+  useDraftRecoveryError,
+} from "@/lib/draft-recovery-context";
+import {
   attachments,
   type Attachment,
   type CaptureSource,
@@ -708,6 +712,8 @@ export interface MarkdownEditorProps {
   paragraphAfterQuote?: boolean;
   /** Keep the formatting toolbar shown while the editor is idle, so a dialog never holds an empty band. */
   persistentToolbar?: boolean;
+  /** Recovery owner to explain independent Undo protection in attachment usage. */
+  recoveryOwner?: string;
 }
 
 let pointerDown = false;
@@ -729,7 +735,32 @@ export function MarkdownEditor({
   focusLink,
   paragraphAfterQuote = false,
   persistentToolbar = false,
+  recoveryOwner = label,
 }: MarkdownEditorProps) {
+  const recovery = useDraftRecovery();
+  const recoveryError = useDraftRecoveryError();
+  const [historyOwner] = useState(
+    () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
+  );
+  const [protectedValue, setProtectedValue] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    void recovery
+      .put(historyOwner, null, value ? [value] : [], "undo")
+      .then(() => {
+        if (current) setProtectedValue(value);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [recovery, historyOwner, value, recoveryError]);
+  useEffect(
+    () => () => {
+      void recovery.put(historyOwner, null, []).catch(() => {});
+    },
+    [recovery, historyOwner],
+  );
   // The formatting toolbar appears while focus is anywhere in the editor (including the toolbar,
   // so it stays keyboard reachable) and while one of its menus holds focus.
   const [active, setActive] = useState(false);
@@ -894,6 +925,7 @@ export function MarkdownEditor({
   ) {
     const pending = insertion.current;
     const uri = await attachments.uri(file.id);
+    await recovery.put(historyOwner, null, [`[File](${uri})`], "undo");
     if (!pending || pending !== insertion.current) return;
     if (pending.markdown !== emitted.current)
       throw new Error(
@@ -1158,6 +1190,32 @@ export function MarkdownEditor({
         setActive(false);
       }}
     >
+      {recoveryError && (
+        <Alert variant="destructive">
+          <AlertTitle>Could not protect recoverable drafts</AlertTitle>
+          <AlertDescription>
+            Keep this window open. {recoveryError}
+            <Button type="button" onClick={recovery.retry}>
+              Retry draft recovery
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {recovery.active &&
+        protectedValue === value &&
+        !recoveryError &&
+        value.includes("ticketd://attachment/") && (
+          <p
+            role="status"
+            aria-label="Attachment draft protection"
+            className="text-xs text-muted-foreground"
+          >
+            Draft protected
+            <span className="sr-only">
+              . Workspace attachments stay protected through Undo.
+            </span>
+          </p>
+        )}
       <div
         className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
         data-persistent={persistentToolbar || undefined}

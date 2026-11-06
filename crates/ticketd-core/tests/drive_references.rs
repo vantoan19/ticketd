@@ -46,6 +46,23 @@ fn selected_native_files_are_reusable_current_references_without_local_bytes() {
         .set_ticket_attachment(&ticket.reference, &file.id, true)
         .unwrap();
     let uri = workspace.attachment_uri(&file.id).unwrap();
+    workspace
+        .retain_draft(&ticketd_core::DraftRetention {
+            owner: "drive-draft".into(),
+            kind: "draft".into(),
+            revision: 0,
+            payload: Some(serde_json::json!({"body":format!("[Current plan]({uri})")})),
+            markdown: vec![format!("[Current plan]({uri})")],
+        })
+        .unwrap();
+    assert!(
+        workspace
+            .attachment_usage(&file.id)
+            .unwrap()
+            .protections
+            .iter()
+            .any(|p| p.owner == "drive-draft")
+    );
     let document = workspace
         .create_document(None, &format!("See [my plan]({uri})."))
         .unwrap();
@@ -166,4 +183,97 @@ fn provider_failure_retains_last_known_metadata_and_cannot_create_valid_new_refe
             .is_err()
     );
     assert_eq!(workspace.attachments(10, 0).unwrap(), [file]);
+}
+
+#[test]
+fn schema50_upgrade_preserves_local_receipts_canonical_uses_drafts_undo_and_safety_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"retained version50 bytes").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.set_attachment_upload_limit(4096).unwrap();
+    let file = workspace
+        .import_attachment("version50-upload", &source, None)
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let body = format!("[Trace]({uri})");
+    let ticket = workspace.create_ticket("Retain source context").unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    let document = workspace.create_document(None, &body).unwrap();
+    let draft = workspace
+        .retain_draft(&ticketd_core::DraftRetention {
+            owner: "version50-draft".into(),
+            kind: "draft".into(),
+            revision: 0,
+            payload: Some(serde_json::json!({"body":body})),
+            markdown: vec![body.clone()],
+        })
+        .unwrap();
+    workspace
+        .retain_draft(&ticketd_core::DraftRetention {
+            owner: "version50-undo".into(),
+            kind: "undo".into(),
+            payload: None,
+            revision: 0,
+            markdown: vec![body.clone()],
+        })
+        .unwrap();
+    drop(workspace);
+    // Frozen schema50 parent-table definition, including its original size and
+    // kind constraints. Keep actual persisted references and numeric receipts.
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture.execute_batch("PRAGMA foreign_keys=OFF;
+        DROP TABLE drive_references;
+        CREATE TABLE attachments_v50 (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, original_filename TEXT NOT NULL, size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0), kind TEXT NOT NULL CHECK(kind = 'local_snapshot'), locator TEXT NOT NULL UNIQUE);
+        INSERT INTO attachments_v50 SELECT id, display_name, original_filename, size_bytes, kind, locator FROM attachments;
+        DROP TABLE attachments;
+        ALTER TABLE attachments_v50 RENAME TO attachments;
+        PRAGMA user_version=50;").unwrap();
+    drop(fixture);
+    std::fs::remove_file(&source).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment_upload_limit().unwrap(), 4096);
+    assert_eq!(
+        workspace
+            .import_attachment("version50-upload", &source, None)
+            .unwrap(),
+        file
+    );
+    assert_eq!(workspace.attachment_uri(&file.id).unwrap(), uri);
+    assert_eq!(
+        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(
+        workspace.embedded_attachments(&document.id).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(workspace.draft_retentions().unwrap().len(), 2);
+    assert_eq!(workspace.draft_retentions().unwrap()[0], draft);
+    let usage = workspace.attachment_usage(&file.id).unwrap();
+    assert!(!usage.eligible);
+    assert!(usage.protections.iter().any(|p| p.kind == "undo"));
+    let backups = workspace.safety_backups().unwrap();
+    assert_eq!(backups.len(), 1);
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, &backups[0].path).unwrap();
+    let restored = Workspace::open(restored).unwrap();
+    assert_eq!(
+        restored.draft_retentions().unwrap(),
+        workspace.draft_retentions().unwrap()
+    );
+    let output = dir.path().join("restored.txt");
+    restored.export_attachment(&file.id, &output).unwrap();
+    assert_eq!(std::fs::read(output).unwrap(), b"retained version50 bytes");
+    // Migration must restore change-token triggers on the rebuilt parent table.
+    let before = workspace.change_token().unwrap();
+    let more = dir.path().join("new.txt");
+    std::fs::write(&more, b"new").unwrap();
+    workspace
+        .import_attachment("post-migration", &more, None)
+        .unwrap();
+    assert!(workspace.change_token().unwrap() > before);
 }
