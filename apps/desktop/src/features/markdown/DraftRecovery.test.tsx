@@ -429,3 +429,70 @@ test("failed draft protection is visible and blocks publication until explicit r
   fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
 });
+
+test("late retention completion cannot publish or replace newer typing before it is durable", async () => {
+  let releaseFirst: () => void = () => {};
+  let first = true;
+  const records = new Map<string, Record<string, unknown>>();
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "draft_retentions") return [];
+    if (command === "draft_cutover_pending") return false;
+    if (command === "retain_draft") {
+      const draft = (args as { draft: Record<string, unknown> }).draft;
+      if (draft.owner === "new-ticket" && first) {
+        first = false;
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      const saved = { ...draft, revision: Number(draft.revision) + 1 };
+      records.set(String(draft.owner), saved);
+      return saved;
+    }
+    return [];
+  });
+  let finishCreate: (value: string) => void = () => {};
+  const create = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        finishCreate = resolve;
+      }),
+  );
+  render(
+    <DraftRecoveryProvider>
+      <CreateTicketDialog
+        open
+        onOpenChange={vi.fn()}
+        triggerRef={createRef()}
+        navigation={{ project: "all", plan: "" }}
+        projects={[]}
+        plans={[]}
+        create={create}
+      />
+    </DraftRecoveryProvider>,
+  );
+  const title = await screen.findByRole("textbox", { name: "Title" });
+  fireEvent.change(title, { target: { value: "Older" } });
+  await waitFor(() => expect(first).toBe(false));
+  fireEvent.change(title, { target: { value: "Newer" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+  expect(create).not.toHaveBeenCalled();
+  await act(async () => {
+    releaseFirst();
+  });
+  await waitFor(() =>
+    expect(create).toHaveBeenCalledWith(
+      "Newer",
+      "",
+      "Todo",
+      null,
+      null,
+      [],
+      false,
+    ),
+  );
+  expect(records.get("new-ticket")?.payload).toMatchObject({ title: "Newer" });
+  await act(async () => {
+    finishCreate("T-1");
+  });
+});

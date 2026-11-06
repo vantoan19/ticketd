@@ -737,10 +737,19 @@ export function MarkdownEditor({
   const [historyOwner] = useState(
     () => `undo:${recoveryOwner}:${crypto.randomUUID()}`,
   );
+  const [historyProtected, setHistoryProtected] = useState(false);
   useEffect(() => {
+    let current = true;
+    setHistoryProtected(false);
     void recovery
       .put(historyOwner, null, value ? [value] : [], "undo")
+      .then(() => {
+        if (current) setHistoryProtected(true);
+      })
       .catch(() => {});
+    return () => {
+      current = false;
+    };
   }, [recovery, historyOwner, value]);
   useEffect(
     () => () => {
@@ -1091,6 +1100,19 @@ export function MarkdownEditor({
           </AlertDescription>
         </Alert>
       )}
+      {recovery.active &&
+        historyProtected &&
+        !recoveryError &&
+        value.includes("ticketd://attachment/") && (
+          <p
+            role="status"
+            aria-label="Attachment draft protection"
+            className="text-xs text-muted-foreground"
+          >
+            Files in this recoverable draft are protected. Undo can retain them
+            after save.
+          </p>
+        )}
       <div
         className={`editor-mode${inlineMode ? " editor-mode--inline" : ""}`}
         data-persistent={persistentToolbar || undefined}
