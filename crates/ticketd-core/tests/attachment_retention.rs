@@ -183,6 +183,15 @@ fn older_workspace_with_retained_bytes_withholds_eligibility_until_browser_cutov
     let export = dir.path().join("export.txt");
     w.export_attachment(&file.id, &export).unwrap();
     assert_eq!(std::fs::read(export).unwrap(), b"legacy draft bytes");
+    let target = dir.path().join("recovered-49.sqlite3");
+    drop(Workspace::open(&target).unwrap());
+    Workspace::restore(&target, &backups[0].path).unwrap();
+    let recovered = Workspace::open(&target).unwrap();
+    assert_eq!(recovered.attachment_upload_limit().unwrap(), 4096);
+    assert!(recovered.draft_cutover_pending().unwrap());
+    let export = dir.path().join("recovered-49.txt");
+    recovered.export_attachment(&file.id, &export).unwrap();
+    assert_eq!(std::fs::read(export).unwrap(), b"legacy draft bytes");
 }
 
 #[test]
