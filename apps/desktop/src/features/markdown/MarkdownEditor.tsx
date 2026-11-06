@@ -12,7 +12,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
-import { TextApi, type Value } from "platejs";
+import { TextApi, NodeApi, type Value } from "platejs";
 import {
   Plate,
   PlateContent,
@@ -67,6 +67,7 @@ import {
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
+import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import {
   attachments,
   type Attachment,
@@ -105,6 +106,7 @@ import {
   MoreHorizontal,
   FileCode2,
   Paperclip,
+  Eye,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
 import { MermaidDiagram } from "./MermaidDiagram";
@@ -155,6 +157,10 @@ function Element(props: PlateElementProps) {
   const editor = useEditorRef();
   const readOnly = useEditorReadOnly();
   const path = editor.api.findPath(element);
+  const [preview, setPreview] = useState<{
+    uri: string;
+    replace: ((file: Attachment) => Promise<void>) | undefined;
+  } | null>(null);
   const tags = {
     p: "p",
     h1: "h1",
@@ -229,6 +235,44 @@ function Element(props: PlateElementProps) {
         <span contentEditable={false} className="editor-rule" />
       )}
       {children}
+      {element.type === "a" &&
+        String(element.url).startsWith("ticketd://attachment/") && (
+          <span contentEditable={false}>
+            <button
+              type="button"
+              className="attachment-inline-preview"
+              aria-label={`Preview attachment: ${NodeApi.string(element)}`}
+              title="Preview attachment"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const before = writeMarkdown(editor.children);
+                setPreview({
+                  uri: String(element.url),
+                  replace:
+                    readOnly || !path
+                      ? undefined
+                      : async (file) => {
+                          const uri = await attachments.uri(file.id);
+                          if (writeMarkdown(editor.children) !== before)
+                            throw new Error(
+                              "The content changed while choosing a replacement. Close the preview and select the reference again.",
+                            );
+                          editor.tf.setNodes({ url: uri }, { at: path });
+                        },
+                });
+              }}
+            >
+              <Eye aria-hidden="true" />
+            </button>
+            {preview && (
+              <AttachmentPreview
+                target={{ uri: preview.uri }}
+                onClose={() => setPreview(null)}
+                onReplace={preview.replace}
+              />
+            )}
+          </span>
+        )}
     </PlateElement>
   );
 }

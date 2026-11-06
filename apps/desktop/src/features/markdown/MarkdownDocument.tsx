@@ -4,6 +4,8 @@ import {
   useContext,
   useEffect,
   useState,
+  useRef,
+  useLayoutEffect,
 } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
@@ -20,6 +22,7 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { SyntaxCode } from "./SyntaxCode";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { attachments, type Attachment } from "@/lib/api/attachments";
 import { CopySourceButton } from "./CopySourceButton";
 import { TicketReference } from "@/features/tickets/TicketMarkdown";
 import { references } from "@/features/tickets/ticket-references";
@@ -31,6 +34,12 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
+const AttachmentReplacement = createContext<
+  (
+    node: ExtraProps["node"],
+    uri: string,
+  ) => ((file: Attachment) => Promise<void>) | undefined
+>(() => undefined);
 type MdNode = { type: string; value?: string; children?: MdNode[] };
 /**
  * Raw HTML is never rendered, but it is not dropped either: `<tag>` written in a brief
@@ -92,15 +101,21 @@ function TrashedMark({
 function DocumentLink({
   href,
   children,
+  node,
 }: {
   href?: string | undefined;
   children?: React.ReactNode;
-}) {
+} & ExtraProps) {
   const { select, revision } = useContext(TicketNavigation);
   const openDocument = useContext(DocumentNavigation);
   const openPlan = useContext(PlanNavigation);
+  const replacement = useContext(AttachmentReplacement);
   if (href?.startsWith("ticketd://attachment/"))
-    return <AttachmentLink uri={href}>{children}</AttachmentLink>;
+    return (
+      <AttachmentLink uri={href} onReplace={replacement(node, href)}>
+        {children}
+      </AttachmentLink>
+    );
   if (href?.startsWith("ticketd://plan/")) {
     const id = href.slice("ticketd://plan/".length);
     return openPlan ? (
@@ -273,12 +288,7 @@ function mentionBlock(tag: string) {
 // during workspace polling would remount diagrams and discard their SVG/state.
 const components: Components = {
   a: DocumentLink,
-  img: ({ src, alt }) =>
-    src?.startsWith("ticketd://attachment/") ? (
-      <AttachmentLink uri={src}>{alt || "Attachment"}</AttachmentLink>
-    ) : (
-      <img src={src} alt={alt ?? ""} />
-    ),
+  img: AttachmentImage,
   table: ({ children }) => (
     <div
       className="markdown-table-scroll"
@@ -295,32 +305,107 @@ const components: Components = {
   ),
 };
 
+function AttachmentImage({
+  src,
+  alt,
+  node,
+}: { src?: string | undefined; alt?: string | undefined } & ExtraProps) {
+  const replacement = useContext(AttachmentReplacement);
+  return src?.startsWith("ticketd://attachment/") ? (
+    <AttachmentLink uri={src} onReplace={replacement(node, src)}>
+      {alt || "Attachment"}
+    </AttachmentLink>
+  ) : (
+    <img src={src} alt={alt ?? ""} />
+  );
+}
+
+// Replace only this occurrence. Shared reference definitions and other uses stay unchanged.
+function replaceDestination(
+  occurrence: string,
+  oldUri: string,
+  nextUri: string,
+): string {
+  const destination = occurrence.indexOf(`](${oldUri}`);
+  const angled = occurrence.indexOf(`](<${oldUri}>`);
+  const offset =
+    destination >= 0 ? destination + 2 : angled >= 0 ? angled + 3 : -1;
+  if (offset >= 0)
+    return (
+      occurrence.slice(0, offset) +
+      nextUri +
+      occurrence.slice(offset + oldUri.length)
+    );
+  let depth = 0;
+  for (
+    let index = occurrence.startsWith("!") ? 1 : 0;
+    index < occurrence.length;
+    index++
+  ) {
+    if (occurrence[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (occurrence[index] === "[") depth += 1;
+    if (occurrence[index] === "]" && --depth === 0)
+      return `${occurrence.slice(0, index + 1)}(${nextUri})`;
+  }
+  throw new Error(
+    "This reference could not be selected safely. Edit its Markdown source to replace it.",
+  );
+}
+
 export function MarkdownDocument({
   source,
   select,
   revision,
   mention,
+  onChange,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
   revision?: number | undefined;
   /** A passage to mark: highlighted, focusable and described. */
   mention?: MentionMark | undefined;
+  onChange?: ((source: string) => void) | undefined;
 }) {
+  const currentSource = useRef(source);
+  useLayoutEffect(() => {
+    currentSource.current = source;
+  }, [source]);
+  function replacement(node: ExtraProps["node"], uri: string) {
+    const start = node?.position?.start.offset;
+    const end = node?.position?.end.offset;
+    if (!onChange || start === undefined || end === undefined) return undefined;
+    return async (file: Attachment) => {
+      const nextUri = await attachments.uri(file.id);
+      if (currentSource.current !== source)
+        throw new Error(
+          "The content changed while choosing a replacement. Close the preview and select the reference again.",
+        );
+      onChange(
+        source.slice(0, start) +
+          replaceDestination(source.slice(start, end), uri, nextUri) +
+          source.slice(end),
+      );
+    };
+  }
   return (
     <div className="markdown-document">
       <TicketNavigation.Provider value={{ select, revision }}>
         <MentionTarget.Provider value={mention ?? null}>
           <MarkdownSource.Provider value={source}>
-            <ReactMarkdown
-              remarkPlugins={remarkPlugins}
-              urlTransform={(url) =>
-                url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
-              }
-              components={components}
-            >
-              {source}
-            </ReactMarkdown>
+            <AttachmentReplacement.Provider value={replacement}>
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                urlTransform={(url) =>
+                  url.startsWith("ticketd:") ? url : defaultUrlTransform(url)
+                }
+                components={components}
+              >
+                {source}
+              </ReactMarkdown>
+            </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>
         </MentionTarget.Provider>
       </TicketNavigation.Provider>

@@ -106,6 +106,45 @@ older database-only backups remain readable. See
 trade-off. Desktop review and `ticketd inspect-backup <path>` expose completeness,
 local file totals, and the limits of remote references through the same core.
 
+## Local media previews
+
+`Workspace::attachment_preview` retains attachment metadata when bytes are missing,
+incomplete, unreadable, or unsuitable for preview. `Workspace::attachment_media`
+authorizes a workspace UUID and attachment ID, opens only a complete managed local
+snapshot, and classifies bounded header evidence against a passive-media allowlist.
+It returns a read handle, never a filesystem path to React. PNG, JPEG, GIF, WebP,
+BMP, WAV, MP3, recognized Ogg, MP4 and WebM containers can be attempted; container
+recognition is not a codec guarantee. HTML, SVG, PDF, office files, playlists and
+unrecognized content retain metadata and explicit export/open fallback actions.
+Images require checked dimensions of at most 16,384 per axis and 40 million pixels;
+files above 100 MiB remain usable through explicit export/open rather than preview,
+even if the configurable upload limit is higher.
+
+The main Tauri WebView serves `attachment-media` requests by identity. GET and HEAD
+support single byte ranges, capped at 1 MiB per range response; a full GET remains
+a complete representation. Tauri/Wry buffer these responses rather than stream
+them; at most two Rust responses are prepared concurrently. Responses use explicit
+allowlisted MIME types, no-store, nosniff and a restrictive response CSP. The app
+CSP permits this origin only for images/media, with frames and objects disabled.
+The dialog loads one selected file, never autoplays, and releases media sources on
+close. A rendering error triggers fresh inspection without asserting a codec or
+storage failure that inspection cannot establish.
+
+Managed-byte resolution rejects links and Windows reparse points at the attachment
+root and every managed path component, verifies canonical containment and the
+opened regular file's recorded length, and uses the same handle for media reads
+and byte exports. Native open retains its explicit extension allowlist. This
+protects against stored path traversal and existing filesystem redirections; it
+does not sandbox a hostile same-user process racing filesystem replacement between
+checks and open, nor isolate hard-linked files. Workspace storage must remain
+under the local user's control.
+
+Previewing never rewrites authored Markdown. Replacement selects/uploads a new
+identity and changes only the selected Markdown occurrence or direct association.
+Reader replacement preserves surrounding source, labels and image syntax; a changed
+draft requires reselection. Direct replacement is one replayable core transaction,
+so failure leaves the old association intact and other uses retain their snapshots.
+
 ## Document editing
 
 Rich document editing uses Plate, with Markdown remaining canonical across storage and CLI operations. Editor document trees remain transient UI state; CodeMirror provides source editing, and Mermaid renders diagrams locally. See [Plate editing with canonical Markdown](adr/0005-plate-editor-with-canonical-markdown.md) for fidelity and integration boundaries.

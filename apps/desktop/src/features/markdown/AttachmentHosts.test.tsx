@@ -108,6 +108,54 @@ async function insertInto(label: string) {
   );
 }
 
+test("reader replacement follows description autosave and retains the chosen occurrence after save failure", async () => {
+  const nextUri = "ticketd://attachment/workspace-1/replacement";
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace-1";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "resolve_attachment_uri") return file;
+    if (command === "attachment_preview")
+      return {
+        attachment: file,
+        status: "missing",
+        media_type: null,
+        message: "Stored bytes are missing",
+        can_open: false,
+      };
+    if (command === "list_attachments")
+      return [{ ...file, id: "replacement", display_name: "Replacement" }];
+    if (command === "inspect_attachment")
+      return { ...file, id: "replacement", display_name: "Replacement" };
+    if (command === "attachment_uri") return nextUri;
+    if (command === "change_ticket") throw new Error("Database busy");
+    return [];
+  });
+  const original = `${link} and [Keep](${uri})`;
+  render(
+    <TicketEditor ticket={{ ...ticket, body: original }} onSaved={vi.fn()} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Trace" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose a replacement" }),
+  );
+  expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
+  fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  const expected = `[Trace](${nextUri}) and [Keep](${uri})`;
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "change_ticket",
+      expect.objectContaining({
+        patch: expect.objectContaining({ body: expected }),
+      }),
+    ),
+  );
+  expect(
+    JSON.parse(localStorage.getItem("ticketd:ticket-draft:ticket-1") ?? "{}")
+      .body,
+  ).toBe(expected);
+});
+
 test("ticket descriptions autosave inserted links and retain the failed draft", async () => {
   bridge();
   render(<TicketEditor ticket={ticket} onSaved={vi.fn()} />);
