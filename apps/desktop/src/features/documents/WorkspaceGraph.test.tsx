@@ -17,9 +17,11 @@ vi.mock("./ContextGraphCanvas", () => ({
   ContextGraphCanvas: ({
     edges,
     nodes,
+    overlay,
   }: {
     edges: { label?: string }[];
     nodes: { id: string }[];
+    overlay?: import("react").ReactNode;
   }) => (
     <div data-testid="canvas">
       {nodes.map((node) => (
@@ -28,6 +30,7 @@ vi.mock("./ContextGraphCanvas", () => ({
       {edges.map((edge, index) => (
         <span key={index}>{edge.label}</span>
       ))}
+      {overlay}
     </div>
   ),
 }));

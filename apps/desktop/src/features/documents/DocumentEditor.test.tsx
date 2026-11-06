@@ -91,7 +91,7 @@ it("tells a capture it is saved to Documents once it has text", async () => {
   });
   const status = await screen.findByText("Saved to Documents as you type");
   expect(status.querySelector("svg")).toBeTruthy();
-  expect(screen.queryByText("Saved locally")).toBeNull();
+  expect(screen.queryByText("Saved on this computer")).toBeNull();
 });
 it("keeps a failed capture open and retries the same request before returning", async () => {
   vi.mocked(documents.save)
@@ -267,7 +267,7 @@ it("opens a connected ticket after saving a document draft", async () => {
   renderEditor(
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
-  await screen.findByText("Source");
+  await screen.findByText("From");
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
@@ -416,13 +416,15 @@ it("reads an untitled Document with its core heading and current save details", 
   });
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "First line" })).toBeTruthy();
-  expect(screen.getByText("before")).toBeTruthy();
-  expect(screen.getAllByText("Saved locally")).toHaveLength(1);
+  expect(screen.getAllByText(/before/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Saved on this computer")).toHaveLength(1);
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Changed" },
   });
-  await waitFor(() => expect(screen.getByText("after")).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.getAllByText(/after/).length).toBeGreaterThan(0),
+  );
   expect(document.querySelector(".document-crumb-title")?.textContent).toBe(
     "Changed",
   );
@@ -694,7 +696,7 @@ it("edits the title in place without repeating the heading as a placeholder", ()
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   const title = screen.getByRole("textbox", { name: "Title" });
-  expect(title.getAttribute("placeholder")).toBe("Add a title (optional)");
+  expect(title.getAttribute("placeholder")).toBe("Title");
   expect(screen.queryByText("Optional title")).toBeNull();
 });
 const stored = {
@@ -988,5 +990,5 @@ it("quotes a passage shared by several connections once", async () => {
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
   await screen.findByRole("button", { name: "T-1" });
   expect(screen.getAllByText(/See\s+T-1/)).toHaveLength(2);
-  expect(screen.getAllByText("Linked from the same passage")).toHaveLength(1);
+  expect(screen.getAllByText("Both from")).toHaveLength(1);
 });

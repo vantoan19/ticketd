@@ -293,7 +293,12 @@ function Diagram(props: PlateElementProps) {
       <div contentEditable={false} className="diagram-editor">
         <MermaidDiagram source={source} />
         <details>
-          <summary>Diagram source</summary>
+          <summary>
+            <Code aria-hidden="true" />
+            <span className="diagram-summary-label">Mermaid diagram</span>
+            <span className="diagram-summary-action">Edit source</span>
+            <span className="sr-only">Diagram source</span>
+          </summary>
           <CodeMirror
             value={source}
             readOnly={readOnly}

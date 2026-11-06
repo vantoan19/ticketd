@@ -242,3 +242,7 @@
   height: 160px;
   padding: 12px;
 }
+.diagram-summary-action,
+.diagram-summary-label {
+  font-size: var(--text-caption);
+}

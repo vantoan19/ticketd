@@ -40,6 +40,16 @@ export function renderDiagram(
         theme: dark ? "dark" : "neutral",
         themeVariables: {
           fontFamily: "Geist, ui-sans-serif, system-ui, sans-serif",
+          // White boxes with a grey outline and a grey line (board F).
+          ...(dark
+            ? {}
+            : {
+                primaryColor: "#ffffff",
+                mainBkg: "#ffffff",
+                nodeBorder: "#bdbdbd",
+                primaryBorderColor: "#bdbdbd",
+                lineColor: "#4d4d4d",
+              }),
         },
         htmlLabels: false,
         maxTextSize: 20000,

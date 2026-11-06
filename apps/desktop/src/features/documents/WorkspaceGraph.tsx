@@ -1,3 +1,4 @@
+import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
 import { ContextGraphCanvas } from "./ContextGraphCanvas";
@@ -6,6 +7,7 @@ import { useScrollFade } from "./scroll-fade";
 import { KindIcon } from "./GraphLegend";
 import {
   connectionRows,
+  labelledConnections,
   cardParts,
   nodeAriaLabel,
   edgeLabels,
@@ -229,6 +231,8 @@ export function WorkspaceGraph({
         id: node.id,
         label: nodeAriaLabel(node),
         ...cardParts(node),
+        kind: node.kind,
+        status: node.state?.split(" · ")[0] ?? "",
       })),
     [connected],
   );
@@ -345,11 +349,16 @@ export function WorkspaceGraph({
             .join(" · ")}
         </p>
       </div>
-      {connectionRows(preview.id, graph!).map((row) => (
-        <p key={row.key} className="context-graph-connection">
-          <strong>{edgeLabels[row.kind] ?? row.kind}</strong> · {row.text}
-        </p>
-      ))}
+      <dl className="context-graph-connections">
+        {labelledConnections(preview.id, graph!).map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            {row.items.map((item) => (
+              <dd key={item.id}>{item.text}</dd>
+            ))}
+          </div>
+        ))}
+      </dl>
       {(graph?.connection_counts?.[preview.id] ?? 0) > 0 && (
         <p>
           {graph?.connection_counts?.[preview.id]}{" "}
@@ -398,14 +407,17 @@ export function WorkspaceGraph({
         )}
       </ListHeader>
       <div className="context-graph-toolbar">
-        <input
-          className="context-graph-search"
-          type="search"
-          aria-label="Search"
-          placeholder="Find a ticket, Document or Plan"
-          value={search}
-          onChange={(event) => refine(() => setSearch(event.target.value))}
-        />
+        <span className="context-graph-search-field">
+          <Search aria-hidden="true" />
+          <input
+            className="context-graph-search"
+            type="search"
+            aria-label="Search"
+            placeholder="Find a ticket, Document or Plan"
+            value={search}
+            onChange={(event) => refine(() => setSearch(event.target.value))}
+          />
+        </span>
         <Picker
           label="Type"
           value={kind || ALL}
@@ -476,6 +488,33 @@ export function WorkspaceGraph({
                 onError={setError}
                 fit={fit}
                 onFitted={() => setFit(false)}
+                overlay={
+                  unconnected.length > 0 ? (
+                    <div
+                      className="context-graph-unconnected"
+                      role="group"
+                      aria-label="Not connected"
+                    >
+                      <strong>Not connected · {unconnected.length}</strong>
+                      <div
+                        ref={fadeUnconnected}
+                        className="context-graph-unconnected-list"
+                        tabIndex={0}
+                        aria-label="Not connected items"
+                      >
+                        {unconnected.map((node) => (
+                          <button
+                            key={node.id}
+                            type="button"
+                            onClick={() => setSelected(node.id)}
+                          >
+                            {node.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null
+                }
               />
             )}
             <aside className="context-graph-preview context-graph-preview-split">
@@ -494,31 +533,6 @@ export function WorkspaceGraph({
                 {previewPanel}
               </div>
               {previewActions}
-              {unconnected.length > 0 && (
-                <div
-                  className="context-graph-unconnected"
-                  role="group"
-                  aria-label="Not connected"
-                >
-                  <strong>Not connected · {unconnected.length}</strong>
-                  <div
-                    ref={fadeUnconnected}
-                    className="context-graph-unconnected-list"
-                    tabIndex={0}
-                    aria-label="Not connected items"
-                  >
-                    {unconnected.map((node) => (
-                      <button
-                        key={node.id}
-                        type="button"
-                        onClick={() => setSelected(node.id)}
-                      >
-                        {node.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </aside>
           </div>
         ) : (
