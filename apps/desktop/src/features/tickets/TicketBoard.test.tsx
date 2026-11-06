@@ -207,6 +207,258 @@ async function chooseStatus(reference: string, status: string) {
   await settle();
 }
 
+function boardGeometry() {
+  const board = screen.getByRole("region", { name: "Ticket status board" });
+  vi.spyOn(board, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(0, 0, 1680, 600),
+  );
+  within(board)
+    .getAllByRole("region")
+    .forEach((column, index) => {
+      vi.spyOn(column, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(index * 280, 0, 280, 600),
+      );
+    });
+  return board;
+}
+function startDrag(reference = "T-1", x = 100) {
+  const card = screen.getByRole("button", {
+    name: new RegExp(`${reference}.*Ticket`),
+  });
+  card.focus();
+  fireEvent.pointerDown(card, {
+    pointerId: 1,
+    pointerType: "mouse",
+    button: 0,
+    clientX: x,
+    clientY: 100,
+  });
+  return card;
+}
+function movePointer(x: number, y = 100) {
+  fireEvent.pointerMove(window, {
+    pointerId: 1,
+    pointerType: "mouse",
+    clientX: x,
+    clientY: y,
+  });
+}
+function releasePointer(x: number, y = 100) {
+  fireEvent.pointerUp(window, {
+    pointerId: 1,
+    pointerType: "mouse",
+    clientX: x,
+    clientY: y,
+  });
+}
+
+test("pointer dragging into an empty column saves through the card status action without opening detail", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  const card = startDrag();
+  movePointer(400);
+  expect(
+    screen.getByText("Drop to change status to In progress."),
+  ).toBeTruthy();
+  releasePointer(400);
+  // Browsers dispatch a click after pointerup, including after a captured drag.
+  fireEvent.click(card, { detail: 1 });
+  await settle(20);
+  expect(bridge.invoke).toHaveBeenCalledWith("bulk_status", {
+    references: ["T-1"],
+    status: "In progress",
+    requestId: expect.any(String),
+  });
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(1);
+  expect(
+    within(
+      screen.getByRole("region", { name: "In progress column" }),
+    ).getByText("Ticket 1"),
+  ).toBeTruthy();
+  expect(screen.getByText("T-1 is now In progress.")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Close ticket details" }),
+  ).toBeNull();
+});
+
+test("same-column and outside drops, Escape and pointer cancellation preserve saved state and focus", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  const card = startDrag();
+  movePointer(140);
+  releasePointer(140);
+  startDrag();
+  movePointer(400);
+  releasePointer(400, 700);
+  startDrag();
+  movePointer(400);
+  fireEvent.pointerCancel(window, { pointerId: 1 });
+  releasePointer(400);
+  startDrag();
+  movePointer(400);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(
+    screen.queryByText("Drop to change status to In progress."),
+  ).toBeNull();
+  releasePointer(400);
+  await settle();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+  expect(document.activeElement).toBe(card);
+  // A canceled mouse drag must not swallow the next keyboard activation.
+  fireEvent.click(card, { detail: 0 });
+  await settle();
+  expect(
+    screen.getByRole("button", { name: "Close ticket details" }),
+  ).toBeTruthy();
+});
+
+test("a pointer held at the board edge scrolls to offscreen destinations and column contents", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  const board = boardGeometry();
+  vi.mocked(board.getBoundingClientRect).mockReturnValue(
+    new DOMRect(0, 0, 560, 600),
+  );
+  Object.defineProperties(board, {
+    scrollWidth: { configurable: true, value: 1680 },
+    clientWidth: { configurable: true, value: 560 },
+  });
+  const column = screen.getByRole("region", { name: "In progress column" });
+  const body = within(column).getByText("No matching tickets").parentElement!;
+  vi.spyOn(body, "getBoundingClientRect").mockReturnValue(
+    new DOMRect(280, 32, 280, 568),
+  );
+  Object.defineProperties(body, {
+    scrollHeight: { configurable: true, value: 1200 },
+    clientHeight: { configurable: true, value: 568 },
+  });
+  startDrag();
+  movePointer(550, 590);
+  await settle(64);
+  expect(board.scrollLeft).toBeGreaterThan(0);
+  expect(body.scrollTop).toBeGreaterThan(0);
+  fireEvent.keyDown(window, { key: "Escape" });
+  const position = board.scrollLeft;
+  await settle(64);
+  expect(board.scrollLeft).toBe(position);
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+});
+
+test("drag respects external destinations and revalidates source changes made during a drag", async () => {
+  saved[0] = { ...ticket(1), source: external() };
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(1000);
+  expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
+  releasePointer(1000);
+  startDrag();
+  movePointer(400);
+  saved[0] = {
+    ...ticket(1, "Done"),
+    source: external({ status_choices: [], status_locked: true }),
+  };
+  releasePointer(400);
+  await settle();
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+  expect(screen.getByRole("alert").textContent).toContain(
+    "This status is no longer available",
+  );
+});
+
+test("a pending dragged ticket cannot be dragged again or changed through its menu", async () => {
+  let finish: ((value: Ticket[]) => void) | undefined;
+  writeOverride = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(400);
+  releasePointer(400);
+  await settle();
+  startDrag();
+  movePointer(1000);
+  expect(screen.queryByText("Drop to change status to Done.")).toBeNull();
+  releasePointer(1000);
+  expect(
+    screen.getByRole("button", { name: "Change status of T-1" }),
+  ).toHaveProperty("disabled", true);
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(1);
+  saved[0] = ticket(1, "In progress");
+  finish?.([saved[0]]);
+  await settle();
+});
+
+test("dropping in Duplicate opens the shared review without moving until confirmation", async () => {
+  render(<App />);
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(1500);
+  releasePointer(1500);
+  await settle();
+  expect(
+    screen.getByRole("heading", { name: "Mark T-1 as a duplicate" }),
+  ).toBeTruthy();
+  expect(saved[0]?.status).toBe("Todo");
+  expect(
+    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await settle(20);
+  expect(
+    within(screen.getByRole("region", { name: "Todo column" })).getByText(
+      "Ticket 1",
+    ),
+  ).toBeTruthy();
+});
+
+test("a column empty because of Ready filtering accepts a drag and explains the saved disappearance", async () => {
+  render(<App />);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
+  await settle();
+  await showBoard();
+  boardGeometry();
+  startDrag();
+  movePointer(400);
+  releasePointer(400);
+  await settle();
+  expect(
+    screen.getByText(
+      "T-1 is now In progress. It no longer matches the current filters.",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("region", { name: "Ticket status board" }),
+    ).queryByText("Ticket 1"),
+  ).toBeNull();
+  expect(screen.getAllByText("No matching tickets")).toHaveLength(6);
+});
+
 test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
   let finish: ((value: Ticket[]) => void) | undefined;
   writeOverride = () =>
