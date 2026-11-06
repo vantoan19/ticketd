@@ -212,7 +212,7 @@ export function TicketListPane({
         </div>
       ) : (
         <div className="list-header">
-          <h1 id="tickets-heading" tabIndex={-1}>
+          <h1 id="tickets-heading" tabIndex={-1} title={scopeName}>
             {scopeName}
           </h1>
           <p>
@@ -228,6 +228,7 @@ export function TicketListPane({
           </p>
           {!trash && !navigation.plan && (
             <SegmentedControl
+              className="ticket-layout-switch"
               compact
               aria-label="Ticket layout"
               value={workspace.layout}
