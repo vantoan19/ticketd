@@ -91,11 +91,10 @@
   align-items: center;
   gap: 8px;
 }
-/* One row: progress, counts, then the spec chip at the right end. The counts
-   wrap inside their own cell, so the header never grows a second row. */
+/* Keep the wide header on one row; let each group wrap before its contents overlap. */
 .plan-summary {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
   color: var(--muted-foreground);
@@ -147,6 +146,9 @@
 }
 .plan-actions {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
 }
@@ -286,6 +288,7 @@
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 4px 8px;
   margin-left: auto;
@@ -307,6 +310,7 @@
   align-items: center;
   gap: 6px;
   height: 28px;
+  max-width: 100%;
   padding: 0 8px;
   border-radius: 6px;
   box-shadow: inset 0 0 0 1px var(--border);
@@ -327,6 +331,10 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.plan-documents > ul {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .plan-document-row {
   display: flex;
@@ -584,7 +592,7 @@
   box-shadow: inset 0 0 0 1px var(--control-boundary);
 }
 
-/* Header rows match board E: purpose 28px, counts row 28px with the spec chip at its right end. */
+/* Header controls match board E's 28px purpose and spec chip. */
 .plan-purpose-edit {
   height: 28px;
 }
@@ -594,7 +602,6 @@
 }
 .plan-documents {
   gap: 0;
-  flex: none;
 }
 .plan-documents .plan-document-row [aria-haspopup="menu"],
 .plan-documents .plan-add-context {
@@ -602,6 +609,5 @@
   height: 28px;
 }
 .plan-counts {
-  flex-wrap: nowrap;
   gap: 4px 16px;
 }
