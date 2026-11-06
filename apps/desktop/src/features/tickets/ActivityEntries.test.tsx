@@ -99,9 +99,11 @@ test("shows an editing agent only when one was recorded and words history as sen
     throw new Error(`Unexpected ${command}`);
   });
   render(<Activity {...props} reference="T-20" />);
-  await screen.findByText("Status changed from Todo to In progress");
+  await screen.findByText("Status Todo → In progress");
   expect(screen.queryByText(/Only in ticketd/)).toBeNull();
-  expect(screen.getAllByText(/^Agent:/)).toHaveLength(1);
+  // The agent names its update; an agentless one is the person's own.
+  expect(screen.getAllByText(/^update ·/)).toHaveLength(2);
+  expect(screen.getAllByText("You")).toHaveLength(1);
   expect(screen.queryByText(/status:/)).toBeNull();
 });
 

@@ -101,7 +101,9 @@ export function TicketWorkspaceView({
     else setNarrowDetail(selected !== null);
   };
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "ticketd.workspace",
+    // Versioned: layouts saved by earlier builds (468px list) must not override
+    // the 384px default.
+    id: "ticketd.workspace.v2",
   });
   const focusPane = useRef<"detail" | "list" | null>(null);
   useLayoutEffect(() => {

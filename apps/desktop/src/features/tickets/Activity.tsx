@@ -26,7 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { FileText, MoreHorizontal, Plus, History } from "lucide-react";
+import { Bot, FileText, MoreHorizontal, Plus, History } from "lucide-react";
 import {
   client,
   type AuthoredActivity,
@@ -918,21 +918,22 @@ export function Activity({
                 }
               >
                 <div className="activity-meta">
-                  <strong>Update</strong>
+                  <Bot aria-hidden="true" className="activity-author-icon" />
+                  <strong>{item.note.editing_agent ?? "You"}</strong>
+                  <span>
+                    update ·{" "}
+                    <time
+                      dateTime={item.note.reported_at}
+                      title={formatDateTime(item.note.reported_at)}
+                    >
+                      {relativeDateTime(item.note.reported_at, now)}
+                    </time>
+                  </span>
                   {item.note.id === (newestNoteId ?? latestNoteId) && (
                     <span className="activity-latest">Latest</span>
                   )}
-                  <time
-                    dateTime={item.note.reported_at}
-                    title={formatDateTime(item.note.reported_at)}
-                  >
-                    {relativeDateTime(item.note.reported_at, now)}
-                  </time>
                   {item.note.updated_at !== item.note.reported_at && (
                     <span>Edited {formatDateTime(item.note.updated_at)}</span>
-                  )}
-                  {item.note.editing_agent && (
-                    <span>Agent: {item.note.editing_agent}</span>
                   )}
                   {!trashed && (
                     <DropdownMenu>

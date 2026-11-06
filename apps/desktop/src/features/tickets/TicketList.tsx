@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusIcon } from "./StatusIcon";
+import { RowTags } from "./RowTags";
 import { ago, externalSource } from "./ticket-source";
 import { groupTickets } from "./ticket-groups";
 import {
@@ -24,7 +25,6 @@ import {
   readinessLabel,
   readinessShortLabel,
   rowContextItem,
-  rowTagSlot,
   type RowContextKind,
   type RowScope,
 } from "./ticket-row";
@@ -258,7 +258,6 @@ function RowDetails({
   const now = useNow();
   const state = readiness(ticket);
   const context = rowContextItem(ticket, scope);
-  const tagSlot = rowTagSlot(ticket.tags);
   const unavailable = Boolean(externalSource(ticket)?.unavailable);
   const showState =
     // The Ready view already says Ready, and a status view says its status;
@@ -309,19 +308,7 @@ function RowDetails({
             <span className="ticket-row-context-label">{context.label}</span>
           </span>
         )}
-        {tagSlot && (
-          <span className="ticket-row-tags">
-            <span className="ticket-tag">{tagSlot.first}</span>
-            {tagSlot.more > 0 && (
-              <span
-                className="ticket-tag ticket-tag-more"
-                title={ticket.tags.slice(1).join(", ")}
-              >
-                +{tagSlot.more}
-              </span>
-            )}
-          </span>
-        )}
+        <RowTags tags={ticket.tags} />
       </span>
       <span className="ticket-row-time">
         {ticket.updated_at ? (
