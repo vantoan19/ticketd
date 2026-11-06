@@ -214,7 +214,7 @@ Trash preserves relationships under section 4.6; permanent ticket deletion is no
 | List             | Flat stream, search, filtering, and quick operations; surface important relationships                                    |
 | Status board     | Side-by-side ticket statuses, independent bounded columns, and the existing ticket detail experience                     |
 | Ticket detail    | Read/edit content, checklist, authored activities, project/Plan links, parent/subtickets, and dependencies; read history |
-| Plan view        | Flat member-ticket list, counts by status, membership management, and archive/reactivation                               |
+| Plan view        | Member-ticket List or Board, Dependencies, counts by status, membership management, and archive/reactivation             |
 | Dependency graph | Understand dependency direction, blocked work, and relationships around a selected ticket                                |
 
 Initial layout direction: navigation for projects and Plans, including unlinked tickets, main list/graph surface, and ticket detail in a panel or dedicated page appropriate to window size. Validate through prototyping rather than treating this as a fixed pixel layout.
@@ -700,7 +700,10 @@ may recreate the schema. This is not an instruction to erase a live workspace.
 
 A Plan requires only a name. Initially show its name, optional short purpose, and
 tickets; empty context sections stay behind Add context. One page contains linked
-Documents, progress, and tickets with a List / Dependencies switch. Set as spec
+Documents, progress, and tickets with a List / Board / Dependencies switch.
+List and Board share the locally remembered ticket layout; Dependencies does not
+change that preference. Header counts describe all non-trashed Plan members,
+while Board column counts reflect the current filters. Set as spec
 selects an existing Document as the optional primary spec; it creates no copy or
 separate document type. The spec is the principal long-form entry point; the Plan
 purpose should not duplicate it. Other supporting Documents use ordinary associations.
