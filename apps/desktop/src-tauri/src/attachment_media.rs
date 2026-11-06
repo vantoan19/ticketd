@@ -35,6 +35,18 @@ pub(crate) fn denied(status: StatusCode) -> Response<Vec<u8>> {
 
 /// Protocol translation only. Workspace owns identity, byte authorization and media policy.
 fn respond(workspace: &Workspace, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+    if request
+        .headers()
+        .get("Sec-Fetch-Dest")
+        .is_some_and(|destination| {
+            matches!(
+                destination.as_bytes(),
+                b"document" | b"iframe" | b"object" | b"embed" | b"script"
+            )
+        })
+    {
+        return denied(StatusCode::FORBIDDEN);
+    }
     if !matches!(*request.method(), Method::GET | Method::HEAD) {
         return denied(StatusCode::METHOD_NOT_ALLOWED);
     }
@@ -240,6 +252,15 @@ mod tests {
         assert_eq!(full.headers()["X-Content-Type-Options"], "nosniff");
         assert_eq!(full.headers()["Cache-Control"], "no-store");
         assert!(!full.headers().contains_key("Access-Control-Allow-Origin"));
+        let navigation = Request::builder()
+            .uri(&uri)
+            .header("Sec-Fetch-Dest", "document")
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(
+            respond(&workspace, &navigation).status(),
+            StatusCode::FORBIDDEN
+        );
         for (range, content_range, expected) in [
             ("bytes=2-5", "bytes 2-5/24", &bytes[2..6]),
             ("bytes=20-", "bytes 20-23/24", &bytes[20..]),

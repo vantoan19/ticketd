@@ -1402,6 +1402,15 @@ pub fn run() -> Result<(), tauri::Error> {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
+        // Tauri classifies registered schemes as local IPC origins. Media is never a document.
+        .plugin(
+            tauri::plugin::Builder::<_, ()>::new("attachment-media-navigation")
+                .on_navigation(|_, url| {
+                    url.scheme() != "attachment-media"
+                        && url.host_str() != Some("attachment-media.localhost")
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![

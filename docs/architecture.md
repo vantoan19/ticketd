@@ -126,6 +126,9 @@ a complete representation. Tauri/Wry buffer these responses rather than stream
 them; at most two Rust responses are prepared concurrently. Responses use explicit
 allowlisted MIME types, no-store, nosniff and a restrictive response CSP. The app
 CSP permits this origin only for images/media, with frames and objects disabled.
+Navigation to the media origin is refused: Tauri otherwise treats registered
+custom schemes as local IPC origins. Media responses also reject document,
+frame, object and script fetch destinations when that request evidence is present.
 The dialog loads one selected file, never autoplays, and releases media sources on
 close. A rendering error triggers fresh inspection without asserting a codec or
 storage failure that inspection cannot establish.
