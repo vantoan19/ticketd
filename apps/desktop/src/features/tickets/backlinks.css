@@ -3,7 +3,7 @@
 }
 .backlinks h3 {
   margin-bottom: 8px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
@@ -42,7 +42,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0 8px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .backlink-heading strong {
@@ -50,7 +50,7 @@
 }
 .backlink-where {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .mention-passage {
@@ -59,7 +59,7 @@
   -webkit-line-clamp: 3;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .backlink-pages {

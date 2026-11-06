@@ -24,14 +24,14 @@
   max-width: 936px;
 }
 .documents-list-view h1 {
-  font-size: 24px;
+  font-size: var(--text-title);
   line-height: 32px;
   font-weight: 600;
   letter-spacing: -0.6px;
   margin-bottom: 24px;
 }
 .documents-list-view h2 {
-  font-size: 14px;
+  font-size: var(--text-ui);
   margin-bottom: 8px;
 }
 .documents-list-view ul {
@@ -86,7 +86,7 @@
 }
 .document-main > header h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-title);
   overflow-wrap: anywhere;
 }
 .document-eyebrow {
@@ -94,7 +94,7 @@
   align-items: center;
   gap: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -122,7 +122,8 @@
   align-items: center;
   gap: 4px;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .document-status svg {
   width: 14px;
@@ -130,11 +131,11 @@
 }
 .document-main > .document-body {
   min-width: 0;
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 .document-main > .document-body .markdown-document {
-  font-size: 16px;
+  font-size: var(--text-reading);
   line-height: 1.6;
 }
 .document-main > footer {
@@ -171,7 +172,7 @@
 .document-save-error details {
   flex-basis: 100%;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-save-error pre {
   white-space: pre-wrap;
@@ -186,7 +187,7 @@
   gap: 12px;
 }
 .document-dialog #document-title {
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .document-rail {
   display: flex;
@@ -195,7 +196,7 @@
 }
 .document-rail dt {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin-top: 12px;
 }
 .document-rail dd {
@@ -216,7 +217,7 @@
 }
 .document-rail li p {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-rail .document-direction {
   margin: 0 0 4px;
@@ -297,7 +298,8 @@
 .documents-count {
   margin: 0 0 8px;
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
 }
 .documents-list-view section {
   margin-bottom: 24px;
@@ -329,7 +331,7 @@
 }
 .document-list-content p {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
@@ -342,7 +344,7 @@
 }
 .document-list-content .document-origin,
 .document-list-content .document-list-tags {
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-list-tags {
   display: flex;
@@ -382,7 +384,7 @@
   flex: none;
   margin-top: 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   white-space: nowrap;
 }
 .document-list > li > button {
@@ -458,11 +460,11 @@
 }
 .document-bar .document-status {
   margin-left: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .document-title {
   margin: 0;
-  font-size: 32px;
+  font-size: var(--text-section);
   line-height: 40px;
   font-weight: 600;
   letter-spacing: -1.28px;
@@ -472,7 +474,7 @@
   height: 44px;
   margin-left: -8px;
   padding: 0 8px;
-  font-size: 32px;
+  font-size: var(--text-section);
   font-weight: 600;
   letter-spacing: -1.28px;
 }
@@ -485,7 +487,7 @@
 .document-rail h2 {
   margin: 0 0 4px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
   font-weight: 400;
 }
@@ -516,7 +518,7 @@
 .document-shared-passage > p {
   margin: 4px 0 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 @media (max-width: 767px) {
   .documents-page {
@@ -526,7 +528,7 @@
 .document-subtitle {
   margin: -8px 0 0;
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .document-title .document-title-input {

@@ -12,7 +12,7 @@
 }
 .create-property > span {
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
 }
 .create-property > button,
@@ -42,7 +42,7 @@
   border-radius: 6px;
   background: var(--recessed);
   color: var(--foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }
 .create-tag-chip svg {
   width: 14px;
@@ -70,9 +70,9 @@
 }
 .create-description-hint {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .create-restored {
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
 }

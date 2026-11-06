@@ -19,7 +19,7 @@
   margin: 32px 0 4px;
   padding: 0 8px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   line-height: 16px;
   letter-spacing: normal;
@@ -77,7 +77,7 @@
   flex: none;
   color: var(--muted-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 .inbox-title {
   min-width: 0;
@@ -99,7 +99,7 @@
 .inbox-entry time {
   flex: none;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 20px;
 }
 .inbox-actions {

@@ -29,7 +29,7 @@
 }
 .subtickets-summary {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 16px;
 }
 .subtickets-rows {
@@ -53,7 +53,7 @@
 .subtickets-reference {
   color: var(--secondary-foreground);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 13px;
+  font-size: var(--text-code);
 }
 .subtickets-title {
   height: auto;
@@ -68,7 +68,7 @@
 }
 .subtickets-status {
   color: var(--muted-foreground);
-  font-size: 14px;
+  font-size: var(--text-ui);
   line-height: 20px;
   white-space: nowrap;
 }
