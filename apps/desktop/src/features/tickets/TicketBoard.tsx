@@ -29,7 +29,6 @@ export function TicketBoard({
   const { statusAction } = workspace;
   return (
     <>
-      <p className="board-summary">Counts reflect current filters.</p>
       <p className="sr-only" role="status" aria-live="polite">
         {statusAction.notice}
       </p>
@@ -258,6 +257,7 @@ export function TicketBoard({
           );
         })}
       </div>
+      <p className="board-summary">Counts reflect current filters.</p>
     </>
   );
 }

@@ -7,8 +7,8 @@ import { createContext, useContext } from "react";
 export type FilterDock = {
   open: boolean;
   setOpen: (open: boolean) => void;
-  /** The list pane; the panel is placed against its right edge. */
-  anchor: { current: HTMLElement | null };
+  /** The List pane's right edge, or null to use the trigger and viewport collision handling. */
+  anchor: { current: HTMLElement | null } | null;
 };
 
 export const FilterDockContext = createContext<FilterDock | null>(null);
