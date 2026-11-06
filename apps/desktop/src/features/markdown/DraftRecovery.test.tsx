@@ -16,6 +16,8 @@ import { CreateTicketDialog } from "@/features/tickets/CreateTicketDialog";
 import { DocumentEditor } from "@/features/documents/DocumentEditor";
 import { Activity } from "@/features/tickets/Activity";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { TicketEditor } from "@/features/tickets/TicketEditor";
+import type { Ticket } from "@/lib/api/client";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 beforeAll(async () => {
@@ -43,7 +45,10 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-function bridge(records = new Map<string, Record<string, unknown>>()) {
+function bridge(
+  records = new Map<string, Record<string, unknown>>(),
+  other?: (command: string, args: unknown) => unknown,
+) {
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "draft_cutover_pending") return false;
     if (command === "draft_retentions") return [...records.values()];
@@ -53,6 +58,7 @@ function bridge(records = new Map<string, Record<string, unknown>>()) {
       records.set(String(draft.owner), saved);
       return saved;
     }
+    if (other) return other(command, args);
     if (command === "save_document" || command === "edit_activity")
       throw new Error("Database busy");
     return [];
@@ -142,6 +148,129 @@ test("unpublished new-ticket content is core-retained and recovers after a faile
   ).toContain("Trace");
   fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
   await waitFor(() => expect(records.get("new-ticket")?.payload).toBeNull());
+});
+
+test("description autosave releases the current draft while source Undo retains and restores its removed file link", async () => {
+  const body = "[Authored trace label](ticketd://attachment/workspace/file)";
+  let canonical: Ticket = {
+    id: "t1",
+    reference: "T-1",
+    title: "Keep Undo",
+    body,
+    status: "Todo",
+    trashed: false,
+    tags: [],
+    project_id: null,
+    plan_id: null,
+    availability: "Ready",
+    prerequisites: [],
+    parent: null,
+    children: [],
+  };
+  const records = bridge(new Map(), (command, args) => {
+    if (command === "change_ticket") {
+      canonical = {
+        ...canonical,
+        ...(args as { patch: Partial<Ticket> }).patch,
+      };
+      return canonical;
+    }
+    return [];
+  });
+  function Host() {
+    const [ticket, setTicket] = useState(canonical);
+    return (
+      <DraftRecoveryProvider>
+        <TicketEditor ticket={ticket} onSaved={setTicket} />
+      </DraftRecoveryProvider>
+    );
+  }
+  render(<Host />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit description" }),
+  );
+  await typeSource("Description", "");
+  await waitFor(() => expect(canonical.body).toBe(""));
+  await waitFor(() => expect(records.get("ticket:t1")?.payload).toBeNull());
+  expect([...records.values()].some((record) => record.kind === "undo")).toBe(
+    true,
+  );
+  const source = screen.getByRole("textbox", { name: "Description source" });
+  fireEvent.keyDown(source, { key: "z", code: "KeyZ", ctrlKey: true });
+  await waitFor(() => expect(canonical.body).toBe(body));
+  fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
+  expect(
+    screen.getByRole("textbox", { name: "Description rich text" }).textContent,
+  ).toContain("Authored trace label");
+});
+
+test("Document Reload preserves the independently recoverable discarded draft until Undo restores it", async () => {
+  const body = "[Discarded trace](ticketd://attachment/workspace/file)";
+  const initial = {
+    id: "d1",
+    title: null,
+    body: "External content",
+    created_at: "2026-11-07",
+    updated_at: "new",
+    trashed: false,
+  };
+  const saved = { title: "", body: "Original content", suggestion: null };
+  const draft = { title: "", body, suggestion: null };
+  const records = bridge(
+    new Map([
+      [
+        "document:d1",
+        {
+          owner: "document:d1",
+          kind: "draft",
+          revision: 1,
+          payload: {
+            draft,
+            saved,
+            id: "d1",
+            revision: "old",
+            pending: null,
+            discarded: null,
+            external: null,
+            externalRevision: null,
+          },
+          markdown: [body],
+        },
+      ],
+    ]),
+    (command) => {
+      if (command === "save_document")
+        throw new Error("document changed elsewhere");
+      if (command === "show_document") return initial;
+      if (command === "document_context_links") return [[], []];
+      return [];
+    },
+  );
+  render(
+    <DraftRecoveryProvider>
+      <DocumentEditor initial={initial} onClose={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reload saved content" }),
+  );
+  await waitFor(() =>
+    expect(records.get("document:d1")?.payload).toMatchObject({
+      discarded: { body },
+      draft: { body: "External content" },
+    }),
+  );
+  expect(records.get("document:d1")?.markdown).toContain(body);
+  fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
+  expect(
+    screen.getByRole("textbox", { name: "Document rich text" }).textContent,
+  ).toContain("Discarded trace");
+  await waitFor(() =>
+    expect(records.get("document:d1")?.payload).toMatchObject({
+      draft: { body },
+      discarded: null,
+    }),
+  );
 });
 
 test("a failed Document capture keeps canonical recovery and its original create request through restart", async () => {

@@ -812,6 +812,10 @@ Fresh workspaces and attachment-free upgrades need no desktop review.
 Distinct old profile drafts are preserved separately when their recovery keys
 collide; `attachment recovery-drafts` inspects their private recovery payloads
 without publishing them.
+After reviewing or recovering a payload, `attachment release-recovery <owner>
+--revision <revision> --discard-recovery` explicitly discards only that owner and
+protection. This also resolves conservative Undo protection left by an interrupted
+editor shutdown; attachment bytes and other owners remain intact.
 
 Publication checks the exact outgoing description in the core before creating a
 remote issue, including retries after a failed or resolved attempt. Workspace-only

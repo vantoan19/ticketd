@@ -56,6 +56,14 @@ enum AttachmentCommand {
     },
     /// Inspect private recovery payloads, including preserved drafts from other profiles
     RecoveryDrafts,
+    /// Discard one reviewed recovery payload/protection, retaining attachment bytes
+    ReleaseRecovery {
+        owner: String,
+        #[arg(long)]
+        revision: i64,
+        #[arg(long, required = true)]
+        discard_recovery: bool,
+    },
     /// Print the workspace-scoped URI to use in canonical Markdown links
     Uri { id: String },
     /// Reuse an existing attachment on another ticket
@@ -1913,6 +1921,11 @@ fn attachment_command(
             serde_json::json!({"legacy_drafts_pending":false}).to_string()
         }
         AttachmentCommand::RecoveryDrafts => serde_json::to_string(&workspace.draft_retentions()?)?,
+        AttachmentCommand::ReleaseRecovery {
+            owner,
+            revision,
+            discard_recovery: _,
+        } => serde_json::to_string(&workspace.release_draft(&owner, revision)?)?,
         AttachmentCommand::Uri { id } => serde_json::to_string(&workspace.attachment_uri(&id)?)?,
         AttachmentCommand::Link { id, ticket } => {
             serde_json::to_string(&workspace.set_ticket_attachment(&ticket, &id, true)?)?

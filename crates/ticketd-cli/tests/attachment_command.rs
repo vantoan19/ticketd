@@ -142,4 +142,25 @@ fn cli_reports_protected_unpublished_drafts_without_a_desktop_process() {
         run(dir.path(), &["attachment", "usage", id])["eligible"],
         false
     );
+    run(
+        dir.path(),
+        &[
+            "attachment",
+            "release-recovery",
+            "activity:T-1",
+            "--revision",
+            "1",
+            "--discard-recovery",
+        ],
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "usage", id])["eligible"],
+        true
+    );
+    let exported = dir.path().join("reviewed.txt");
+    run(
+        dir.path(),
+        &["attachment", "export", id, exported.to_str().unwrap()],
+    );
+    assert_eq!(std::fs::read(exported).unwrap(), b"unpublished");
 }

@@ -43,6 +43,9 @@ legacy payload is preserved under a stable profile-specific recovery owner
 before removing its browser slot; it never overwrites the primary recovered draft.
 `attachment recovery-drafts` explicitly inspects private recovery payloads,
 including these separately retained drafts, for recovery into an editor.
+`attachment release-recovery <owner> --revision <revision> --discard-recovery`
+deliberately retires a reviewed owner, including conservative history left by an
+interrupted shutdown. Stale revisions fail; other owners and bytes remain intact.
 
 One profile cannot prove other profiles empty. The desktop therefore offers an
 explicit acknowledgement after all profiles are reviewed; the CLI offers the
