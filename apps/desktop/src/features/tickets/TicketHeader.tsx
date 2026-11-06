@@ -345,8 +345,8 @@ export function TicketHeader({
           refresh={refresh}
           open
           onOpenChange={setDuplicateOpen}
-          title="Mark as duplicate"
-          description={`Choose the canonical ticket for ${ticket.reference} and review its dependencies.`}
+          title={`Mark ${ticket.reference} as a duplicate`}
+          description={`${ticket.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
           returnFocus={actionsTrigger}
         />
       )}

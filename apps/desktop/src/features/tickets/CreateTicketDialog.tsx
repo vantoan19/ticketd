@@ -312,6 +312,7 @@ export function CreateTicketDialog({
           <span aria-hidden="true">Tags</span>
           <TokenField
             label="Add tag"
+            chevron
             placeholder="Add a tag"
             suggestions={suggestions}
             values={draft.tags}

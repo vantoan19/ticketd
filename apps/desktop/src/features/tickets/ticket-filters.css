@@ -43,12 +43,40 @@
   justify-content: space-between;
   gap: 8px;
 }
-/* Docked-look panel (board C): 340px, flat, beside the list. */
+/* Docked panel (board C): 340px, flat, 1px ring, beside the list. It stays
+   at its content height; the detail pane's empty state re-centres in the
+   space to its right. */
 .filters-content {
   width: 340px;
   max-height: calc(100dvh - 44px - 16px);
   box-shadow: 0 0 0 1px #00000014;
   border-radius: 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.filters-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+.filters-head {
+  flex: none;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 #0000000f;
+}
+.ticket-workspace[data-filters-open] #detail .detail-empty {
+  padding-left: 383px;
+}
+/* The Filter control keeps a filled pill while the panel is open or filters apply. */
+.filter-trigger[data-active],
+.filter-trigger[data-state="open"] {
+  background: var(--accent);
 }
 .filters-head h2 {
   font-size: var(--text-ui);
@@ -59,7 +87,22 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 16px;
+}
+.filters-content .toggle-chips button {
+  height: 28px;
+  gap: 6px;
+  padding: 0 10px 0 8px;
+  border-radius: 9999px;
+  font-size: var(--text-code);
+}
+.filters-content .tag-chips button {
+  height: 26px;
+  padding: 0 10px;
+}
+.filters-content .filter-section [data-slot="select-trigger"],
+.filters-content .ui-picker-field {
+  width: 100%;
+  height: 32px;
 }
 .filter-section h3 {
   color: var(--muted-foreground);
@@ -78,9 +121,11 @@
   line-height: 16px;
 }
 .filters-foot {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  flex: none;
+  height: 52px;
+  padding: 0 12px 0 16px;
+  background: var(--background);
+  box-shadow: 0 -1px 0 0 #0000000f;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
@@ -149,13 +194,14 @@
 }
 .parent-search-icon {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  width: 16px;
-  height: 16px;
+  top: 9px;
+  left: 10px;
+  width: 14px;
+  height: 14px;
   color: var(--muted-foreground);
   pointer-events: none;
 }
 .parent-search input {
-  padding-left: 36px;
+  height: 32px;
+  padding-left: 34px;
 }

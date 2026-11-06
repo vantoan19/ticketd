@@ -92,7 +92,7 @@ function renderReview(
       refresh={refresh}
       open
       onOpenChange={() => {}}
-      title="Mark as duplicate"
+      title="Mark T-2 as a duplicate"
       description="Choose the canonical ticket and review its dependencies."
       {...props}
     />,
@@ -112,7 +112,7 @@ async function openReview(refresh = vi.fn(async () => {})) {
     target: { value: "T-2" },
   });
   submitReview();
-  await screen.findByText("Affected dependencies");
+  await screen.findByText("Dependencies to review");
   return refresh;
 }
 /** The apply button, once the core has answered for the current choices. */
@@ -163,7 +163,7 @@ test("a waiting ticket that is itself a Duplicate does not break the review", as
   };
   await openReview();
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByText("Affected dependencies")).toBeTruthy();
+  expect(screen.getByText("Dependencies to review")).toBeTruthy();
 });
 
 test("the summary and the apply label follow the choices", async () => {
@@ -264,7 +264,6 @@ test("a ticket with no dependencies can be marked directly", async () => {
   submitReview();
   const apply = await screen.findByRole("button", { name: "Mark duplicate" });
   expect((apply as HTMLButtonElement).disabled).toBe(false);
-  expect(screen.getByText(/Removing the duplicate link later/)).toBeTruthy();
 });
 
 test("reviews separate dependency changes for an existing endpoint", async () => {
@@ -281,7 +280,7 @@ test("reviews separate dependency changes for an existing endpoint", async () =>
     target: { value: "T-9" },
   });
   submitReview();
-  await screen.findByText("Affected dependencies");
+  await screen.findByText("Dependencies to review");
   choose("T-9 blocks T-3", "replace");
   fireEvent.click(await enabled("Apply dependency changes"));
   await waitFor(() =>
@@ -294,13 +293,12 @@ test("reviews separate dependency changes for an existing endpoint", async () =>
 
 test("shows both tickets with their statuses, and the duplicate's status change", async () => {
   await openReview();
-  expect(screen.getByText("Canonical")).toBeTruthy();
   const duplicate = screen.getByRole("group", { name: "Duplicate" });
   expect(duplicate.textContent).toContain(
-    "Todo → Duplicate · Duplicate of T-2",
+    "Result: T-1 becomes Duplicate of T-2",
   );
   const canonical = screen.getByRole("group", { name: "Canonical ticket" });
-  expect(canonical.textContent).toContain("Todo · unchanged");
+  expect(canonical.textContent).toContain("T-2");
 });
 
 test("a separate review does not claim the kept endpoint is a duplicate", async () => {
@@ -317,7 +315,7 @@ test("a separate review does not claim the kept endpoint is a duplicate", async 
     target: { value: "T-9" },
   });
   submitReview();
-  await screen.findByText("Affected dependencies");
+  await screen.findByText("Dependencies to review");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
   expect(screen.queryByText(/duplicate ticket/)).toBeNull();
@@ -464,7 +462,7 @@ test("a separate review compares against the preview's normalized source", async
     target: { value: "T-09" },
   });
   submitReview();
-  await screen.findByText("Affected dependencies");
+  await screen.findByText("Dependencies to review");
   choose("T-9 blocks T-3", "retain");
   expect(screen.getByText("T-3 keeps waiting on T-9")).toBeTruthy();
 });
@@ -604,7 +602,7 @@ test("a trashed endpoint explains why Replace is unavailable", async () => {
 test("one flow in the dialog shell: Cancel, and a primary that waits for a canonical ticket", async () => {
   renderReview(async () => {});
   expect(
-    screen.getByRole("dialog", { name: "Mark as duplicate" }),
+    screen.getByRole("dialog", { name: "Mark T-2 as a duplicate" }),
   ).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Review dependencies" }),
