@@ -750,7 +750,7 @@ export function MarkdownEditor({
     return () => {
       current = false;
     };
-  }, [recovery, historyOwner, value]);
+  }, [recovery, historyOwner, value, recoveryError]);
   useEffect(
     () => () => {
       void recovery.put(historyOwner, null, []).catch(() => {});
@@ -1109,8 +1109,8 @@ export function MarkdownEditor({
             aria-label="Attachment draft protection"
             className="text-xs text-muted-foreground"
           >
-            Files in this recoverable draft are protected. Undo can retain them
-            after save.
+            Draft recovery saved. Workspace attachments stay protected through
+            Undo.
           </p>
         )}
       <div
