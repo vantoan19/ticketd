@@ -5,8 +5,8 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
-import { modifierKeyLabel } from "@/lib/platform";
+import { Folder, Layers } from "lucide-react";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { Picker } from "@/components/ui/picker";
 import { Switch } from "@/components/ui/switch";
 import { TokenField } from "@/components/ui/token-field";
@@ -162,6 +162,18 @@ export function CreateTicketDialog({
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="New ticket"
       primaryLabel="Create ticket"
+      primaryHint="⌘↵"
+      footerLeading={
+        <label className="create-more">
+          <Switch
+            checked={createMore}
+            onCheckedChange={setCreateMore}
+            disabled={pending}
+            aria-label="Create more"
+          />
+          <span>Create more</span>
+        </label>
+      }
       blockedReason={blockedReason}
       onSubmit={() => void submit()}
       returnFocus={triggerRef}
@@ -190,7 +202,7 @@ export function CreateTicketDialog({
         <Field data-disabled={pending}>
           <FieldLabel asChild>
             <span>
-              Description <small>Optional. Markdown and checklists work.</small>
+              Description <small>Optional</small>
             </span>
           </FieldLabel>
           <div
@@ -200,8 +212,9 @@ export function CreateTicketDialog({
             // creates the ticket. Nested UI (slash menu, link field, source
             // editors) handles or ignores it first, so it never reaches here
             // as an unhandled rich-editor event.
-            // The area keeps its height while the editor loads.
-            className="min-h-32"
+            // The box keeps its 112px height while the editor loads, and the
+            // hint sits inside it at the bottom.
+            className="create-description"
             onKeyDown={(event) => {
               if (
                 event.key === "Enter" &&
@@ -226,10 +239,10 @@ export function CreateTicketDialog({
               value={draft.body}
               onChange={(body) => update({ body })}
             />
+            <small className="create-description-hint">
+              Markdown works · type / for blocks
+            </small>
           </div>
-          <small className="create-description-hint">
-            Markdown works · type / for blocks
-          </small>
         </Field>
         {draft.restored && (
           <p className="create-restored" role="status">
@@ -248,12 +261,14 @@ export function CreateTicketDialog({
           </p>
         )}
         <div
-          className="flex flex-wrap items-center gap-2"
+          className="create-properties"
           role="group"
           aria-label="Initial properties"
         >
           <Picker
             label="Status"
+            stacked
+            icon={<StatusIcon status={draft.status} size={16} decorative />}
             value={draft.status}
             disabled={pending}
             onValueChange={(status) => update({ status })}
@@ -264,6 +279,8 @@ export function CreateTicketDialog({
           />
           <Picker
             label="Project"
+            stacked
+            icon={<Folder aria-hidden="true" />}
             value={draft.project || NONE}
             disabled={pending}
             onValueChange={(project) =>
@@ -276,6 +293,8 @@ export function CreateTicketDialog({
           />
           <Picker
             label="Plan"
+            stacked
+            icon={<Layers aria-hidden="true" />}
             value={draft.plan || NONE}
             disabled={pending}
             onValueChange={(plan) =>
@@ -289,7 +308,8 @@ export function CreateTicketDialog({
             ]}
           />
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
+          <span aria-hidden="true">Tags</span>
           <TokenField
             label="Add tag"
             placeholder="Add a tag"
@@ -308,21 +328,6 @@ export function CreateTicketDialog({
         <p className="sr-only" role="status" aria-live="polite">
           {announcement}
         </p>
-        <div className="flex items-center gap-4">
-          <label className="create-more">
-            <Switch
-              checked={createMore}
-              onCheckedChange={setCreateMore}
-              disabled={pending}
-              aria-label="Create more"
-            />
-            <span>Create more</span>
-          </label>
-          <small className="create-hint">
-            <Kbd>{modifierKeyLabel()}</Kbd>
-            <Kbd>Enter</Kbd> to create
-          </small>
-        </div>
       </div>
     </DialogShell>
   );

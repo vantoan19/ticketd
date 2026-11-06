@@ -10,8 +10,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Search, SlidersHorizontal, X } from "lucide-react";
+import { Layers, Search, SlidersHorizontal, X } from "lucide-react";
 import { client, type Ticket } from "@/lib/api/client";
+import { StatusIcon } from "@/features/tickets/StatusIcon";
+import { StatusDot } from "@/components/ui/status-dot";
 import { ticketStatuses } from "@/lib/statuses";
 import "./ticket-filters.css";
 
@@ -169,10 +171,15 @@ export function TicketFilters(p: Props) {
               className="filters-content"
               side="right"
               align="start"
+              sideOffset={0}
+              alignOffset={0}
               aria-label="Ticket filters"
             >
               <div className="filters-head">
                 <h2>Filters</h2>
+                <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+                  Clear all
+                </Button>
               </div>
               {p.navigation.kind !== "progress" && (
                 <FilterSection label="Status">
@@ -185,6 +192,7 @@ export function TicketFilters(p: Props) {
                           update(p.setStatus, p.status === value ? "" : value)
                         }
                       >
+                        <StatusIcon status={value} size={16} decorative />
                         {value}
                       </ToggleChip>
                     ))}
@@ -199,10 +207,19 @@ export function TicketFilters(p: Props) {
                     onValueChange={(value) =>
                       update(p.setAvailability, value === "Any" ? "" : value)
                     }
-                    options={["Any", "Ready", "Blocked"].map((value) => ({
-                      value,
-                      label: value,
-                    }))}
+                    options={[
+                      { value: "Any", label: "Any" },
+                      {
+                        value: "Ready",
+                        label: "Ready",
+                        icon: <StatusDot tone="ready" size={8} />,
+                      },
+                      {
+                        value: "Blocked",
+                        label: "Blocked",
+                        icon: <StatusDot tone="blocked" size={8} />,
+                      },
+                    ]}
                   />
                 </FilterSection>
               )}
@@ -210,6 +227,7 @@ export function TicketFilters(p: Props) {
                 <FilterSection label="Plan">
                   <Picker
                     label="Plan"
+                    icon={<Layers aria-hidden="true" />}
                     value={p.plan || "__any"}
                     onValueChange={(value) =>
                       update(p.setPlan, value === "__any" ? "" : value)
@@ -245,10 +263,11 @@ export function TicketFilters(p: Props) {
                   {ofTotal} {p.total === 1 ? "ticket matches" : "tickets match"}
                 </span>
                 <span className="filters-actions">
-                  <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-                    Clear all
-                  </Button>
-                  <Button size="sm" onClick={() => setFiltersOpen(false)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFiltersOpen(false)}
+                  >
                     Done
                   </Button>
                 </span>
@@ -421,6 +440,7 @@ function ParentSearch({
   const results = text.trim() ? found : [];
   return (
     <div className="parent-search">
+      <Search aria-hidden="true" className="parent-search-icon" />
       <Input
         aria-label="Find a parent ticket"
         placeholder="Find a parent by title or T-number"

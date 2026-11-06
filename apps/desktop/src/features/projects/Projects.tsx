@@ -199,10 +199,12 @@ function CheckoutRow({
 function FolderPicker({
   path,
   title,
+  hint,
   onChoose,
 }: {
   path: string;
   title: string;
+  hint?: string;
   onChoose: (path: string) => void;
 }) {
   const [error, setError] = useState("");
@@ -219,6 +221,10 @@ function FolderPicker({
     <Field>
       <FieldLabel>Folder</FieldLabel>
       <div className="folder-picker">
+        <Folder
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground"
+        />
         <span
           className="folder-path"
           data-empty={!path}
@@ -230,6 +236,7 @@ function FolderPicker({
           {path ? "Change…" : "Choose folder…"}
         </Button>
       </div>
+      {hint && <small className="folder-hint">{hint}</small>}
       {error && <FieldError>{error}</FieldError>}
     </Field>
   );
@@ -547,13 +554,14 @@ export function Projects({
         open={dialog?.kind === "project"}
         onOpenChange={(next) => !next && setDialog(null)}
         title="New project"
-        description="A project represents a repository."
+        description="Start from the repository folder on this computer."
+        width={573}
         primaryLabel="Create project"
         blockedReason={
           saving
             ? "Saving…"
             : !newPath
-              ? "Choose the repository folder to continue."
+              ? "Choose a folder to continue"
               : !newNameValue.trim()
                 ? "Enter a project name."
                 : null
@@ -563,6 +571,7 @@ export function Projects({
         <FolderPicker
           path={newPath}
           title="Choose the repository folder"
+          hint="Pick it in Finder or drop it here. It becomes the first checkout."
           onChoose={setNewPath}
         />
         <Field>
@@ -583,6 +592,7 @@ export function Projects({
         open={!!renaming}
         onOpenChange={(next) => !next && setDialog(null)}
         title="Rename project"
+        width={573}
         description="Its identity stays the same, and so do its tickets."
         primaryLabel="Save name"
         blockedReason={
@@ -614,6 +624,7 @@ export function Projects({
         open={!!checkoutProject}
         onOpenChange={(next) => !next && setDialog(null)}
         title="Register checkout"
+        width={573}
         description={`Another folder where ${checkoutProject?.name ?? "this project"} lives on this computer.`}
         primaryLabel="Register checkout"
         blockedReason={

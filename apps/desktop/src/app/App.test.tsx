@@ -735,16 +735,12 @@ test("a filter applies live, counts N of M, and Done closes the panel", async ()
       .textContent,
   ).toContain("3 of 7");
   expect(panel.getByText("3 of 7 tickets match")).toBeTruthy();
-  // Clear all sits in the footer beside Done, not in the header.
-  const footer = panel.getByRole("status").parentElement!;
-  expect(
-    within(footer).getByRole("button", { name: "Clear all" }),
-  ).toBeTruthy();
+  // Clear all sits in the header (board C); the footer has the count and Done.
   expect(
     within(
       panel.getByRole("heading", { name: "Filters" }).parentElement!,
-    ).queryByRole("button", { name: "Clear all" }),
-  ).toBeNull();
+    ).getByRole("button", { name: "Clear all" }),
+  ).toBeTruthy();
   // The Done status chip shares the name; the footer button comes last.
   fireEvent.click(panel.getAllByRole("button", { name: "Done" }).at(-1)!);
   expect(screen.queryByRole("dialog", { name: "Ticket filters" })).toBeNull();
@@ -1709,7 +1705,7 @@ test("the Duplicate group's Add action chooses a ticket and then reviews its can
     name: "Mark T-2 as a duplicate",
   });
   expect(
-    within(review).getByText(/Choose the canonical ticket for T-2/),
+    within(review).getByText(/T-2 keeps its description and history/),
   ).toBeTruthy();
   // The cursor is where the next answer goes, not on the dialog's frame.
   expect(document.activeElement).toBe(
