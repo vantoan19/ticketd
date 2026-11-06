@@ -127,6 +127,17 @@ test("native file drops use physical coordinates and ignore other surfaces", asy
   });
   act(() => receive?.(payload(500)));
   expect(changed).not.toHaveBeenCalled();
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => document.body,
+  });
+  await act(async () => receive?.(payload(80)));
+  expect(changed).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "Attach file" })).toBeNull();
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => region,
+  });
   await act(async () => receive?.(payload(80)));
   await waitFor(() => expect(changed.mock.lastCall?.[0]).toContain(uri));
   expect(invoke).toHaveBeenCalledWith(
@@ -134,6 +145,7 @@ test("native file drops use physical coordinates and ignore other surfaces", asy
     expect.objectContaining({ source: "C:/trace.log" }),
   );
   expect(open).not.toHaveBeenCalled();
+  Reflect.deleteProperty(document, "elementFromPoint");
 });
 
 test.each(["rich", "source"])(

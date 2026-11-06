@@ -24,6 +24,9 @@ export function useNativeFileDrop(
             const bounds = target.current?.getBoundingClientRect();
             const x = payload.position.x / window.devicePixelRatio;
             const y = payload.position.y / window.devicePixelRatio;
+            const hit = document.elementFromPoint?.(x, y);
+            // Bounds alone also match editors underneath a modal or another pane.
+            if (hit && !target.current?.contains(hit)) return;
             if (
               bounds &&
               x >= bounds.left &&
