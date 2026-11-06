@@ -1210,8 +1210,10 @@ export function MarkdownEditor({
             aria-label="Attachment draft protection"
             className="text-xs text-muted-foreground"
           >
-            Draft recovery saved. Workspace attachments stay protected through
-            Undo.
+            Draft protected
+            <span className="sr-only">
+              . Workspace attachments stay protected through Undo.
+            </span>
           </p>
         )}
       <div
