@@ -376,6 +376,20 @@ existing broken references remain editable and removable. Foreign links remain
 canonical content with unresolved reference records. `embedded_attachments` and
 `embedded_attachment_uris` expose derived uses without depending on editor trees.
 
+Publication eligibility inspects the exact outgoing Markdown inside the write
+transaction before saving an attempt or calling the connector. Its
+`internal_attachments` reason and preview list expose workspace-only URIs and known
+display names to desktop and CLI. Retries use the same guard; resolving an
+uncertain attempt only reads the provider and never resends its saved body.
+Direct attachments are counted as local context, never uploaded implicitly.
+
+Source import, refresh and publication resolution index authoritative incoming
+text without requiring its attachment links to resolve. Known identities retain
+their file association; unknown or foreign links retain the URI with no local
+identity. Local authoring continues to validate newly introduced local file links.
+Both paths update derived references in the content transaction and leave direct
+ticket attachment associations and explicit local Document references untouched.
+
 The desktop shares one AttachmentPicker between the direct-ticket adapter and
 MarkdownEditor. Its `onPick(file, requestId)` callback receives only a successfully
 stored or inspected identity. MarkdownEditor resolves the URI through the core

@@ -177,6 +177,7 @@ const eligibilitySchema = z.discriminatedUnion("kind", [
       "source_not_connected",
       "unsupported",
       "attempt_open",
+      "internal_attachments",
     ]),
     message: z.string(),
   }),
@@ -198,9 +199,13 @@ const publicationPreviewSchema = z.object({
       plan: z.string().nullable(),
       tags: z.array(z.string()),
       subtickets: z.array(z.string()),
+      attachments: z.number().int().nonnegative().default(0),
     })
     .optional(),
   eligibility: eligibilitySchema,
+  internal_attachments: z
+    .array(z.object({ uri: z.string(), display_name: z.string().nullable() }))
+    .default([]),
   attempt: publicationAttemptSchema.nullable(),
 });
 export type PublicationPreview = z.infer<typeof publicationPreviewSchema>;

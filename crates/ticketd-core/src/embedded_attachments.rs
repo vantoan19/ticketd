@@ -56,6 +56,24 @@ pub(crate) fn destinations(markdown: &str) -> BTreeSet<String> {
 
 /// Called inside the same transaction as every canonical body/brief write.
 pub(crate) fn index(tx: &Connection, source_id: &str, markdown: &str) -> Result<(), Error> {
+    index_content(tx, source_id, markdown, true)
+}
+
+/// Source-authoritative text must remain readable even when its file links cannot resolve.
+pub(crate) fn index_external(
+    tx: &Connection,
+    source_id: &str,
+    markdown: &str,
+) -> Result<(), Error> {
+    index_content(tx, source_id, markdown, false)
+}
+
+fn index_content(
+    tx: &Connection,
+    source_id: &str,
+    markdown: &str,
+    validate_new: bool,
+) -> Result<(), Error> {
     // Earlier migrations rebuild mention indexes before attachment tables exist.
     if tx.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))? < 48 {
         return Ok(());
@@ -68,7 +86,7 @@ pub(crate) fn index(tx: &Connection, source_id: &str, markdown: &str) -> Result<
     let next = destinations(markdown);
     for uri in &next {
         let id = uri.strip_prefix(&prefix);
-        if let Some(id) = id.filter(|_| !previous.contains(uri)) {
+        if let Some(id) = id.filter(|_| validate_new && !previous.contains(uri)) {
             let file = crate::attachments::read_attachment(tx, id)?;
             crate::attachments::validate_attachment_bytes(tx, &file)?;
         }
@@ -80,7 +98,7 @@ pub(crate) fn index(tx: &Connection, source_id: &str, markdown: &str) -> Result<
     for uri in next {
         let id = uri.strip_prefix(&prefix);
         tx.execute(
-            "INSERT INTO embedded_attachments(source_id, uri, attachment_id) VALUES (?1, ?2, ?3)",
+            "INSERT INTO embedded_attachments(source_id, uri, attachment_id) VALUES (?1, ?2, (SELECT id FROM attachments WHERE id=?3))",
             params![source_id, uri, id],
         )?;
     }
