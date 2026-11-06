@@ -227,8 +227,15 @@ enum Command {
     },
     /// Save a consistent workspace backup to a new file
     Backup { path: String },
+    /// Review backup integrity and retained local bytes as JSON without restoring
+    InspectBackup { path: String },
     /// Restore a workspace backup after closing other ticketd operations
-    RestoreWorkspace { path: String },
+    RestoreWorkspace {
+        path: String,
+        /// Recover into this database path instead of replacing the current workspace; does not switch the desktop workspace
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Export a portable JSON snapshot to stdout or a new file
     Export {
         #[arg(long)]
@@ -947,8 +954,12 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     use clap::{CommandFactory, FromArgMatches};
     let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
         .unwrap_or_else(|error| error.exit());
-    if let Command::RestoreWorkspace { path } = &args.command {
-        let safety = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
+    if let Command::RestoreWorkspace { path, target } = &args.command {
+        let destination = target
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("TICKETD_TEST_WORKSPACE").map(std::path::PathBuf::from));
+        let safety = match destination {
             Some(workspace) => Workspace::restore(workspace, path)?,
             None => Workspace::restore_default(path)?,
         };
@@ -1157,6 +1168,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
             workspace.backup(&path)?;
             format!("Backup saved: {path}")
         }
+        Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
         Command::Export { file } => {
             if let Some(path) = file {

@@ -68,11 +68,24 @@ Native open resolves only a stored, complete snapshot and permits passive file
 formats; arbitrary types can be exported explicitly without executing them.
 Exports publish synced temporary output without replacing an existing file.
 
-Until attachment-aware backup packaging is implemented, database-only backup,
-restore, and migration safety copies reject attachment-bearing workspaces.
-Backup holds the upload lock while checking and copying, so a concurrent upload
-cannot turn an attachment-free copy into an apparently complete partial backup.
-Supported attachment-free and older backups retain their existing behavior.
+Backup, restore safety copies, and migration safety copies include every
+retained local file. Attachment-bearing backups use a versioned single SQLite
+container with streamed file blobs, per-file SHA-256 and a checked inventory;
+its version is independent of the workspace schema. The upload lock covers
+database snapshotting and file packaging. Files with no reference, files in
+Trash, recovery manifests, and retained quarantine are included; incomplete
+upload staging and coordination locks are excluded. Remote records remain
+references and metadata; credentials and implicit remote downloads are excluded.
+
+Restore validates the database and all retained bytes before changing the
+workspace. It stages a live database without archive-only tables and a separate
+attachment root, saves a complete safety copy, then replaces the files and
+atomically replaces the database. A synced journal resolves interrupted file
+swaps before another workspace connection opens. Supported attachment-free and
+older database-only backups remain readable. See
+[ADR 0008](adr/0008-attachment-backup-container.md) for the format and recovery
+trade-off. Desktop review and `ticketd inspect-backup <path>` expose completeness,
+local file totals, and the limits of remote references through the same core.
 
 ## Document editing
 

@@ -349,7 +349,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
     <SettingsCard
       id="backups"
       title="Backups"
-      description="A complete copy of the workspace, checked for integrity after it is saved. It never replaces an existing file."
+      description="A complete copy of the workspace and every retained local attachment file, checked for integrity after it is saved. Remote files remain references and metadata. It never replaces an existing file."
       actions={
         <Button
           type="button"

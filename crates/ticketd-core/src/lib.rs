@@ -3,10 +3,13 @@ pub use search::TicketWithUpdate;
 mod backlinks;
 pub use backlinks::Backlink;
 mod backup;
+mod backup_archive;
+mod restore;
 pub use backup::BackupRecord;
 mod backup_review;
 pub use backup_review::{
-    BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind, WorkspaceSummary,
+    AttachmentBackupContent, BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind,
+    WorkspaceSummary,
 };
 mod context;
 mod context_graph;
@@ -88,6 +91,13 @@ pub enum Error {
     DocumentNotFound(String),
     #[error("backup or restore failed: {0}")]
     Backup(String),
+    #[error(
+        "cannot save a complete safety copy of the current workspace: {source}. The current workspace is unchanged. Repair missing current files, or restore the complete backup separately with `ticketd restore-workspace <backup> --target <new-database-path>`; this does not switch the desktop workspace"
+    )]
+    SafetyCopy {
+        #[source]
+        source: Box<Error>,
+    },
     #[error(
         "backup or restore failed: workspace is in use; close other ticketd operations and retry: {source}"
     )]
@@ -351,6 +361,12 @@ impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         use fs2::FileExt;
         let path = path.as_ref();
+        let resolved = if path.exists() {
+            Some(path.canonicalize()?)
+        } else {
+            None
+        };
+        let path = resolved.as_deref().unwrap_or(path);
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let lock = backup::lock_file(path)?;
@@ -361,7 +377,25 @@ impl Workspace {
                 wait_for_migration_lock(deadline)?;
                 continue;
             }
+            if restore::pending(path) {
+                drop(lock);
+                let recovery_lock = backup::lock_file(path)?;
+                if let Err(error) = FileExt::try_lock_exclusive(&recovery_lock) {
+                    if error.raw_os_error() != fs2::lock_contended_error().raw_os_error() {
+                        return Err(error.into());
+                    }
+                    wait_for_migration_lock(deadline)?;
+                    continue;
+                }
+                restore::recover(path)?;
+                continue;
+            }
             let connection = Connection::open(path)?;
+            if backup::table_exists(&connection, "ticketd_backup_container")?
+                || backup::table_exists(&connection, "ticketd_backup_files")?
+            {
+                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
+            }
             document_links::register_heading_function(&connection)?;
             connection.busy_timeout(Duration::from_secs(10))?;
             let version: i64 =
