@@ -82,7 +82,9 @@ test("Attachments opens from the existing Context navigation without replacing t
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
-  expect(await screen.findByRole("heading", { name: "Attachments" })).toBeTruthy();
+  expect(
+    await screen.findByRole("heading", { name: "Attachments" }),
+  ).toBeTruthy();
   expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
