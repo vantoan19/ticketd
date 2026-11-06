@@ -62,7 +62,7 @@ export function AttachmentSettings() {
         <Input
           id="attachment-upload-limit"
           type="number"
-          min="0.000001"
+          min={1 / 1048576}
           step="any"
           value={value}
           disabled={saved === null || saving}

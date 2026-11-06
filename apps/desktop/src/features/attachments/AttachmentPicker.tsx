@@ -359,6 +359,13 @@ export function AttachmentPicker({
                   <li key={row.requestId} aria-label={row.name}>
                     <div>
                       <strong>{row.name}</strong>
+                      <small className="attachment-hint">
+                        {row.stored
+                          ? formatSize(row.stored.size_bytes)
+                          : row.progress.total
+                            ? `${formatSize(row.progress.copied)} / ${formatSize(row.progress.total)}`
+                            : "Size pending"}
+                      </small>
                       <p role="status">
                         {row.state === "inserted"
                           ? "Attached"
