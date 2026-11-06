@@ -6,11 +6,17 @@
 .ticket-list:has(.ticket-board) > :not(.ticket-board) {
   flex-shrink: 0;
 }
-.board-summary {
+.ticket-list > .board-summary {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
   margin: 0;
-  padding: 10px 16px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
+  line-height: 16px;
 }
 .ticket-board {
   display: flex;
@@ -95,6 +101,7 @@
   overflow: hidden;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+  color: var(--foreground);
   font-size: var(--text-ui);
   font-weight: 400;
   line-height: 20px;
@@ -113,8 +120,14 @@
 }
 .board-card-context {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 6px 10px;
+}
+.board-card-context > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .board-card-context svg {
   width: 12px;
