@@ -630,6 +630,37 @@ test("switching layouts preserves a pending card request and its protection", as
   expect(screen.getByText("T-1 is now Done.")).toBeTruthy();
 });
 
+test("a membership response for an old scope cannot announce the wrong filtered outcome", async () => {
+  let doneReads = 0;
+  let finish: ((value: unknown) => void) | undefined;
+  writeOverride = async () => {
+    saved[0] = ticket(1, "Done");
+    readOverride = (filter) =>
+      filter.status === "Done" && ++doneReads === 2
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : null;
+    return [saved[0]];
+  };
+  render(<App />);
+  await settle();
+  await showBoard();
+  await chooseStatus("T-1", "Done");
+  expect(finish).toBeTypeOf("function");
+  fireEvent.click(screen.getByRole("button", { name: /^In progress/ }));
+  await settle();
+  await act(async () => {
+    finish?.([{ ticket: saved[0], latest_update: null }]);
+  });
+  await settle();
+  expect(
+    screen.getByText(
+      "T-1 is now Done. It no longer matches the current filters.",
+    ),
+  ).toBeTruthy();
+});
+
 test("a move out of Ready keeps its filters, announces departure and focuses the board", async () => {
   render(<App />);
   await settle();

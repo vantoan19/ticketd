@@ -58,10 +58,15 @@ export function useBoardStatus(workspace: {
   }
   async function saved(reference: string) {
     const current = await reconcile(reference);
-    const matches = await latest.current.board.matches(current);
-    setNotice(
-      `${reference} is now ${current.status}.${matches ? "" : " It no longer matches the current filters."}`,
-    );
+    for (;;) {
+      const board = latest.current.board;
+      const matches = await board.matches(current);
+      if (board.key !== latest.current.board.key) continue;
+      setNotice(
+        `${reference} is now ${current.status}.${matches ? "" : " It no longer matches the current filters."}`,
+      );
+      return;
+    }
   }
   async function submit(attempt: Attempt) {
     const reference = attempt.ticket.reference;

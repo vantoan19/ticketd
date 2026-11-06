@@ -204,5 +204,5 @@ export function useTicketBoard(
     saved.current = { key, columns };
     setState(saved.current);
   }
-  return { columns: displayed, refresh, loadMore, matches, confirmTicket };
+  return { columns: displayed, refresh, loadMore, matches, confirmTicket, key };
 }
