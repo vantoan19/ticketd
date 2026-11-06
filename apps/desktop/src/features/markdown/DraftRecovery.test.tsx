@@ -272,7 +272,7 @@ test("Document Reload preserves the independently recoverable discarded draft un
     }),
   );
   expect(records.get("document:d1")?.markdown).toContain(body);
-  fireEvent.click(screen.getByRole("button", { name: "Undo", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await waitFor(() =>
     expect(
       screen.getByRole("textbox", { name: "Document rich text" }).textContent,
@@ -282,6 +282,62 @@ test("Document Reload preserves the independently recoverable discarded draft un
     expect(records.get("document:d1")?.payload).toMatchObject({
       draft: { body },
       discarded: null,
+    }),
+  );
+});
+
+test("recovered Document editing hides its repeated heading while retaining the canonical prefix", async () => {
+  const link = "[Trace](ticketd://attachment/workspace/file)";
+  const body = `# Heading\n\n${link}`;
+  const initial = {
+    id: "heading-doc",
+    title: "Heading",
+    body: "# Heading\n\nOriginal",
+    created_at: "old",
+    updated_at: "old",
+    trashed: false,
+  };
+  const records = bridge(
+    new Map([
+      [
+        "document:heading-doc",
+        {
+          owner: "document:heading-doc",
+          kind: "draft",
+          revision: 1,
+          payload: {
+            draft: { title: "Heading", body, suggestion: null },
+            saved: { title: "Heading", body: initial.body, suggestion: null },
+            id: initial.id,
+            revision: "old",
+            pending: null,
+            discarded: null,
+            external: null,
+            externalRevision: null,
+          },
+          markdown: [body],
+        },
+      ],
+    ]),
+  );
+  render(
+    <DraftRecoveryProvider>
+      <DocumentEditor initial={initial} onClose={vi.fn()} />
+    </DraftRecoveryProvider>,
+  );
+  const editor = await screen.findByRole("textbox", {
+    name: "Document rich text",
+  });
+  expect(editor.textContent).not.toContain("Heading");
+  await typeSource(
+    "Document",
+    "[Changed](ticketd://attachment/workspace/file)",
+  );
+  await waitFor(() =>
+    expect(records.get("document:heading-doc")?.payload).toMatchObject({
+      draft: {
+        body: "# Heading\n\n[Changed](ticketd://attachment/workspace/file)",
+      },
     }),
   );
 });

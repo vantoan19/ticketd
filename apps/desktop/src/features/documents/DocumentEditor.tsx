@@ -192,7 +192,12 @@ export function DocumentEditor({
   );
   // The heading line the title already shows, kept out of the editor while editing
   // and put back in front of what is typed, so the saved text never changes.
-  const [hiddenHead, setHiddenHead] = useState("");
+  const [hiddenHead, setHiddenHead] = useState(() => {
+    if (!recovered || !initial) return "";
+    const { body, title } = recovered.draft;
+    const stripped = withoutDerivedHeading(body, title, initial.heading);
+    return body.slice(0, body.length - stripped.length);
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [creatingFromDocument, setCreatingFromDocument] = useState(false);
