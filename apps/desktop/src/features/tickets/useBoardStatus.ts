@@ -45,7 +45,7 @@ export function useBoardStatus(workspace: {
         active === returnFocus.current ||
         !active?.isConnected
       )
-        (trigger ?? board)?.focus();
+        (trigger ?? board)?.focus({ preventScroll: true });
     });
   }
   async function reconcile(reference: string) {
@@ -75,7 +75,11 @@ export function useBoardStatus(workspace: {
     setNotice("");
     attempts.current.set(reference, attempt);
     try {
-      await client.bulkStatus([reference], attempt.status, attempt.id);
+      await client.changeTicket(
+        reference,
+        { status: attempt.status },
+        attempt.id,
+      );
       await saved(reference);
       attempts.current.delete(reference);
     } catch (reason) {

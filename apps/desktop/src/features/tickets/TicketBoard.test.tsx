@@ -120,6 +120,7 @@ beforeEach(() => {
         references?: string[];
         status?: string;
         requestId?: string;
+        patch?: { status?: string };
       },
     ) => {
       if (command === "workspace_change_token") return change;
@@ -151,11 +152,47 @@ beforeEach(() => {
       if (command === "show_ticket")
         return saved.find((item) => item.reference === args?.reference);
       if (
+        command === "change_ticket" &&
+        args?.reference &&
+        args.patch?.status &&
+        args.requestId
+      ) {
+        const {
+          reference,
+          patch: { status },
+          requestId,
+        } = args;
+        if (writeOverride)
+          return (
+            await writeOverride({ references: [reference], status, requestId })
+          )[0];
+        saved = saved.map((item) =>
+          item.reference === reference
+            ? { ...item, status, availability: null, duplicate_of: null }
+            : item,
+        );
+        return saved.find((item) => item.reference === reference);
+      }
+      if (
         command === "bulk_status" &&
         args?.references &&
         args.status &&
         args.requestId
       ) {
+        if (
+          saved.some(
+            (item) =>
+              args.references?.includes(item.reference) &&
+              item.status === "Duplicate" &&
+              args.status !== "Duplicate",
+          )
+        )
+          throw {
+            code: "batch_operation",
+            index: 0,
+            message:
+              "Open the duplicate and remove its link before changing its status",
+          };
         if (writeOverride)
           return writeOverride({
             references: args.references,
@@ -266,13 +303,13 @@ test("pointer dragging into an empty column saves through the card status action
   // Browsers dispatch a click after pointerup, including after a captured drag.
   fireEvent.click(card, { detail: 1 });
   await settle(20);
-  expect(bridge.invoke).toHaveBeenCalledWith("bulk_status", {
-    references: ["T-1"],
-    status: "In progress",
+  expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
+    reference: "T-1",
+    patch: { status: "In progress" },
     requestId: expect.any(String),
   });
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(1);
   expect(
     within(
@@ -309,7 +346,7 @@ test("same-column and outside drops, Escape and pointer cancellation preserve sa
   releasePointer(400);
   await settle();
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(document.activeElement).toBe(card);
   // A canceled mouse drag must not swallow the next keyboard activation.
@@ -351,7 +388,7 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
   await settle(64);
   expect(board.scrollLeft).toBe(position);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
 });
 
@@ -374,7 +411,7 @@ test("drag respects external destinations and revalidates source changes made du
   releasePointer(400);
   await settle();
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   expect(screen.getByRole("alert").textContent).toContain(
     "This status is no longer available",
@@ -403,7 +440,7 @@ test("a pending dragged ticket cannot be dragged again or changed through its me
     screen.getByRole("button", { name: "Change status of T-1" }),
   ).toHaveProperty("disabled", true);
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(1);
   saved[0] = ticket(1, "In progress");
   finish?.([saved[0]]);
@@ -424,7 +461,7 @@ test("dropping in Duplicate opens the shared review without moving until confirm
   ).toBeTruthy();
   expect(saved[0]?.status).toBe("Todo");
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await settle(20);
@@ -470,7 +507,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
   await showBoard();
   await chooseStatus("T-1", "Todo");
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   await chooseStatus("T-1", "Done");
   expect(screen.getByText("Saving T-1…")).toBeTruthy();
@@ -486,7 +523,7 @@ test("choosing the saved status does not write, and a pending card cannot submit
   );
   await settle();
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(1);
   await act(async () => {
     saved[0] = { ...ticket(1, "Done"), availability: null };
@@ -524,7 +561,7 @@ test("a failed save keeps its saved column and retries with the same request ide
   );
   await settle();
   const writes = bridge.invoke.mock.calls.filter(
-    ([command]) => command === "bulk_status",
+    ([command]) => command === "change_ticket",
   );
   expect(writes).toHaveLength(2);
   expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
@@ -579,7 +616,7 @@ test("a lost response reconciles applied state and a historical replay never rep
     ),
   ).toBeNull();
   const writes = bridge.invoke.mock.calls.filter(
-    ([command]) => command === "bulk_status",
+    ([command]) => command === "change_ticket",
   );
   expect(writes[1]?.[1]).toEqual(writes[0]?.[1]);
 });
@@ -653,11 +690,7 @@ test("ownership changes during a card save reconcile the saved state and permitt
         status_choices: [],
       }),
     };
-    throw {
-      code: "batch_operation",
-      index: 0,
-      message: "GitHub owns this closure",
-    };
+    throw new Error("GitHub owns this closure");
   };
   render(<App />);
   await settle();
@@ -697,7 +730,7 @@ test("a failed pre-save read offers a working retry without writing stale card d
   await chooseStatus("T-1", "Done");
   expect(screen.getByRole("alert").textContent).toContain("Read unavailable");
   expect(
-    bridge.invoke.mock.calls.filter(([command]) => command === "bulk_status"),
+    bridge.invoke.mock.calls.filter(([command]) => command === "change_ticket"),
   ).toHaveLength(0);
   fail = false;
   fireEvent.click(
@@ -945,18 +978,6 @@ test("a card status action changes only that ticket and leaves the selected deta
       parent: { reference: "T-1", title: "Ticket 1", trashed: false },
     },
   ];
-  const fallback = bridge.invoke.getMockImplementation()!;
-  bridge.invoke.mockImplementation(async (command, args) => {
-    if (command === "bulk_status") {
-      saved = saved.map((item) =>
-        args.references.includes(item.reference)
-          ? { ...item, status: args.status, availability: null }
-          : item,
-      );
-      return saved.filter((item) => args.references.includes(item.reference));
-    }
-    return fallback(command, args);
-  });
   render(<App />);
   await settle();
   await showBoard();
@@ -986,9 +1007,9 @@ test("a card status action changes only that ticket and leaves the selected deta
     "Keep my draft",
   );
   expect(screen.getByText("T-1 is now In progress.")).toBeTruthy();
-  expect(bridge.invoke).toHaveBeenCalledWith("bulk_status", {
-    references: ["T-1"],
-    status: "In progress",
+  expect(bridge.invoke).toHaveBeenCalledWith("change_ticket", {
+    reference: "T-1",
+    patch: { status: "In progress" },
     requestId: expect.any(String),
   });
 });
