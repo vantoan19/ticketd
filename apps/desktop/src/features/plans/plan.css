@@ -505,10 +505,10 @@
   background: var(--accent);
 }
 /* Nothing is selected: the hint sits at the centre of the whole pane. */
-.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-scroll {
+.ticket-detail[data-empty] .detail-scroll {
   display: flex;
 }
-.plan-workspace[data-plan] .ticket-detail[data-empty] .detail-empty {
+.ticket-detail[data-empty] .detail-empty {
   flex: 1;
   min-height: 0;
 }

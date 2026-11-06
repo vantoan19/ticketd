@@ -3,7 +3,8 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 20px;
+  min-height: 44px;
+  padding: 0 20px 0 16px;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
@@ -70,10 +71,14 @@
   padding: 0 8px 0 16px;
   box-shadow: 0 1px 0 0 #0000000f;
 }
-.ticket-workspace[data-filters-open] #detail .detail-empty {
-  padding-left: 383px;
-}
 /* The Filter control keeps a filled pill while the panel is open or filters apply. */
+.filter-trigger {
+  gap: 6px;
+  padding-inline: 8px;
+}
+.filter-chips > [aria-label="Clear filters"] {
+  margin-left: auto;
+}
 .filter-trigger[data-active],
 .filter-trigger[data-state="open"] {
   background: var(--accent);

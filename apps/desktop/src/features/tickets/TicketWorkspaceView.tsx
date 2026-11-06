@@ -78,10 +78,14 @@ export function TicketWorkspaceView({
       open: filtersOpen,
       setOpen: setFiltersOpen,
       anchor: {
-        get current() {
-          return listRef.current?.closest<HTMLElement>("#list") ?? null;
-        },
-        set current(_: HTMLElement | null) {},
+        // Always a measurable: the panel measures the list pane when it opens.
+        current: {
+          getBoundingClientRect: () =>
+            (
+              listRef.current?.closest<HTMLElement>("#list") ??
+              document.getElementById("list")
+            )?.getBoundingClientRect() ?? new DOMRect(),
+        } as HTMLElement,
       },
     }),
     [filtersOpen],
