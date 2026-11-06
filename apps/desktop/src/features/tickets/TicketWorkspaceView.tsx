@@ -77,18 +77,21 @@ export function TicketWorkspaceView({
     () => ({
       open: filtersOpen,
       setOpen: setFiltersOpen,
-      anchor: {
-        // Always a measurable: the panel measures the list pane when it opens.
-        current: {
-          getBoundingClientRect: () =>
-            (
-              listRef.current?.closest<HTMLElement>("#list") ??
-              document.getElementById("list")
-            )?.getBoundingClientRect() ?? new DOMRect(),
-        } as HTMLElement,
-      },
+      anchor:
+        workspace.layout === "board"
+          ? null
+          : {
+              // Always a measurable: the panel measures the list pane when it opens.
+              current: {
+                getBoundingClientRect: () =>
+                  (
+                    listRef.current?.closest<HTMLElement>("#list") ??
+                    document.getElementById("list")
+                  )?.getBoundingClientRect() ?? new DOMRect(),
+              } as HTMLElement,
+            },
     }),
-    [filtersOpen],
+    [filtersOpen, workspace.layout],
   );
   // Plan dependencies take the detail pane. Each Plan opens on its list.
   const [planMode, setPlanModeState] = useState<"list" | "dependencies">(

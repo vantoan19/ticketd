@@ -141,7 +141,7 @@ export function TicketFilters(p: Props) {
             </IconButton>
           )}
           <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
-            {dock && <PopoverAnchor virtualRef={dock.anchor} />}
+            {dock?.anchor && <PopoverAnchor virtualRef={dock.anchor} />}
             <PopoverTrigger asChild>
               {p.labeledFilter ? (
                 <Button
@@ -180,9 +180,9 @@ export function TicketFilters(p: Props) {
               side="right"
               align="start"
               sideOffset={8}
-              alignOffset={dock ? 8 : 0}
+              alignOffset={dock?.anchor ? 8 : 0}
               collisionPadding={8}
-              avoidCollisions={!dock}
+              avoidCollisions={!dock?.anchor}
               aria-label="Ticket filters"
             >
               <div className="filters-head">
