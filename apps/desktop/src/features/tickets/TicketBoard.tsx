@@ -1,10 +1,21 @@
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
-import { CornerDownRight, Folder, Layers } from "lucide-react";
+import { CornerDownRight, Folder, Layers, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ticketStatuses } from "@/lib/statuses";
+import { Duplicates } from "./Duplicates";
+import { ConfirmLeaveDuplicate } from "./ConfirmLeaveDuplicate";
 import { SourcePill } from "./TicketList";
 import { StatusIcon } from "./StatusIcon";
 import { readiness, readinessLabel } from "./ticket-row";
-import { externalSource } from "./ticket-source";
+import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import "./ticket-board.css";
 
@@ -15,12 +26,56 @@ export function TicketBoard({
   workspace: TicketWorkspace;
   onOpen: (reference: string) => void;
 }) {
+  const { statusAction } = workspace;
   return (
     <>
+      <p className="sr-only" role="status" aria-live="polite">
+        {statusAction.notice}
+      </p>
+      {Object.entries(statusAction.failures)
+        .filter(([, message]) => message)
+        .map(([reference, message]) => (
+          <p key={reference} className="board-status-error" role="alert">
+            {message}{" "}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => statusAction.retry(reference)}
+            >
+              Retry status change for {reference}
+            </Button>
+          </p>
+        ))}
+      {statusAction.review?.status === "Duplicate" && (
+        <Duplicates
+          ticket={statusAction.review.ticket}
+          open
+          title={`Mark ${statusAction.review.ticket.reference} as a duplicate`}
+          description={`${statusAction.review.ticket.reference} keeps its description and history and becomes Duplicate. Review what points at it.`}
+          refresh={statusAction.completeDuplicate}
+          onApplyFailure={statusAction.reconcileDuplicate}
+          onOpenChange={(open) => {
+            if (!open) statusAction.cancelReview();
+          }}
+          returnFocus={statusAction.returnFocus}
+        />
+      )}
+      <ConfirmLeaveDuplicate
+        canonical={statusAction.review?.ticket.duplicate_of ?? ""}
+        status={
+          statusAction.review?.status !== "Duplicate"
+            ? (statusAction.review?.status ?? null)
+            : null
+        }
+        returnFocus={statusAction.returnFocus}
+        onCancel={statusAction.cancelReview}
+        onConfirm={statusAction.confirmLeave}
+      />
       <div
         className="ticket-board"
         role="region"
         aria-label="Ticket status board"
+        tabIndex={-1}
       >
         {workspace.board.columns.map((column) => {
           const { status, tickets: items, total, loading, error } = column;
@@ -63,57 +118,116 @@ export function TicketBoard({
                     !workspace.navigation.plan &&
                     workspace.plans.find((p) => p.id === ticket.plan_id);
                   return (
-                    <Button
-                      variant="ghost"
-                      className="board-card"
+                    <div
+                      className="board-card-container"
                       key={ticket.id}
-                      data-board-reference={ticket.reference}
-                      aria-pressed={workspace.selected === ticket.reference}
-                      onClick={() => onOpen(ticket.reference)}
+                      aria-busy={statusAction.pending.has(ticket.reference)}
                     >
-                      <span className="board-card-top">
-                        <span className="ticket-ref">{ticket.reference}</span>
-                        <SourcePill ticket={ticket} />
-                      </span>
-                      <span className="board-card-title" title={ticket.title}>
-                        {ticket.title}
-                      </span>
-                      {source?.unavailable ? (
-                        <span className="board-card-state">
-                          <StatusDot tone="attention" size={10} />
-                          Source unavailable
+                      <Button
+                        variant="ghost"
+                        className="board-card"
+                        data-board-reference={ticket.reference}
+                        aria-pressed={workspace.selected === ticket.reference}
+                        onClick={() => onOpen(ticket.reference)}
+                      >
+                        <span className="board-card-top">
+                          <span className="ticket-ref">{ticket.reference}</span>
+                          <SourcePill ticket={ticket} />
                         </span>
-                      ) : (
-                        state.kind !== "status" && (
+                        <span className="board-card-title" title={ticket.title}>
+                          {ticket.title}
+                        </span>
+                        {source?.unavailable ? (
                           <span className="board-card-state">
-                            <StatusDot tone={state.kind} size={10} />
-                            {readinessLabel(state)}
+                            <StatusDot tone="attention" size={10} />
+                            Source unavailable
                           </span>
-                        )
-                      )}
-                      {(project || plan || ticket.parent) && (
-                        <span className="board-card-context">
-                          {project && (
-                            <span>
-                              <Folder aria-hidden="true" />
-                              {project.name}
+                        ) : (
+                          state.kind !== "status" && (
+                            <span className="board-card-state">
+                              <StatusDot tone={state.kind} size={10} />
+                              {readinessLabel(state)}
                             </span>
+                          )
+                        )}
+                        {(project || plan || ticket.parent) && (
+                          <span className="board-card-context">
+                            {project && (
+                              <span>
+                                <Folder aria-hidden="true" />
+                                {project.name}
+                              </span>
+                            )}
+                            {plan && (
+                              <span>
+                                <Layers aria-hidden="true" />
+                                {plan.name}
+                              </span>
+                            )}
+                            {ticket.parent && (
+                              <span>
+                                <CornerDownRight aria-hidden="true" />
+                                Subticket of {ticket.parent.reference}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="board-card-menu"
+                            aria-label={`Change status of ${ticket.reference}`}
+                            title={`Change status (saved: ${ticket.status})`}
+                            disabled={
+                              ticket.trashed ||
+                              statusAction.pending.has(ticket.reference)
+                            }
+                          >
+                            <MoreHorizontal aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          aria-label={`Change status of ${ticket.reference}`}
+                        >
+                          <DropdownMenuLabel>
+                            Saved status: {ticket.status}
+                          </DropdownMenuLabel>
+                          <DropdownMenuRadioGroup
+                            value={ticket.status}
+                            onValueChange={(status) =>
+                              void statusAction.choose(ticket, status)
+                            }
+                          >
+                            {ticketStatuses.map((choice) => (
+                              <DropdownMenuRadioItem
+                                key={choice}
+                                value={choice}
+                                disabled={
+                                  choice !== ticket.status &&
+                                  !ticketStatusChoices(ticket).includes(choice)
+                                }
+                              >
+                                {choice}
+                              </DropdownMenuRadioItem>
+                            ))}
+                          </DropdownMenuRadioGroup>
+                          {source && (
+                            <p className="status-menu-caption">
+                              Status choices follow {source.provider_name}.
+                            </p>
                           )}
-                          {plan && (
-                            <span>
-                              <Layers aria-hidden="true" />
-                              {plan.name}
-                            </span>
-                          )}
-                          {ticket.parent && (
-                            <span>
-                              <CornerDownRight aria-hidden="true" />
-                              Subticket of {ticket.parent.reference}
-                            </span>
-                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      {statusAction.pending.has(ticket.reference) && (
+                        <span className="board-card-saving" role="status">
+                          Saving {ticket.reference}…
                         </span>
                       )}
-                    </Button>
+                    </div>
                   );
                 })}
                 {loading && total === null && (

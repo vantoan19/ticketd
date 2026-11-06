@@ -27,7 +27,6 @@ import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
 import {
-  useOnWorkspaceChange,
   useWorkspaceChangePoll,
   WorkspaceChangeProvider,
 } from "@/lib/workspace-change";
@@ -104,7 +103,6 @@ function AppContent() {
       active = false;
     };
   }, []);
-  useOnWorkspaceChange(() => loadCounts.current());
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
@@ -202,6 +200,7 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  useEffect(() => loadCounts.current(), [revision]);
   const openGraphItem = (node: GraphData["nodes"][number]) => {
     keepGraph.current = true;
     try {

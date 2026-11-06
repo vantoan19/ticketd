@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTicketBoard } from "./useTicketBoard";
+import { useBoardStatus } from "./useBoardStatus";
 import {
   client,
   type FindFilter,
@@ -391,6 +392,7 @@ export function useTicketWorkspace(
       }),
     );
   }, []);
+  const statusAction = useBoardStatus({ board, refresh, updateTicket });
   const total = counts ? counts.total : tickets.length;
   const selectedIndex = tickets.findIndex(
     (item) => item.reference === selected,
@@ -475,6 +477,7 @@ export function useTicketWorkspace(
   return {
     layout,
     board,
+    statusAction,
     source,
     setSource,
     sourceCounts,

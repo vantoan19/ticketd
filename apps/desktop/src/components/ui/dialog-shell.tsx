@@ -31,6 +31,7 @@ export function DialogShell({
   footerNote,
   primaryHint,
   children,
+  busy = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,11 +53,18 @@ export function DialogShell({
   /** A shortcut shown inside the primary button. */
   primaryHint?: string;
   children: ReactNode;
+  /** A submitted write is still in flight, so dismissing must wait for its result. */
+  busy?: boolean;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
       <DialogContent
         className="gap-0 overflow-hidden p-0"
         style={{ maxWidth: `min(${width}px, calc(100vw - 32px))`, width }}
@@ -97,6 +105,7 @@ export function DialogShell({
                 variant="ghost"
                 size="sm"
                 onClick={onCancel}
+                disabled={busy}
               >
                 Cancel
               </Button>
@@ -123,6 +132,7 @@ export function DialogShell({
                 variant="ghost"
                 size="icon-sm"
                 {...(onCancel && { onClick: onCancel })}
+                disabled={busy}
               >
                 <XIcon />
                 <span className="sr-only">Close</span>
