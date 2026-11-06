@@ -6,14 +6,19 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
+import {
+  useDefaultLayout,
+  useGroupRef,
+  usePanelRef,
+  type Layout,
+} from "react-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { cn } from "cn";
-import { usePreferences } from "@/lib/preferences";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { PlanHeader } from "@/features/plans/PlanHeader";
 import { usePlanView } from "@/features/plans/usePlanView";
@@ -29,6 +34,7 @@ const DETAIL_PANEL_STYLE = {
   overflow: "hidden",
 } as const;
 const NARROW_QUERY = "(max-width: 1071px)";
+const BOARD_SPLIT: Layout = { list: 44, detail: 56 };
 
 function subscribeNarrow(callback: () => void) {
   const media = window.matchMedia(NARROW_QUERY);
@@ -77,28 +83,29 @@ export function TicketWorkspaceView({
     () => ({
       open: filtersOpen,
       setOpen: setFiltersOpen,
-      anchor: {
-        // Always a measurable: the panel measures the list pane when it opens.
-        current: {
-          getBoundingClientRect: () =>
-            (
-              listRef.current?.closest<HTMLElement>("#list") ??
-              document.getElementById("list")
-            )?.getBoundingClientRect() ?? new DOMRect(),
-        } as HTMLElement,
-      },
+      anchor:
+        workspace.layout === "board"
+          ? null
+          : {
+              // Always a measurable: the panel measures the list pane when it opens.
+              current: {
+                getBoundingClientRect: () =>
+                  (
+                    listRef.current?.closest<HTMLElement>("#list") ??
+                    document.getElementById("list")
+                  )?.getBoundingClientRect() ?? new DOMRect(),
+              } as HTMLElement,
+            },
     }),
-    [filtersOpen],
+    [filtersOpen, workspace.layout],
   );
-  // Plan dependencies take the detail pane. Each Plan opens on its list.
-  const [planMode, setPlanModeState] = useState<"list" | "dependencies">(
-    "list",
-  );
+  // Dependencies are temporary; ticket layouts share the remembered preference.
+  const [showDependencies, setShowDependencies] = useState(false);
   const planScope = workspace.trash ? "" : workspace.navigation.plan;
   const [shownPlan, setShownPlan] = useState(planScope);
   if (shownPlan !== planScope) {
     setShownPlan(planScope);
-    setPlanModeState("list");
+    setShowDependencies(false);
   }
   useEffect(() => {
     // A new Plan opens with its title in view, not where the last one scrolled.
@@ -115,26 +122,66 @@ export function TicketWorkspaceView({
     workspace.refresh,
   );
   const scopedPlan = workspace.plans.find((item) => item.id === planScope);
-  const dependenciesOpen = planMode === "dependencies" && scopedPlan;
-  const setPlanMode = (mode: "list" | "dependencies") => {
-    setPlanModeState(mode);
-    if (mode === "dependencies") setNarrowDetail(true);
-    else setNarrowDetail(selected !== null);
+  const dependenciesOpen = showDependencies && scopedPlan;
+  const showTickets = () => {
+    setShowDependencies(false);
+    setNarrowDetail(selected !== null);
   };
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+  const setPlanMode = (mode: "list" | "board" | "dependencies") => {
+    if (mode === "dependencies") {
+      setShowDependencies(true);
+      setNarrowDetail(true);
+    } else if (setPreference("ticketLayout", mode)) showTickets();
+    else
+      workspace.setError(
+        "Could not remember ticket layout. Check local storage and try again.",
+      );
+  };
+  const listSplit = useDefaultLayout({
     // Versioned: layouts saved by earlier builds (468px list) must not override
     // the 384px default.
     id: "ticketd.workspace.v2",
   });
+  const boardSplit = useDefaultLayout({ id: "ticketd.workspace.board.v1" });
+  const groupRef = useGroupRef();
+  const listPanelRef = usePanelRef();
+  const activeSplit = useRef(workspace.layout);
+  const splitLayouts = useRef<{ list: Layout | undefined; board: Layout }>({
+    list: listSplit.defaultLayout,
+    board: boardSplit.defaultLayout ?? BOARD_SPLIT,
+  });
+  useLayoutEffect(() => {
+    if (activeSplit.current === workspace.layout) return;
+    activeSplit.current = workspace.layout;
+    const layout = splitLayouts.current[workspace.layout];
+    // Change the library's layout without remounting the detail editor or board scrollers.
+    if (layout) groupRef.current?.setLayout(layout);
+    else listPanelRef.current?.resize(384);
+  }, [workspace.layout, groupRef, listPanelRef]);
   const focusPane = useRef<"detail" | "list" | null>(null);
+  const boardReturn = useRef<{ reference: string; scrollLeft: number } | null>(
+    null,
+  );
   useLayoutEffect(() => {
     if (focusPane.current === "detail")
       document.getElementById("detail-heading")?.focus();
     if (focusPane.current === "list") {
-      const target = listRef.current?.querySelector<HTMLButtonElement>(
-        '[aria-pressed="true"]',
-      );
-      (target ?? document.getElementById("tickets-heading"))?.focus();
+      const returned =
+        workspace.layout === "board" ? boardReturn.current : null;
+      const board =
+        listRef.current?.querySelector<HTMLElement>(".ticket-board");
+      if (board && returned) board.scrollLeft = returned.scrollLeft;
+      const target =
+        (returned &&
+          listRef.current?.querySelector<HTMLButtonElement>(
+            `[data-board-reference="${returned.reference}"]`,
+          )) ||
+        listRef.current?.querySelector<HTMLButtonElement>(
+          '.board-card[aria-pressed="true"], .ticket-row[aria-pressed="true"]',
+        );
+      (target ?? document.getElementById("tickets-heading"))?.focus({
+        preventScroll: true,
+      });
     }
     focusPane.current = null;
   });
@@ -175,7 +222,7 @@ export function TicketWorkspaceView({
             plan={scopedPlan}
             plans={workspace.plans}
             state={planState}
-            mode={planMode}
+            mode={dependenciesOpen ? "dependencies" : workspace.layout}
             onModeChange={setPlanMode}
           />
         )}
@@ -185,10 +232,10 @@ export function TicketWorkspaceView({
             revision={workspace.revision}
             projects={workspace.projects}
             refresh={workspace.refresh}
-            onClose={() => setPlanMode("list")}
+            onClose={showTickets}
             archived={scopedPlan.archived}
             onOpen={(reference) => {
-              setPlanMode("list");
+              showTickets();
               setSelected(reference);
               setNarrowDetail(true);
             }}
@@ -198,19 +245,39 @@ export function TicketWorkspaceView({
           orientation="horizontal"
           // The split handle is hidden here; left enabled, the panel library still
           // claims presses nearby, which stopped the sidebar's New menu from opening.
-          disabled={narrow}
+          disabled={
+            narrow || expanded || (workspace.layout === "board" && !selected)
+          }
           className={cn(
             "ticket-workspace",
             expanded && "expanded",
             narrowDetail && "narrow-detail",
+            workspace.layout === "board" && "board-layout",
+            !selected && "board-unselected",
           )}
           data-filters-open={filtersOpen ? "" : undefined}
-          defaultLayout={defaultLayout}
-          onLayoutChanged={onLayoutChanged}
+          groupRef={groupRef}
+          defaultLayout={
+            workspace.layout === "board"
+              ? (boardSplit.defaultLayout ?? BOARD_SPLIT)
+              : listSplit.defaultLayout
+          }
+          onLayoutChanged={(layout, meta) => {
+            const mode = activeSplit.current;
+            if (meta.isUserInteraction || !splitLayouts.current[mode])
+              splitLayouts.current[mode] = meta.requestedLayout ?? layout;
+            // Full-width modes and window constraints must not overwrite the preferred split.
+            if (meta.isUserInteraction)
+              (mode === "board" ? boardSplit : listSplit).onLayoutChanged(
+                layout,
+                meta,
+              );
+          }}
           hidden={hidden || Boolean(dependenciesOpen)}
         >
           <ResizablePanel
             id="list"
+            panelRef={listPanelRef}
             minSize={360}
             defaultSize={384}
             className="list-panel"
@@ -222,7 +289,14 @@ export function TicketWorkspaceView({
               planState={planState}
               onCreate={onCreate}
               onOpen={(reference) => {
-                setPlanModeState("list");
+                if (workspace.layout === "board")
+                  boardReturn.current = {
+                    reference,
+                    scrollLeft:
+                      listRef.current?.querySelector(".ticket-board")
+                        ?.scrollLeft ?? 0,
+                  };
+                setShowDependencies(false);
                 setSelected(reference);
                 setNarrowDetail(true);
                 const narrow = window.matchMedia(NARROW_QUERY).matches;

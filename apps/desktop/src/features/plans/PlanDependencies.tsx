@@ -277,7 +277,7 @@ export function PlanDependencies({
   projects: Project[];
   refresh: () => Promise<void>;
   onOpen: (reference: string) => void;
-  /** Back to the member list. */
+  /** Back to the member ticket layout. */
   onClose: () => void;
   /** The Plan is archived, so its blockers can be read but not changed. */
   archived?: boolean;
@@ -400,7 +400,7 @@ export function PlanDependencies({
             <p className="plan-callout" role="status">
               Showing {members.length} of {total} tickets.{" "}
               <button type="button" onClick={onClose}>
-                Use the list to see the rest.
+                See all Plan tickets
               </button>
             </p>
           )}

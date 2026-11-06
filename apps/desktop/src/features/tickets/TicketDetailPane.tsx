@@ -33,14 +33,22 @@ export function TicketDetailPane({
     position,
     openAdjacent,
   } = workspace;
+  const resultTickets =
+    workspace.layout === "board"
+      ? workspace.board.columns.flatMap((column) => column.tickets)
+      : tickets;
+  const resultLoading =
+    workspace.layout === "board"
+      ? workspace.board.columns.some((column) => column.loading)
+      : loading;
   return (
     <>
       <TicketDetails
         outsideResults={Boolean(
           selected &&
-          !loading &&
+          !resultLoading &&
           !queryError &&
-          !tickets.some((ticket) => ticket.reference === selected),
+          !resultTickets.some((ticket) => ticket.reference === selected),
         )}
         expanded={expanded}
         onExpand={onExpand}
@@ -55,7 +63,7 @@ export function TicketDetailPane({
         revision={revision}
         refresh={refresh}
         updateTicket={updateTicket}
-        position={position}
+        position={workspace.layout === "board" ? null : position}
         onAdjacent={openAdjacent}
       />
     </>

@@ -60,8 +60,8 @@ export function PlanHeader({
   plan: Plan;
   plans: Plan[];
   state: PlanViewState;
-  mode: "list" | "dependencies";
-  onModeChange: (mode: "list" | "dependencies") => void;
+  mode: "list" | "board" | "dependencies";
+  onModeChange: (mode: "list" | "board" | "dependencies") => void;
 }) {
   const { view, loadError, pending, actionError, run } = state;
   const openGraph = useContext(ContextGraphNavigation);
@@ -176,6 +176,7 @@ export function PlanHeader({
             onValueChange={onModeChange}
             options={[
               { value: "list", label: "List" },
+              { value: "board", label: "Board" },
               { value: "dependencies", label: "Dependencies" },
             ]}
           />

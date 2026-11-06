@@ -217,7 +217,7 @@ export function TicketList({
 }
 
 /** The owner of an externally owned ticket; a local ticket has no pill. */
-function SourcePill({ ticket }: { ticket: Ticket }) {
+export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
   return (
