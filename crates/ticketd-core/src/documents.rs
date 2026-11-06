@@ -227,11 +227,12 @@ impl Workspace {
             crate::document_links::index_body(&self.connection, &id, body)?;
             self.open_document(&id)
         })();
-        match result {
-            Ok(document) => {
-                self.connection.execute_batch("RELEASE create_document")?;
-                Ok(document)
-            }
+        match result.and_then(|document| {
+            // Releasing the outermost savepoint can fail at commit, too.
+            self.connection.execute_batch("RELEASE create_document")?;
+            Ok(document)
+        }) {
+            Ok(document) => Ok(document),
             Err(error) => {
                 self.connection
                     .execute_batch("ROLLBACK TO create_document; RELEASE create_document")?;
@@ -527,11 +528,11 @@ impl Workspace {
             }
             self.show_document(id)
         })();
-        match result {
-            Ok(document) => {
-                self.connection.execute_batch("RELEASE change_document")?;
-                Ok(document)
-            }
+        match result.and_then(|document| {
+            self.connection.execute_batch("RELEASE change_document")?;
+            Ok(document)
+        }) {
+            Ok(document) => Ok(document),
             Err(error) => {
                 self.connection
                     .execute_batch("ROLLBACK TO change_document; RELEASE change_document")?;

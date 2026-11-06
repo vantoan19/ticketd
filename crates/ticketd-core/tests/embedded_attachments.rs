@@ -220,6 +220,67 @@ fn failed_reference_writes_roll_back_content_and_leave_completed_bytes_reusable(
 }
 
 #[test]
+fn a_rejected_document_commit_rolls_back_content_and_references_before_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("file.txt");
+    std::fs::write(&source, b"completed bytes").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let file = workspace
+        .import_attachment("commit-failure", &source, None)
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let linked = format!("[Stored file]({uri})");
+    let original = workspace.create_document(None, "Original body").unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TABLE reject_document_commit (id TEXT REFERENCES tickets(id) DEFERRABLE INITIALLY DEFERRED);
+        CREATE TRIGGER reject_reference_commit AFTER INSERT ON embedded_attachments BEGIN INSERT INTO reject_document_commit VALUES ('missing-ticket'); END;").unwrap();
+    assert!(
+        workspace
+            .change_document(
+                &original.id,
+                DocumentPatch {
+                    body: Some(linked.clone()),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(
+        workspace.show_document(&original.id).unwrap().body,
+        "Original body"
+    );
+    assert!(
+        workspace
+            .embedded_attachments(&original.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        workspace
+            .create_document(Some("Rejected"), &linked)
+            .is_err()
+    );
+    assert!(
+        workspace
+            .search_documents("Rejected", None, 50, 0)
+            .unwrap()
+            .is_empty()
+    );
+    faults
+        .execute_batch("DROP TRIGGER reject_reference_commit; DROP TABLE reject_document_commit;")
+        .unwrap();
+    let saved = workspace.create_document(Some("Retry"), &linked).unwrap();
+    assert_eq!(
+        workspace.embedded_attachments(&saved.id).unwrap(),
+        std::slice::from_ref(&file)
+    );
+    let exported = dir.path().join("completed.txt");
+    workspace.export_attachment(&file.id, &exported).unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"completed bytes");
+}
+
+#[test]
 fn broken_existing_links_remain_editable_but_new_links_require_completed_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
