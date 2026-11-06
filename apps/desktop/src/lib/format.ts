@@ -43,3 +43,15 @@ export function relativeDateTime(timestamp: string, now = Date.now()): string {
       : {}),
   });
 }
+
+/** Shortest reading age for dense lists: "now", "2m", "1h", "3d", "2w". */
+export function compactAgo(timestamp: string, now = Date.now()): string | null {
+  const then = new Date(timestamp).getTime();
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+  if (minutes < 10080) return `${Math.floor(minutes / 1440)}d`;
+  return `${Math.floor(minutes / 10080)}w`;
+}

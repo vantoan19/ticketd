@@ -1427,7 +1427,7 @@ test("totals and group counts describe the whole result, not the loaded page", a
     count_tickets: counted({ in_progress: 1, todo: 119 }),
   });
   expect(screen.getByRole("heading", { name: "All tickets" })).toBeTruthy();
-  expect(screen.getByText("120 tickets")).toBeTruthy();
+  expect(screen.getByText("120", { selector: ".list-header p" })).toBeTruthy();
   // One Todo ticket is on this page of the 119 in the result.
   expect(screen.getByText("1 of 119")).toBeTruthy();
   expect(screen.getByText(/Showing 1–2 of 120/)).toBeTruthy();
@@ -1861,7 +1861,7 @@ test("a later page that empties moves back to the last page that exists", async 
     await vi.advanceTimersByTimeAsync(10);
   });
   expect(offsets.at(-1)).toBe(0);
-  expect(screen.getByText("50 tickets")).toBeTruthy();
+  expect(screen.getByText("50", { selector: ".list-header p" })).toBeTruthy();
   expect(screen.queryByText(/Your workspace is ready/)).toBeNull();
 });
 
