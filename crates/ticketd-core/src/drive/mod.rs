@@ -1,4 +1,4 @@
-//! Existing-file references. This capability deliberately has no remote mutation operations.
+//! Google Drive references and blob uploads, without overwrites, deletion or sharing changes.
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
