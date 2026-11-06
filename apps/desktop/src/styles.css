@@ -448,6 +448,10 @@
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
+/* Design frame D shows nothing of the empty detail behind a modal scrim. */
+body:has([data-slot="dialog-overlay"]) .detail-empty {
+  visibility: hidden;
+}
 .ui-popover[data-state="open"],
 .ui-menu[data-state="open"] {
   animation: overlay-enter 0.2s var(--motion-swift);
@@ -533,8 +537,8 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  /* The nav column is 208px wide, 11px from the window edge (design frame A). */
-  padding: 0 5px 12px 11px;
+  /* The nav column is 208px wide, 8px from the window edge (design frame A). */
+  padding: 0 8px 12px 8px;
   background: var(--background);
   color: var(--foreground);
 }
@@ -883,7 +887,7 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0 12px;
+  gap: 0 4px;
   min-height: 48px;
   padding: 0 8px 0 20px;
   background: var(--surface);
@@ -1277,6 +1281,10 @@
   overflow: hidden;
   box-shadow: var(--shadow-border);
   border-radius: 6px;
+}
+.markdown-code-block {
+  /* The frame's hairline sits inside the 64px box, not around it (+2px). */
+  box-shadow: inset var(--shadow-border-base);
 }
 .markdown-block-toolbar {
   display: flex;

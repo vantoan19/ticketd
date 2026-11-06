@@ -91,10 +91,10 @@
 .list-position {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 .list-position-text {
-  padding-inline: 4px;
+  padding-inline: 0 4px;
   font-size: var(--text-caption);
   line-height: 16px;
   white-space: nowrap;

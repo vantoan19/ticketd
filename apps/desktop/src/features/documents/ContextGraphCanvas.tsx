@@ -30,6 +30,9 @@ import "@xyflow/react/dist/style.css";
 
 /** Low enough that a dense neighbourhood fits whole instead of being clipped. */
 const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 2;
+/** One press of the zoom buttons multiplies the zoom by this (React Flow's own step). */
+const ZOOM_STEP = 1.2;
 /** A lone card must not be blown up to fill the view. */
 const MAX_FIT_ZOOM = 1;
 /** Fit never zooms out past this, so card text stays legible; the user pans. */
@@ -309,6 +312,15 @@ export function ContextGraphCanvas({
     return () => window.cancelAnimationFrame(frame);
   }, [fit, centerOn, placed, ready, positions]);
   const container = useRef<HTMLDivElement | null>(null);
+  // Steps from the zoom the person sees, so repeated presses always move by one
+  // step and never restart from a half-finished animation.
+  const stepZoom = (factor: number) => {
+    const next = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, viewportRef.current.zoom * factor),
+    );
+    void instance.current?.zoomTo(next, { duration: 0 });
+  };
   // Whether the opening fit ran against a canvas that had a measured size.
   const fitSized = useRef(false);
   // Cards that appear later (Expand, Load more) are panned into view; cards already
@@ -497,6 +509,7 @@ export function ContextGraphCanvas({
             onNodesChange={rememberSizes}
             edges={shownEdges}
             minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
             proOptions={{ hideAttribution: true }}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
@@ -519,7 +532,7 @@ export function ContextGraphCanvas({
           <button
             type="button"
             aria-label="Zoom out"
-            onClick={() => void instance.current?.zoomOut({ duration: 150 })}
+            onClick={() => stepZoom(1 / ZOOM_STEP)}
           >
             <Minus aria-hidden="true" />
           </button>
@@ -527,7 +540,7 @@ export function ContextGraphCanvas({
           <button
             type="button"
             aria-label="Zoom in"
-            onClick={() => void instance.current?.zoomIn({ duration: 150 })}
+            onClick={() => stepZoom(ZOOM_STEP)}
           >
             <Plus aria-hidden="true" />
           </button>
