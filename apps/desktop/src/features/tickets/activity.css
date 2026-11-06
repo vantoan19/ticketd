@@ -86,7 +86,8 @@
   min-height: 40px;
   padding: 8px 12px;
   border: 0;
-  box-shadow: var(--shadow-border-base);
+  /* Frame: a 1px #DBDBDB edge, a step stronger than the base border. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 16%, transparent);
   border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
@@ -104,6 +105,12 @@
 }
 .activity-note {
   margin: 0;
+}
+/* Expanded, an update reads at the document's reading size (frame B). */
+.ticket-detail[data-expanded] .activity-note,
+.ticket-detail[data-expanded] .activity-note :is(p, li) {
+  font-size: var(--text-reading);
+  line-height: 24px;
 }
 .activity-note:not([data-expanded]) {
   max-height: 20rem;

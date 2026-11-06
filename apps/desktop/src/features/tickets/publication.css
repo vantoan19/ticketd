@@ -297,14 +297,10 @@
   background: var(--surface);
 }
 
-/* An inline link in a rail note: the focus ring reaches 4px past the link, so
-   the link is its own inline-block with a 4px lead-in (beside the space) and the
-   note's lines are far enough apart for the ring to clear the line below. */
-.rail-note:has(.rail-publish-link) {
-  line-height: 26px;
-}
+/* An inline link in a rail note: one 12px/16px caption, the link inline with
+   the sentence. The focus ring is a box-shadow and may pass over the next line. */
 .rail-note .rail-publish-link {
-  display: inline-block;
+  display: inline;
   height: auto;
   min-height: 0;
   font-size: inherit;
@@ -314,5 +310,5 @@
 }
 .rail-source .rail-note .ui-button.rail-publish-link {
   padding: 0;
-  margin: 0 4px;
+  margin: 0;
 }

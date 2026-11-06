@@ -163,7 +163,10 @@
 /* Compact rail groups: a label followed by one icon/reference/title row. */
 @container (max-width: 260px) {
   .linked-work-row {
-    grid-template-columns: 16px 3rem minmax(0, 1fr);
+    /* The reference hugs its text so the title starts beside it and a wrapped
+       title lines up under its own first line. */
+    grid-template-columns: 16px auto minmax(0, 1fr);
+    align-items: start;
     min-height: 32px;
     padding: 0;
     gap: 4px 8px;
@@ -174,9 +177,11 @@
   }
   .linked-work-icon {
     grid-column: 1;
+    margin-top: 2px;
   }
   .linked-work-reference {
     grid-column: 2;
+    line-height: 20px;
   }
   /* A long related title wraps so the ticket can still be told apart. */
   .linked-work-title {

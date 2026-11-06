@@ -38,7 +38,9 @@ test("side by side, the document and the rail are separate bounded scrollers", (
     "@container ticket-detail (min-width: 652px) {\n  /* Side",
   );
   const block = css.slice(start, css.indexOf("\n}\n", start));
-  expect(block).toMatch(/\.detail-scroll \{\s*overflow: hidden;/);
+  expect(block).toMatch(
+    /\.detail-scroll \{\s*display: flex;\s*flex-direction: column;\s*overflow: hidden;/,
+  );
   expect(block).toMatch(/\.detail-content \{\s*height: 100%;\s*min-height: 0;/);
   expect(block).toMatch(
     /\.detail-document,\s*\.detail-content > \.ticket-properties \{\s*min-height: 0;\s*overflow-y: auto;/,
