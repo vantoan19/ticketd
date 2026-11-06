@@ -239,7 +239,6 @@ impl Workspace {
                 let name: String = file
                     .original_filename
                     .chars()
-                    .take(100)
                     .map(|c| {
                         if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
                             c
@@ -248,6 +247,8 @@ impl Workspace {
                         }
                     })
                     .collect();
+                // Bound the component while retaining the suffix and file extension.
+                let name = &name[name.len().saturating_sub(100)..];
                 let relative = format!("files/{}-{name}", file.id);
                 let output = folder.join(&relative);
                 let mut input = match fs::File::open(path) {

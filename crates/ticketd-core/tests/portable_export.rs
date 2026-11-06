@@ -363,3 +363,30 @@ fn source_selection_carries_used_reference_definitions_without_exporting_unselec
     assert!(!output.contains("Private unselected prose"));
     assert!(!output.contains("example.com/private"));
 }
+
+#[test]
+fn portable_filename_bounds_preserve_the_original_file_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let name = format!("{}.pdf", "long-report-".repeat(12));
+    let file = workspace
+        .import_attachment_bytes("a", &name, b"sample", |_, _| true)
+        .unwrap();
+    let export = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Markdown {
+                body: format!(
+                    "[Long report]({})",
+                    workspace.attachment_uri(&file.id).unwrap()
+                ),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    let path = export.attachments[0].path.as_ref().unwrap();
+    assert_eq!(std::path::Path::new(path).extension().unwrap(), "pdf");
+    assert_eq!(
+        std::fs::read(export.directory.join(path)).unwrap(),
+        b"sample"
+    );
+}
