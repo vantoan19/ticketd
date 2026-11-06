@@ -178,7 +178,14 @@ impl DriveUploadProvider for Provider {
                 web_url: format!("https://drive.google.com/file/d/{id}/view"),
                 resource_key: None,
             },
-            sha256_checksum: (!self.unverified).then(|| operation.request.sha256.clone()),
+            sha256_checksum: (!self.unverified).then(|| {
+                if bytes == b"original bytes" {
+                    "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698"
+                } else {
+                    "fbbc2c3431a44cfdde4191200aa44fcadf6f0bb0fe0c139abd61a455b422e2b4"
+                }
+                .into()
+            }),
             version: Some("1".into()),
             operation_id: Some(operation.attachment_id.clone()),
             parent_ids: vec!["folder".into()],

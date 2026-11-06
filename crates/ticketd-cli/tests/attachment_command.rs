@@ -107,7 +107,9 @@ fn cli_replays_a_completed_drive_upload_with_the_source_and_desktop_absent() {
                     web_url: "https://drive.google.com/file/d/blob-id/view".into(),
                     resource_key: None,
                 },
-                sha256_checksum: Some(operation.request.sha256.clone()),
+                sha256_checksum: Some(
+                    "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698".into(),
+                ),
                 version: Some("7".into()),
                 operation_id: Some(operation.attachment_id.clone()),
                 parent_ids: vec!["folder".into()],
