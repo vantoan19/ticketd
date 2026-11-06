@@ -186,53 +186,76 @@ fn provider_failure_retains_last_known_metadata_and_cannot_create_valid_new_refe
 }
 
 #[test]
+#[ignore = "requires a preserved schema50 CLI in TICKETD_SCHEMA50_CLI; run explicitly for cross-version verification"]
 fn schema50_upgrade_preserves_local_receipts_canonical_uses_drafts_undo_and_safety_backup() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let source = dir.path().join("trace.txt");
     std::fs::write(&source, b"retained version50 bytes").unwrap();
-    let mut workspace = Workspace::open(&path).unwrap();
-    workspace.set_attachment_upload_limit(4096).unwrap();
-    let file = workspace
-        .import_attachment("version50-upload", &source, None)
-        .unwrap();
-    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let old_cli = std::env::var_os("TICKETD_SCHEMA50_CLI")
+        .expect("supply the preserved, verified schema50 executable");
+    let old = |args: &[&str]| {
+        let result = std::process::Command::new(&old_cli)
+            .env("TICKETD_TEST_WORKSPACE", &path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result.stdout
+    };
+    old(&["attachment", "limit", "--bytes", "4096"]);
+    let file: ticketd_core::Attachment = serde_json::from_slice(&old(&[
+        "attachment",
+        "add",
+        source.to_str().unwrap(),
+        "--request-id",
+        "version50-upload",
+    ]))
+    .unwrap();
+    let uri: String = serde_json::from_slice(&old(&["attachment", "uri", &file.id])).unwrap();
     let body = format!("[Trace]({uri})");
-    let ticket = workspace.create_ticket("Retain source context").unwrap();
-    workspace
-        .set_ticket_attachment(&ticket.reference, &file.id, true)
-        .unwrap();
-    let document = workspace.create_document(None, &body).unwrap();
-    let draft = workspace
-        .retain_draft(&ticketd_core::DraftRetention {
-            owner: "version50-draft".into(),
-            kind: "draft".into(),
-            revision: 0,
-            payload: Some(serde_json::json!({"body":body})),
-            markdown: vec![body.clone()],
-        })
-        .unwrap();
-    workspace
-        .retain_draft(&ticketd_core::DraftRetention {
-            owner: "version50-undo".into(),
-            kind: "undo".into(),
-            payload: None,
-            revision: 0,
-            markdown: vec![body.clone()],
-        })
-        .unwrap();
-    drop(workspace);
-    // Frozen schema50 parent-table definition, including its original size and
-    // kind constraints. Keep actual persisted references and numeric receipts.
+    let ticket: serde_json::Value =
+        serde_json::from_slice(&old(&["create", "Retain source context"])).unwrap();
+    let ticket_reference = ticket["reference"].as_str().unwrap();
+    old(&["attachment", "link", &file.id, ticket_reference]);
+    let document: serde_json::Value =
+        serde_json::from_slice(&old(&["document", "create", "--body", &body])).unwrap();
     let fixture = rusqlite::Connection::open(&path).unwrap();
-    fixture.execute_batch("PRAGMA foreign_keys=OFF;
-        DROP TABLE drive_references;
-        CREATE TABLE attachments_v50 (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, original_filename TEXT NOT NULL, size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0), kind TEXT NOT NULL CHECK(kind = 'local_snapshot'), locator TEXT NOT NULL UNIQUE);
-        INSERT INTO attachments_v50 SELECT id, display_name, original_filename, size_bytes, kind, locator FROM attachments;
-        DROP TABLE attachments;
-        ALTER TABLE attachments_v50 RENAME TO attachments;
-        PRAGMA user_version=50;").unwrap();
+    assert_eq!(
+        fixture
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        50
+    );
+    // Persist the documented schema50 recovery wire format, then validate the
+    // fixture using that version's CLI before the current core opens it.
+    for kind in ["draft", "undo"] {
+        let owner = format!("version50-{kind}");
+        fixture.execute("INSERT INTO attachment_drafts(owner,kind,revision,payload,markdown) VALUES(?1,?2,1,?3,?4)", rusqlite::params![owner, kind, if kind == "draft" { Some(serde_json::json!({"body":body}).to_string()) } else { None }, serde_json::to_string(&vec![&body]).unwrap()]).unwrap();
+        fixture
+            .execute(
+                "INSERT INTO attachment_draft_references(owner,uri,attachment_id) VALUES(?1,?2,?3)",
+                rusqlite::params![owner, uri, file.id],
+            )
+            .unwrap();
+    }
     drop(fixture);
+    let old_usage: serde_json::Value =
+        serde_json::from_slice(&old(&["attachment", "usage", &file.id])).unwrap();
+    assert_eq!(old_usage["eligible"], false);
+    assert!(
+        old_usage["protections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["kind"] == "undo")
+    );
+    let old_drafts: Vec<ticketd_core::DraftRetention> =
+        serde_json::from_slice(&old(&["attachment", "recovery-drafts"])).unwrap();
     std::fs::remove_file(&source).unwrap();
     let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(workspace.attachment_upload_limit().unwrap(), 4096);
@@ -244,15 +267,17 @@ fn schema50_upgrade_preserves_local_receipts_canonical_uses_drafts_undo_and_safe
     );
     assert_eq!(workspace.attachment_uri(&file.id).unwrap(), uri);
     assert_eq!(
-        workspace.ticket_attachments(&ticket.reference).unwrap(),
+        workspace.ticket_attachments(ticket_reference).unwrap(),
         std::slice::from_ref(&file)
     );
     assert_eq!(
-        workspace.embedded_attachments(&document.id).unwrap(),
+        workspace
+            .embedded_attachments(document["id"].as_str().unwrap())
+            .unwrap(),
         std::slice::from_ref(&file)
     );
     assert_eq!(workspace.draft_retentions().unwrap().len(), 2);
-    assert_eq!(workspace.draft_retentions().unwrap()[0], draft);
+    assert_eq!(workspace.draft_retentions().unwrap(), old_drafts);
     let usage = workspace.attachment_usage(&file.id).unwrap();
     assert!(!usage.eligible);
     assert!(usage.protections.iter().any(|p| p.kind == "undo"));
