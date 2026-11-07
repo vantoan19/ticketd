@@ -497,7 +497,9 @@ or unmounting abandons insertion without deleting uploaded bytes. The CLI's
 ## Existing Google Drive references
 
 The core's narrow `drive::AttachmentProvider` capability resolves file metadata.
-It is separate from ticket-source connectors and has no remote mutation methods.
+It is separate from ticket-source connectors. Uploads use the separate
+`drive::DriveUploadProvider` capability; neither interface exposes deletion,
+overwrites, conversion or sharing changes.
 The Google implementation can exchange/refresh authorization, read account
 identity and read explicitly authorized file metadata. It neither downloads nor
 converts Google-native content and cannot change sharing or delete a remote file.
@@ -531,3 +533,42 @@ not followed. Workspace backups/JSON export contain reference metadata, never
 credentials or remote bytes. The standalone CLI uses the same core/vault namespace;
 no desktop process is needed. Portable Drive-link export and richer recovery/remote
 record cleanup are separate workflows.
+
+## Google Drive uploaded copies
+
+Schema 52 adds `drive_upload_operations`. Workspace workflows own per-file input
+bounds, a frozen temporary input and its SHA-256, destination validation, durable
+operation identity, remote ID reservation, reconciliation and attachment registration.
+An operation binds the original connection, folder and filename. Both adapters
+use `DriveUploadDestination`; future default-destination changes cannot redirect
+an existing retry. The shared picker persists that destination with its existing
+capture recovery record. Explicit local fallback creates a separate local operation
+and retains the Drive operation for reconciliation.
+
+Each operation holds a cross-process file lock before short database writes;
+process exit releases ownership without a time-based lease. No network call holds
+a SQLite transaction. The operation is persisted before ID allocation, the
+pre-generated blob ID is persisted before create, and uncertainty is persisted
+before sending bytes. Retry/restart resolves that same ID first. A missing or
+inaccessible read does not prove non-creation: subsequent creates still use the
+same ID, allowing Drive's duplicate-ID rejection to prevent a second object.
+`check_drive_upload` only reconciles; it never starts an upload. Ordinary writes
+and Drive uploads share a request-ID namespace enforced by database triggers.
+
+The provider creates a blob with that ID and provenance in `appProperties`, then
+sends bounded 256 KiB resumable chunks. Session URLs stay in memory and are never
+logged, backed up or exported. After interruption or session expiry, a new session
+may target only the original ID after reconciliation. Completion requires matching
+ID, operation provenance, folder, size and SHA-256; unsupported/missing verification
+leaves an uncertain operation with an Open in Drive route. A same-ID conflict is
+not itself success. Failure to register metadata remains recoverable without a
+second create or requiring the source when remote completion can be verified.
+
+Completed copies use the remote `external_reference` storage locator with separate
+immutable upload provenance, exposed by `drive_uploaded_copy`. They remain reusable
+if insertion or reference saving fails. They are uploaded copies, not local
+snapshots. Byte export remains unavailable until a workflow can download and
+verify current content against provenance. Backup/restore and JSON export retain
+operation metadata and remote references only, with no tokens, session URLs,
+source paths or cached remote bytes. Remote content is retained after cancellation,
+local fallback and record cleanup.

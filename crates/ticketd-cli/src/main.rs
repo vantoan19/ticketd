@@ -96,6 +96,28 @@ enum AttachmentCommand {
     Inspect { id: String },
     /// Last-known Drive metadata and opaque connection handle; no network needed
     DriveInfo { id: String },
+    /// Upload a new blob copy to an explicitly authorized writable Drive folder
+    DriveUpload {
+        path: String,
+        #[arg(long)]
+        connection: String,
+        #[arg(long)]
+        folder: String,
+        #[arg(long)]
+        resource_key: Option<String>,
+        #[arg(long)]
+        request_id: String,
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// List pending, uncertain and completed uploads without network access
+    DriveUploads,
+    /// Inspect an operation; --check reconciles the same remote ID without uploading
+    DriveUploadStatus {
+        request_id: String,
+        #[arg(long)]
+        check: bool,
+    },
     /// Reference an already-authorized Drive file using the shared OS credential store
     DriveAdd {
         connection: String,
@@ -2086,6 +2108,52 @@ fn attachment_command(
         AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,
         AttachmentCommand::DriveInfo { id } => {
             serde_json::to_string(&workspace.drive_reference(&id)?)?
+        }
+        AttachmentCommand::DriveUploads => serde_json::to_string(&workspace.drive_uploads()?)?,
+        AttachmentCommand::DriveUploadStatus { request_id, check } => {
+            let operation = workspace.drive_upload(&request_id)?;
+            if check {
+                let transport = ticketd_core::drive::GoogleTransport::default();
+                let provider = ticketd_core::drive::GoogleDrive::new(
+                    &operation.request.destination.connection_id,
+                    &ticketd_core::drive::PlatformCredentialStore,
+                    &transport,
+                );
+                serde_json::to_string(&workspace.check_drive_upload(&request_id, &provider)?)?
+            } else {
+                serde_json::to_string(&operation)?
+            }
+        }
+        AttachmentCommand::DriveUpload {
+            path,
+            connection,
+            folder,
+            resource_key,
+            request_id,
+            ticket,
+        } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &connection,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let destination = ticketd_core::drive::DriveUploadDestination {
+                connection_id: connection.clone(),
+                folder_id: folder,
+                resource_key,
+            };
+            let file = workspace.upload_drive_file(
+                &request_id,
+                &path,
+                &destination,
+                &provider,
+                |_, _| true,
+            )?;
+            if let Some(ticket) = ticket {
+                workspace.set_ticket_attachment(&ticket,&file.id,true).map_err(|error|format!("Uploaded copy saved as {}; association failed: {error}; the remote file remains in Drive. Reuse with ticketd attachment link {} {ticket}",file.id,file.id))?;
+            }
+            serde_json::to_string(&file)?
         }
         AttachmentCommand::DriveAdd {
             connection,

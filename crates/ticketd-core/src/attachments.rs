@@ -201,6 +201,9 @@ impl Workspace {
         fs::create_dir_all(&root)?;
         let _upload_lock = lock_uploads(&root)?;
         self.recover_uploads_locked(&root)?;
+        if crate::drive::upload_request_claimed(&self.connection, request_id)? {
+            return Err(Error::RequestConflict(request_id.into()));
+        }
         let previous: Option<(String, String)> = self
             .connection
             .query_row(
@@ -282,6 +285,12 @@ impl Workspace {
         let file = &completed.attachment;
         tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator, added_at) VALUES (?1, ?2, ?3, ?4, 'local_snapshot', ?5, ?6)",
             params![file.id, file.display_name, file.original_filename, file.size_bytes, file.locator, file.added_at])?;
+        if crate::drive::upload_request_claimed(&tx, &completed.request_id)? {
+            // A concurrent Drive allocation may have claimed this ID while the
+            // local copy ran. Preserve its bytes without poisoning later recovery.
+            tx.commit()?;
+            return Err(Error::RequestConflict(completed.request_id.clone()));
+        }
         if let Some(stored) = stored {
             if stored != completed.request {
                 // A competing ordinary write may have claimed the ID during the

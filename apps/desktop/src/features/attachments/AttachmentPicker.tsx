@@ -1,4 +1,5 @@
 import { DrivePicker } from "./DrivePicker";
+import { DriveSetupNotice } from "./DriveSetupNotice";
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
@@ -18,6 +19,8 @@ import {
   type Attachment,
   type CaptureSource,
   type UploadProgress,
+  type DriveUploadDestination,
+  type DriveConfiguration,
 } from "@/lib/api/attachments";
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
@@ -62,6 +65,11 @@ export function AttachmentPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [limit, setLimit] = useState<number | null>(null);
+  const [destination, setDestination] = useState<DriveUploadDestination>();
+  const [folderName, setFolderName] = useState("");
+  const [folderConfiguration, setFolderConfiguration] =
+    useState<DriveConfiguration | null>(null);
+  const folderSelection = useRef<string | null>(null);
   const insertion = useRef(0);
   const reuseRequests = useRef(new Map<string, string>());
   const running = useRef(false);
@@ -77,6 +85,10 @@ export function AttachmentPicker({
   useEffect(
     () => () => {
       insertion.current += 1;
+      if (folderSelection.current)
+        void attachments
+          .cancelDriveSelection(folderSelection.current)
+          .catch(() => {});
     },
     [],
   );
@@ -115,7 +127,13 @@ export function AttachmentPicker({
       );
   }, [open, loadRecovery]);
   function changeOpen(next: boolean) {
-    if (!next) insertion.current += 1;
+    if (!next) {
+      insertion.current += 1;
+      if (folderSelection.current)
+        void attachments
+          .cancelDriveSelection(folderSelection.current)
+          .catch(() => {});
+    }
     onOpenChange(next);
   }
   useEffect(() => {
@@ -165,6 +183,7 @@ export function AttachmentPicker({
               next.progress = value;
               update();
             },
+            next.destination,
           );
           await journal?.put(next);
           if (isCanceled(next) || insertion.current !== currentInsertion) {
@@ -240,6 +259,7 @@ export function AttachmentPicker({
       order: started + index++ / 1000,
       requestId: crypto.randomUUID(),
       linkRequestId: crypto.randomUUID(),
+      ...(destination ? { destination, destinationName: folderName } : {}),
       state: "queued",
       progress: {
         copied: 0,
@@ -290,6 +310,46 @@ export function AttachmentPicker({
     } catch (reason) {
       setError(String(reason));
     }
+  }
+  async function chooseFolder() {
+    const currentInsertion = insertion.current;
+    setBusy(true);
+    setError("");
+    try {
+      const configuration = await attachments.driveConfiguration();
+      if (insertion.current !== currentInsertion) return;
+      setFolderConfiguration(configuration);
+      if (!configuration.configured) return;
+      const operationId = crypto.randomUUID();
+      folderSelection.current = operationId;
+      const selected = await attachments.chooseDriveFolder(operationId);
+      if (insertion.current === currentInsertion) {
+        setDestination(selected.destination);
+        setFolderName(selected.folder.name);
+      }
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      folderSelection.current = null;
+      setBusy(false);
+    }
+  }
+  function uploadLocally(row: UploadAttempt) {
+    row.state = "canceled";
+    row.error =
+      "Local upload chosen explicitly. Any completed remote file remains in Drive; this Drive operation is retained for status checks.";
+    const local: UploadAttempt = {
+      source: row.source,
+      name: row.name,
+      order: Date.now(),
+      requestId: crypto.randomUUID(),
+      linkRequestId: crypto.randomUUID(),
+      state: "queued",
+      progress: { copied: 0, total: 0 },
+    };
+    attempts.current.push(local);
+    update();
+    void run();
   }
   async function reuse(attachmentId: string) {
     setBusy(true);
@@ -362,8 +422,36 @@ export function AttachmentPicker({
               <Button disabled={busy} onClick={() => void choose()}>
                 {single ? "Choose file" : "Choose files"}
               </Button>
-              <small>Destination: Local workspace</small>
+              <small>
+                {destination
+                  ? `Destination: Google Drive · ${folderName}`
+                  : "Destination: Local workspace"}
+              </small>
+              <div className="attachment-actions">
+                <Button
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void chooseFolder()}
+                >
+                  Choose Drive folder
+                </Button>
+                {destination && (
+                  <Button
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      setDestination(undefined);
+                      setFolderName("");
+                    }}
+                  >
+                    Use local for new uploads
+                  </Button>
+                )}
+              </div>
             </div>
+            {folderConfiguration && (
+              <DriveSetupNotice configuration={folderConfiguration} />
+            )}
             {rows.length > 0 && (
               <ul className="attachment-uploads" aria-label="Uploads">
                 {rows.map((row) => (
@@ -403,14 +491,75 @@ export function AttachmentPicker({
                       {row.error && <p role="alert">{row.error}</p>}
                       {row.stored && row.state !== "inserted" && (
                         <p className="attachment-hint">
-                          Stored as {row.stored.id}. The snapshot remains
-                          available in Existing files.
+                          Stored as {row.stored.id}.{" "}
+                          {row.destination
+                            ? "The uploaded copy remains in Drive and Existing files, including after cancellation."
+                            : "The snapshot remains available in Existing files."}
+                        </p>
+                      )}
+                      {row.destination && (
+                        <p className="attachment-hint">
+                          Google Drive ·{" "}
+                          {row.destinationName || "Selected upload folder"} ·
+                          Uploaded copy · Original bytes are not guaranteed. Any
+                          completed file remains in Drive.
                         </p>
                       )}
                     </div>
                     <div className="attachment-actions">
                       {(row.state === "failed" || row.state === "canceled") && (
                         <>
+                          {row.destination && !row.stored && (
+                            <>
+                              <Button
+                                disabled={busy}
+                                onClick={() => {
+                                  setBusy(true);
+                                  void attachments
+                                    .checkDriveUpload(row.requestId)
+                                    .then(async (result) => {
+                                      if (result.attachment) {
+                                        row.stored = result.attachment;
+                                        await (await loadRecovery())?.put(row);
+                                        row.error =
+                                          "Upload complete. Retry to insert the existing uploaded copy.";
+                                      } else
+                                        row.error =
+                                          "Not confirmed complete. Retry reconciles the same remote ID before sending bytes.";
+                                      update();
+                                    })
+                                    .catch((reason: unknown) => {
+                                      row.error = String(reason);
+                                      update();
+                                    })
+                                    .finally(() => setBusy(false));
+                                }}
+                              >
+                                Check status
+                              </Button>
+                              <Button
+                                disabled={busy}
+                                variant="ghost"
+                                onClick={() => uploadLocally(row)}
+                              >
+                                Upload locally instead
+                              </Button>
+                            </>
+                          )}
+                          {row.destination && (
+                            <Button
+                              variant="ghost"
+                              onClick={() =>
+                                void attachments
+                                  .openDriveUpload(row.requestId)
+                                  .catch((reason: unknown) =>
+                                    setError(String(reason)),
+                                  )
+                              }
+                            >
+                              Open in Drive
+                            </Button>
+                          )}
                           <Button
                             disabled={busy}
                             onClick={() => {

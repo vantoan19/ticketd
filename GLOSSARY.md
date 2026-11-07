@@ -97,6 +97,13 @@ An Attachment resolving current provider content rather than a local snapshot. G
 **Quarantined Attachment**:
 A local Attachment whose unused bytes were explicitly moved out of active storage for reversible cleanup. Its identity and metadata remain discoverable, complete backups retain its bytes, and restoration makes the same identity reusable. Saved references, recoverable drafts, Undo and Trash protect files from quarantine. Quarantine still occupies disk space until explicit purge.
 
+**Uploaded copy**:
+An Attachment uploaded by ticketd to an explicitly selected remote folder. Its
+operation, remote identity, input digest and observed checksum/version are retained
+for recovery. The provider can change the content independently; an uploaded copy
+does not promise preserved original bytes. A revision uses a new upload operation
+and attachment identity. Cancellation and removal never delete the remote file.
+
 **Recoverable draft**:
 Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
 

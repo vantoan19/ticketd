@@ -36,6 +36,174 @@ const file = (name: string) => ({
   locator: `${name}/bytes/${name}`,
 });
 
+test("Drive failures retain their folder and operation; status checks precede retry and local fallback is explicit", async () => {
+  const destination = {
+    connection_id: "connection",
+    folder_id: "folder",
+    resource_key: null,
+  };
+  let fail = true;
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "drive-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
+    if (command === "select_drive_upload_folder")
+      return {
+        destination,
+        folder: {
+          id: "folder",
+          name: "ticketd attachments",
+          can_add_children: true,
+        },
+      };
+    if (command === "check_drive_upload")
+      return { state: "uncertain", attachment: null };
+    if (command === "upload_drive_file") {
+      if (fail)
+        throw new Error("Completion uncertain. Check status before retrying.");
+      return {
+        ...file("trace.log"),
+        kind: "external_reference",
+        locator: "drive:connection:reserved",
+      };
+    }
+    return file("trace.log");
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await screen.findByText(/Destination: Google Drive/);
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText(/Completion uncertain/);
+  expect(picked).not.toHaveBeenCalled();
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "import_attachment"),
+  ).toBe(false);
+  const original = vi
+    .mocked(invoke)
+    .mock.calls.find(([command]) => command === "upload_drive_file")?.[1];
+  fireEvent.click(within(row).getByRole("button", { name: "Check status" }));
+  await within(row).findByText(/Not confirmed complete/);
+  fail = false;
+  fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
+  const requests = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "upload_drive_file");
+  expect(requests[1]?.[1]).toMatchObject({
+    requestId: (original as { requestId: string }).requestId,
+    destination,
+  });
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "import_attachment"),
+  ).toBe(false);
+});
+
+test("unmount cancels an unfinished Drive folder selection without starting uploads", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "folder-cancel";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
+    if (command === "select_drive_upload_folder") return new Promise(() => {});
+    return null;
+  });
+  const view = render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "select_drive_upload_folder",
+      expect.anything(),
+    ),
+  );
+  const request = vi
+    .mocked(invoke)
+    .mock.calls.find(
+      ([command]) => command === "select_drive_upload_folder",
+    )?.[1];
+  view.unmount();
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("cancel_drive_selection", request),
+  );
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "upload_drive_file"),
+  ).toBe(false);
+});
+
+test("explicit local fallback uses a new operation and retains the original Drive recovery record after remount", async () => {
+  const destination = {
+    connection_id: "connection",
+    folder_id: "original-folder",
+    resource_key: null,
+  };
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "fallback-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
+    if (command === "select_drive_upload_folder")
+      return {
+        destination,
+        folder: {
+          id: "original-folder",
+          name: "Uploads",
+          can_add_children: true,
+        },
+      };
+    if (command === "upload_drive_file") throw new Error("Drive offline");
+    return file("trace.log");
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  const first = render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={picked} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await screen.findByText(/Destination: Google Drive/);
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await screen.findByText("Drive offline");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Upload locally instead" }),
+  );
+  await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
+  const remote = vi
+    .mocked(invoke)
+    .mock.calls.find(([command]) => command === "upload_drive_file")?.[1] as {
+    requestId: string;
+  };
+  const local = vi
+    .mocked(invoke)
+    .mock.calls.find(([command]) => command === "import_attachment")?.[1] as {
+    requestId: string;
+  };
+  expect(remote.requestId).not.toBe(local.requestId);
+  expect(
+    screen.getByText(
+      /Any completed remote file remains in Drive; this Drive operation is retained/,
+    ),
+  ).toBeTruthy();
+  first.unmount();
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  await screen.findByText(/Google Drive · Uploads · Uploaded copy/);
+  expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "upload_drive_file"),
+  ).toHaveLength(1);
+});
+
 test("existing files search keeps related usage distinct and inserts selected identities in selection order", async () => {
   const related = file("ticket.log");
   const recent = file("recent.png");

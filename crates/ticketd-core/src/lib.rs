@@ -762,6 +762,9 @@ impl Workspace {
         if version < 51 {
             drive::migrate(&transaction)?;
         }
+        if version < 52 {
+            drive::migrate_uploads(&transaction)?;
+        }
         if version < 53 {
             attachment_cleanup::migrate(&transaction)?;
         }

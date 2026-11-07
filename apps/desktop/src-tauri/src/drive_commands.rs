@@ -9,12 +9,132 @@ use std::{
     time::Duration,
 };
 use tauri_plugin_opener::OpenerExt;
+use ticketd_core::drive::{DriveFolder, DriveUploadDestination, DriveUploadState};
 use ticketd_core::{
     Attachment,
     drive::{
         DesktopOAuthClient, GoogleDrive, GoogleTransport, PickerSession, PlatformCredentialStore,
     },
 };
+
+#[derive(Serialize)]
+pub struct SelectedUploadFolder {
+    destination: DriveUploadDestination,
+    folder: DriveFolder,
+}
+
+#[tauri::command]
+pub async fn select_drive_upload_folder(
+    app: tauri::AppHandle,
+    operations: tauri::State<'_, DrivePickerOperations>,
+    operation_id: String,
+) -> Result<SelectedUploadFolder, String> {
+    if operation_id.trim().is_empty() || operation_id.len() > 128 {
+        return Err("invalid Drive selection operation".into());
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let operations = Arc::clone(&operations.0);
+    {
+        let mut active = operations
+            .lock()
+            .map_err(|_| "Drive picker state is unavailable")?;
+        if !active.is_empty() {
+            return Err("another Drive selection is active; complete or cancel it first".into());
+        }
+        active.insert(operation_id.clone(), Arc::clone(&cancelled));
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let session = PickerSession::begin_folder(
+            DesktopOAuthClient::from_environment().map_err(|e| e.to_string())?,
+            Duration::from_secs(180),
+        )
+        .map_err(|e| e.to_string())?;
+        app.opener()
+            .open_url(session.authorization_url(), None::<&str>)
+            .map_err(|_| {
+                "could not open the system browser for Drive folder selection".to_owned()
+            })?;
+        let transport = GoogleTransport::default();
+        let selection = session
+            .finish(&transport, &PlatformCredentialStore, &cancelled)
+            .map_err(|e| e.to_string())?;
+        let [folder_id] = selection.file_ids.as_slice() else {
+            return Err("choose exactly one writable Drive folder".into());
+        };
+        let destination = DriveUploadDestination {
+            connection_id: selection.connection_id.clone(),
+            folder_id: folder_id.clone(),
+            resource_key: None,
+        };
+        let provider = GoogleDrive::new(
+            &selection.connection_id,
+            &PlatformCredentialStore,
+            &transport,
+        );
+        let folder = open_workspace()
+            .and_then(|w| w.validate_drive_upload_destination(&destination, &provider))
+            .map_err(|e| e.to_string())?;
+        Ok(SelectedUploadFolder {
+            destination,
+            folder,
+        })
+    })
+    .await
+    .map_err(|_| "Drive folder selection could not finish".to_owned());
+    operations
+        .lock()
+        .map_err(|_| "Drive picker state is unavailable")?
+        .remove(&operation_id);
+    result?
+}
+
+#[derive(Serialize)]
+pub struct UploadStatus {
+    state: DriveUploadState,
+    attachment: Option<Attachment>,
+}
+#[tauri::command]
+pub fn open_drive_upload(app: tauri::AppHandle, request_id: String) -> Result<(), String> {
+    let url = open_workspace()
+        .and_then(|w| w.drive_upload_open_url(&request_id))
+        .map_err(|e| e.to_string())?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "Could not open this upload in Drive".into())
+}
+#[tauri::command]
+pub async fn check_drive_upload(request_id: String) -> Result<UploadStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let operation = workspace
+            .drive_upload(&request_id)
+            .map_err(|e| e.to_string())?;
+        let transport = GoogleTransport::default();
+        let provider = GoogleDrive::new(
+            &operation.request.destination.connection_id,
+            &PlatformCredentialStore,
+            &transport,
+        );
+        let operation = workspace
+            .check_drive_upload(&request_id, &provider)
+            .map_err(|e| e.to_string())?;
+        let attachment = if operation.state == DriveUploadState::Completed {
+            Some(
+                workspace
+                    .attachment(&operation.attachment_id)
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        };
+        Ok(UploadStatus {
+            state: operation.state,
+            attachment,
+        })
+    })
+    .await
+    .map_err(|_| "Drive upload status could not finish".to_owned())?
+}
 
 #[derive(Default)]
 pub struct DrivePickerOperations(pub Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>);
