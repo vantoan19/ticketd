@@ -1971,9 +1971,11 @@ test("Ctrl+B belongs to the editors and never toggles the sidebar", async () => 
 test("a failed save of the sidebar state says so and leaves the sidebar as it was", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
-  const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-    throw new Error("quota");
-  });
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
   fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
   setItem.mockRestore();
   expect(screen.getByRole("alert").textContent).toContain(

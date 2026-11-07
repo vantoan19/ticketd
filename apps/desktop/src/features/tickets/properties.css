@@ -267,7 +267,7 @@
   gap: 6px;
   margin: 12px 0 0;
 }
-.chip-bar > :is(small, p) {
+.chip-bar > :is(small, p, section) {
   flex-basis: 100%;
 }
 .chip-bar .rail-follow {

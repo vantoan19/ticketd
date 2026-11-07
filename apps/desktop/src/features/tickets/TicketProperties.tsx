@@ -427,15 +427,14 @@ export function TicketProperties({
           )}
         </>,
       )}
-      {!chips &&
-        (ticket.status === "In progress" || ticket.status === "In review") && (
-          <LatestUpdate
-            reference={ticket.reference}
-            active={active}
-            revision={revision}
-            onOpen={onOpenNote}
-          />
-        )}
+      {(ticket.status === "In progress" || ticket.status === "In review") && (
+        <LatestUpdate
+          reference={ticket.reference}
+          active={active}
+          revision={revision}
+          onOpen={onOpenNote}
+        />
+      )}
       <ConfirmLeaveDuplicate
         canonical={ticket.duplicate_of ?? ""}
         status={leaving}

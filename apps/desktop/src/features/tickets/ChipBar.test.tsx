@@ -163,3 +163,23 @@ test("widening the pane brings the rail back", async () => {
     await screen.findByRole("complementary", { name: "Ticket properties" }),
   ).toBeTruthy();
 });
+
+test("a hidden pane reports no width and keeps its layout", async () => {
+  renderDetails();
+  resizePane(900);
+  await screen.findByRole("complementary", { name: "Ticket properties" });
+  resizePane(0);
+  expect(
+    screen.getByRole("complementary", { name: "Ticket properties" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Ticket properties" })).toBeNull();
+});
+
+test("narrow, an active ticket still shows its Latest update under the chips", async () => {
+  renderDetails();
+  resizePane(500);
+  const bar = await screen.findByRole("group", { name: "Ticket properties" });
+  expect(
+    await within(bar).findByRole("heading", { name: "Latest update" }),
+  ).toBeTruthy();
+});
