@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { ContextGraphNavigation } from "./navigation";
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -313,14 +314,17 @@ export function Documents({
   return (
     <div className="documents-page">
       <div className="documents-list-view" hidden={selected !== null}>
-        <div className="documents-heading">
-          <h1>Documents</h1>
-          {onCapture && (
-            <Button variant="outline" onClick={onCapture}>
-              <Plus aria-hidden="true" /> Capture
-            </Button>
-          )}
-        </div>
+        <SectionHeader
+          level={1}
+          title="Documents"
+          actions={
+            onCapture && (
+              <Button variant="outline" onClick={onCapture}>
+                <Plus aria-hidden="true" /> Capture
+              </Button>
+            )
+          }
+        />
         {error && <p role="alert">{error}</p>}
         <div className="documents-toolbar">
           <div className="documents-tabs">

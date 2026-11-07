@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import type { ReactNode } from "react";
 import {
   settingsCardId,
@@ -30,21 +31,14 @@ export function SettingsCard({
       aria-labelledby={headingId}
       tabIndex={-1}
     >
-      {description ? (
-        <div className="settings-card-header" data-described>
-          <div className="settings-card-heading">
-            <h2 id={headingId}>{title}</h2>
-            <p className="settings-card-description">{description}</p>
-          </div>
-          {actions}
-        </div>
-      ) : actions ? (
-        <div className="settings-card-header">
-          <h2 id={headingId}>{title}</h2>
-          {actions}
-        </div>
-      ) : (
-        <h2 id={headingId}>{title}</h2>
+      <SectionHeader
+        level={2}
+        titleId={headingId}
+        title={title}
+        actions={actions}
+      />
+      {description && (
+        <p className="settings-card-description">{description}</p>
       )}
       {children}
       {footer && <div className="settings-card-footer">{footer}</div>}

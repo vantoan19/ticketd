@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
@@ -185,12 +186,15 @@ export function TicketFilters(p: Props) {
               avoidCollisions={!dock?.anchor}
               aria-label="Ticket filters"
             >
-              <div className="filters-head">
-                <h2>Filters</h2>
-                <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-                  Clear all
-                </Button>
-              </div>
+              <SectionHeader
+                level={2}
+                title="Filters"
+                actions={
+                  <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+                    Clear all
+                  </Button>
+                }
+              />
               <div className="filters-body">
                 {p.navigation.kind !== "progress" && (
                   <FilterSection label="Status">
