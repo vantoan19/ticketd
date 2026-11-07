@@ -3,12 +3,16 @@ use std::fs;
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::{Attachment, AttachmentKind, AttachmentUsage, Error, Workspace, attachments};
+use crate::{
+    Attachment, AttachmentKind, AttachmentPurgeState, AttachmentUsage, Error, Workspace,
+    attachments,
+};
 
 #[derive(Debug, Serialize)]
 pub struct AttachmentCleanupReview {
     pub attachment: Attachment,
     pub eligible: bool,
+    pub purge_eligible: bool,
     pub reason: String,
     pub usage: AttachmentUsage,
 }
@@ -16,6 +20,19 @@ pub struct AttachmentCleanupReview {
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     tx.execute_batch("ALTER TABLE attachments ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0 CHECK(quarantined IN (0,1) AND (quarantined=0 OR kind='local_snapshot')); ALTER TABLE attachments ADD COLUMN added_at TEXT; PRAGMA user_version=53;")?;
     Ok(())
+}
+
+pub(crate) fn migrate_purge(tx: &Connection) -> Result<(), Error> {
+    tx.execute_batch("ALTER TABLE attachments ADD COLUMN purge_state TEXT NOT NULL DEFAULT 'retained' CHECK(purge_state IN ('retained','pending','purged') AND (purge_state='retained' OR (kind='local_snapshot' AND quarantined=1))); PRAGMA user_version=54;")?;
+    Ok(())
+}
+
+pub(crate) fn purge_unavailable(file: &Attachment) -> String {
+    match file.purge_state {
+        AttachmentPurgeState::Pending => "Permanent purge is pending; local bytes are unavailable. Retry the explicit purge to finish, or deliberately restore an older complete backup to a separate workspace.".into(),
+        AttachmentPurgeState::Purged => "Local bytes were permanently purged. Restore an older complete backup to a separate workspace, or choose a replacement for this reference.".into(),
+        AttachmentPurgeState::Retained => String::new(),
+    }
 }
 
 fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
@@ -27,8 +44,8 @@ fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
             "External reference · No local storage to reclaim. Remote files are never deleted."
                 .into(),
         )
-    } else if attachment.quarantined {
-        (false, "Quarantined · Restore to reuse this file.".into())
+    } else if attachment.purge_state != AttachmentPurgeState::Retained {
+        (false, purge_unavailable(&attachment))
     } else if usage.legacy_drafts_pending {
         (
             false,
@@ -41,21 +58,137 @@ fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
         )
     } else if let Err(error) = attachments::validate_attachment_bytes(tx, &attachment) {
         (false, error.to_string())
+    } else if attachment.quarantined {
+        (
+            false,
+            "Quarantined · Restore to reuse, or explicitly purge permanently.".into(),
+        )
     } else {
         (
             true,
             "Unused local snapshot · Eligible for reversible quarantine.".into(),
         )
     };
+    let purge_eligible = attachment.kind == AttachmentKind::LocalSnapshot
+        && (attachment.purge_state == AttachmentPurgeState::Pending
+            || (attachment.quarantined
+                && attachment.purge_state == AttachmentPurgeState::Retained
+                && usage.eligible
+                && attachments::validate_attachment_bytes(tx, &attachment).is_ok()));
     Ok(AttachmentCleanupReview {
         attachment,
         eligible,
+        purge_eligible,
         reason,
         usage,
     })
 }
 
 impl Workspace {
+    /// The identity itself makes retries idempotent. Never run inside a replay transaction:
+    /// intent must commit before irreversible I/O, and completion only after deletion.
+    pub fn purge_attachment(&mut self, id: &str) -> Result<Attachment, Error> {
+        let _files = self.attachment_backup_lock()?;
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        let file = attachments::read_attachment(&tx, id)?;
+        if file.kind != AttachmentKind::LocalSnapshot {
+            return Err(Error::Attachment(
+                "Only quarantined local snapshots can be purged. Remote files are never deleted."
+                    .into(),
+            ));
+        }
+        if file.purge_state == AttachmentPurgeState::Purged {
+            return Ok(file);
+        }
+        if file.purge_state == AttachmentPurgeState::Retained {
+            let usage = crate::attachment_retention::read_usage(&tx, id)?;
+            if !usage.eligible {
+                return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before purging.".into()));
+            }
+            if !file.quarantined {
+                return Err(Error::Attachment(
+                    "Move this local snapshot to quarantine before permanent purge.".into(),
+                ));
+            }
+            let source = attachments::validate_attachment_bytes(&tx, &file)?;
+            let root = attachments::attachment_directory(&tx)?.canonicalize()?;
+            if source != root.join(quarantine_locator(&file.locator)) {
+                return Err(Error::Attachment(
+                    "Quarantine move is incomplete; retry quarantine before permanent purge."
+                        .into(),
+                ));
+            }
+            tx.execute(
+                "UPDATE attachments SET purge_state='pending' WHERE id=?1",
+                [id],
+            )?;
+        }
+        tx.commit()?;
+
+        // No writer transaction during filesystem I/O. Committed pending state makes
+        // concurrent canonical/draft restoration refuse these bytes without lock inversion.
+        self.delete_purged_bytes(&file).map_err(|error| Error::Attachment(format!("Permanent purge is pending, not confirmed: {error}. Retry explicit purge for '{id}' after repairing managed storage; do not restore individual bytes.")))?;
+        (|| {
+            let tx = self.connection.savepoint()?;
+            crate::transaction_write_lock(&tx)?;
+            tx.execute("UPDATE attachments SET purge_state='purged' WHERE id=?1", [id])?;
+            let file = attachments::read_attachment(&tx, id)?;
+            tx.commit()?;
+            Ok(file)
+        })().map_err(|error: Error| Error::Attachment(format!("Permanent purge is pending: bytes were removed but completion was not recorded: {error}. Retry explicit purge for '{id}' to confirm completion.")))
+    }
+
+    fn delete_purged_bytes(&self, file: &Attachment) -> Result<(), Error> {
+        let root = self.attachment_directory()?;
+        let relative = quarantine_locator(&file.locator);
+        if uuid::Uuid::parse_str(&file.id).is_err()
+            || file.original_filename.contains(['/', '\\', ':', '\0'])
+            || matches!(file.original_filename.as_str(), "" | "." | "..")
+            || file.locator != format!("{}/bytes/{}", file.id, file.original_filename)
+        {
+            return Err(Error::Attachment(
+                "Invalid managed snapshot locator; preserve files and repair metadata.".into(),
+            ));
+        }
+        for path in [
+            root.clone(),
+            root.join(&file.id),
+            root.join(&file.id).join("quarantine"),
+        ] {
+            crate::attachment_previews::reject_link(&path)
+                .map_err(|error| Error::Attachment(error.message))?;
+        }
+        let destination = root.canonicalize()?.join(relative);
+        let parent = destination
+            .parent()
+            .ok_or_else(|| Error::Attachment("invalid managed purge path".into()))?;
+        match fs::symlink_metadata(root.join(&file.locator)) {
+            Ok(_) => {
+                return Err(Error::Attachment(
+                    "Active bytes exist; preserve them and review managed storage before retrying."
+                        .into(),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        match fs::symlink_metadata(&destination) {
+            Ok(metadata) => {
+                crate::attachment_previews::reject_link(&destination)
+                    .map_err(|error| Error::Attachment(error.message))?;
+                if !metadata.is_file() || Some(metadata.len()) != file.size_bytes {
+                    return Err(Error::Attachment("Quarantined bytes are not the expected regular file; preserve them and review storage.".into()));
+                }
+                fs::remove_file(&destination)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        crate::backup_archive::sync_directory(parent)?;
+        Ok(())
+    }
+
     pub fn attachment_cleanup_reviews(
         &self,
         limit: u32,
@@ -133,6 +266,9 @@ impl Workspace {
 /// The caller already holds the SQLite writer lock. Never acquire the upload lock here.
 pub(crate) fn restore_reference(tx: &Connection, id: &str) -> Result<(), Error> {
     let file = attachments::read_attachment(tx, id)?;
+    if file.purge_state != AttachmentPurgeState::Retained {
+        return Err(Error::Attachment(purge_unavailable(&file)));
+    }
     if file.kind != AttachmentKind::LocalSnapshot {
         return Ok(());
     }

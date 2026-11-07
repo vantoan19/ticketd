@@ -19,7 +19,7 @@ impl Workspace {
             ("attachment_upload_settings", "id, limit_bytes"),
             (
                 "attachments",
-                "id, display_name, original_filename, size_bytes, kind, locator",
+                "id, display_name, original_filename, size_bytes, kind, locator, quarantined, added_at, purge_state",
             ),
             ("ticket_attachments", "ticket_id, attachment_id"),
             (

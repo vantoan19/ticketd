@@ -704,6 +704,15 @@ fn uploaded_copy_is_discoverable_and_replays_without_source_after_restart() {
     let provenance = workspace.drive_upload("upload").unwrap();
     assert_eq!(provenance.state, DriveUploadState::Completed);
     assert_eq!(provenance.remote_file_id.as_deref(), Some("reserved-file"));
+    let calls = provider.ids.lock().unwrap().clone();
+    assert!(
+        workspace
+            .purge_attachment(&file.id)
+            .unwrap_err()
+            .to_string()
+            .contains("Remote files are never deleted")
+    );
+    assert_eq!(*provider.ids.lock().unwrap(), calls);
     assert_eq!(
         workspace.drive_reference(&file.id).unwrap().metadata.id,
         "reserved-file"

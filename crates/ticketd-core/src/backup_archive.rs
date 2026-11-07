@@ -226,8 +226,23 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
         ));
     }
     if table_exists(connection, "attachments")? {
+        let has_purge =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 54;
+        if has_purge
+            && connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM attachments WHERE purge_state='pending')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            return Err(Error::Backup("Permanent attachment purge is pending. Retry the explicit purge before creating a complete backup; no deletion was retried automatically.".into()));
+        }
         let mut query = connection.prepare(
-            "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'",
+            if has_purge {
+                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot' AND purge_state='retained'"
+            } else {
+                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'"
+            },
         )?;
         let mut rows = query.query([])?;
         let mut missing = Vec::new();

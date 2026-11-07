@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/attachments";
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { AttachmentCleanup } from "./AttachmentCleanup";
+import { PurgeAttachment } from "./PurgeAttachment";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
@@ -31,6 +32,7 @@ export function AttachmentLibrary({
   const [renaming, setRenaming] = useState<Attachment | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [cleanup, setCleanup] = useState(false);
+  const [purging, setPurging] = useState<Attachment | null>(null);
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, error } = useAttachmentSearch(
@@ -131,7 +133,17 @@ export function AttachmentLibrary({
                           <span>
                             {file.display_name}
                             <small>{file.original_filename}</small>
-                            {file.quarantined && <small>Quarantined</small>}
+                            {file.purge_state === "purged" ? (
+                              <small>
+                                Permanently purged · Bytes unavailable
+                              </small>
+                            ) : file.purge_state === "pending" ? (
+                              <small>
+                                Permanent purge pending · Bytes unavailable
+                              </small>
+                            ) : (
+                              file.quarantined && <small>Quarantined</small>
+                            )}
                           </span>
                         </button>
                       </td>
@@ -173,24 +185,37 @@ export function AttachmentLibrary({
                         )}
                       </td>
                       <td>
-                        {file.quarantined && (
+                        {file.quarantined &&
+                          file.purge_state !== "purged" &&
+                          file.purge_state !== "pending" && (
+                            <Button
+                              variant="outline"
+                              aria-label={`Restore ${file.display_name}`}
+                              disabled={restoring !== null}
+                              onClick={() => {
+                                setRestoring(file.id);
+                                setRestoreError("");
+                                void attachments
+                                  .restore(file.id, crypto.randomUUID())
+                                  .then(() => setRefresh((value) => value + 1))
+                                  .catch((reason: unknown) =>
+                                    setRestoreError(String(reason)),
+                                  )
+                                  .finally(() => setRestoring(null));
+                              }}
+                            >
+                              Restore
+                            </Button>
+                          )}
+                        {file.quarantined && file.purge_state !== "purged" && (
                           <Button
-                            variant="outline"
-                            aria-label={`Restore ${file.display_name}`}
-                            disabled={restoring !== null}
-                            onClick={() => {
-                              setRestoring(file.id);
-                              setRestoreError("");
-                              void attachments
-                                .restore(file.id, crypto.randomUUID())
-                                .then(() => setRefresh((value) => value + 1))
-                                .catch((reason: unknown) =>
-                                  setRestoreError(String(reason)),
-                                )
-                                .finally(() => setRestoring(null));
-                            }}
+                            variant="ghost"
+                            aria-label={`Permanently purge ${file.display_name}`}
+                            onClick={() => setPurging(file)}
                           >
-                            Restore
+                            {file.purge_state === "pending"
+                              ? "Retry purge"
+                              : "Permanently purge"}
                           </Button>
                         )}
                         <Button
@@ -249,6 +274,13 @@ export function AttachmentLibrary({
         {cleanup && (
           <AttachmentCleanup
             onClose={() => setCleanup(false)}
+            onChanged={() => setRefresh((value) => value + 1)}
+          />
+        )}
+        {purging && (
+          <PurgeAttachment
+            file={purging}
+            onClose={() => setPurging(null)}
             onChanged={() => setRefresh((value) => value + 1)}
           />
         )}

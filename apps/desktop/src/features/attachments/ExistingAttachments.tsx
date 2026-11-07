@@ -110,13 +110,22 @@ export function ExistingAttachments({
                               <>{formatSize(file.size_bytes)} · </>
                             )}
                             {usageContext(usage)}
+                            {file.purge_state === "purged"
+                              ? " · Permanently purged · Bytes unavailable"
+                              : file.purge_state === "pending"
+                                ? " · Permanent purge pending · Bytes unavailable"
+                                : ""}
                           </small>
                         </span>
                         <input
                           type={single ? "radio" : "checkbox"}
                           name={single ? choiceName : undefined}
                           aria-label={`Select ${file.display_name}`}
-                          disabled={busy}
+                          disabled={
+                            busy ||
+                            file.purge_state === "purged" ||
+                            file.purge_state === "pending"
+                          }
                           checked={selected.some(
                             (row) => row.file.id === file.id,
                           )}

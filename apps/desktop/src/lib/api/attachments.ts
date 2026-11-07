@@ -10,6 +10,7 @@ export const attachmentSchema = z.object({
   kind: z.enum(["local_snapshot", "external_reference"]),
   locator: z.string(),
   quarantined: z.boolean().optional(),
+  purge_state: z.enum(["retained", "pending", "purged"]).optional(),
   added_at: z.string().nullable().optional(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
@@ -30,6 +31,7 @@ export type AttachmentState = "all" | "in_use" | "unused" | "quarantined";
 const cleanupReviewSchema = z.object({
   attachment: attachmentSchema,
   eligible: z.boolean(),
+  purge_eligible: z.boolean().optional(),
   reason: z.string(),
   usage: attachmentUsageSchema,
 });
@@ -142,6 +144,14 @@ const driveConfigurationSchema = z.object({
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
+  async cleanupReview(id: string) {
+    return cleanupReviewSchema.parse(
+      await invoke("attachment_cleanup_review", { id }),
+    );
+  },
+  async purge(id: string) {
+    return attachmentSchema.parse(await invoke("purge_attachment", { id }));
+  },
   async cleanupReviews(offset: number) {
     return z
       .array(cleanupReviewSchema)

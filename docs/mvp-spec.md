@@ -880,6 +880,21 @@ review. `attachment quarantine <id> [--request-id ID]` rechecks protections and
 quarantines local bytes; `attachment restore <id> [--request-id ID]` restores them.
 Request replay returns its original result without repeating later effects.
 `attachment search --state quarantined` finds retained quarantine.
+
+The library offers Permanently purge separately from Restore, with irreversible
+confirmation. `attachment purge <id> --confirm` provides the same explicit local
+action without a desktop. Purge rechecks saved references, drafts, Undo, Trash and
+legacy-draft review at execution time. It never deletes remote files or unrelated
+managed files. Its identity and names remain discoverable as permanently purged;
+references and recovered Undo show unavailable bytes, without silently replacing
+content. Upload replay preserves the identity and reports current purge status.
+
+An interrupted purge is pending until explicitly retried, with no automatic
+deletion on opening or backup. Pending purges block complete backup publication.
+Quarantine remains in backups until purge; backups after completed purge retain
+unavailable metadata. Existing older complete backups remain unchanged and can be
+deliberately restored to recover the earlier workspace and its bytes.
+
 The library's Added column shows truthful first-registration time for new local
 and external records. Old records without evidence show Unknown. Rename, retries,
 metadata refresh and backup/restore preserve this value.

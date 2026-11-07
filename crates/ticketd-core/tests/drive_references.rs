@@ -36,6 +36,13 @@ fn selected_native_files_are_reusable_current_references_without_local_bytes() {
     );
     assert!(workspace.quarantine_attachment(&file.id).is_err());
     assert!(workspace.restore_attachment(&file.id).is_err());
+    assert!(
+        workspace
+            .purge_attachment(&file.id)
+            .unwrap_err()
+            .to_string()
+            .contains("Remote files are never deleted")
+    );
     assert_eq!(
         workspace
             .resolve_drive_reference(&file.id, &SelectedFile)
