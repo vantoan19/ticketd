@@ -311,12 +311,13 @@
   flex: 0 1 auto;
   min-width: 0;
 }
-.plan-document-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+.plan-documents > ul > [data-slot="item"] {
+  min-height: 0;
+  padding: 0;
 }
-.plan-document-row > button:first-child {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-child {
   text-align: left;
   overflow-wrap: anywhere;
 }
@@ -354,7 +355,6 @@
   padding: 0;
   list-style: none;
 }
-.plan-dependency-row,
 .plan-blocker-main {
   display: flex;
   align-items: center;
@@ -388,14 +388,16 @@
 .plan-blocker-form [data-slot="field"] {
   width: 100%;
 }
-.plan-document-row {
-  gap: 4px 8px;
-}
-.plan-document-row > button:first-of-type {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-of-type {
   flex: 1 1 160px;
   min-width: 0;
 }
-.plan-document-row > button + button {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button
+  + button {
   flex: none;
 }
 .plan-document-choices li {
@@ -439,10 +441,9 @@
 }
 
 /* A Document row reads title (left, truncating) then its actions on one line. */
-.plan-document-row {
-  flex-wrap: nowrap;
-}
-.plan-document-row > button:first-of-type {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-of-type {
   flex: 1 1 0;
   overflow: hidden;
   text-align: left;
@@ -578,7 +579,9 @@
 .plan-documents {
   gap: 0;
 }
-.plan-documents .plan-document-row [aria-haspopup="menu"],
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  [aria-haspopup="menu"],
 .plan-documents .plan-add-context {
   width: 28px;
   height: 28px;
