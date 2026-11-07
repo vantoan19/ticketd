@@ -21,6 +21,7 @@ import {
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
+import { Reference } from "@/components/ui/reference";
 
 const isDuplicateKind = (kind: LinkRow["kind"]) =>
   kind === "duplicate_of" || kind === "duplicates";
@@ -182,7 +183,7 @@ export function LinkedWork({
       >
         <StatusIcon status={row.status} size={16} decorative />
       </span>
-      <span className="linked-work-reference">{row.reference}</span>
+      <Reference>{row.reference}</Reference>
       <Button
         variant="link"
         className="linked-work-title"
@@ -316,15 +317,11 @@ function ExternalTargetRow({
           </Button>
         ) : url ? (
           <SourceLink url={url}>{label}</SourceLink>
+        ) : // A reference is monospace; "Unknown" is a word.
+        target.kind === "unknown" ? (
+          <span>{label}</span>
         ) : (
-          // A reference is monospace; "Unknown" is a word.
-          <span
-            className={
-              target.kind === "unknown" ? undefined : "linked-work-reference"
-            }
-          >
-            {label}
-          </span>
+          <Reference>{label}</Reference>
         )}{" "}
         <span className="linked-work-note">{note}</span>
       </span>

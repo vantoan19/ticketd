@@ -7,6 +7,7 @@ import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
 import { formatDateTime } from "@/lib/format";
 import "./backlinks.css";
+import { Reference } from "@/components/ui/reference";
 
 type Link = Awaited<ReturnType<typeof client.backlinks>>[number];
 
@@ -167,7 +168,7 @@ export function Backlinks({
               }
             >
               <span className="backlink-heading">
-                <span className="backlink-ref">{link.source_reference}</span>
+                <Reference>{link.source_reference}</Reference>
                 <strong>{link.source_title}</strong>
                 <span className="backlink-where">
                   {link.activity_id

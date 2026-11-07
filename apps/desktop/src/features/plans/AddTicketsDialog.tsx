@@ -14,6 +14,7 @@ import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { client, type Ticket } from "@/lib/api/client";
 import { plansClient, type Plan } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
+import { Reference } from "@/components/ui/reference";
 
 /** Searches existing tickets and adds them to an Plan; a ticket belongs to one Plan. */
 export function AddTicketsDialog({
@@ -135,7 +136,7 @@ export function AddTicketsDialog({
             return (
               <li key={ticket.id}>
                 <StatusIcon status={ticket.status} />
-                <span className="ticket-ref">{ticket.reference}</span>
+                <Reference>{ticket.reference}</Reference>
                 <span className="plan-add-title" title={ticket.title}>
                   {ticket.title}
                   {from && <small>In {from}</small>}

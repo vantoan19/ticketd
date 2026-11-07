@@ -33,6 +33,7 @@ import {
 } from "./inboxModel";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
+import { Reference } from "@/components/ui/reference";
 
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
@@ -237,7 +238,7 @@ export function Inbox({
                       }}
                     >
                       <span className="inbox-title-line">
-                        <span className="inbox-reference">{e.reference}</span>
+                        <Reference>{e.reference}</Reference>
                         <span className="inbox-title">{e.title}</span>
                         {!e.read && <span className="sr-only">Unread</span>}
                       </span>

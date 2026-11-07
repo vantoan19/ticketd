@@ -31,6 +31,9 @@ import {
 import { compactAgo, formatDateTime } from "@/lib/format";
 import type { StatusCounts, Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
+import { Badge } from "@/components/ui/badge";
+import { Count } from "@/components/ui/count";
+import { Reference } from "@/components/ui/reference";
 
 export function TicketList({
   tickets,
@@ -103,13 +106,13 @@ export function TicketList({
               >
                 <StatusIcon status={status} decorative />
                 <h2>{status}</h2>
-                <span className="ticket-group-count">
+                <Count>
                   {shown.length < count ? `${shown.length} of ${count}` : count}
                   <span className="sr-only">
                     {" "}
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
-                </span>
+                </Count>
                 {grouping?.onAdd && (
                   <IconButton
                     className="ticket-group-add"
@@ -192,7 +195,7 @@ export function TicketList({
                   </TooltipTrigger>
                   <TooltipContent>{ticket.status}</TooltipContent>
                 </Tooltip>
-                <span className="ticket-ref">{ticket.reference}</span>
+                <Reference>{ticket.reference}</Reference>
                 <span className="ticket-title" title={ticket.title}>
                   {ticket.title}
                 </span>
@@ -221,8 +224,8 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
   return (
-    <span
-      className="ticket-source-pill"
+    <Badge
+      variant="source"
       title={`Owned by ${source.provider_name}: ${source.display}`}
     >
       <span className="sr-only">
@@ -230,7 +233,7 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
       </span>
       <Cloud aria-hidden="true" />
       <span aria-hidden="true">{source.number}</span>
-    </span>
+    </Badge>
   );
 }
 

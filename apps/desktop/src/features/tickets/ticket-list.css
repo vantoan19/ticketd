@@ -46,9 +46,6 @@
 .ticket-row-status svg {
   flex: none;
 }
-.ticket-ref {
-  line-height: 20px;
-}
 .ticket-title {
   min-width: 0;
   color: var(--foreground);
@@ -104,16 +101,9 @@
   overflow: clip;
   overflow-clip-margin: 1px;
 }
-.ticket-tag {
-  flex: none;
-  height: 18px;
+/* Row tags are 18px on a 16px line; the negative margin keeps the line 16px. */
+.ticket-row-tags [data-slot="badge"] {
   margin-block: -1px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--border);
-  line-height: 18px;
-  white-space: nowrap;
 }
 .ticket-list .ticket-row:focus-visible {
   position: relative;
@@ -400,38 +390,13 @@
   line-height: 20px;
   letter-spacing: -0.28px;
 }
-.ticket-group-count {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .ticket-group-add {
   margin-left: auto;
 }
 
 /* The owner of an externally owned ticket, after its title: source mark and number. */
-.ticket-source-pill {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: var(--shadow-border-base);
-  color: var(--secondary-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
-}
-.ticket-source-pill svg {
-  width: 12px;
-  height: 12px;
-}
-.ticket-rows li:hover .ticket-source-pill,
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-source-pill {
+.ticket-rows li:hover [data-variant="source"],
+.ticket-rows li:has(.ticket-row[aria-pressed="true"]) [data-variant="source"] {
   background: var(--surface);
 }
 /* Source filter follows the inset canvas composition. */
@@ -453,11 +418,6 @@
 }
 .source-filter [role="radio"]:hover {
   background: var(--recessed);
-}
-.segmented-count {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .source-refresh {
   color: var(--muted-foreground);
@@ -511,11 +471,9 @@
   min-width: 4ch;
   height: auto;
 }
-.ticket-row-contextual .ticket-tag {
+.ticket-row-contextual [data-slot="badge"] {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 /* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
 .ticket-row-contextual .ticket-row-tags {
@@ -524,11 +482,11 @@
   max-width: 50%;
 }
 /* The first tag is never the part that gives: the context name truncates first. */
-.ticket-row-contextual .ticket-tag:first-child {
+.ticket-row-contextual [data-slot="badge"]:first-child {
   flex: none;
   max-width: 100%;
 }
-.ticket-row-contextual .ticket-tag-more {
+.ticket-row-contextual [data-slot="badge"][data-more] {
   flex: none;
 }
 /* The context item carries its type icon: layers for a Plan, a folder for a

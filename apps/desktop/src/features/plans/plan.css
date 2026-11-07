@@ -109,18 +109,6 @@
   gap: 8px;
   color: var(--foreground);
 }
-.plan-progress-bar {
-  width: 96px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 9999px;
-  background: var(--accent);
-}
-.plan-progress-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--foreground);
-}
 .plan-summary-rule {
   width: 1px;
   height: 16px;
@@ -304,19 +292,6 @@
   flex: none;
   padding-inline: 6px;
   font-variant-numeric: tabular-nums;
-}
-.plan-spec-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  max-width: 100%;
-  padding: 0 8px;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
 }
 .plan-spec-label {
   color: var(--muted-foreground);

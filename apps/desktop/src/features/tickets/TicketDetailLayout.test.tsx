@@ -252,7 +252,9 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   expect(
     (await screen.findByLabelText("Selected update")).textContent,
   ).toContain("Reported progress");
-  expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
+  expect(
+    document.querySelectorAll('.rail-tags [data-slot="badge"]'),
+  ).toHaveLength(2);
 });
 
 test("Edit is a real button with its shortcut, and E starts editing", async () => {

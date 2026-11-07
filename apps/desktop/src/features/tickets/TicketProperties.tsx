@@ -47,6 +47,7 @@ import {
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
 import "./properties.css";
+import { Badge } from "@/components/ui/badge";
 
 type Choice = { value: string; label: string };
 export function PropertyPicker({
@@ -502,9 +503,7 @@ export function TicketProperties({
             <>
               <div className="rail-tags">
                 {ticket.tags.map((tag) => (
-                  <span className="rail-tag" key={tag}>
-                    {tag}
-                  </span>
+                  <Badge key={tag}>{tag}</Badge>
                 ))}
               </div>
               {!ticket.tags.length && (
@@ -521,9 +520,7 @@ export function TicketProperties({
                   {ticket.tags.length ? (
                     <span className="rail-tags">
                       {ticket.tags.map((tag) => (
-                        <span className="rail-tag" key={tag}>
-                          {tag}
-                        </span>
+                        <Badge key={tag}>{tag}</Badge>
                       ))}
                     </span>
                   ) : (

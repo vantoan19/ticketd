@@ -5,6 +5,8 @@ import { IconButton } from "@/components/ui/icon-button";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./subtickets.css";
+import { Reference } from "@/components/ui/reference";
+import { Progress } from "@/components/ui/progress";
 
 /**
  * The ticket's subtickets directly under its description, with local progress.
@@ -43,8 +45,7 @@ export function Subtickets({
         <h3 id={headingId}>Subtickets</h3>
         {total > 0 && (
           <>
-            <progress
-              className="subtickets-progress"
+            <Progress
               aria-label="Subticket progress"
               value={done}
               max={total}
@@ -63,7 +64,7 @@ export function Subtickets({
         {rows.map((row) => (
           <li key={row.reference} className="subtickets-row">
             <StatusIcon status={row.status} size={16} decorative />
-            <span className="subtickets-reference">{row.reference}</span>
+            <Reference>{row.reference}</Reference>
             <Button
               variant="link"
               className="subtickets-title"

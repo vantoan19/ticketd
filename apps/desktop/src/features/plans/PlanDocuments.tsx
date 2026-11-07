@@ -18,6 +18,7 @@ import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { plansClient, type View } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
 import "@/features/tickets/ticket-documents.css";
+import { Badge } from "@/components/ui/badge";
 
 export function PlanDocuments({
   view,
@@ -41,28 +42,31 @@ export function PlanDocuments({
   const rest = supporting.filter((doc) => doc.id !== featured?.id);
   function documentRow(doc: View["documents"][number], chip = false) {
     const isSpec = doc.id === spec?.id;
+    const open = () => openDocument?.(doc.id, `Back to ${view.plan.name}`);
+    const heading = (
+      <>
+        {doc.heading}
+        {doc.trashed && " (Trashed)"}
+      </>
+    );
     return (
       <li key={doc.id} className="plan-document-row">
         {!chip && <FileText aria-hidden="true" size={14} />}
-        <button
-          type="button"
-          className={chip ? "plan-spec-chip" : undefined}
-          title={doc.heading}
-          onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
-        >
-          {chip && (
-            <>
+        {chip ? (
+          <Badge variant="doc" asChild>
+            <button type="button" title={doc.heading} onClick={open}>
               <FileText aria-hidden="true" size={14} />
               <span className="plan-spec-label">
                 {isSpec ? "Spec:" : "Document:"}
               </span>{" "}
-            </>
-          )}
-          <span className={chip ? "plan-spec-title" : undefined}>
-            {doc.heading}
-            {doc.trashed && " (Trashed)"}
-          </span>
-        </button>
+              <span className="plan-spec-title">{heading}</span>
+            </button>
+          </Badge>
+        ) : (
+          <button type="button" title={doc.heading} onClick={open}>
+            <span>{heading}</span>
+          </button>
+        )}
         {!readOnly && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

@@ -508,6 +508,88 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   border-radius: 6px;
 }
 
+/* Marks shared by every feature: tags, references, counts and progress. */
+.ui-badge {
+  display: inline-block;
+  flex: none;
+  gap: 4px;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--input);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A badge with an icon lays the icon and its text out in a row. */
+.ui-badge:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+}
+.ui-badge:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ui-badge svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.ui-badge-sm {
+  height: 18px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+.ui-badge-source {
+  font-family: var(--font-mono);
+}
+.ui-badge-doc {
+  gap: 6px;
+  height: 28px;
+  line-height: 28px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+}
+.ui-badge-doc svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+}
+.ui-reference {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.ui-count {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-variant-numeric: tabular-nums;
+}
+.ui-progress {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--control-boundary);
+}
+.ui-progress-indicator {
+  height: 100%;
+  background: var(--foreground);
+}
+
 .workspace {
   display: flex;
   width: 100%;
@@ -975,13 +1057,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-.ticket-ref {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--muted-foreground);
 }
 .editor-title {
   display: block;

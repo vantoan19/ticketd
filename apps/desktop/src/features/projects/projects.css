@@ -20,11 +20,6 @@
   font-weight: 600;
   letter-spacing: -0.6px;
 }
-.projects-count {
-  font-size: var(--text-caption);
-  line-height: 16px;
-  color: var(--muted-foreground);
-}
 .projects-spacer {
   flex: 1;
 }

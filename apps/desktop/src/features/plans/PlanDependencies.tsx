@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/client";
 import { plansClient } from "@/lib/api/plans";
 import "@/features/tickets/linked-work.css";
+import { Reference } from "@/components/ui/reference";
 
 type GraphTicket = DependencyGraph["nodes"][number];
 
@@ -130,8 +131,7 @@ function Blockers({
                     <StatusIcon status={node.status} size={14} decorative />
                   )}
                   <button type="button" onClick={() => onOpen(reference)}>
-                    <span className="ticket-ref">{reference}</span>{" "}
-                    {node?.title}
+                    <Reference>{reference}</Reference> {node?.title}
                   </button>
                   {!archived && (
                     <Button
@@ -172,8 +172,7 @@ function Blockers({
                 <div className="plan-blocker-main">
                   <StatusIcon status={item.status} size={14} decorative />
                   <button type="button" onClick={() => onOpen(item.reference)}>
-                    <span className="ticket-ref">{item.reference}</span>{" "}
-                    {item.title}
+                    <Reference>{item.reference}</Reference> {item.title}
                     {projects.find((p) => p.id === item.project_id) &&
                       ` · ${projects.find((p) => p.id === item.project_id)?.name}`}
                     {item.boundary && " · Outside Plan"}
@@ -434,8 +433,7 @@ export function PlanDependencies({
                     <div className="plan-dependency-row">
                       <StatusIcon status={member.status} size={14} decorative />
                       <span className="plan-dependency-title">
-                        <span className="ticket-ref">{member.reference}</span>{" "}
-                        {member.title}
+                        <Reference>{member.reference}</Reference> {member.title}
                       </span>
                       <Button
                         variant="secondary"

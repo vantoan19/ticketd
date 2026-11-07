@@ -13,6 +13,7 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
 import { useTicketSearch } from "./useTicketSearch";
+import { Reference } from "@/components/ui/reference";
 
 /**
  * The Duplicate group's Add action. A ticket becomes a Duplicate only through
@@ -109,7 +110,7 @@ export function MarkDuplicateDialog({
                     onClick={() => setChosen(item)}
                   >
                     <StatusIcon status={item.status} size={14} decorative />
-                    <span className="ticket-ref">{item.reference}</span>
+                    <Reference>{item.reference}</Reference>
                     <span className="truncate">{item.title}</span>
                   </Button>
                 </li>

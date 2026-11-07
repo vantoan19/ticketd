@@ -48,13 +48,6 @@
 .backlink-heading strong {
   font-weight: 500;
 }
-.backlink-ref {
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
-}
 .backlink-where::before {
   content: "· ";
 }

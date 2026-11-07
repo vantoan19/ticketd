@@ -9,24 +9,6 @@
   margin-left: auto;
 }
 /* Progress is neutral: the bar is local bookkeeping, not a status color. */
-.subtickets-progress {
-  width: 64px;
-  height: 4px;
-  appearance: none;
-  border: 0;
-  border-radius: 999px;
-  background: var(--control-boundary);
-  overflow: hidden;
-}
-.subtickets-progress::-webkit-progress-bar {
-  background: var(--control-boundary);
-}
-.subtickets-progress::-webkit-progress-value {
-  background: var(--foreground);
-}
-.subtickets-progress::-moz-progress-bar {
-  background: var(--foreground);
-}
 .subtickets-summary {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -49,11 +31,6 @@
 .subtickets-row:hover,
 .subtickets-row:focus-within {
   background: var(--recessed);
-}
-.subtickets-reference {
-  color: var(--secondary-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--text-code);
 }
 .subtickets-title {
   height: auto;

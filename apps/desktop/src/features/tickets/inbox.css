@@ -73,12 +73,6 @@
   align-items: baseline;
   gap: 8px;
 }
-.inbox-reference {
-  flex: none;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--text-caption);
-}
 .inbox-title {
   min-width: 0;
   overflow: hidden;

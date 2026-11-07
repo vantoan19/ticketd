@@ -26,6 +26,7 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import { useBoardDrag } from "./useBoardDrag";
 import "./ticket-board.css";
+import { Reference } from "@/components/ui/reference";
 
 export function TicketBoard({
   workspace,
@@ -173,7 +174,7 @@ export function TicketBoard({
                         }}
                       >
                         <span className="board-card-top">
-                          <span className="ticket-ref">{ticket.reference}</span>
+                          <Reference>{ticket.reference}</Reference>
                           <SourcePill ticket={ticket} />
                         </span>
                         <span className="board-card-title" title={ticket.title}>
@@ -310,7 +311,7 @@ export function TicketBoard({
               width: drag.width,
             }}
           >
-            <span className="ticket-ref">{drag.ticket.reference}</span>
+            <Reference>{drag.ticket.reference}</Reference>
             <span className="board-card-title">{drag.ticket.title}</span>
           </div>
           <p className="sr-only" role="status">

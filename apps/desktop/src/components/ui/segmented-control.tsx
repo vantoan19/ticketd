@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
 import { RadioGroup } from "radix-ui";
+import { Count } from "./count";
 
 export type SegmentedOption<T extends string> = {
   value: T;
@@ -56,9 +57,7 @@ export function SegmentedControl<T extends string>({
         >
           {option.icon}
           {option.label}{" "}
-          {option.count !== undefined && (
-            <span className="segmented-count">{option.count}</span>
-          )}
+          {option.count !== undefined && <Count>{option.count}</Count>}
         </RadioGroup.Item>
       ))}
     </RadioGroup.Root>

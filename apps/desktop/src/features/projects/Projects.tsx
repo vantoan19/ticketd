@@ -26,6 +26,7 @@ import { fileManagerName } from "@/lib/platform";
 import { nameFromFolder } from "@/features/projects/paths";
 import { PathText } from "@/features/projects/PathText";
 import "./projects.css";
+import { Count } from "@/components/ui/count";
 
 type OpenDialog =
   | { kind: "project" }
@@ -388,9 +389,7 @@ export function Projects({
     <section className="projects-column" aria-label="Project management">
       <div className="projects-heading">
         <h1>Projects</h1>
-        {projects.length > 0 && (
-          <span className="projects-count">{projects.length}</span>
-        )}
+        {projects.length > 0 && <Count>{projects.length}</Count>}
         <span className="projects-spacer" />
         {projects.length > 0 && newProject}
       </div>
