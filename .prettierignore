@@ -3,3 +3,5 @@ package-lock.json
 target/
 **/dist/
 **/gen/
+# Written by ESLint (--suppress-rule, --prune-suppressions).
+apps/desktop/eslint-suppressions.json
