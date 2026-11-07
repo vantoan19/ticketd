@@ -1,5 +1,10 @@
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { StatusDot } from "@/components/ui/status-dot";
 import type { Ticket } from "@/lib/api/client";
 import { TakeOwnership } from "./TakeOwnership";
 import { useTicketRefresh } from "./useTicketRefresh";
@@ -29,14 +34,14 @@ export function SourceUnavailableNotice({
   if (!source || !notice) return null;
   const name = source.provider_name;
   return (
-    <section
-      className="source-unavailable-notice"
+    <Alert
+      tone="attention"
+      role="region"
       aria-label="Source unavailable"
+      className="mb-6"
     >
-      <p className="source-unavailable-title">
-        <StatusDot tone="attention" size={10} /> {notice.title}
-      </p>
-      <p>
+      <AlertTitle>{notice.title}</AlertTitle>
+      <AlertDescription>
         {notice.detail.split(source.display).map((part, index) => (
           <span key={index}>
             {index > 0 && <code>{source.display}</code>}
@@ -49,23 +54,23 @@ export function SourceUnavailableNotice({
           ? ` from ${formatDateTime(source.last_refreshed_at)}`
           : ""}
         .
-      </p>
-      <div className="source-unavailable-actions">
+      </AlertDescription>
+      <AlertActions>
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           disabled={retrying}
           onClick={() => void retry()}
         >
           Retry now
         </Button>
-        <TakeOwnership ticket={ticket} refresh={refresh} variant="ghost" />
+        <TakeOwnership ticket={ticket} refresh={refresh} variant="outline" />
         <SourceLink url={source.url}>Open on {name}</SourceLink>
         {retrying && <span role="status">Refreshing {name}…</span>}
         {failure && !retrying && (
           <span role="alert">Still unavailable: {failure}</span>
         )}
-      </div>
-    </section>
+      </AlertActions>
+    </Alert>
   );
 }

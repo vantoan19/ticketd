@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Layers, Link2, Network } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Canvas, SelectionPanel } from "@/features/tickets/DependencyGraph";
@@ -396,20 +398,24 @@ export function PlanDependencies({
             </>
           )}
           {total > members.length && (
-            <p className="plan-callout" role="status">
-              Showing {members.length} of {total} tickets.{" "}
-              <button type="button" onClick={onClose}>
+            <Alert role="status" size="compact">
+              <AlertDescription>
+                Showing {members.length} of {total} tickets.
+              </AlertDescription>
+              <Button variant="outline" size="sm" onClick={onClose}>
                 See all Plan tickets
-              </button>
-            </p>
+              </Button>
+            </Alert>
           )}
           {outside > 0 && (
-            <p className="plan-callout" role="status">
-              {graph.outside_total && graph.outside_total > outside
-                ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
-                : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
-              · not included in the {total} member tickets
-            </p>
+            <Alert role="status" size="compact">
+              <AlertDescription>
+                {graph.outside_total && graph.outside_total > outside
+                  ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
+                  : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
+                · not included in the {total} member tickets
+              </AlertDescription>
+            </Alert>
           )}
           {(graph.edges.length > 0 || members.length > 1 || selected) && (
             <ul className="plan-dependency-rows" aria-label="Plan tickets">
@@ -430,7 +436,7 @@ export function PlanDependencies({
                       : "Add blocker";
                 return (
                   <li key={member.reference}>
-                    <div className="plan-dependency-row">
+                    <Item>
                       <StatusIcon status={member.status} size={14} decorative />
                       <span className="plan-dependency-title">
                         <Reference>{member.reference}</Reference> {member.title}
@@ -447,7 +453,7 @@ export function PlanDependencies({
                         <Link2 aria-hidden="true" />
                         {label}
                       </Button>
-                    </div>
+                    </Item>
                     {open && (
                       <Blockers
                         key={member.reference}

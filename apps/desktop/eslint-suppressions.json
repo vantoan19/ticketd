@@ -9,11 +9,6 @@
       "count": 8
     }
   },
-  "src/components/ui/alert.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 2
-    }
-  },
   "src/components/ui/command.tsx": {
     "shadcn/no-arbitrary-values": {
       "count": 1

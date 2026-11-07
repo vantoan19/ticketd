@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/empty-state";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -41,22 +42,24 @@ export function TicketBoard({
   return (
     <>
       <div
-        className={statusAction.notice ? "board-status-notice" : "sr-only"}
+        className={statusAction.notice ? undefined : "sr-only"}
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        <span>{statusAction.notice}</span>
         {statusAction.notice && (
-          <IconButton
-            label="Dismiss status update"
-            onClick={() => {
-              statusAction.dismissNotice();
-              boardRef.current?.focus({ preventScroll: true });
-            }}
-          >
-            <X />
-          </IconButton>
+          <Alert role="none" size="compact">
+            <AlertDescription>{statusAction.notice}</AlertDescription>
+            <IconButton
+              label="Dismiss status update"
+              onClick={() => {
+                statusAction.dismissNotice();
+                boardRef.current?.focus({ preventScroll: true });
+              }}
+            >
+              <X />
+            </IconButton>
+          </Alert>
         )}
       </div>
       {Object.entries(statusAction.failures)
