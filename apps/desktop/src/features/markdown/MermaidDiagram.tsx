@@ -155,7 +155,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           </DialogTrigger>
         </div>
         {current?.error ? (
-          <Alert variant="destructive" data-reason={current.detail}>
+          <Alert tone="error" data-reason={current.detail}>
             <AlertDescription>{current.error}</AlertDescription>
           </Alert>
         ) : !current ? (

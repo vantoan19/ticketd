@@ -508,6 +508,54 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   border-radius: 6px;
 }
 
+/* Notice (components/ui/alert.tsx): one inline message with a tone. */
+.ui-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.ui-notice-description {
+  color: var(--muted-foreground);
+}
+.ui-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ui-notice-error {
+  background: var(--error-surface);
+  box-shadow: none;
+}
+.ui-notice-error .ui-notice-title,
+.ui-notice-error .ui-notice-description {
+  color: var(--error-foreground);
+}
+.ui-notice-compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.ui-notice-compact .ui-notice-description {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Card: surface, header band, body and recessed footer. */
 .ui-card {
   overflow: hidden;
