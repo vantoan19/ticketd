@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
@@ -114,17 +115,21 @@ export function SourceConversation({
       className="source-conversation"
       aria-label={`Conversation on ${name}`}
     >
-      <div className="source-conversation-heading">
-        <h3>{name} conversation</h3>
+      <SectionHeader
+        title={`${name} conversation`}
+        actions={
+          owned &&
+          !source.unavailable && (
+            <SourceLink url={source.url}>Comment on {name}</SourceLink>
+          )
+        }
+      >
         <span className="source-caption">
           {owned
             ? `${entries?.filter((entry) => entry.type === "comment").length ?? 0} comments · read-only`
             : "archive · no longer refreshed"}
         </span>
-        {owned && !source.unavailable && (
-          <SourceLink url={source.url}>Comment on {name}</SourceLink>
-        )}
-      </div>
+      </SectionHeader>
       {error && <p role="alert">Could not load the conversation: {error}</p>}
       {entries && entries.length === 0 && !error && (
         <p className="source-caption">

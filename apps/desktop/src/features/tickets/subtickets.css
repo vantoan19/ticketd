@@ -1,12 +1,8 @@
 .subtickets {
   margin-top: 24px;
 }
-.subtickets .detail-section-heading {
-  justify-content: flex-start;
-  gap: 8px 12px;
-}
-.subtickets .detail-section-heading > button:last-child {
-  margin-left: auto;
+.subtickets [data-slot="section-header"] {
+  margin-bottom: 8px;
 }
 /* Progress is neutral: the bar is local bookkeeping, not a status color. */
 .subtickets-summary {
