@@ -94,6 +94,9 @@ A workspace-scoped file identity with a display name, original filename, availab
 **External attachment reference**:
 An Attachment resolving current provider content rather than a local snapshot. Google Drive references use the connected person's per-file application authorization and existing sharing permissions. Google Docs, Sheets, and Slides open in Drive without conversion. Last-known metadata survives access failures; removing a reference never deletes the remote file.
 
+**Quarantined Attachment**:
+A local Attachment whose unused bytes were explicitly moved out of active storage for reversible cleanup. Its identity and metadata remain discoverable, complete backups retain its bytes, and restoration makes the same identity reusable. Saved references, recoverable drafts, Undo and Trash protect files from quarantine. Quarantine still occupies disk space until explicit purge.
+
 **Recoverable draft**:
 Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
 

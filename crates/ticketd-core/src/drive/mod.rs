@@ -105,7 +105,7 @@ impl Workspace {
             )
             .optional()?;
         let id = previous.unwrap_or_else(|| Uuid::new_v4().to_string());
-        tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator) VALUES (?1, ?2, ?2, ?3, 'external_reference', ?4)", params![id, metadata.name, metadata.size_bytes, format!("drive:{connection_id}:{file_id}")])?;
+        tx.execute("INSERT OR IGNORE INTO attachments(id, display_name, original_filename, size_bytes, kind, locator, added_at) VALUES (?1, ?2, ?2, ?3, 'external_reference', ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))", params![id, metadata.name, metadata.size_bytes, format!("drive:{connection_id}:{file_id}")])?;
         tx.execute("INSERT INTO drive_references(attachment_id, connection_id, file_id, metadata) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(attachment_id) DO UPDATE SET metadata=excluded.metadata", params![id, connection_id, file_id, serde_json::to_string(&metadata)?])?;
         tx.execute(
             "UPDATE attachments SET size_bytes=?1 WHERE id=?2",

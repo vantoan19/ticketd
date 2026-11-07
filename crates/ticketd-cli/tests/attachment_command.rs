@@ -16,6 +16,50 @@ fn run(dir: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+fn cli_reviews_quarantines_restores_and_replays_without_a_desktop() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"CLI recovery").unwrap();
+    let file = run(dir.path(), &["attachment", "add", source.to_str().unwrap()]);
+    let id = file["id"].as_str().unwrap();
+    let review = run(dir.path(), &["attachment", "cleanup-review", id]);
+    assert_eq!(review["eligible"], true);
+    let quarantined = run(
+        dir.path(),
+        &["attachment", "quarantine", id, "--request-id", "cleanup"],
+    );
+    assert_eq!(quarantined["quarantined"], true);
+    let results = run(
+        dir.path(),
+        &["attachment", "search", "", "--state", "quarantined"],
+    );
+    assert_eq!(results[0]["attachment"]["id"], id);
+    let restored = run(
+        dir.path(),
+        &["attachment", "restore", id, "--request-id", "restore"],
+    );
+    assert_eq!(restored["quarantined"], false);
+    // Lost-response replay returns its original outcome without moving bytes again.
+    assert_eq!(
+        run(
+            dir.path(),
+            &["attachment", "quarantine", id, "--request-id", "cleanup"]
+        ),
+        quarantined
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "inspect", id])["quarantined"],
+        false
+    );
+    let output = dir.path().join("out.txt");
+    run(
+        dir.path(),
+        &["attachment", "export", id, output.to_str().unwrap()],
+    );
+    assert_eq!(std::fs::read(output).unwrap(), b"CLI recovery");
+}
+
+#[test]
 fn cli_searches_usage_and_renames_without_changing_inline_labels_or_reuploading() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("original.txt");

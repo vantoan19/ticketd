@@ -852,6 +852,24 @@ Activity details remain uses; deleting an Activity removes its brief use while
 preserving its supporting Document and its files. Cleanup must check eligibility
 again when it executes.
 
+**Reclaim local storage** opens an explicit review in the attachment library,
+including eligibility reasons and protected references. Chosen unused local files
+move to reversible quarantine; no automatic deletion occurs. The Quarantine filter
+keeps their metadata discoverable and Restore makes the same identity reusable.
+Quarantine still occupies disk space and stays in complete backups until explicit
+purge. New references and Undo restore available quarantined bytes before saving;
+missing content produces an actionable failure instead of a false intact reference.
+Remote files have no reclaimable local bytes and are never deleted.
+
+`attachment cleanup-review [id] [--limit N] [--offset N]` reports the same core
+review. `attachment quarantine <id> [--request-id ID]` rechecks protections and
+quarantines local bytes; `attachment restore <id> [--request-id ID]` restores them.
+Request replay returns its original result without repeating later effects.
+`attachment search --state quarantined` finds retained quarantine.
+The library's Added column shows truthful first-registration time for new local
+and external records. Old records without evidence show Unknown. Rename, retries,
+metadata refresh and backup/restore preserve this value.
+
 For an upgraded workspace with existing attachments, review recoverable drafts
 from every desktop profile before allowing cleanup. Startup imports the current
 profile's drafts without claiming other profiles are empty. Confirm **All desktop

@@ -405,7 +405,20 @@ pub(crate) fn open_snapshot(
     // Reject links/reparse points in every managed component, including the root.
     let mut path = root.clone();
     reject_link(&path)?;
-    for component in [&attachment.id, "bytes", &attachment.original_filename] {
+    path.push(&attachment.id);
+    reject_link(&path)?;
+    // Failed/uncertain DB commits never strand retained bytes in the other location.
+    let directory = if path
+        .join("bytes")
+        .join(&attachment.original_filename)
+        .try_exists()
+        .map_err(snapshot_io)?
+    {
+        "bytes"
+    } else {
+        "quarantine"
+    };
+    for component in [directory, &attachment.original_filename] {
         path.push(component);
         reject_link(&path)?;
     }
@@ -429,7 +442,7 @@ pub(crate) fn open_snapshot(
     Ok((canonical_path, file))
 }
 
-fn reject_link(path: &Path) -> Result<(), SnapshotFailure> {
+pub(crate) fn reject_link(path: &Path) -> Result<(), SnapshotFailure> {
     let metadata = fs::symlink_metadata(path).map_err(snapshot_io)?;
     #[cfg(windows)]
     let reparse = {

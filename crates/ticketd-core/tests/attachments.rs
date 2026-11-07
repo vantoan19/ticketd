@@ -117,6 +117,10 @@ fn upload_configuration_upgrade_and_backup_preserve_existing_snapshots_and_ident
     Workspace::restore(&restored, &backup).unwrap();
     let workspace = Workspace::open(&restored).unwrap();
     assert_eq!(workspace.attachment_upload_limit().unwrap(), 17);
+    let file = ticketd_core::Attachment {
+        added_at: None,
+        ..file
+    };
     assert_eq!(workspace.resolve_attachment_uri(&uri).unwrap(), file);
     let export = dir.path().join("export.txt");
     workspace.export_attachment(&file.id, &export).unwrap();

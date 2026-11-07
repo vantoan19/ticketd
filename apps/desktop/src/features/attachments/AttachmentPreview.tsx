@@ -261,6 +261,26 @@ export function AttachmentPreview({
           </div>
           <aside className="attachment-preview-info">
             <h3>File details</h3>
+            {file?.quarantined && (
+              <section>
+                <p>
+                  Quarantined · Retained bytes remain recoverable in this
+                  workspace and complete backups.
+                </p>
+                <Button
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() =>
+                    void action(async () => {
+                      await attachments.restore(file.id, crypto.randomUUID());
+                      setAttempt((value) => value + 1);
+                    })
+                  }
+                >
+                  Restore file
+                </Button>
+              </section>
+            )}
             {file && (
               <>
                 <dl className="attachment-metadata">

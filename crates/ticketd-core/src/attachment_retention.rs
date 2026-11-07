@@ -170,6 +170,16 @@ impl Workspace {
                     [id],
                     |r| r.get(0),
                 )?;
+                if exists {
+                    let file = crate::attachments::read_attachment(&tx, id)?;
+                    // Private recovery must still save prose containing missing bytes.
+                    // A canonical save performs strict restore/validation before committing.
+                    if file.quarantined
+                        && crate::attachments::validate_attachment_bytes(&tx, &file).is_ok()
+                    {
+                        crate::attachment_cleanup::restore_reference(&tx, id)?;
+                    }
+                }
                 exists.then_some(id)
             } else {
                 None

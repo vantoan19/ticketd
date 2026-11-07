@@ -65,7 +65,9 @@ pub use counts::{SidebarCounts, StatusCounts};
 mod inbox;
 pub use inbox::InboxEntry;
 mod activities;
+mod attachment_cleanup;
 mod attachment_library;
+pub use attachment_cleanup::AttachmentCleanupReview;
 mod attachment_previews;
 mod attachment_retention;
 pub use attachment_library::{AttachmentQuery, AttachmentSearchResult, AttachmentState};
@@ -86,7 +88,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 51;
+pub const FORMAT_VERSION: i64 = 53;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -757,6 +759,9 @@ impl Workspace {
         }
         if version < 51 {
             drive::migrate(&transaction)?;
+        }
+        if version < 53 {
+            attachment_cleanup::migrate(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

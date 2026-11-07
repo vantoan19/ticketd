@@ -96,6 +96,33 @@ const file = {
   locator: "file-1/bytes/screen.png",
 };
 
+test("quarantined content offers explicit same-identity restore without replacing a reference", async () => {
+  let quarantined = true;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "restore_attachment") {
+      quarantined = false;
+      return { ...file, quarantined };
+    }
+    if (command === "attachment_preview")
+      return {
+        attachment: { ...file, quarantined },
+        status: "unsupported",
+        media_type: null,
+        message: "No media preview",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Restore file" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Restore file" })).toBeNull(),
+  );
+  expect(screen.getByRole("dialog", { name: "Screenshot" })).toBeTruthy();
+});
+
 test("usage distinguishes persisted context, recoverable trash and Undo alongside missing metadata", async () => {
   vi.mocked(invoke).mockImplementation(async (command) =>
     command === "attachment_workspace_id"

@@ -9,12 +9,158 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentLibrary } from "./AttachmentLibrary";
+import { AttachmentCleanup } from "./AttachmentCleanup";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+});
+
+test("explicit local cleanup reviews protections and restores quarantine", async () => {
+  let quarantined = false;
+  const file = {
+    id: "stable",
+    display_name: "Unused trace",
+    original_filename: "trace.txt",
+    size_bytes: 9,
+    kind: "local_snapshot",
+    locator: "stable/bytes/trace.txt",
+    added_at: "2026-11-04T10:00:00Z",
+  };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    const attachment = { ...file, quarantined };
+    if (command === "search_attachments")
+      return [
+        {
+          attachment,
+          related: false,
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        },
+      ];
+    if (command === "attachment_cleanup_reviews")
+      return [
+        {
+          attachment,
+          eligible: true,
+          reason: "Unused local snapshot",
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        },
+        {
+          attachment: { ...file, id: "protected", display_name: "Draft trace" },
+          eligible: false,
+          reason: "Protected by recoverable draft",
+          usage: {
+            eligible: false,
+            legacy_drafts_pending: false,
+            protections: [
+              {
+                kind: "draft",
+                owner: "draft",
+                ticket_id: null,
+                trashed: false,
+              },
+            ],
+          },
+        },
+      ];
+    if (command === "quarantine_attachment") {
+      quarantined = true;
+      return { ...file, quarantined };
+    }
+    if (command === "restore_attachment") {
+      quarantined = false;
+      return { ...file, quarantined };
+    }
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentLibrary onPreview={() => {}} />);
+  await screen.findByRole("button", { name: "Unused trace" });
+  expect(screen.getByRole("columnheader", { name: "Added" })).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Reclaim local storage" }),
+  );
+  await screen.findByRole("dialog", { name: "Review unused attachments" });
+  expect(
+    await screen.findByText("Protected by recoverable draft"),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("checkbox", { name: "Select Draft trace" }),
+  ).toHaveProperty("disabled", true);
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: "Select Unused trace" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Move to quarantine" }));
+  await screen.findByRole("button", { name: "Restore Unused trace" });
+  fireEvent.click(screen.getByRole("button", { name: "Restore Unused trace" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Restore Unused trace" }),
+    ).toBeNull(),
+  );
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => String(command).includes("delete")),
+  ).toBe(false);
+});
+
+test("a rejected cleanup keeps its review and original request identity for explicit retry", async () => {
+  const file = {
+    id: "retry",
+    display_name: "Trace",
+    original_filename: "trace.txt",
+    size_bytes: 3,
+    kind: "local_snapshot",
+    locator: "retry/bytes/trace.txt",
+  };
+  const close = vi.fn();
+  let fail = true;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_cleanup_reviews")
+      return [
+        {
+          attachment: file,
+          eligible: true,
+          reason: "Unused",
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        },
+      ];
+    if (command === "quarantine_attachment") {
+      if (fail) throw new Error("A new draft protects this file");
+      return { ...file, quarantined: true };
+    }
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentCleanup onClose={close} onChanged={() => {}} />);
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select Trace" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Move to quarantine" }));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "A new draft protects this file",
+  );
+  expect(close).not.toHaveBeenCalled();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "Move to quarantine" }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  const requests = vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === "quarantine_attachment");
+  expect(requests[0]?.[1]).toEqual(requests[1]?.[1]);
 });
 
 test("external references with unknown size stay external and are not fetched for thumbnails", async () => {

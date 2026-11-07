@@ -2,6 +2,38 @@ use tauri_plugin_opener::OpenerExt;
 use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
+#[tauri::command(async)]
+pub fn attachment_cleanup_reviews(
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<ticketd_core::AttachmentCleanupReview>, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_cleanup_reviews(limit, offset))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub fn quarantine_attachment(id: String, request_id: String) -> Result<Attachment, String> {
+    match open_workspace()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::QuarantineAttachment { id }))
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Attachment(file) => Ok(file),
+        _ => Err("unexpected quarantine result".into()),
+    }
+}
+
+#[tauri::command(async)]
+pub fn restore_attachment(id: String, request_id: String) -> Result<Attachment, String> {
+    match open_workspace()
+        .and_then(|mut w| w.write(Some(&request_id), WriteRequest::RestoreAttachment { id }))
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Attachment(file) => Ok(file),
+        _ => Err("unexpected restore result".into()),
+    }
+}
+
 #[tauri::command]
 pub async fn attachment_preview(
     workspace: String,
