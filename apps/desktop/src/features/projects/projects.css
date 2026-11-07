@@ -82,6 +82,7 @@
 .path-text {
   display: flex;
   min-width: 0;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: 18px;

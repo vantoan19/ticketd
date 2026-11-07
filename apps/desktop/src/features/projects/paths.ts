@@ -19,16 +19,20 @@ export function splitPathMiddle(path: string): {
   middle: string;
   tail: string;
 } {
-  const parts = path.split("/");
+  // A Windows path uses backslashes, and may carry the verbatim "\?\" prefix.
+  const windows = path.includes("\\") && !path.includes("/");
+  const sep = windows ? "\\" : "/";
+  const shown = windows ? path.replace(/^\\\\[?]\\/, "") : path;
+  const parts = shown.split(sep);
   // "~/a/b" and "/a/b" both start with a root part that is kept.
-  const rootParts = path.startsWith("/") ? 2 : 1;
+  const rootParts = shown.startsWith(sep) ? 2 : 1;
   const tailParts = 2;
   if (parts.length <= rootParts + tailParts)
-    return { lead: "", middle: "", tail: path };
+    return { lead: "", middle: "", tail: shown };
   return {
-    lead: parts.slice(0, rootParts).join("/") + "/",
-    middle: parts.slice(rootParts, -tailParts).join("/") + "/",
-    tail: parts.slice(-tailParts).join("/"),
+    lead: parts.slice(0, rootParts).join(sep) + sep,
+    middle: parts.slice(rootParts, -tailParts).join(sep) + sep,
+    tail: parts.slice(-tailParts).join(sep),
   };
 }
 
