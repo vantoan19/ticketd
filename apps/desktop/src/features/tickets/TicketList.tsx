@@ -48,6 +48,7 @@ export function TicketList({
   grouping,
   singleStatus = false,
   readyView = false,
+  simple = false,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -76,6 +77,8 @@ export function TicketList({
   singleStatus?: boolean;
   /** Every row is Ready (the Ready view), so the per-row Ready dot is omitted. */
   readyView?: boolean;
+  /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
+  simple?: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   // Groups and rows share one list so a row that changes group keeps its
@@ -156,6 +159,7 @@ export function TicketList({
                 }}
                 type="button"
                 className="ticket-row"
+                data-rows={simple ? "simple" : undefined}
                 aria-pressed={ticket.reference === selected}
                 onClick={() => onOpen(ticket.reference)}
                 onFocus={(event) =>
@@ -206,6 +210,7 @@ export function TicketList({
                   grouped={grouping !== undefined}
                   singleStatus={singleStatus}
                   readyView={readyView}
+                  simple={simple}
                 />
               </button>
               {rowAction && (
@@ -251,12 +256,14 @@ function RowDetails({
   grouped,
   singleStatus,
   readyView,
+  simple,
 }: {
   ticket: Ticket;
   scope: RowScope;
   grouped: boolean;
   singleStatus: boolean;
   readyView: boolean;
+  simple: boolean;
 }) {
   const now = useNow();
   const state = readiness(ticket);
@@ -274,7 +281,27 @@ function RowDetails({
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">
-        {unavailable ? (
+        {simple ? (
+          // One line: a dot says Ready, Blocked or unavailable; the words are for
+          // assistive technology.
+          (unavailable ||
+            state.kind === "ready" ||
+            state.kind === "blocked") && (
+            <span className="ticket-row-state">
+              <StatusDot
+                tone={
+                  unavailable || state.kind === "status"
+                    ? "attention"
+                    : state.kind
+                }
+                size={10}
+              />
+              <span className="sr-only">
+                {unavailable ? "Source unavailable" : readinessLabel(state)}
+              </span>
+            </span>
+          )
+        ) : unavailable ? (
           // The source cannot be read: say so in place of Ready or Blocked, which
           // would describe content that may no longer be current.
           <span className="ticket-row-state">
@@ -305,13 +332,13 @@ function RowDetails({
             </span>
           )
         )}
-        {context && (
+        {!simple && context && (
           <span className="ticket-row-context" data-kind={context.kind}>
             <ContextIcon kind={context.kind} />
             <span className="ticket-row-context-label">{context.label}</span>
           </span>
         )}
-        <RowTags tags={ticket.tags} />
+        {!simple && <RowTags tags={ticket.tags} />}
       </span>
       <span className="ticket-row-time">
         {ticket.updated_at ? (

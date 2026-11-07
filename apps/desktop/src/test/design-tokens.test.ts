@@ -13,9 +13,9 @@ const KNOWN: Record<string, number> = {
   "features/documents/documents.css": 8,
   "features/markdown/markdown-editor.css": 5,
   "features/plans/plan.css": 8,
-  "features/projects/projects.css": 7,
+  "features/projects/projects.css": 6,
   "features/settings/restore-review.css": 6,
-  "features/settings/settings.css": 10,
+  "features/settings/settings.css": 9,
   "features/settings/sources/sources.css": 8,
   "features/tickets/activity.css": 3,
   "features/tickets/backlinks.css": 1,
@@ -28,11 +28,11 @@ const KNOWN: Record<string, number> = {
   "features/tickets/properties.css": 1,
   "features/tickets/publication.css": 3,
   "features/tickets/ticket-board.css": 7,
-  "features/tickets/ticket-detail.css": 4,
+  "features/tickets/ticket-detail.css": 3,
   "features/tickets/ticket-documents.css": 3,
   "features/tickets/ticket-filters.css": 6,
   "features/tickets/ticket-list.css": 5,
-  "styles.css": 35,
+  "styles.css": 34,
 };
 
 function filesUnder(dir: string): string[] {

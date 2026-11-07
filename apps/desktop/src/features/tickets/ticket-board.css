@@ -219,26 +219,23 @@
 .ticket-workspace.board-layout.board-unselected .split-handle {
   display: none !important;
 }
-.list-header:has(.ticket-layout-switch) h1 {
+.list-header:has(.list-refresh) h1 {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.list-header:has(.ticket-layout-switch) > p {
+.list-header:has(.list-refresh) > p {
   white-space: nowrap;
 }
 @container (max-width: 480px) {
-  .ticket-layout-switch svg {
-    display: none;
-  }
-  .list-header:has(.ticket-layout-switch):has(.header-search) {
+  .list-header:has(.list-refresh):has(.header-search) {
     flex-wrap: wrap;
     height: auto;
     min-height: 48px;
     padding-block: 8px;
   }
-  .list-header:has(.ticket-layout-switch):has(.header-search) .list-controls {
+  .list-header:has(.list-refresh):has(.header-search) .list-controls {
     flex-basis: 100%;
     min-width: 0;
   }
