@@ -113,9 +113,12 @@ export function AttachmentCleanup({
           </span>
         </label>
         <p>
-          {row.usage.protections.length
-            ? `Protected · ${usageContext(row.usage)}`
-            : row.reason}
+          {row.attachment.purge_state === "pending" ||
+          row.attachment.purge_state === "purged"
+            ? row.reason
+            : row.usage.protections.length
+              ? `Protected · ${usageContext(row.usage)}`
+              : row.reason}
         </p>
         {row.usage.protections.length > 0 && (
           <details>

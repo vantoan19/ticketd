@@ -31,6 +31,15 @@ pub enum AttachmentKind {
     ExternalReference,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentPurgeState {
+    #[default]
+    Retained,
+    Pending,
+    Purged,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachmentOpenTarget {
     LocalPath(PathBuf),
@@ -50,6 +59,8 @@ pub struct Attachment {
     pub locator: String,
     #[serde(default)]
     pub quarantined: bool,
+    #[serde(default)]
+    pub purge_state: AttachmentPurgeState,
     /// First registration, unknown for legacy records without timestamp evidence.
     #[serde(default)]
     pub added_at: Option<String>,
@@ -218,7 +229,7 @@ impl Workspace {
                 return Err(Error::RequestConflict(request_id.into()));
             }
             return match serde_json::from_str(&outcome)? {
-                WriteResult::Attachment(file) => Ok(file),
+                WriteResult::Attachment(file) => replay_attachment(&self.connection, file),
                 _ => Err(Error::RequestConflict(request_id.into())),
             };
         }
@@ -249,6 +260,7 @@ impl Workspace {
             size_bytes: Some(size_bytes),
             kind: AttachmentKind::LocalSnapshot,
             quarantined: false,
+            purge_state: AttachmentPurgeState::Retained,
             added_at: Some(self.connection.query_row(
                 "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",
                 [],
@@ -366,7 +378,7 @@ impl Workspace {
     /// Includes completed uploads whose insertion was abandoned; never deletes bytes.
     pub fn attachments(&self, limit: u32, offset: u32) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
-        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator, kind, quarantined, added_at FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
+        let mut stmt = self.connection.prepare("SELECT id, display_name, original_filename, size_bytes, locator, kind, quarantined, added_at, purge_state FROM attachments ORDER BY rowid DESC LIMIT ?1 OFFSET ?2")?;
         Ok(stmt
             .query_map(params![limit.min(1000), offset], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -376,7 +388,7 @@ impl Workspace {
     pub fn ticket_attachments(&self, reference: &str) -> Result<Vec<Attachment>, Error> {
         self.recover_uploads()?;
         let ticket_id = relationships::id(&self.connection, reference)?;
-        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator, a.kind, a.quarantined, a.added_at FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
+        let mut stmt = self.connection.prepare("SELECT a.id, a.display_name, a.original_filename, a.size_bytes, a.locator, a.kind, a.quarantined, a.added_at, a.purge_state FROM attachments a JOIN ticket_attachments t ON t.attachment_id=a.id WHERE t.ticket_id=?1 ORDER BY a.rowid")?;
         Ok(stmt
             .query_map([ticket_id], attachment_row)?
             .collect::<Result<Vec<_>, _>>()?)
@@ -590,14 +602,25 @@ fn copy_upload(
 
 pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attachment, Error> {
     // Earlier migrations rebuild embedded indexes before the new columns exist.
-    let columns =
-        if connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 53 {
-            "quarantined, added_at"
-        } else {
-            "0, NULL"
-        };
+    let version =
+        connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?;
+    let columns = match version {
+        54.. => "quarantined, added_at, purge_state",
+        53 => "quarantined, added_at, 'retained'",
+        _ => "0, NULL, 'retained'",
+    };
     connection.query_row(&format!("SELECT id, display_name, original_filename, size_bytes, locator, kind, {columns} FROM attachments WHERE id=?1"), [id], attachment_row).optional()?
         .ok_or_else(|| Error::Attachment(format!("'{id}' was not found; use attachment list to find a workspace attachment ID")))
+}
+
+/// Preserve original replay metadata, but never imply purged bytes are still available.
+pub(crate) fn replay_attachment(
+    connection: &Connection,
+    mut file: Attachment,
+) -> Result<Attachment, Error> {
+    let current = read_attachment(connection, &file.id)?;
+    file.purge_state = current.purge_state;
+    Ok(file)
 }
 
 fn attachment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Attachment> {
@@ -609,6 +632,18 @@ fn attachment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Attachment> {
         locator: row.get(4)?,
         quarantined: row.get(6)?,
         added_at: row.get(7)?,
+        purge_state: match row.get::<_, String>(8)?.as_str() {
+            "retained" => AttachmentPurgeState::Retained,
+            "pending" => AttachmentPurgeState::Pending,
+            "purged" => AttachmentPurgeState::Purged,
+            value => {
+                return Err(rusqlite::Error::FromSqlConversionFailure(
+                    8,
+                    rusqlite::types::Type::Text,
+                    format!("unknown purge state: {value}").into(),
+                ));
+            }
+        },
         kind: match row.get::<_, String>(5)?.as_str() {
             "local_snapshot" => AttachmentKind::LocalSnapshot,
             "external_reference" => AttachmentKind::ExternalReference,

@@ -84,7 +84,10 @@ pub use upload_destination::AttachmentUploadDestination;
 pub mod drive;
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
-pub use attachments::{Attachment, AttachmentKind, AttachmentOpenTarget, DEFAULT_ATTACHMENT_LIMIT};
+pub use attachments::{
+    Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
+    DEFAULT_ATTACHMENT_LIMIT,
+};
 mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
@@ -771,6 +774,9 @@ impl Workspace {
         }
         if version < 53 {
             attachment_cleanup::migrate(&transaction)?;
+        }
+        if version < 54 {
+            attachment_cleanup::migrate_purge(&transaction)?;
         }
         if version < 55 {
             upload_destination::migrate(&transaction)?;

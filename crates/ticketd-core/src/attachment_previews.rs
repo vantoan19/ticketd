@@ -376,6 +376,19 @@ pub(crate) fn open_snapshot(
     connection: &rusqlite::Connection,
     attachment: &Attachment,
 ) -> Result<(PathBuf, File), SnapshotFailure> {
+    let current =
+        crate::attachments::read_attachment(connection, &attachment.id).map_err(|error| {
+            SnapshotFailure {
+                status: PreviewStatus::Unavailable,
+                message: error.to_string(),
+            }
+        })?;
+    if current.purge_state != crate::AttachmentPurgeState::Retained {
+        return Err(SnapshotFailure {
+            status: PreviewStatus::Unavailable,
+            message: crate::attachment_cleanup::purge_unavailable(&current),
+        });
+    }
     if attachment.kind != AttachmentKind::LocalSnapshot {
         return Err(SnapshotFailure {
             status: PreviewStatus::Unsupported,

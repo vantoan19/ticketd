@@ -177,6 +177,8 @@ export function AttachmentPreview({
   }
   const external = file?.kind === "external_reference";
   const available = !external && info?.status === "available" && !failed;
+  const purgeUnavailable =
+    file?.purge_state === "pending" || file?.purge_state === "purged";
   return (
     <Dialog
       open
@@ -220,7 +222,7 @@ export function AttachmentPreview({
                 {!external && (
                   <Button
                     variant="ghost"
-                    disabled={busy}
+                    disabled={busy || purgeUnavailable}
                     onClick={() => void action(() => attachments.export(file))}
                   >
                     <Download aria-hidden="true" />
@@ -247,13 +249,17 @@ export function AttachmentPreview({
               <div className="attachment-preview-fallback">
                 <File aria-hidden="true" />
                 <h3>
-                  {info?.status === "missing"
-                    ? "The local file could not be found"
-                    : info?.status === "incomplete"
-                      ? "Stored bytes are incomplete"
-                      : info || error
-                        ? "Preview unavailable"
-                        : "Loading preview…"}
+                  {file?.purge_state === "purged"
+                    ? "File permanently purged"
+                    : file?.purge_state === "pending"
+                      ? "Permanent purge pending"
+                      : info?.status === "missing"
+                        ? "The local file could not be found"
+                        : info?.status === "incomplete"
+                          ? "Stored bytes are incomplete"
+                          : info || error
+                            ? "Preview unavailable"
+                            : "Loading preview…"}
                 </h3>
                 <p>
                   {info?.message ??
@@ -281,7 +287,7 @@ export function AttachmentPreview({
           </div>
           <aside className="attachment-preview-info">
             <h3>File details</h3>
-            {file?.quarantined && (
+            {file?.quarantined && !purgeUnavailable && (
               <section>
                 <p>Quarantined · Restore this file to reuse it.</p>
                 <Button
@@ -395,7 +401,9 @@ export function AttachmentPreview({
           <p className="attachment-hint">
             {external
               ? "Removing a link keeps this external reference in your workspace."
-              : "Local snapshot · Removing a link keeps this file in your workspace."}
+              : purgeUnavailable
+                ? "Local bytes are unavailable. Its name, identity and references are preserved."
+                : "Local snapshot · Removing a link keeps this file in your workspace."}
           </p>
           <div className="attachment-actions">
             <Button variant="ghost" onClick={close}>

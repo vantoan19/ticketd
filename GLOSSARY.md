@@ -104,6 +104,13 @@ for recovery. The provider can change the content independently; an uploaded cop
 does not promise preserved original bytes. A revision uses a new upload operation
 and attachment identity. Cancellation and removal never delete the remote file.
 
+**Purged Attachment**:
+A local Attachment whose quarantined bytes were permanently removed by explicit
+confirmation. Its identity, names and references remain with unavailable status.
+Undo cannot recover purged bytes; deliberately restoring an older complete backup
+can recover the earlier workspace. A pending purge records committed intent but
+unconfirmed completion and requires explicit retry, never automatic deletion.
+
 **Recoverable draft**:
 Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
 

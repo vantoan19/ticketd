@@ -315,7 +315,14 @@ impl Workspace {
                     if previous != canonical {
                         return Err(Error::RequestConflict(id.to_owned()));
                     }
-                    return Ok(serde_json::from_str(&outcome)?);
+                    let result = serde_json::from_str(&outcome)?;
+                    return match result {
+                        WriteResult::Attachment(file) => {
+                            crate::attachments::replay_attachment(&self.connection, file)
+                                .map(WriteResult::Attachment)
+                        }
+                        other => Ok(other),
+                    };
                 }
             }
             if let Some(id) = request_id {

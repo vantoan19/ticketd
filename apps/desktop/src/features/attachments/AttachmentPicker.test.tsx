@@ -161,6 +161,76 @@ test("failed destination bindings keep the batch choice through a later preferen
   ).toHaveLength(4);
 });
 
+test("a purged upload replay stays unavailable instead of reporting stored or attaching", async () => {
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+    )
+      return { kind: "local" };
+    if (command === "attachment_workspace_id") return "purged-replay";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "import_attachment" || command === "inspect_attachment")
+      return { ...file("trace.log"), quarantined: true, purge_state: "purged" };
+    throw new Error(`Unexpected ${command}`);
+  });
+  const picked = vi.fn().mockResolvedValue(undefined);
+  render(
+    <AttachmentPicker
+      purpose="store"
+      open
+      onOpenChange={() => {}}
+      onPick={picked}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  expect(await within(row).findByRole("alert")).toHaveProperty(
+    "textContent",
+    expect.stringContaining("purged"),
+  );
+  expect(picked).not.toHaveBeenCalled();
+  expect(within(row).queryByText("Stored")).toBeNull();
+  expect(within(row).queryByText(/snapshot remains available/i)).toBeNull();
+});
+
+test("retry refreshes a cached completed upload after permanent purge", async () => {
+  let purged = false;
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+    )
+      return { kind: "local" };
+    if (command === "attachment_workspace_id") return "cached-purged-replay";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "import_attachment" || command === "inspect_attachment")
+      return {
+        ...file("trace.log"),
+        purge_state: purged ? "purged" : "retained",
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  const picked = vi.fn().mockRejectedValue(new Error("Insertion failed"));
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText("Insertion failed");
+  purged = true;
+  fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(within(row).getByRole("alert").textContent).toContain("purged"),
+  );
+  expect(picked).toHaveBeenCalledTimes(1);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "import_attachment"),
+  ).toHaveLength(1);
+});
+
 test("Drive failures retain their folder and operation; status checks precede retry and local fallback is explicit", async () => {
   const destination = {
     connection_id: "connection",
@@ -662,6 +732,7 @@ test("canceling one file suppresses late insertion, preserves its completed snap
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "cancel_attachment_upload") return;
     const params = args as Record<string, unknown>;
+    if (command === "inspect_attachment") return file(String(params.id));
     if (params.source === "C:/first.txt") {
       (params.progress as Channel<unknown>).onmessage({ copied: 3, total: 7 });
       return pending;

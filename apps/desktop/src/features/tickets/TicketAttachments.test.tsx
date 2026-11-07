@@ -197,7 +197,8 @@ test("a failed association retains the completed upload and retry links the same
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments") return attempts > 1 ? [file] : [];
-    if (command === "import_attachment") return file;
+    if (command === "import_attachment" || command === "inspect_attachment")
+      return file;
     if (command === "set_ticket_attachment") {
       if (++attempts === 1) throw new Error("database busy");
       return ticket;
