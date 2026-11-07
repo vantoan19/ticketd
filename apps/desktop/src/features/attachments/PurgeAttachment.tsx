@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +27,7 @@ export function PurgeAttachment({
   const [review, setReview] = useState<AttachmentCleanupReview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const cancel = useRef<HTMLButtonElement>(null);
   const pending = (review?.attachment ?? file).purge_state === "pending";
   useEffect(() => {
     let current = true;
@@ -70,6 +71,10 @@ export function PurgeAttachment({
       <DialogContent
         className="attachment-cleanup-dialog"
         showCloseButton={!busy}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          cancel.current?.focus();
+        }}
       >
         <DialogHeader>
           <DialogTitle>Permanently purge this file?</DialogTitle>
@@ -98,7 +103,12 @@ export function PurgeAttachment({
         )}
         {error && <p role="alert">{error}</p>}
         <div className="attachment-actions attachment-cleanup-footer">
-          <Button autoFocus variant="ghost" disabled={busy} onClick={onClose}>
+          <Button
+            ref={cancel}
+            variant="ghost"
+            disabled={busy}
+            onClick={onClose}
+          >
             Cancel
           </Button>
           <Button

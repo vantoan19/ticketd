@@ -57,13 +57,16 @@ test("quarantine separates restore from confirmed purge and keeps failures actio
   });
   render(<AttachmentLibrary onPreview={() => {}} />);
   await screen.findByRole("button", { name: "Restore Unused trace" });
-  fireEvent.click(
-    screen.getByRole("button", { name: "Permanently purge Unused trace" }),
-  );
+  const trigger = screen.getByRole("button", {
+    name: "Permanently purge Unused trace",
+  });
+  trigger.focus();
+  fireEvent.click(trigger);
   await screen.findByRole("dialog", { name: "Permanently purge this file?" });
   expect(attempts).toBe(0);
   expect(screen.getByText(/cannot be undone/i)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(attempts).toBe(0);
   fireEvent.click(
     screen.getByRole("button", { name: "Permanently purge Unused trace" }),
