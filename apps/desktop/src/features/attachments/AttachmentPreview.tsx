@@ -263,10 +263,7 @@ export function AttachmentPreview({
             <h3>File details</h3>
             {file?.quarantined && (
               <section>
-                <p>
-                  Quarantined · Retained bytes remain recoverable in this
-                  workspace and complete backups.
-                </p>
+                <p>Quarantined · Restore this file to reuse it.</p>
                 <Button
                   variant="outline"
                   disabled={busy}
