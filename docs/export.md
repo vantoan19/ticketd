@@ -56,6 +56,8 @@ Ordinary copy-as-Markdown keeps internal workspace links. The blocked-publicatio
 dialog's **Export with files** shares the same workflow and never publishes.
 The result dialog reports omissions and offers **Show Markdown** and **Show
 manifest** in the system file manager.
+Drive attachment previews offer **Export link**, using this same workflow for a
+named provider link without a download or native-file conversion.
 
 ## Workspace JSON snapshot
 
