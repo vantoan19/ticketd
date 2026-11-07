@@ -38,19 +38,25 @@ export function DriveAccessRecovery({
   const [selecting, setSelecting] = useState(false);
   const [error, setError] = useState("");
   const generation = useRef(0);
+  const observation = useRef(0);
   const operation = useRef<string | null>(null);
   useEffect(() => {
     const current = ++generation.current;
+    const sequence = ++observation.current;
     void attachments
       .checkDriveReference(id)
       .then((value) => {
-        if (generation.current === current) {
+        if (
+          generation.current === current &&
+          observation.current === sequence
+        ) {
           setAccess(value);
           if (!value.failure) onRefresh();
         }
       })
       .catch((reason: unknown) => {
-        if (generation.current === current) setError(String(reason));
+        if (generation.current === current && observation.current === sequence)
+          setError(String(reason));
       });
     void attachments
       .driveConfiguration()
@@ -72,6 +78,7 @@ export function DriveAccessRecovery({
 
   async function check(recover: boolean) {
     const current = generation.current;
+    const sequence = ++observation.current;
     setBusy(true);
     setSelecting(recover);
     setError("");
@@ -81,7 +88,8 @@ export function DriveAccessRecovery({
       const result = operationId
         ? await attachments.recoverDriveReference(id, operationId)
         : await attachments.checkDriveReference(id);
-      if (generation.current !== current) return;
+      if (generation.current !== current || observation.current !== sequence)
+        return;
       setAccess(result);
       if (!result.failure) onRefresh();
     } catch (reason) {

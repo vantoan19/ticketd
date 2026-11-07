@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -124,4 +125,33 @@ test("unmount cancels an active recovery and ignores its late completion", async
   );
   finish?.({ reference, failure: null });
   expect(refreshed).not.toHaveBeenCalled();
+});
+
+test("an older initial check cannot overwrite a successful explicit retry", async () => {
+  let finishInitial: ((value: unknown) => void) | undefined;
+  let checks = 0;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready" };
+    if (command === "check_drive_reference") {
+      if (++checks === 1)
+        return new Promise((resolve) => {
+          finishInitial = resolve;
+        });
+      return { reference, failure: null };
+    }
+    throw new Error(`Unexpected command ${command}`);
+  });
+  render(<DriveAccessRecovery id="attachment" onRefresh={() => {}} />);
+  await waitFor(() => expect(checks).toBe(1));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh details" }));
+  await screen.findByText("Current source in Google Drive");
+  await act(async () =>
+    finishInitial?.({
+      reference,
+      failure: { kind: "offline", message: "Old offline observation" },
+    }),
+  );
+  expect(screen.getByText("Current source in Google Drive")).toBeTruthy();
+  expect(screen.queryByText("Old offline observation")).toBeNull();
 });
