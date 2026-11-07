@@ -127,7 +127,12 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   expect(
     within(bar).getByRole("button", { name: "Source: Local" }),
   ).toBeTruthy();
-  expect(within(bar).getByRole("switch", { name: "Follow" })).toBeTruthy();
+  // Follow is a chip that reads Following once on, and keeps its name.
+  const follow = within(bar).getByRole("switch", { name: "Follow" });
+  expect(follow.textContent).toBe("Follow");
+  fireEvent.click(follow);
+  await waitFor(() => expect(follow.textContent).toBe("Following"));
+  expect(follow.getAttribute("aria-checked")).toBe("true");
 
   // The Project chip opens the rail's picker, and choosing saves.
   fireEvent.click(

@@ -154,6 +154,7 @@ export function TicketPage({
         key={`follow-${ticket.reference}`}
         reference={ticket.reference}
         revision={revision}
+        chip={narrow}
       />
       <Reminder
         key={`reminder-${ticket.reference}`}

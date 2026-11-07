@@ -328,6 +328,8 @@
 .ui-button-secondary {
   color: var(--foreground);
   background: var(--recessed);
+  /* Recessed matches a dark card surface, so the edge keeps it visible. */
+  box-shadow: var(--shadow-border-base);
 }
 .ui-button-ghost {
   color: var(--muted-foreground);

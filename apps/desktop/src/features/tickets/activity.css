@@ -127,3 +127,12 @@
   padding-block: 8px;
   background: var(--background);
 }
+/* "Only in ticketd" is a caption under the heading row at every width, not a
+   control that sits beside the toggle until the pane is narrow. */
+.activity [data-slot="section-header-actions"] {
+  flex-basis: 100%;
+  margin-inline-start: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
