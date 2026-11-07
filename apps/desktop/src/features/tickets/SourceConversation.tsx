@@ -1,3 +1,4 @@
+import { Card, CardHeader } from "@/components/ui/card";
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
@@ -138,42 +139,43 @@ export function SourceConversation({
           {entries.map((entry) => (
             <li key={`${entry.type}-${entry.id}`}>
               {entry.type === "comment" ? (
-                <article
-                  className="source-card"
-                  aria-label={`Comment by ${entry.author} on ${name}, read-only`}
-                >
-                  <header className="source-card-header">
-                    <span className="source-comment-meta">
-                      <strong>{entry.author}</strong> commented on {name} ·{" "}
-                      <time
-                        dateTime={entry.created_at}
-                        title={formatDateTime(entry.created_at)}
-                      >
-                        {relativeDateTime(entry.created_at, now)}
-                      </time>
-                      {entry.edited_at && (
-                        <>
-                          {" "}
-                          · <span>edited</span>
-                        </>
-                      )}
-                    </span>
-                    <span className="source-card-actions">
-                      <span className="source-readonly-label">
-                        <LockKeyhole aria-hidden="true" />
-                        Read-only
+                <Card asChild>
+                  <article
+                    aria-label={`Comment by ${entry.author} on ${name}, read-only`}
+                  >
+                    <CardHeader>
+                      <span className="source-comment-meta">
+                        <strong>{entry.author}</strong> commented on {name} ·{" "}
+                        <time
+                          dateTime={entry.created_at}
+                          title={formatDateTime(entry.created_at)}
+                        >
+                          {relativeDateTime(entry.created_at, now)}
+                        </time>
+                        {entry.edited_at && (
+                          <>
+                            {" "}
+                            · <span>edited</span>
+                          </>
+                        )}
                       </span>
-                      <SourceLink url={entry.url}>View on {name}</SourceLink>
-                    </span>
-                  </header>
-                  <div className="markdown-preview description-document">
-                    <MarkdownDocument
-                      source={entry.body}
-                      select={select}
-                      revision={revision}
-                    />
-                  </div>
-                </article>
+                      <span className="source-card-actions">
+                        <span className="source-readonly-label">
+                          <LockKeyhole aria-hidden="true" />
+                          Read-only
+                        </span>
+                        <SourceLink url={entry.url}>View on {name}</SourceLink>
+                      </span>
+                    </CardHeader>
+                    <div className="markdown-preview description-document">
+                      <MarkdownDocument
+                        source={entry.body}
+                        select={select}
+                        revision={revision}
+                      />
+                    </div>
+                  </article>
+                </Card>
               ) : (
                 <EventRow entry={entry} name={name} now={now} />
               )}

@@ -126,26 +126,7 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
-/* Content owned by an external source: a read-only card whose header bar names the owner. */
-.source-card {
-  overflow: hidden;
-  border-radius: 12px;
-  box-shadow: var(--shadow-border-base);
-}
-.source-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
-  gap: 8px;
-  min-height: 40px;
-  padding: 4px 4px 4px 16px;
-  background: var(--background);
-  color: var(--secondary-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.source-card .description-document {
+.source-description .description-document {
   margin-top: 0;
   min-height: 0;
   padding: 16px;
@@ -232,7 +213,7 @@
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
-.source-card-header .source-link {
+[data-slot="card-header"] .source-link {
   font-size: var(--text-caption);
   white-space: nowrap;
 }

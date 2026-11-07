@@ -508,6 +508,52 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   border-radius: 6px;
 }
 
+/* Card: surface, header band, body and recessed footer. */
+.ui-card {
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 16px;
+  background: var(--background);
+  box-shadow: inset 0 -1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-card-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-card-header :is(h2, h3) {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+}
+.ui-card-body {
+  padding: 12px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-card-footer {
+  padding: 12px 16px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
 /* Marks shared by every feature: tags, references, counts and progress. */
 .ui-badge {
   display: inline-block;
@@ -1183,20 +1229,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
-}
-.settings-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 24px;
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
-  border-radius: 12px;
-}
-.settings-card section {
-  border: 0;
-  padding: 0;
 }
 .create-panel {
   width: min(720px, calc(100vw - 32px));
