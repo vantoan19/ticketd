@@ -96,6 +96,20 @@ Native open resolves only a stored, complete snapshot and permits passive file
 formats; arbitrary types can be exported explicitly without executing them.
 Exports publish synced temporary output without replacing an existing file.
 
+`Workspace::export_markdown_with_files` owns portable content export for saved
+Documents, tickets (including direct attachments), and selected/current Markdown.
+Selections can supply source context; core carries only used reference definitions
+into the output, without copying unrelated prose or files.
+It acquires the attachment file lock before a SQLite read snapshot, uses local
+metadata/byte validation and external provider viewer links, and rewrites only
+exported destinations. A fresh temporary bundle is retained only after its
+Markdown, copied bytes and complete/partial manifest are synced successfully.
+Identity-prefixed filenames prevent collisions across filesystem case rules.
+Canonical source and independently linked Documents remain unchanged. The CLI
+and desktop translate sources, folder selection and results; they do not resolve
+private storage paths or duplicate export policy. Provider references export
+links without invoking a download or credential capability.
+
 Backup, restore safety copies, and migration safety copies include every
 retained local file. Attachment-bearing backups use a versioned single SQLite
 container with streamed file blobs, per-file SHA-256 and a checked inventory;

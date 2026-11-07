@@ -327,6 +327,20 @@ enum Command {
         #[arg(long)]
         file: Option<String>,
     },
+    /// Export portable Markdown, referenced files and manifest into a fresh folder; inspect JSON status for omissions
+    #[command(group(clap::ArgGroup::new("content").required(true).multiple(false).args(["ticket", "document", "markdown_file"])))]
+    ExportMarkdown {
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        document: Option<String>,
+        /// Export selected/current Markdown from a file (- reads stdin)
+        #[arg(long)]
+        markdown_file: Option<String>,
+        /// Existing parent folder; a new ticketd-export-* directory is created
+        #[arg(long)]
+        output: String,
+    },
     /// Execute a JSON write request (file or - for stdin); prints {"kind","value"}. With --request-id, a retry returns the first result. Other commands print the bare object; `activity add/edit` and `document create/change` also accept --request-id with the same replay behavior
     Write {
         file: String,
@@ -1256,6 +1270,35 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::InspectBackup { path } => serde_json::to_string(&workspace.inspect_backup(path)?)?,
         Command::RestoreWorkspace { .. } => return Err("restore was not performed".into()),
+        Command::ExportMarkdown {
+            ticket,
+            document,
+            markdown_file,
+            output,
+        } => {
+            let source = match (ticket, document, markdown_file) {
+                (Some(reference), None, None) => {
+                    ticketd_core::MarkdownExportSource::Ticket { reference }
+                }
+                (None, Some(id), None) => ticketd_core::MarkdownExportSource::Document { id },
+                (None, None, Some(path)) => {
+                    let body = if path == "-" {
+                        let mut body = String::new();
+                        std::io::stdin().read_to_string(&mut body)?;
+                        body
+                    } else {
+                        std::fs::read_to_string(path)?
+                    };
+                    ticketd_core::MarkdownExportSource::Markdown { body }
+                }
+                _ => {
+                    return Err(
+                        "select exactly one of --ticket, --document or --markdown-file".into(),
+                    );
+                }
+            };
+            serde_json::to_string_pretty(&workspace.export_markdown_with_files(source, output)?)?
+        }
         Command::Export { file } => {
             if let Some(path) = file {
                 workspace.export_file(path)?;

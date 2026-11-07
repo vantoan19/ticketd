@@ -16,6 +16,71 @@ fn run(dir: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+fn portable_markdown_exports_ticket_document_and_selected_input_without_desktop() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"portable evidence").unwrap();
+    let ticket = run(dir.path(), &["create", "Share evidence"]);
+    let file = run(
+        dir.path(),
+        &[
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--ticket",
+            ticket["reference"].as_str().unwrap(),
+        ],
+    );
+    let result = run(
+        dir.path(),
+        &[
+            "export-markdown",
+            "--ticket",
+            "T-1",
+            "--output",
+            dir.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(result["status"], "complete");
+    assert_eq!(result["attachments"][0]["attachment_id"], file["id"]);
+    let folder = Path::new(result["directory"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(folder.join(result["attachments"][0]["path"].as_str().unwrap())).unwrap(),
+        b"portable evidence"
+    );
+    let uri = run(
+        dir.path(),
+        &["attachment", "uri", file["id"].as_str().unwrap()],
+    );
+    let markdown = format!("[Selected]({})", uri.as_str().unwrap());
+    let document = run(dir.path(), &["document", "create", "--body", &markdown]);
+    let result = run(
+        dir.path(),
+        &[
+            "export-markdown",
+            "--document",
+            document["id"].as_str().unwrap(),
+            "--output",
+            dir.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(result["status"], "complete");
+    std::fs::write(&source, "[Missing](ticketd://attachment/foreign/absent)").unwrap();
+    let result = run(
+        dir.path(),
+        &[
+            "export-markdown",
+            "--markdown-file",
+            source.to_str().unwrap(),
+            "--output",
+            dir.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(result["status"], "partial");
+    assert!(result["attachments"][0]["omission"].is_string());
+}
+
+#[test]
 fn cli_searches_usage_and_renames_without_changing_inline_labels_or_reuploading() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("original.txt");
