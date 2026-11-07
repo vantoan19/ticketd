@@ -1,6 +1,6 @@
 /* The property rail: labeled sections on the canvas surface, beside the
-   document column, or below it when the detail pane is narrower than 652px
-   (a 420px document column plus a 232px rail). */
+   document column. Below 652px (a 420px document column plus a 232px rail)
+   the pane shows the chip bar instead; see useNarrowPane. */
 .ticket-properties {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -9,12 +9,6 @@
   min-width: 0;
   padding: 20px 20px 48px;
   background: var(--background);
-}
-@container ticket-detail (max-width: 651px) {
-  /* Below the document, sections keep their order but share the width. */
-  .ticket-properties {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
-  }
 }
 @container ticket-detail (min-width: 652px) {
   /* A flat rail split from the document by a 1px rule; it scrolls on its own
@@ -240,12 +234,13 @@
 }
 
 /* A trashed ticket's values are read-only, not faded: keep them at full contrast. */
-aside.ticket-properties :disabled,
-aside.ticket-properties [data-slot="select-trigger"][data-disabled] {
+:is(aside.ticket-properties, .chip-bar) :disabled,
+:is(aside.ticket-properties, .chip-bar)
+  [data-slot="select-trigger"][data-disabled] {
   opacity: 1;
   color: var(--foreground);
 }
-aside.ticket-properties :disabled svg {
+:is(aside.ticket-properties, .chip-bar) :disabled svg {
   color: var(--secondary-foreground);
 }
 
@@ -262,4 +257,28 @@ aside.ticket-properties :disabled svg {
   color: var(--muted-foreground);
   font-size: var(--text-ui);
   line-height: 20px;
+}
+
+/* A narrow pane folds the rail into chips under the title, in rail order. */
+.chip-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+.chip-bar > :is(small, p) {
+  flex-basis: 100%;
+}
+.chip-bar .rail-follow {
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-small);
+}
+/* Relationships and Documents follow the description as a section. */
+.detail-connected {
+  display: grid;
+  gap: 20px;
+  margin-top: 24px;
 }

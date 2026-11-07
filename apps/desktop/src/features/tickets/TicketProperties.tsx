@@ -162,7 +162,10 @@ export function TicketProperties({
   children,
   active = true,
   revision = 0,
+  layout = "rail",
 }: {
+  /** "chips" folds the rail into a wrapping row of chips for a narrow pane. */
+  layout?: "rail" | "chips";
   active?: boolean;
   revision?: number;
   ticket: Ticket;
@@ -176,6 +179,7 @@ export function TicketProperties({
   /** Opens another ticket, such as the canonical ticket of a duplicate. */
   onOpenTicket?: (reference: string) => void;
 }) {
+  const chips = layout === "chips";
   const propertiesRef = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState("");
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -268,21 +272,28 @@ export function TicketProperties({
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`
     : ticket.plan_id || "Add to a Plan";
   function property(label: string, control: ReactNode) {
-    return (
-      <RailSection label={label}>
+    const feedback = (
+      <>
         {control}
         {pending === label && <small role="status">Saving…</small>}
         {errors[label] && <small role="alert">{errors[label]}</small>}
-      </RailSection>
+      </>
+    );
+    return chips ? (
+      feedback
+    ) : (
+      <RailSection label={label}>{feedback}</RailSection>
     );
   }
+  const Container = chips ? "div" : "aside";
   return (
-    <aside
+    <Container
       ref={propertiesRef}
-      className="ticket-properties"
+      {...(chips
+        ? { className: "chip-bar", role: "group" }
+        : { className: "ticket-properties", tabIndex: 0 })}
       data-trashed={ticket.trashed || undefined}
       aria-label="Ticket properties"
-      tabIndex={0}
     >
       {ticket.trashed && (
         <p role="note" className="rail-trash-note">
@@ -316,7 +327,7 @@ export function TicketProperties({
             <SelectTrigger
               ref={statusTrigger}
               size="sm"
-              variant="ghost"
+              variant={chips ? "default" : "ghost"}
               readOnly={ticket.trashed}
               aria-label={`Status: ${ticket.status}`}
               title="Status"
@@ -418,14 +429,15 @@ export function TicketProperties({
           )}
         </>,
       )}
-      {(ticket.status === "In progress" || ticket.status === "In review") && (
-        <LatestUpdate
-          reference={ticket.reference}
-          active={active}
-          revision={revision}
-          onOpen={onOpenNote}
-        />
-      )}
+      {!chips &&
+        (ticket.status === "In progress" || ticket.status === "In review") && (
+          <LatestUpdate
+            reference={ticket.reference}
+            active={active}
+            revision={revision}
+            onOpen={onOpenNote}
+          />
+        )}
       <ConfirmLeaveDuplicate
         canonical={ticket.duplicate_of ?? ""}
         status={leaving}
@@ -449,11 +461,11 @@ export function TicketProperties({
           returnFocus={statusTrigger}
         />
       )}
-      <SourceRail ticket={ticket} refresh={refresh} />
+      <SourceRail ticket={ticket} refresh={refresh} chip={chips} />
       {property(
         "Project",
         <PropertyPicker
-          compact
+          compact={!chips}
           align="end"
           readOnly={ticket.trashed}
           icon={Folder}
@@ -476,7 +488,7 @@ export function TicketProperties({
       {property(
         "Plan",
         <PropertyPicker
-          compact
+          compact={!chips}
           align="end"
           readOnly={ticket.trashed}
           icon={Layers}
@@ -512,9 +524,9 @@ export function TicketProperties({
             </>
           ) : (
             <PropertyPicker
-              compact
+              compact={!chips}
               align="end"
-              className="rail-tags-picker"
+              {...(!chips && { className: "rail-tags-picker" })}
               display={
                 <>
                   {ticket.tags.length ? (
@@ -526,10 +538,12 @@ export function TicketProperties({
                   ) : (
                     <span className="text-muted-foreground">Add tags</span>
                   )}
-                  <ChevronDown
-                    aria-hidden="true"
-                    className="rail-tags-chevron"
-                  />
+                  {!chips && (
+                    <ChevronDown
+                      aria-hidden="true"
+                      className="rail-tags-chevron"
+                    />
+                  )}
                 </>
               }
               label="Tags"
@@ -560,6 +574,6 @@ export function TicketProperties({
         <small role="status">{vocabularyError}</small>
       )}
       {children}
-    </aside>
+    </Container>
   );
 }

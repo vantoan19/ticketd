@@ -257,7 +257,7 @@
   },
   "src/features/tickets/TicketProperties.tsx": {
     "shadcn/no-restyle": {
-      "count": 5
+      "count": 4
     }
   },
   "src/features/tickets/TicketRowsSkeleton.tsx": {
