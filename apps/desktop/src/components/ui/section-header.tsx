@@ -39,8 +39,16 @@ export function SectionHeader({
       data-bar={bar ? "" : undefined}
       className={cn("ui-section-header", className)}
     >
-      <Heading id={titleId}>{title}</Heading>
-      {count != null && <Count>{count}</Count>}
+      {/* The count is part of the heading, so the name stays “Evidence 2”. */}
+      <Heading id={titleId}>
+        {title}
+        {count != null && (
+          <>
+            {" "}
+            <Count>{count}</Count>
+          </>
+        )}
+      </Heading>
       {children}
       {actions && <span data-slot="section-header-actions">{actions}</span>}
     </div>

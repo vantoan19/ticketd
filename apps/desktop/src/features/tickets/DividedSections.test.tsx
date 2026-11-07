@@ -68,5 +68,5 @@ test("each major ticket section opens with a divided header", async () => {
   for (const name of ["Subtickets", "Evidence", /^Mentioned in/, "Activity"])
     expect(headerOf(name)?.hasAttribute("data-divided")).toBe(true);
   // The count sits in the same header as the title.
-  expect(headerOf(/^Mentioned in/)?.textContent).toBe("Mentioned in1");
+  expect(headerOf(/^Mentioned in/)?.textContent).toBe("Mentioned in 1");
 });

@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 afterEach(cleanup);
 import { SectionHeader } from "@/components/ui/section-header";
 
-it("renders the title as a heading of the requested level, then count, controls and actions in order", () => {
+it("renders the title and its count as one heading, then controls and actions in order", () => {
   render(
     <SectionHeader
       title="Evidence"
@@ -17,11 +17,13 @@ it("renders the title as a heading of the requested level, then count, controls 
     </SectionHeader>,
   );
   expect(
-    screen.getByRole("heading", { level: 2, name: "Evidence" }),
+    screen.getByRole("heading", { level: 2, name: "Evidence 4" }),
   ).toBeTruthy();
+  expect(screen.getByRole("heading").contains(screen.getByText("4"))).toBe(
+    true,
+  );
   const order = [
     screen.getByRole("heading"),
-    screen.getByText("4"),
     screen.getByRole("button", { name: "Mode" }),
     screen.getByRole("button", { name: "Add evidence" }),
   ];
