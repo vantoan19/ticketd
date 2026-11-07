@@ -50,12 +50,12 @@ export function PurgeAttachment({
       await attachments.purge(file.id);
       onClose();
     } catch (reason) {
-      setError(String(reason));
       try {
         setReview(await attachments.cleanupReview(file.id));
       } catch {
         // Keep the original failure and allow the same explicit action to retry.
       }
+      setError(String(reason));
     } finally {
       setBusy(false);
       onChanged();
@@ -103,7 +103,21 @@ export function PurgeAttachment({
               : review.reason}
           </p>
         )}
-        {error && <p role="alert">{error}</p>}
+        {error &&
+          (pending ? (
+            <>
+              <p role="alert">
+                Permanent purge is pending. Retry to finish or confirm
+                completion.
+              </p>
+              <details>
+                <summary>Details</summary>
+                <p className="attachment-hint">{error}</p>
+              </details>
+            </>
+          ) : (
+            <p role="alert">{error}</p>
+          ))}
         <div className="attachment-actions attachment-cleanup-footer">
           <Button
             ref={cancel}
