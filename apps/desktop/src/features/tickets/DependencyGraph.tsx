@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 import { ArrowLeft, Maximize, Minus, Plus } from "lucide-react";
 import "@xyflow/react/dist/style.css";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -540,9 +541,9 @@ export default function DependencyGraph({
       </header>
       <Legend />
       {notice && (
-        <p className="graph-notice" role="status">
-          {notice}
-        </p>
+        <Alert role="status" size="compact">
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
       )}
       {error && <p role="alert">Graph failed: {error}</p>}
       {!graph && !error && <p role="status">Loading graph…</p>}

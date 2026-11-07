@@ -1,3 +1,4 @@
+import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import { useEffect, useState } from "react";
 import {
   Check,
@@ -8,6 +9,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
@@ -26,7 +28,7 @@ import { fileManagerName } from "@/lib/platform";
 import { nameFromFolder } from "@/features/projects/paths";
 import { PathText } from "@/features/projects/PathText";
 import "./projects.css";
-import { Count } from "@/components/ui/count";
+import { SectionHeader } from "@/components/ui/section-header";
 
 type OpenDialog =
   | { kind: "project" }
@@ -138,7 +140,7 @@ function CheckoutRow({
       </div>
     );
   return (
-    <div className="checkout-row">
+    <Item>
       <span className="checkout-text">
         <PathText path={path} />
         <span className="checkout-note">
@@ -171,7 +173,7 @@ function CheckoutRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </Item>
   );
 }
 
@@ -387,12 +389,12 @@ export function Projects({
 
   return (
     <section className="projects-column" aria-label="Project management">
-      <div className="projects-heading">
-        <h1>Projects</h1>
-        {projects.length > 0 && <Count>{projects.length}</Count>}
-        <span className="projects-spacer" />
-        {projects.length > 0 && newProject}
-      </div>
+      <SectionHeader
+        level={1}
+        title="Projects"
+        count={projects.length > 0 ? projects.length : undefined}
+        actions={projects.length > 0 && newProject}
+      />
       <p className="projects-description">
         A project is a repository. Its identity survives moves and renames, and
         each checkout lets the command line infer the project from the folder
@@ -411,107 +413,116 @@ export function Projects({
         <ul className="projects-list" aria-label="Projects">
           {projects.map((item) => (
             <li key={item.id}>
-              <section
-                className="project-card"
-                aria-labelledby={`project-${item.id}-name`}
-              >
-                <div className="project-card-header">
-                  <Folder aria-hidden />
-                  <h2 id={`project-${item.id}-name`}>{item.name}</h2>
-                  <span className="project-tickets">
-                    {ticketsLabel(counts[item.id])}
-                  </span>
-                  <span className="projects-spacer" />
-                  {onOpenTickets && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="project-open-tickets"
-                      aria-label={`Open tickets of ${item.name}`}
-                      onClick={() => onOpenTickets(item)}
-                    >
-                      Open tickets
-                    </Button>
-                  )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton
-                        type="button"
-                        label={`Actions for ${item.name}`}
-                      >
-                        <MoreHorizontal aria-hidden />
-                      </IconButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onSelect={() => open({ kind: "rename", id: item.id })}
-                      >
-                        Rename project…
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                <div className="project-card-body">
-                  <span className="project-label">Checkouts</span>
-                  {item.paths.length === 0 ? (
-                    <p className="settings-hint">
-                      No registered checkouts. Register one so the command line
-                      can infer {item.name} from its folder.
-                    </p>
-                  ) : (
-                    <ul
-                      className="checkout-list"
-                      aria-label={`Checkouts of ${item.name}`}
-                    >
-                      {item.paths.map((path, index) => (
-                        <li key={path}>
-                          <CheckoutRow
-                            project={item}
-                            path={path}
-                            first={index === 0}
-                            confirming={
-                              confirming?.id === item.id &&
-                              confirming.path === path
+              <Card asChild>
+                <section aria-labelledby={`project-${item.id}-name`}>
+                  <CardHeader asChild>
+                    <div className="project-card-header">
+                      <Folder aria-hidden />
+                      <h2 id={`project-${item.id}-name`}>{item.name}</h2>
+                      <span className="project-tickets">
+                        {ticketsLabel(counts[item.id])}
+                      </span>
+                      <span className="projects-spacer" />
+                      {onOpenTickets && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="project-open-tickets"
+                          aria-label={`Open tickets of ${item.name}`}
+                          onClick={() => onOpenTickets(item)}
+                        >
+                          Open tickets
+                        </Button>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <IconButton
+                            type="button"
+                            label={`Actions for ${item.name}`}
+                          >
+                            <MoreHorizontal aria-hidden />
+                          </IconButton>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              open({ kind: "rename", id: item.id })
                             }
-                            pending={pending === "remove"}
-                            error={removeError}
-                            onAsk={() => {
-                              setRemoveError("");
-                              setConfirming({ id: item.id, path });
-                            }}
-                            onCancel={() => setConfirming(null)}
-                            onConfirm={() => void removeCheckout(item, path)}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="register-checkout"
-                    aria-label={`Register checkout for ${item.name}`}
-                    onClick={() => open({ kind: "checkout", id: item.id })}
-                  >
-                    <Plus aria-hidden />
-                    Register checkout…
-                  </Button>
-                </div>
-                <div className="project-card-footer">
-                  <span>Project ID</span>
-                  <code title={item.id}>{truncateId(item.id)}</code>
-                  <CopyIcon
-                    label={`Copy project ID of ${item.name}`}
-                    text={item.id}
-                  />
-                  <span className="projects-spacer" />
-                  <span>
-                    Used by <code>ticketd list --project</code>
-                  </span>
-                </div>
-              </section>
+                          >
+                            Rename project…
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </CardHeader>
+                  <CardBody asChild>
+                    <div className="project-card-body">
+                      <span className="project-label">Checkouts</span>
+                      {item.paths.length === 0 ? (
+                        <p className="settings-hint">
+                          No registered checkouts. Register one so the command
+                          line can infer {item.name} from its folder.
+                        </p>
+                      ) : (
+                        <ul
+                          className="checkout-list"
+                          aria-label={`Checkouts of ${item.name}`}
+                        >
+                          {item.paths.map((path, index) => (
+                            <li key={path}>
+                              <CheckoutRow
+                                project={item}
+                                path={path}
+                                first={index === 0}
+                                confirming={
+                                  confirming?.id === item.id &&
+                                  confirming.path === path
+                                }
+                                pending={pending === "remove"}
+                                error={removeError}
+                                onAsk={() => {
+                                  setRemoveError("");
+                                  setConfirming({ id: item.id, path });
+                                }}
+                                onCancel={() => setConfirming(null)}
+                                onConfirm={() =>
+                                  void removeCheckout(item, path)
+                                }
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="register-checkout"
+                        aria-label={`Register checkout for ${item.name}`}
+                        onClick={() => open({ kind: "checkout", id: item.id })}
+                      >
+                        <Plus aria-hidden />
+                        Register checkout…
+                      </Button>
+                    </div>
+                  </CardBody>
+                  <CardFooter asChild>
+                    <div className="project-card-footer">
+                      <span>Project ID</span>
+                      <code title={item.id}>{truncateId(item.id)}</code>
+                      <CopyIcon
+                        label={`Copy project ID of ${item.name}`}
+                        text={item.id}
+                      />
+                      <span className="projects-spacer" />
+                      <span>
+                        Used by <code>ticketd list --project</code>
+                      </span>
+                    </div>
+                  </CardFooter>
+                </section>
+              </Card>
             </li>
           ))}
         </ul>

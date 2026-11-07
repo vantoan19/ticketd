@@ -322,7 +322,7 @@ export function CreateTicketDialog({
           />
         </div>
         {error && (
-          <Alert variant="destructive">
+          <Alert tone="error">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}

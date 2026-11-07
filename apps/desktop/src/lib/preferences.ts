@@ -8,6 +8,7 @@ const preferencesSchema = z.object({
   openTickets: z.enum(["split", "expanded"]).catch("split"),
   ticketLayout: z.enum(["list", "board"]).catch("list"),
   sidebarCollapsed: z.boolean().catch(false),
+  ticketRows: z.enum(["detailed", "simple"]).catch("detailed"),
   followCreated: z.boolean().catch(true),
   notifyReminders: z.boolean().catch(false),
 });
@@ -22,6 +23,7 @@ const DEFAULTS: Preferences = {
   openTickets: "split",
   ticketLayout: "list",
   sidebarCollapsed: false,
+  ticketRows: "detailed",
   followCreated: true,
   notifyReminders: false,
 };

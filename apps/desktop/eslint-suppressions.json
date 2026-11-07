@@ -9,11 +9,6 @@
       "count": 8
     }
   },
-  "src/components/ui/alert.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 2
-    }
-  },
   "src/components/ui/command.tsx": {
     "shadcn/no-arbitrary-values": {
       "count": 1
@@ -157,7 +152,7 @@
   },
   "src/features/tickets/Activity.tsx": {
     "shadcn/no-restyle": {
-      "count": 4
+      "count": 3
     }
   },
   "src/features/tickets/BulkControls.tsx": {
@@ -252,7 +247,7 @@
   },
   "src/features/tickets/TicketListPane.tsx": {
     "shadcn/no-restyle": {
-      "count": 2
+      "count": 1
     }
   },
   "src/features/tickets/TicketProperties.tsx": {

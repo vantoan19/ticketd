@@ -1,3 +1,6 @@
+import { Card, CardHeader } from "@/components/ui/card";
+import { EventRow, Timeline } from "@/components/ui/timeline";
+import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
@@ -114,17 +117,22 @@ export function SourceConversation({
       className="source-conversation"
       aria-label={`Conversation on ${name}`}
     >
-      <div className="source-conversation-heading">
-        <h3>{name} conversation</h3>
+      <SectionHeader
+        divided
+        title={`${name} conversation`}
+        actions={
+          owned &&
+          !source.unavailable && (
+            <SourceLink url={source.url}>Comment on {name}</SourceLink>
+          )
+        }
+      >
         <span className="source-caption">
           {owned
             ? `${entries?.filter((entry) => entry.type === "comment").length ?? 0} comments · read-only`
             : "archive · no longer refreshed"}
         </span>
-        {owned && !source.unavailable && (
-          <SourceLink url={source.url}>Comment on {name}</SourceLink>
-        )}
-      </div>
+      </SectionHeader>
       {error && <p role="alert">Could not load the conversation: {error}</p>}
       {entries && entries.length === 0 && !error && (
         <p className="source-caption">
@@ -134,58 +142,64 @@ export function SourceConversation({
         </p>
       )}
       {entries && entries.length > 0 && (
-        <ol className="source-conversation-list">
-          {entries.map((entry) => (
-            <li key={`${entry.type}-${entry.id}`}>
-              {entry.type === "comment" ? (
-                <article
-                  className="source-card"
-                  aria-label={`Comment by ${entry.author} on ${name}, read-only`}
-                >
-                  <header className="source-card-header">
-                    <span className="source-comment-meta">
-                      <strong>{entry.author}</strong> commented on {name} ·{" "}
-                      <time
-                        dateTime={entry.created_at}
-                        title={formatDateTime(entry.created_at)}
-                      >
-                        {relativeDateTime(entry.created_at, now)}
-                      </time>
-                      {entry.edited_at && (
-                        <>
-                          {" "}
-                          · <span>edited</span>
-                        </>
-                      )}
-                    </span>
-                    <span className="source-card-actions">
-                      <span className="source-readonly-label">
-                        <LockKeyhole aria-hidden="true" />
-                        Read-only
+        <Timeline aria-label="Conversation">
+          {entries.map((entry) =>
+            entry.type === "comment" ? (
+              <li key={`${entry.type}-${entry.id}`}>
+                <Card asChild>
+                  <article
+                    aria-label={`Comment by ${entry.author} on ${name}, read-only`}
+                  >
+                    <CardHeader>
+                      <span className="source-comment-meta">
+                        <strong>{entry.author}</strong> commented on {name} ·{" "}
+                        <time
+                          dateTime={entry.created_at}
+                          title={formatDateTime(entry.created_at)}
+                        >
+                          {relativeDateTime(entry.created_at, now)}
+                        </time>
+                        {entry.edited_at && (
+                          <>
+                            {" "}
+                            · <span>edited</span>
+                          </>
+                        )}
                       </span>
-                      <SourceLink url={entry.url}>View on {name}</SourceLink>
-                    </span>
-                  </header>
-                  <div className="markdown-preview description-document">
-                    <MarkdownDocument
-                      source={entry.body}
-                      select={select}
-                      revision={revision}
-                    />
-                  </div>
-                </article>
-              ) : (
-                <EventRow entry={entry} name={name} now={now} />
-              )}
-            </li>
-          ))}
-        </ol>
+                      <span className="source-card-actions">
+                        <span className="source-readonly-label">
+                          <LockKeyhole aria-hidden="true" />
+                          Read-only
+                        </span>
+                        <SourceLink url={entry.url}>View on {name}</SourceLink>
+                      </span>
+                    </CardHeader>
+                    <div className="markdown-preview description-document">
+                      <MarkdownDocument
+                        source={entry.body}
+                        select={select}
+                        revision={revision}
+                      />
+                    </div>
+                  </article>
+                </Card>
+              </li>
+            ) : (
+              <SourceEvent
+                key={`${entry.type}-${entry.id}`}
+                entry={entry}
+                name={name}
+                now={now}
+              />
+            ),
+          )}
+        </Timeline>
       )}
     </section>
   );
 }
 
-function EventRow({
+function SourceEvent({
   entry,
   name,
   now,
@@ -194,22 +208,21 @@ function EventRow({
   name: string;
   now: number;
 }) {
-  const { text, icon: Icon } = describeEvent(entry);
+  const { text, icon } = describeEvent(entry);
   return (
-    <div className="source-event">
-      <span className="source-event-icon" aria-hidden="true">
-        <Icon size={16} />
-      </span>
-      <span className="source-event-text">
-        <strong>{entry.actor ?? "Someone"}</strong>
-        {text.slice((entry.actor ?? "Someone").length)} on {name}
-      </span>
-      <time
-        dateTime={entry.created_at}
-        title={formatDateTime(entry.created_at)}
-      >
-        {relativeDateTime(entry.created_at, now)}
-      </time>
-    </div>
+    <EventRow
+      icon={icon}
+      meta={
+        <time
+          dateTime={entry.created_at}
+          title={formatDateTime(entry.created_at)}
+        >
+          {relativeDateTime(entry.created_at, now)}
+        </time>
+      }
+    >
+      <strong>{entry.actor ?? "Someone"}</strong>
+      {text.slice((entry.actor ?? "Someone").length)} on {name}
+    </EventRow>
   );
 }

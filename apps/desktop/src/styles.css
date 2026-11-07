@@ -508,6 +508,166 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   border-radius: 6px;
 }
 
+/* Notice (components/ui/alert.tsx): one inline message with a tone. */
+.ui-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.ui-notice-description {
+  color: var(--muted-foreground);
+}
+.ui-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ui-notice-error {
+  background: var(--error-surface);
+  box-shadow: none;
+}
+.ui-notice-error .ui-notice-title,
+.ui-notice-error .ui-notice-description {
+  color: var(--error-foreground);
+}
+.ui-notice-compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.ui-notice-compact .ui-notice-description {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Card: surface, header band, body and recessed footer. */
+.ui-card {
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 16px;
+  background: var(--background);
+  box-shadow: inset 0 -1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-card-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-card-header :is(h2, h3) {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+}
+.ui-card-body {
+  padding: 12px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-card-footer {
+  padding: 12px 16px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+/* Timeline: one 2px line behind the badges and cards of an activity list. */
+.ui-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ui-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 14px;
+  left: 13px;
+  width: 2px;
+  background: var(--control-boundary);
+  opacity: 0.35;
+}
+.ui-timeline > li {
+  position: relative;
+  z-index: 1;
+}
+.ui-event-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  overflow-wrap: anywhere;
+}
+.ui-event-row-badge {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.ui-event-row-badge svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-event-row strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-event-row-text {
+  min-width: 0;
+}
+.ui-event-row-meta {
+  margin-inline-start: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
 /* Marks shared by every feature: tags, references, counts and progress. */
 .ui-badge {
   display: inline-block;
@@ -560,6 +720,19 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   height: 14px;
   color: var(--muted-foreground);
 }
+.ui-item {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+}
+.ui-item:hover,
+.ui-item:focus-within {
+  background: var(--accent);
+}
 .ui-reference {
   flex: none;
   font-family: var(--font-mono);
@@ -575,6 +748,35 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   font-variant-numeric: tabular-nums;
+}
+.ui-section-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 28px;
+}
+.ui-section-header > :is(h1, h2, h3) {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ui-section-header > h1 {
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+}
+.ui-section-header[data-divided] {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+[data-slot="section-header-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
 }
 .ui-progress {
   position: relative;
@@ -1158,20 +1360,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   line-height: 32px;
   letter-spacing: -0.6px;
 }
-.detail-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.detail-section-heading h3 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
 .reminder-popover {
   display: flex;
   flex-direction: column;
@@ -1241,20 +1429,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
-}
-.settings-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 24px;
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
-  border-radius: 12px;
-}
-.settings-card section {
-  border: 0;
-  padding: 0;
 }
 .create-panel {
   width: min(720px, calc(100vw - 32px));

@@ -188,22 +188,6 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.board-status-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--recessed);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.board-status-notice > span {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .board-empty {
   padding: 24px 12px;
   text-align: center;
@@ -219,26 +203,23 @@
 .ticket-workspace.board-layout.board-unselected .split-handle {
   display: none !important;
 }
-.list-header:has(.ticket-layout-switch) h1 {
+.list-header:has(.list-refresh) h1 {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.list-header:has(.ticket-layout-switch) > p {
+.list-header:has(.list-refresh) > p {
   white-space: nowrap;
 }
 @container (max-width: 480px) {
-  .ticket-layout-switch svg {
-    display: none;
-  }
-  .list-header:has(.ticket-layout-switch):has(.header-search) {
+  .list-header:has(.list-refresh):has(.header-search) {
     flex-wrap: wrap;
     height: auto;
     min-height: 48px;
     padding-block: 8px;
   }
-  .list-header:has(.ticket-layout-switch):has(.header-search) .list-controls {
+  .list-header:has(.list-refresh):has(.header-search) .list-controls {
     flex-basis: 100%;
     min-width: 0;
   }
