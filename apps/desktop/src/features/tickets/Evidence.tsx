@@ -166,6 +166,7 @@ export function Evidence({
   return (
     <section aria-label="Evidence" className="evidence-section">
       <SectionHeader
+        divided
         title="Evidence"
         count={items.length || undefined}
         actions={
