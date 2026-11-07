@@ -103,6 +103,7 @@ function TicketAttachmentFiles({ ticket, revision, refresh }: Props) {
         {error && !selected && <p role="alert">{error}</p>}
       </div>
       <AttachmentPicker
+        ticketReference={ticket.reference}
         open={picker}
         onOpenChange={setPicker}
         onPick={async (file, requestId) => {

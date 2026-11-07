@@ -696,6 +696,7 @@ export function Activity({
                 <span>{edit ? "Edit update" : "New update"}</span>
               </FieldLabel>
               <LazyMarkdownEditor
+                attachmentTicketReference={reference}
                 key={edit?.id ?? "new"}
                 recoveryOwner={
                   edit ? `activity-edit:${ticketId}` : recoveryOwner
@@ -718,6 +719,7 @@ export function Activity({
                 <span>Details</span>
               </FieldLabel>
               <LazyMarkdownEditor
+                attachmentTicketReference={reference}
                 label="Details"
                 recoveryOwner={`${recoveryOwner}:details`}
                 placeholder="Technical notes, logs or Markdown. Kept as a Document with this update."

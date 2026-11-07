@@ -771,6 +771,8 @@ export interface MarkdownEditorProps {
   persistentToolbar?: boolean;
   /** Recovery owner to explain independent Undo protection in attachment usage. */
   recoveryOwner?: string;
+  /** Current ticket context ranks related files; it never changes reference ownership. */
+  attachmentTicketReference?: string | null | undefined;
 }
 
 let pointerDown = false;
@@ -793,6 +795,7 @@ export function MarkdownEditor({
   paragraphAfterQuote = false,
   persistentToolbar = false,
   recoveryOwner = label,
+  attachmentTicketReference = null,
 }: MarkdownEditorProps) {
   const recovery = useDraftRecovery();
   const recoveryError = useDraftRecoveryError();
@@ -1524,6 +1527,7 @@ export function MarkdownEditor({
       )}
       {!readOnly && (
         <AttachmentPicker
+          ticketReference={attachmentTicketReference}
           open={attachmentPicker}
           capture={capture}
           onOpenChange={(open) => {

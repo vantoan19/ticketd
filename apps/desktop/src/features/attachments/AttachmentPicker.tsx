@@ -1,7 +1,7 @@
 import { DrivePicker } from "./DrivePicker";
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { File as FileIcon, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,7 @@ import {
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
 import { UploadRecovery, type UploadRecord } from "./upload-recovery";
+import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
   state:
@@ -39,9 +40,13 @@ export function AttachmentPicker({
   onOpenChange,
   onPick,
   capture,
+  ticketReference = null,
+  purpose = "insert",
   single = false,
 }: {
   open: boolean;
+  ticketReference?: string | null | undefined;
+  purpose?: "insert" | "store";
   onOpenChange: (open: boolean) => void;
   onPick: (
     file: Attachment,
@@ -52,7 +57,6 @@ export function AttachmentPicker({
   single?: boolean;
 }) {
   const [tab, setTab] = useState<"upload" | "existing" | "drive">("upload");
-  const [recent, setRecent] = useState<Attachment[]>([]);
   const [id, setId] = useState("");
   const [rows, setRows] = useState<UploadAttempt[]>([]);
   const attempts = useRef<UploadAttempt[]>([]);
@@ -139,21 +143,6 @@ export function AttachmentPicker({
       current = false;
     };
   }, [open]);
-  useEffect(() => {
-    let current = true;
-    if (open && tab === "existing")
-      void attachments
-        .recent()
-        .then((files) => {
-          if (current) setRecent(files);
-        })
-        .catch((reason: unknown) => {
-          if (current) setError(String(reason));
-        });
-    return () => {
-      current = false;
-    };
-  }, [open, tab]);
 
   async function run() {
     if (running.current) return;
@@ -362,33 +351,40 @@ export function AttachmentPicker({
       reuseRequests.current.set(file.id, requestId);
       await onPick(file, requestId);
       reuseRequests.current.delete(file.id);
-      changeOpen(false);
+      if (insertion.current === currentInsertion) changeOpen(false);
     } catch (reason) {
       setError(String(reason));
     } finally {
       setBusy(false);
     }
   }
+  const existingInsertion = insertion.current;
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent ref={dropTarget}>
+      <DialogContent ref={dropTarget} className="attachment-picker">
         <DialogHeader>
-          <DialogTitle>Attach file</DialogTitle>
+          <DialogTitle>
+            {purpose === "store" ? "Add files" : "Attach file"}
+          </DialogTitle>
           <DialogDescription>
-            Upload, reuse a workspace file, or select a Google Drive reference.
+            {purpose === "store"
+              ? "Store files in this workspace for reuse across tickets and Documents."
+              : "Upload, reuse a workspace file, or select a Google Drive reference."}
           </DialogDescription>
         </DialogHeader>
-        <SegmentedControl
-          aria-label="Attachment source"
-          value={tab}
-          onValueChange={setTab}
-          options={[
-            { value: "upload", label: "Upload", disabled: busy },
-            { value: "existing", label: "Existing files", disabled: busy },
-            { value: "drive", label: "Google Drive", disabled: busy },
-          ]}
-        />
-        {tab === "upload" ? (
+        {purpose === "insert" && (
+          <SegmentedControl
+            aria-label="Attachment source"
+            value={tab}
+            onValueChange={setTab}
+            options={[
+              { value: "upload", label: "Upload", disabled: busy },
+              { value: "existing", label: "Existing files", disabled: busy },
+              { value: "drive", label: "Google Drive", disabled: busy },
+            ]}
+          />
+        )}
+        {tab === "upload" || purpose === "store" ? (
           <>
             <div
               className="attachment-upload"
@@ -456,7 +452,9 @@ export function AttachmentPicker({
                       </small>
                       <p role="status">
                         {row.state === "inserted"
-                          ? "Attached"
+                          ? purpose === "store"
+                            ? "Stored"
+                            : "Attached"
                           : row.state === "canceled"
                             ? "Canceled"
                             : row.state === "failed"
@@ -604,8 +602,9 @@ export function AttachmentPicker({
               </ul>
             )}
             <p className="attachment-hint">
-              Completed files remain available if insertion is canceled or
-              saving fails. Retry keeps the original upload identity.
+              {purpose === "store"
+                ? "Stored files remain available for reuse. Choose them in a ticket or Document to create a reference."
+                : "Completed files remain available if insertion is canceled or saving fails. Retry keeps the original upload identity."}
             </p>
           </>
         ) : tab === "drive" ? (
@@ -632,30 +631,26 @@ export function AttachmentPicker({
                 Reuse ID
               </Button>
             </div>
-            <p className="attachment-hint">Recent workspace files</p>
-            <ul aria-label="Existing files">
-              {recent.map((file) => (
-                <li key={file.id}>
-                  <button
-                    className="attachment-row"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void reuse(file.id)}
-                  >
-                    <FileIcon aria-hidden="true" />
-                    <span>
-                      {file.display_name}
-                      <small>
-                        {file.kind === "external_reference"
-                          ? "Google Drive · External reference"
-                          : formatSize(file.size_bytes)}{" "}
-                        · {file.id}
-                      </small>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ExistingAttachments
+              single={single}
+              ticketReference={ticketReference}
+              onBusyChange={setBusy}
+              onDone={() => {
+                if (insertion.current === existingInsertion) changeOpen(false);
+              }}
+              onPick={async (file, requestId) => {
+                if (insertion.current !== existingInsertion)
+                  throw new Error(
+                    "Insertion was canceled. The file remains in the workspace.",
+                  );
+                const stored = await attachments.inspect(file.id);
+                if (insertion.current !== existingInsertion)
+                  throw new Error(
+                    "Insertion was canceled. The file remains in the workspace.",
+                  );
+                await pick.current(stored, requestId);
+              }}
+            />
           </div>
         )}
         {error && <p role="alert">{error}</p>}

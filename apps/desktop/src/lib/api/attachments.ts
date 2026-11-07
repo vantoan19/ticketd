@@ -11,6 +11,28 @@ export const attachmentSchema = z.object({
   locator: z.string(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
+export const attachmentUsageSchema = z.object({
+  eligible: z.boolean(),
+  legacy_drafts_pending: z.boolean(),
+  protections: z.array(
+    z.object({
+      kind: z.string(),
+      owner: z.string(),
+      ticket_id: z.string().nullable(),
+      trashed: z.boolean(),
+    }),
+  ),
+});
+export type AttachmentUsage = z.infer<typeof attachmentUsageSchema>;
+export type AttachmentState = "all" | "in_use" | "unused";
+const attachmentSearchResultSchema = z.object({
+  attachment: attachmentSchema,
+  usage: attachmentUsageSchema,
+  related: z.boolean(),
+});
+export type AttachmentSearchResult = z.infer<
+  typeof attachmentSearchResultSchema
+>;
 const previewSchema = z.object({
   attachment: attachmentSchema,
   status: z.enum([
@@ -157,21 +179,26 @@ export const attachments = {
     await invoke("cancel_drive_selection", { operationId });
   },
 
-  async usage(id: string) {
+  async search(query: {
+    search: string;
+    state: AttachmentState;
+    ticket: string | null;
+    limit: number;
+    offset: number;
+  }) {
     return z
-      .object({
-        eligible: z.boolean(),
-        legacy_drafts_pending: z.boolean(),
-        protections: z.array(
-          z.object({
-            kind: z.string(),
-            owner: z.string(),
-            ticket_id: z.string().nullable(),
-            trashed: z.boolean(),
-          }),
-        ),
-      })
-      .parse(await invoke("attachment_usage", { id }));
+      .array(attachmentSearchResultSchema)
+      .parse(await invoke("search_attachments", { query }));
+  },
+  async rename(id: string, displayName: string, requestId: string) {
+    return attachmentSchema.parse(
+      await invoke("rename_attachment", { id, displayName, requestId }),
+    );
+  },
+  async usage(id: string) {
+    return attachmentUsageSchema.parse(
+      await invoke("attachment_usage", { id }),
+    );
   },
   async workspaceId() {
     return z
