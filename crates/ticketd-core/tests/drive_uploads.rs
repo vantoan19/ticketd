@@ -26,6 +26,15 @@ fn removed_uploaded_copy_keeps_provenance_but_old_upload_and_write_receipts_cann
         display_name: "Diagnostic".into(),
     };
     workspace.write(Some("rename-copy"), rename()).unwrap();
+    let before = workspace.drive_upload("upload-remove").unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TABLE removal_commit_fault(id TEXT REFERENCES attachments(id) DEFERRABLE INITIALLY DEFERRED); CREATE TRIGGER fail_copy_removal AFTER DELETE ON attachments BEGIN INSERT INTO removal_commit_fault VALUES(OLD.id); END;").unwrap();
+    assert!(workspace.remove_remote_attachment(&file.id).is_err());
+    assert_eq!(workspace.drive_upload("upload-remove").unwrap(), before);
+    assert!(workspace.attachment(&file.id).is_ok());
+    faults
+        .execute_batch("DROP TRIGGER fail_copy_removal; DROP TABLE removal_commit_fault;")
+        .unwrap();
     workspace.remove_remote_attachment(&file.id).unwrap();
     drop(workspace);
     let mut workspace = Workspace::open(&path).unwrap();
