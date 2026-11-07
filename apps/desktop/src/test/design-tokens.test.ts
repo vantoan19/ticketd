@@ -68,3 +68,29 @@ it("stylesheets take colors and radii from the design tokens", () => {
     ].join("\n"),
   ).toEqual(KNOWN);
 });
+
+it("no custom property is defined in terms of itself", () => {
+  // A self-reference is invalid at computed-value time, so every use of the
+  // token silently computes to its initial value (border-radius: 0).
+  const cyclic: string[] = [];
+  for (const file of filesUnder(srcDir)) {
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of css.matchAll(/(--[\w-]+)\s*:\s*([^;{}]*)/g)) {
+      const [, name = "", value = ""] = m;
+      if (new RegExp("var[(] *" + name + " *[,)]").test(value))
+        cyclic.push(`${relative(srcDir, file)}: ${name}: ${value.trim()}`);
+    }
+  }
+  expect(cyclic).toEqual([]);
+});
+
+it("the radius tokens match DESIGN.md section 4", () => {
+  const css = readFileSync(join(srcDir, "styles.css"), "utf8");
+  const root = css.slice(0, css.indexOf("}", css.indexOf(":root")));
+  const radius = (name: string) =>
+    new RegExp(name + ": *([^;]+);").exec(root)?.[1]?.trim();
+  expect(radius("--radius")).toBe("6px");
+  expect(radius("--radius-segment")).toBe("4px");
+  expect(radius("--radius-panel")).toBe("12px");
+  expect(radius("--radius-pill")).toBe("9999px");
+});

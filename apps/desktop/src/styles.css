@@ -81,7 +81,7 @@
   --error-foreground: #991b1b;
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
-  --radius: var(--radius);
+  --radius: 6px;
   --radius-segment: 4px;
   --radius-panel: 12px;
   --radius-pill: 9999px;
