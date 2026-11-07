@@ -502,7 +502,7 @@ export function AttachmentPicker({
                       {row.error && <p role="alert">{row.error}</p>}
                       {row.stored && row.state !== "inserted" && (
                         <p className="attachment-hint">
-                          Upload receipt: {row.stored.id}.{" "}
+                          Stored as {row.stored.id}.{" "}
                           {row.stored.purge_state === "purged" ||
                           row.stored.purge_state === "pending"
                             ? "Local bytes are unavailable. Its identity remains in Existing files for inspection."
