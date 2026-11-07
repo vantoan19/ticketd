@@ -26,6 +26,13 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Permanently delete quarantined local bytes; identity remains unavailable. Never deletes remote files.
+    Purge {
+        id: String,
+        /// Required acknowledgement: this cannot be undone except by restoring an older complete backup
+        #[arg(long, required = true)]
+        confirm: bool,
+    },
     /// Review unused local storage and protected references; never moves or deletes files
     CleanupReview {
         id: Option<String>,
@@ -2019,6 +2026,9 @@ fn attachment_command(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let status_only = matches!(&command, AttachmentCommand::DriveStatus { .. });
     Ok(match command {
+        AttachmentCommand::Purge { id, confirm: _ } => {
+            serde_json::to_string(&workspace.purge_attachment(&id)?)?
+        }
         AttachmentCommand::CleanupReview { id, limit, offset } => match id {
             Some(id) => serde_json::to_string(&workspace.attachment_cleanup_review(&id)?)?,
             None => serde_json::to_string(&workspace.attachment_cleanup_reviews(limit, offset)?)?,

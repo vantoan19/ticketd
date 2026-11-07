@@ -82,7 +82,10 @@ pub use attachment_previews::{
 pub mod drive;
 mod embedded_attachments;
 pub use attachment_retention::{AttachmentProtection, AttachmentUsage, DraftRetention};
-pub use attachments::{Attachment, AttachmentKind, AttachmentOpenTarget, DEFAULT_ATTACHMENT_LIMIT};
+pub use attachments::{
+    Attachment, AttachmentKind, AttachmentOpenTarget, AttachmentPurgeState,
+    DEFAULT_ATTACHMENT_LIMIT,
+};
 mod change_token;
 pub use activities::{
     Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
@@ -92,7 +95,7 @@ pub use projects::Project;
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one migration step; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 53;
+pub const FORMAT_VERSION: i64 = 54;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -769,6 +772,9 @@ impl Workspace {
         }
         if version < 53 {
             attachment_cleanup::migrate(&transaction)?;
+        }
+        if version < 54 {
+            attachment_cleanup::migrate_purge(&transaction)?;
         }
         let violations: i64 =
             transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {

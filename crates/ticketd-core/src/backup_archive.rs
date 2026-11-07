@@ -226,8 +226,23 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
         ));
     }
     if table_exists(connection, "attachments")? {
+        let has_purge =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 54;
+        if has_purge
+            && connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM attachments WHERE purge_state='pending')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            return Err(Error::Backup("Permanent attachment purge is pending. Retry the explicit purge before creating a complete backup; no deletion was retried automatically.".into()));
+        }
         let mut query = connection.prepare(
-            "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'",
+            if has_purge {
+                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot' AND purge_state='retained'"
+            } else {
+                "SELECT display_name, locator, size_bytes FROM attachments WHERE kind='local_snapshot'"
+            },
         )?;
         let mut rows = query.query([])?;
         let mut missing = Vec::new();
@@ -324,7 +339,13 @@ pub(crate) fn unpack_database(connection: &Connection) -> Result<(), Error> {
 pub(crate) fn content(connection: &Connection) -> Result<crate::AttachmentBackupContent, Error> {
     let container_version = container_version(connection)?.and_then(|v| u32::try_from(v).ok());
     let (local_snapshots, remote_references) = if table_exists(connection, "attachments")? {
-        connection.query_row("SELECT COUNT(CASE WHEN kind='local_snapshot' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments", [], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let has_purge =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 54;
+        connection.query_row(if has_purge {
+            "SELECT COUNT(CASE WHEN kind='local_snapshot' AND purge_state='retained' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments"
+        } else {
+            "SELECT COUNT(CASE WHEN kind='local_snapshot' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments"
+        }, [], |r| Ok((r.get(0)?, r.get(1)?)))?
     } else {
         (0, 0)
     };

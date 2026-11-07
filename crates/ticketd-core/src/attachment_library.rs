@@ -101,7 +101,7 @@ impl Workspace {
                     AND (instr(lower(d.file_id), lower(?2)) > 0
                         OR instr(lower(json_extract(d.metadata, '$.name')), lower(?2)) > 0
                         OR instr(lower(json_extract(d.metadata, '$.mime_type')), lower(?2)) > 0)))
-             AND (?3=0 OR (?3=1 AND a.id IN used) OR (?3=2 AND a.id NOT IN used AND a.quarantined=0) OR (?3=3 AND a.quarantined=1))
+             AND (?3=0 OR (?3=1 AND a.id IN used) OR (?3=2 AND a.id NOT IN used AND a.quarantined=0) OR (?3=3 AND a.quarantined=1 AND a.purge_state<>'purged'))
              ORDER BY is_related DESC, a.rowid DESC LIMIT ?4 OFFSET ?5",
         )?;
         let ids = statement

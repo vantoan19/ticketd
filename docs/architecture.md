@@ -211,6 +211,15 @@ Backup briefly freezes writers for its database/path inventory and streams files
 with one open input at a time after releasing the writer barrier. See
 [ADR 0010](adr/0010-local-attachment-quarantine.md) for move, retry and backup races.
 
+Explicit permanent purge uses `Workspace::purge_attachment`, outside the generic
+write-outcome transaction. Schema 54 records retained/pending/purged status.
+Under file-lock-before-writer ordering it commits eligible quarantine's purge
+intent, deletes only its checked file with no writer transaction open, then records
+completion. Pending intent blocks restoration and byte reads until explicit retry;
+recovery prose and identity remain. Complete backup refuses pending purges and
+preserves completed purges as unavailable identities. Replayed attachment outcomes
+keep original metadata with current purge status. No provider deletion exists.
+
 Only upgrades with existing attachment records require review of legacy browser
 drafts. Startup imports every recoverable slot in the current profile, including
 unopened tickets and legacy Activity details/request keys. Other profiles remain

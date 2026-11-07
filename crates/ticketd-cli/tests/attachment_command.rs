@@ -60,6 +60,74 @@ fn cli_reviews_quarantines_restores_and_replays_without_a_desktop() {
 }
 
 #[test]
+fn cli_permanent_purge_requires_confirmation_and_reports_unavailable_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"explicit CLI purge").unwrap();
+    let file = run(
+        dir.path(),
+        &[
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--request-id",
+            "upload",
+        ],
+    );
+    let id = file["id"].as_str().unwrap();
+    run(dir.path(), &["attachment", "quarantine", id]);
+    let unconfirmed = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "purge", id])
+        .output()
+        .unwrap();
+    assert!(!unconfirmed.status.success());
+    assert!(String::from_utf8_lossy(&unconfirmed.stderr).contains("--confirm"));
+    assert_eq!(
+        run(dir.path(), &["attachment", "inspect", id])["purge_state"],
+        "retained"
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "purge", id, "--confirm"])["purge_state"],
+        "purged"
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "purge", id, "--confirm"])["purge_state"],
+        "purged"
+    );
+    assert_eq!(
+        run(
+            dir.path(),
+            &[
+                "attachment",
+                "add",
+                source.to_str().unwrap(),
+                "--request-id",
+                "upload"
+            ]
+        )["purge_state"],
+        "purged"
+    );
+    let restore = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "restore", id])
+        .output()
+        .unwrap();
+    assert!(!restore.status.success());
+    let error = String::from_utf8_lossy(&restore.stderr);
+    assert!(
+        error.contains("purged") && error.contains("backup"),
+        "{error}"
+    );
+}
+
+#[test]
 fn portable_markdown_exports_ticket_document_and_selected_input_without_desktop() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("trace.log");

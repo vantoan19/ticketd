@@ -176,16 +176,27 @@ export function AttachmentPicker({
           // Persist the original identity and clipboard bytes before starting any effect.
           await journal?.put(next);
           if (isCanceled(next)) continue;
-          next.stored ??= await attachments.upload(
-            next.source,
-            next.requestId,
-            (value) => {
-              next.progress = value;
-              update();
-            },
-            next.destination,
-          );
+          next.stored = next.stored
+            ? await attachments.inspect(next.stored.id)
+            : await attachments.upload(
+                next.source,
+                next.requestId,
+                (value) => {
+                  next.progress = value;
+                  update();
+                },
+                next.destination,
+              );
           await journal?.put(next);
+          if (
+            next.stored.purge_state === "purged" ||
+            next.stored.purge_state === "pending"
+          )
+            throw new Error(
+              next.stored.purge_state === "purged"
+                ? "Local bytes were permanently purged. Restore an older complete backup or choose a new upload; retry keeps this unavailable identity."
+                : "Permanent purge is pending; local bytes are unavailable. Finish the explicit purge in Attachments or deliberately restore an older complete backup.",
+            );
           if (isCanceled(next) || insertion.current !== currentInsertion) {
             next.state = "canceled";
             update();
@@ -492,9 +503,12 @@ export function AttachmentPicker({
                       {row.stored && row.state !== "inserted" && (
                         <p className="attachment-hint">
                           Stored as {row.stored.id}.{" "}
-                          {row.destination
-                            ? "The uploaded copy remains in Drive and Existing files, including after cancellation."
-                            : "The snapshot remains available in Existing files."}
+                          {row.stored.purge_state === "purged" ||
+                          row.stored.purge_state === "pending"
+                            ? "Local bytes are unavailable. Its identity remains in Existing files for inspection."
+                            : row.destination
+                              ? "The uploaded copy remains in Drive and Existing files, including after cancellation."
+                              : "The snapshot remains available in Existing files."}
                         </p>
                       )}
                       {row.destination && (

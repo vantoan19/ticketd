@@ -59,6 +59,35 @@ retries, metadata refresh and backup/restore preserve that value. Existing recor
 and older receipts without date evidence retain an unknown date; migration time
 is never shown as the date a file was added.
 
+## Explicit permanent purge
+
+Schema 54 adds `attachments.purge_state`: retained, pending, or purged. Only an
+explicit `Workspace::purge_attachment` invocation can start or resume deletion.
+Desktop confirmation and `attachment purge <id> --confirm` use this workflow;
+quarantine and restore remain separate reversible operations.
+
+Purge takes the upload lock before a short writer transaction. It rechecks all
+saved, draft, Undo, Trash and legacy-cutover protections and requires checked
+quarantine bytes before committing pending intent. New canonical references then
+refuse unavailable bytes. Late recovery text can still retain its literal links,
+with unavailable status; it cannot undo already committed purge intent.
+
+Deletion runs outside the writer transaction and removes only the expected regular
+file under the checked quarantine location. It never recursively removes a
+directory, receipt, unrelated file or remote content. A second short transaction
+records purged only after successful deletion and directory sync where supported.
+Failure before intent leaves bytes retained. Failure after intent remains pending,
+with actionable explicit-retry guidance; neither opening nor backup retries it.
+An interrupted deletion can be retried when that exact path is already missing.
+
+Pending purge blocks complete backup publication. Completed purges retain metadata,
+but no longer require bytes in backup completeness checks. Older valid backups
+still restore the earlier quarantine and exact bytes deliberately; current backups
+preserve the purged identity and status. Container version 1 remains unchanged.
+Upload receipts and retained write outcomes stay intact. Replay preserves original
+metadata with current purge status so it cannot imply that destroyed bytes survived
+or create another snapshot with the old operation identity.
+
 ## Trade-off
 
 Resolving two fixed locations avoids a general filesystem journal for immutable

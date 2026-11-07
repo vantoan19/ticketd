@@ -144,6 +144,12 @@ pub(crate) fn missing_tables(
             }
         }
     }
+    if version >= 54 && table_exists(connection, "attachments")? {
+        let exists: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name='purge_state')", [], |row| row.get(0))?;
+        if !exists {
+            missing.push("attachments.purge_state");
+        }
+    }
     // Context identities and derived indexes need their maintenance triggers;
     // missing triggers silently corrupt subsequent writes after a restore.
     for (trigger, introduced) in [

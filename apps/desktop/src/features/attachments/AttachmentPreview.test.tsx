@@ -23,6 +23,47 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("purged Undo references retain their name with unavailable bytes and deliberate recovery", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : {
+          attachment: { ...file, quarantined: true, purge_state: "purged" },
+          status: "unavailable",
+          media_type: null,
+          can_open: false,
+          message:
+            "Local bytes were permanently purged. Restore an older complete backup to a separate workspace, or choose a replacement for this reference.",
+          usage: {
+            total: 1,
+            entries: [
+              {
+                kind: "undo",
+                owner: "recovered",
+                label: "Recoverable Undo",
+                trashed: false,
+              },
+            ],
+            legacy_drafts_pending: false,
+          },
+        },
+  );
+  render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
+  expect(
+    await screen.findByRole("heading", { name: "File permanently purged" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Screenshot" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Restore file" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Export file" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  expect(screen.getByText(/older complete backup/)).toBeTruthy();
+  expect(
+    screen.queryByText("Quarantined · Restore this file to reuse it."),
+  ).toBeNull();
+});
+
 test("closing pending inspection ignores its late response and media close releases playback", async () => {
   let complete: ((value: unknown) => void) | undefined;
   const pending = new Promise((resolve) => {

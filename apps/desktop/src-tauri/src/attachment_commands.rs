@@ -3,6 +3,22 @@ use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
 #[tauri::command(async)]
+pub fn attachment_cleanup_review(
+    id: String,
+) -> Result<ticketd_core::AttachmentCleanupReview, String> {
+    open_workspace()
+        .and_then(|w| w.attachment_cleanup_review(&id))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
+pub fn purge_attachment(id: String) -> Result<Attachment, String> {
+    open_workspace()
+        .and_then(|mut w| w.purge_attachment(&id))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command(async)]
 pub fn attachment_cleanup_reviews(
     limit: u32,
     offset: u32,
