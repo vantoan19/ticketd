@@ -47,6 +47,8 @@ test("Drive failures retain their folder and operation; status checks precede re
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_workspace_id") return "drive-workspace";
     if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
     if (command === "select_drive_upload_folder")
       return {
         destination,
@@ -108,6 +110,8 @@ test("unmount cancels an unfinished Drive folder selection without starting uplo
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_workspace_id") return "folder-cancel";
     if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
     if (command === "select_drive_upload_folder") return new Promise(() => {});
     return null;
   });
@@ -147,6 +151,8 @@ test("explicit local fallback uses a new operation and retains the original Driv
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_workspace_id") return "fallback-workspace";
     if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready to select a folder" };
     if (command === "select_drive_upload_folder")
       return {
         destination,

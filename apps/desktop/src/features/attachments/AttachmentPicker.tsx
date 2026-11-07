@@ -1,4 +1,5 @@
 import { DrivePicker } from "./DrivePicker";
+import { DriveSetupNotice } from "./DriveSetupNotice";
 import { formatSize } from "./format-size";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Upload } from "lucide-react";
@@ -19,6 +20,7 @@ import {
   type CaptureSource,
   type UploadProgress,
   type DriveUploadDestination,
+  type DriveConfiguration,
 } from "@/lib/api/attachments";
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
@@ -65,6 +67,8 @@ export function AttachmentPicker({
   const [limit, setLimit] = useState<number | null>(null);
   const [destination, setDestination] = useState<DriveUploadDestination>();
   const [folderName, setFolderName] = useState("");
+  const [folderConfiguration, setFolderConfiguration] =
+    useState<DriveConfiguration | null>(null);
   const folderSelection = useRef<string | null>(null);
   const insertion = useRef(0);
   const reuseRequests = useRef(new Map<string, string>());
@@ -309,11 +313,15 @@ export function AttachmentPicker({
   }
   async function chooseFolder() {
     const currentInsertion = insertion.current;
-    const operationId = crypto.randomUUID();
-    folderSelection.current = operationId;
     setBusy(true);
     setError("");
     try {
+      const configuration = await attachments.driveConfiguration();
+      if (insertion.current !== currentInsertion) return;
+      setFolderConfiguration(configuration);
+      if (!configuration.configured) return;
+      const operationId = crypto.randomUUID();
+      folderSelection.current = operationId;
       const selected = await attachments.chooseDriveFolder(operationId);
       if (insertion.current === currentInsertion) {
         setDestination(selected.destination);
@@ -441,6 +449,9 @@ export function AttachmentPicker({
                 )}
               </div>
             </div>
+            {folderConfiguration && (
+              <DriveSetupNotice configuration={folderConfiguration} />
+            )}
             {rows.length > 0 && (
               <ul className="attachment-uploads" aria-label="Uploads">
                 {rows.map((row) => (

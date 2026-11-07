@@ -126,6 +126,11 @@ export const driveDestinationSchema = z.object({
   resource_key: z.string().nullable(),
 });
 export type DriveUploadDestination = z.infer<typeof driveDestinationSchema>;
+const driveConfigurationSchema = z.object({
+  configured: z.boolean(),
+  message: z.string(),
+});
+export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
   async openDriveUpload(requestId: string) {
@@ -163,9 +168,7 @@ export const attachments = {
     return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
   },
   async driveConfiguration() {
-    return z
-      .object({ configured: z.boolean(), message: z.string() })
-      .parse(await invoke("drive_configuration"));
+    return driveConfigurationSchema.parse(await invoke("drive_configuration"));
   },
   async selectDrive(operationId: string) {
     return z

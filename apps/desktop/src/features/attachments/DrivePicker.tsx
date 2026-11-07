@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { attachments, type Attachment } from "@/lib/api/attachments";
+import {
+  attachments,
+  type Attachment,
+  type DriveConfiguration,
+} from "@/lib/api/attachments";
+import { DriveSetupNotice } from "./DriveSetupNotice";
 
 export function DrivePicker({
   onPick,
@@ -16,10 +21,9 @@ export function DrivePicker({
   ) => Promise<void>;
   onComplete: () => void;
 }) {
-  const [configuration, setConfiguration] = useState<{
-    configured: boolean;
-    message: string;
-  } | null>(null);
+  const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
+    null,
+  );
   const [files, setFiles] = useState<
     {
       file: Attachment;
@@ -144,15 +148,7 @@ export function DrivePicker({
         External references show current Drive content. Google Docs, Sheets and
         Slides open in Drive.
       </p>
-      {configuration && !configuration.configured && (
-        <>
-          <p role="status">Google Drive setup is required before connecting.</p>
-          <details className="attachment-hint">
-            <summary className="cursor-pointer">Setup instructions</summary>
-            <p className="mt-2 wrap-anywhere">{configuration.message}</p>
-          </details>
-        </>
-      )}
+      {configuration && <DriveSetupNotice configuration={configuration} />}
       <Button
         disabled={busy || !configuration?.configured}
         onClick={() => void choose()}
