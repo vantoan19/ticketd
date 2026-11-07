@@ -104,6 +104,39 @@ test("Drive failures retain their folder and operation; status checks precede re
   ).toBe(false);
 });
 
+test("unmount cancels an unfinished Drive folder selection without starting uploads", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "folder-cancel";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "select_drive_upload_folder") return new Promise(() => {});
+    return null;
+  });
+  const view = render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "select_drive_upload_folder",
+      expect.anything(),
+    ),
+  );
+  const request = vi
+    .mocked(invoke)
+    .mock.calls.find(
+      ([command]) => command === "select_drive_upload_folder",
+    )?.[1];
+  view.unmount();
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("cancel_drive_selection", request),
+  );
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "upload_drive_file"),
+  ).toBe(false);
+});
+
 test("explicit local fallback uses a new operation and retains the original Drive recovery record after remount", async () => {
   const destination = {
     connection_id: "connection",

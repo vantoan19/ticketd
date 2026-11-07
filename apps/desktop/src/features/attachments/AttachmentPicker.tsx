@@ -81,6 +81,10 @@ export function AttachmentPicker({
   useEffect(
     () => () => {
       insertion.current += 1;
+      if (folderSelection.current)
+        void attachments
+          .cancelDriveSelection(folderSelection.current)
+          .catch(() => {});
     },
     [],
   );
