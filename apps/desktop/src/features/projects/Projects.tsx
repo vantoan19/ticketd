@@ -27,7 +27,7 @@ import { fileManagerName } from "@/lib/platform";
 import { nameFromFolder } from "@/features/projects/paths";
 import { PathText } from "@/features/projects/PathText";
 import "./projects.css";
-import { Count } from "@/components/ui/count";
+import { SectionHeader } from "@/components/ui/section-header";
 
 type OpenDialog =
   | { kind: "project" }
@@ -388,12 +388,12 @@ export function Projects({
 
   return (
     <section className="projects-column" aria-label="Project management">
-      <div className="projects-heading">
-        <h1>Projects</h1>
-        {projects.length > 0 && <Count>{projects.length}</Count>}
-        <span className="projects-spacer" />
-        {projects.length > 0 && newProject}
-      </div>
+      <SectionHeader
+        level={1}
+        title="Projects"
+        count={projects.length > 0 ? projects.length : undefined}
+        actions={projects.length > 0 && newProject}
+      />
       <p className="projects-description">
         A project is a repository. Its identity survives moves and renames, and
         each checkout lets the command line infer the project from the folder

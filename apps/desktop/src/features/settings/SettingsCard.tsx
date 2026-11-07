@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import type { ReactNode } from "react";
 import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import {
@@ -32,8 +33,13 @@ export function SettingsCard({
         tabIndex={-1}
       >
         <CardHeader>
-          <h2 id={headingId}>{title}</h2>
-          {actions}
+          <SectionHeader
+            className="flex-1"
+            level={2}
+            titleId={headingId}
+            title={title}
+            actions={actions}
+          />
         </CardHeader>
         <CardBody>
           {description && (

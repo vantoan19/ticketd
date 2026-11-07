@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "./DocumentPicker";
 import { hasVisibleText } from "./brief-text";
@@ -578,8 +579,15 @@ export function Activity({
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
-      <div className="activity-heading">
-        <h3>Activity</h3>
+      {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
+      <SectionHeader
+        title="Activity"
+        actions={
+          sourceName && (
+            <span>Only in ticketd · never sent to {sourceName}</span>
+          )
+        }
+      >
         <SegmentedControl
           aria-label="Show activity"
           value={view}
@@ -589,11 +597,7 @@ export function Activity({
             { value: "updates", label: "Updates" },
           ]}
         />
-        {/* Only worth saying where a source owns the ticket and could be confused for the destination. */}
-        {sourceName && (
-          <span>Only in ticketd · never sent to {sourceName}</span>
-        )}
-      </div>
+      </SectionHeader>
       {feedback && (
         <p role="status" className="activity-muted">
           {feedback}

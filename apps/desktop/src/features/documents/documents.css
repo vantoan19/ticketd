@@ -239,15 +239,6 @@
   }
 }
 
-.documents-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.documents-heading h1 {
-  margin-bottom: 0;
-}
 .documents-toolbar {
   display: flex;
   flex-direction: column;

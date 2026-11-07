@@ -7,19 +7,6 @@
   flex-direction: column;
   gap: 16px;
 }
-.projects-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
-.projects-heading h1 {
-  margin: 0;
-  font-size: var(--text-title);
-  line-height: 32px;
-  font-weight: 600;
-  letter-spacing: -0.6px;
-}
 .projects-spacer {
   flex: 1;
 }

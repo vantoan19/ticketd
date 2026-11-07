@@ -622,6 +622,35 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   line-height: var(--text-caption-line);
   font-variant-numeric: tabular-nums;
 }
+.ui-section-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 28px;
+}
+.ui-section-header > :is(h1, h2, h3) {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ui-section-header > h1 {
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+}
+.ui-section-header[data-divided] {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+[data-slot="section-header-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
 .ui-progress {
   position: relative;
   flex: none;
@@ -1145,20 +1174,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
-}
-.detail-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.detail-section-heading h3 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 .reminder-popover {
   display: flex;

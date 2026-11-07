@@ -54,18 +54,13 @@
   white-space: nowrap;
 }
 
-.source-conversation-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+.source-conversation [data-slot="section-header"] {
   margin-bottom: 12px;
 }
-.source-conversation-heading .source-caption {
+.source-conversation [data-slot="section-header"] .source-caption {
   margin: 0;
 }
-.source-conversation-heading .source-link {
-  margin-left: auto;
+.source-conversation [data-slot="section-header"] .source-link {
   font-size: var(--text-caption);
 }
 .source-comment-meta {
