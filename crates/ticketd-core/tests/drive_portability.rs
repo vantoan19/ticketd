@@ -283,7 +283,7 @@ fn html_images_of_drive_files_export_readable_links_while_local_images_remain_im
     let remote_uri = workspace.attachment_uri(&remote.id).unwrap();
     let local_uri = workspace.attachment_uri(&local.id).unwrap();
     let source = format!(
-        "Before <img alt='my &amp; <readable> plan' src=\"{remote_uri}\"> after.\n\n<div>\n<IMG SRC='{remote_uri}' />\n<img src=\"{local_uri}\" alt=\"local\">\n<span title='<img src=\"{remote_uri}\">'>keep literal</span>\n</div>"
+        "Before <img alt='my &amp; <readable> plan' src=\"{remote_uri}\"> after.\n\n<div>\n<IMG SRC='{remote_uri}' />\n<img src=\"{local_uri}\" alt=\"local\">\n<span title='<img src=\"{remote_uri}\">'>keep literal</span>\n</div>\n\n<div title='<img src=\"{remote_uri}\">"
     );
     let document = workspace.create_document(None, &source).unwrap();
     let result = workspace
@@ -313,6 +313,10 @@ fn html_images_of_drive_files_export_readable_links_while_local_images_remain_im
         "{body}"
     );
     assert!(body.contains("<span title='<img src=\"https://docs.google.com/document/d/doc/edit\">'>keep literal</span>"), "{body}");
+    assert!(
+        body.ends_with("<div title='<img src=\"https://docs.google.com/document/d/doc/edit\">"),
+        "{body}"
+    );
     assert_eq!(workspace.show_document(&document.id).unwrap().body, source);
 }
 

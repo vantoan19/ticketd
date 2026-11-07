@@ -473,7 +473,8 @@ fn external_html_images(
             }
             None
         });
-        let Some(end) = end else { continue };
+        // An unfinished tag consumes the remainder; its attribute text is not more tags.
+        let Some(end) = end else { break };
         covered_until = start + 1 + end + 1;
         let tag = &tag[..end];
         if !tag
