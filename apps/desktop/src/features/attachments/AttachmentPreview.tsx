@@ -413,7 +413,7 @@ export function AttachmentPreview({
         <footer className="attachment-preview-footer">
           <p className="attachment-hint">
             {external
-              ? "Removing a link keeps this external reference in your workspace."
+              ? "Google Drive · Removing a link keeps the file in Drive."
               : "Local snapshot · Removing a link keeps this file in your workspace."}
           </p>
           <div className="attachment-actions">
