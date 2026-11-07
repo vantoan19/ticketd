@@ -225,12 +225,23 @@ fn provider_links_cannot_persist_temporary_authorization_in_workspace_or_portabl
     let result = workspace
         .export_markdown_with_files(
             MarkdownExportSource::Markdown {
-                body: format!("[Plan]({})", workspace.attachment_uri(&file.id).unwrap()),
+                body: format!(
+                    "[Plan]({0})\n\n<a href=\"{0}\">HTML label</a>",
+                    workspace.attachment_uri(&file.id).unwrap()
+                ),
             },
             dir.path(),
         )
         .unwrap();
     assert_eq!(result.attachments[0].external_url.as_deref(), Some(url));
+    let body = std::fs::read_to_string(result.directory.join("content.md")).unwrap();
+    assert!(
+        body.contains(&format!(
+            "<a href=\"{}\">HTML label</a>",
+            url.replace('&', "&amp;")
+        )),
+        "{body}"
+    );
 }
 
 #[test]

@@ -366,7 +366,7 @@ fn rewrite(
                 {
                     edits.push((
                         range.start + at..range.start + at + uri.len(),
-                        target.clone(),
+                        html_text(target),
                     ));
                 }
             }
