@@ -221,3 +221,31 @@ test("Reply starts a new update with a quote of the one it answers", async () =>
     screen.getByRole("textbox", { name: "New update source" }),
   ).toHaveProperty("value", expect.stringContaining("> Re: Found the cause"));
 });
+
+test("changes made together share one row, and Updates hides the rows", async () => {
+  const added = (name: string, id: number) => ({
+    type: "automatic",
+    id,
+    event: {
+      kind: "evidence",
+      from_value: "",
+      to_value: name,
+      timestamp: "2026-10-31T11:00:00Z",
+      editing_agent: "codex",
+    },
+  });
+  bridge.invoke.mockImplementation(async (command: string) =>
+    command === "activity_feed"
+      ? [
+          added("PR #482", 1),
+          added("fix branch", 2),
+          { type: "authored", activity: note },
+        ]
+      : [],
+  );
+  render(<Activity {...props} reference="T-21" />);
+  await screen.findByText("Added evidence “PR #482” and “fix branch”");
+  fireEvent.click(screen.getByRole("radio", { name: "Updates" }));
+  expect(screen.queryByText(/Added evidence/)).toBeNull();
+  expect(screen.getByText("Body")).toBeTruthy();
+});

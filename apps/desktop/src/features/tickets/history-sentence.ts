@@ -114,3 +114,23 @@ export function describeChange(
       return "Ticket updated";
   }
 }
+
+/** Kinds whose additions made together read as one change. */
+const groupedKinds = new Set(["evidence", "relationship:child"]);
+
+/** Whether an entry only adds a value, so it can share a row with its siblings. */
+export function isAddition(entry: Entry): boolean {
+  return groupedKinds.has(entry.kind) && !entry.from_value && !!entry.to_value;
+}
+
+/** One sentence for several additions of one kind made together. */
+export function describeAdditions(kind: string, values: string[]): string {
+  const named = kind === "evidence" ? values.map(quote) : values;
+  const list =
+    named.length < 2
+      ? named.join("")
+      : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+  return kind === "evidence"
+    ? `Added evidence ${list}`
+    : `Added subtickets ${list}`;
+}
