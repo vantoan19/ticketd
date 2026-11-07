@@ -109,7 +109,7 @@
   margin: -4px -12px -12px;
   padding: 12px;
   min-height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .ticket-detail[data-expanded] .description-reading .description-document {
   margin-top: 8px;

@@ -17,7 +17,7 @@
 .filter-count {
   min-width: 16px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--primary-foreground);
   background: var(--primary);
   font-size: var(--text-caption);
@@ -49,8 +49,8 @@
 .filters-content {
   width: 340px;
   max-height: calc(100dvh - 44px - 16px);
-  box-shadow: 0 0 0 1px #00000014;
-  border-radius: 12px;
+  box-shadow: var(--shadow-border-base);
+  border-radius: var(--radius-panel);
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -69,7 +69,7 @@
   flex-wrap: nowrap;
   height: 44px;
   padding: 0 8px 0 16px;
-  box-shadow: 0 1px 0 0 #0000000f;
+  box-shadow: 0 1px 0 0 var(--group-hairline);
 }
 /* The Filter control keeps a filled pill while the panel is open or filters apply. */
 .filter-trigger {
@@ -92,7 +92,7 @@
   height: 28px;
   gap: 6px;
   padding: 0 10px 0 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: var(--text-code);
 }
 .filters-content .tag-chips button {
@@ -125,7 +125,7 @@
   height: 52px;
   padding: 0 12px 0 16px;
   background: var(--background);
-  box-shadow: 0 -1px 0 0 #0000000f;
+  box-shadow: 0 -1px 0 0 var(--group-hairline);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }

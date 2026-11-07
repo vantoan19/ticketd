@@ -20,7 +20,7 @@
   min-height: 32px;
   flex: none;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
 }
@@ -224,7 +224,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   font-size: var(--text-code);
   font-weight: 500;
@@ -245,7 +245,7 @@
   align-items: flex-start;
   gap: 4px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
   text-align: left;
@@ -279,7 +279,7 @@
   flex: none;
   width: 14px;
   height: 14px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1.5px var(--control-boundary);
 }
 .layout-choice[data-state="checked"] .layout-choice-dot {
@@ -291,13 +291,13 @@
   width: 100%;
   height: 56px;
   padding: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
 }
 .layout-preview-list,
 .layout-preview-detail {
-  border-radius: 3px;
+  border-radius: var(--radius-segment);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
 }
@@ -347,7 +347,7 @@
 .workspace-path {
   margin: 12px 0;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   font-family: var(--font-mono);
@@ -494,9 +494,9 @@
 }
 .workspace-location > button {
   height: 40px;
-  box-shadow: 0 0 0 1px #00000024;
+  box-shadow: var(--shadow-border-base);
 }
 .workspace-location > button[aria-label="Copy path"] {
   width: 40px;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
