@@ -143,6 +143,12 @@ export function ExportMarkdownButton({
                 </div>
               ))}
             </dl>
+            {result.attachments.some((file) => file.external_url) && (
+              <p className="text-sm">
+                Drive files remain online. Recipients need access in Google
+                Drive; this export does not include their bytes.
+              </p>
+            )}
             <p className="break-all text-sm">{result.directory}</p>
             <ul
               className="portable-export-files"

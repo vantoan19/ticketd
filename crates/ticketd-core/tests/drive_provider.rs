@@ -52,6 +52,92 @@ fn native_metadata_uses_only_token_exchange_and_metadata_get_with_redacted_crede
 }
 
 #[test]
+fn mixed_portable_outputs_and_restore_exclude_credentials_and_need_no_provider_access() {
+    struct PrivateVault;
+    impl CredentialStore for PrivateVault {
+        fn load(&self, _: &str) -> Result<DriveCredential, DriveError> {
+            Ok(DriveCredential {
+                client_id: "client.apps.googleusercontent.com".into(),
+                client_secret: Some("private-client-secret".into()),
+                refresh_token: "private-refresh-token".into(),
+            })
+        }
+        fn save(&self, _: &str, _: &DriveCredential) -> Result<(), DriveError> {
+            Ok(())
+        }
+    }
+    let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
+        DriveResponse { status: 200, body: br#"{"access_token":"private-access-token","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() },
+        DriveResponse { status: 200, body: br#"{"id":"doc-123","name":"Plan","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/doc-123/edit","isAppAuthorized":true,"unexpectedToken":"private-response-token"}"#.to_vec() },
+    ]) };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let remote = workspace
+        .reference_drive_file(
+            &connection,
+            "doc-123",
+            None,
+            &GoogleDrive::new(&connection, &PrivateVault, &transport),
+        )
+        .unwrap();
+    let local = workspace
+        .import_attachment_bytes("local", "log.txt", b"stored bytes", |_, _| true)
+        .unwrap();
+    let document = workspace
+        .create_document(
+            None,
+            &format!(
+                "[Plan]({}) and [Log]({})",
+                workspace.attachment_uri(&remote.id).unwrap(),
+                workspace.attachment_uri(&local.id).unwrap()
+            ),
+        )
+        .unwrap();
+    let export = workspace
+        .export_markdown_with_files(
+            ticketd_core::MarkdownExportSource::Document { id: document.id },
+            dir.path(),
+        )
+        .unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let restored_path = dir.path().join("restored.sqlite3");
+    ticketd_core::Workspace::restore(&restored_path, &backup).unwrap();
+    let restored = ticketd_core::Workspace::open(&restored_path).unwrap();
+    assert_eq!(
+        restored.drive_reference(&remote.id).unwrap(),
+        workspace.drive_reference(&remote.id).unwrap()
+    );
+    let outputs = [
+        workspace.export().unwrap().to_string().into_bytes(),
+        std::fs::read(&path).unwrap(),
+        std::fs::read(&backup).unwrap(),
+        std::fs::read(&restored_path).unwrap(),
+        std::fs::read(export.directory.join("content.md")).unwrap(),
+        std::fs::read(export.directory.join("manifest.json")).unwrap(),
+    ];
+    for secret in [
+        "private-client-secret",
+        "private-refresh-token",
+        "private-access-token",
+        "private-response-token",
+    ] {
+        for bytes in &outputs {
+            assert!(
+                !bytes
+                    .windows(secret.len())
+                    .any(|part| part == secret.as_bytes())
+            );
+        }
+    }
+    // The two deterministic auth/metadata calls precede persistence. Export,
+    // backup and restore add no network, download, conversion or mutation calls.
+    assert_eq!(transport.requests.lock().unwrap().len(), 2);
+}
+
+#[test]
 fn unselected_file_has_explicit_picker_guidance_instead_of_broader_authorization() {
     let transport = Http {
         requests: Mutex::new(vec![]),

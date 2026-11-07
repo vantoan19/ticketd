@@ -313,5 +313,7 @@ pub(crate) fn content(connection: &Connection) -> Result<crate::AttachmentBackup
         retained_files,
         retained_bytes,
         remote_references,
+        remote_bytes_included: false,
+        remote_access_verified: false,
     })
 }

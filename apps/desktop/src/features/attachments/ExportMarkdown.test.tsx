@@ -78,6 +78,41 @@ test("cancelling the output folder does not export anything", async () => {
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+test("complete external-link exports explain remote bytes and recipient access", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  vi.mocked(invoke).mockResolvedValue({
+    format_version: 1,
+    status: "complete",
+    directory: "C:/sharing/export",
+    markdown_path: "content.md",
+    manifest_path: "manifest.json",
+    attachments: [
+      {
+        uri: "ticketd://attachment/workspace/doc",
+        attachment_id: "doc",
+        kind: "external_reference",
+        display_name: "Current plan",
+        original_filename: "Current plan",
+        path: null,
+        external_url: "https://docs.google.com/document/d/doc/edit",
+        omission: null,
+      },
+    ],
+  });
+  render(
+    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-1" }} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Export Markdown with files" }),
+  );
+  const result = await screen.findByRole("dialog", { name: "Export complete" });
+  expect(
+    within(result).getByText(/Recipients need access in Google Drive/)
+      .textContent,
+  ).toContain("does not include their bytes");
+  expect(within(result).getByText("Current plan")).toBeTruthy();
+});
+
 test("file-manager failures are announced inside the export result", async () => {
   vi.mocked(open).mockResolvedValue("C:/sharing");
   vi.mocked(invoke).mockResolvedValue({

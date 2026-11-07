@@ -275,10 +275,14 @@ fn independent_cli_reuses_authorized_drive_identity_without_desktop_or_snapshot_
     let file = workspace
         .reference_drive_file(connection, "sheet-123", None, &Provider)
         .unwrap();
+    let local = workspace
+        .import_attachment_bytes("local", "trace.log", b"retained bytes", |_, _| true)
+        .unwrap();
     drop(workspace);
     let ticket = run(dir.path(), &["create", "Reuse current content"]);
     let reference = ticket["reference"].as_str().unwrap();
     run(dir.path(), &["attachment", "link", &file.id, reference]);
+    run(dir.path(), &["attachment", "link", &local.id, reference]);
     assert_eq!(
         run(dir.path(), &["attachment", "drive-info", &file.id])["metadata"]["mime_type"],
         "application/vnd.google-apps.spreadsheet"
@@ -288,14 +292,68 @@ fn independent_cli_reuses_authorized_drive_identity_without_desktop_or_snapshot_
         "external_reference"
     );
     assert_eq!(
-        run(dir.path(), &["attachment", "list", "--ticket", reference])[0]["id"],
-        file.id
+        run(dir.path(), &["attachment", "list", "--ticket", reference])
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == file.id)
+            .unwrap()["id"],
+        file.id,
     );
     assert!(
         run(dir.path(), &["attachment", "uri", &file.id])
             .as_str()
             .unwrap()
             .starts_with("ticketd://attachment/")
+    );
+    let exported = run(
+        dir.path(),
+        &[
+            "export-markdown",
+            "--ticket",
+            reference,
+            "--output",
+            dir.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(exported["status"], "complete");
+    let external = exported["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["attachment_id"] == file.id)
+        .unwrap();
+    assert_eq!(external["kind"], "external_reference");
+    assert_eq!(
+        external["external_url"],
+        "https://docs.google.com/spreadsheets/d/sheet-123/edit"
+    );
+    assert!(external["path"].is_null());
+    let backup = dir.path().join("backup.sqlite3");
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["backup", backup.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let inspection = run(dir.path(), &["inspect-backup", backup.to_str().unwrap()]);
+    assert_eq!(inspection["check"]["status"], "valid");
+    assert_eq!(inspection["attachment_content"]["local_snapshots"], 1);
+    assert_eq!(inspection["attachment_content"]["remote_references"], 1);
+    assert_eq!(
+        inspection["attachment_content"]["remote_bytes_included"],
+        false
+    );
+    assert_eq!(
+        inspection["attachment_content"]["remote_access_verified"],
+        false
     );
     run(dir.path(), &["attachment", "detach", &file.id, reference]);
     assert_eq!(

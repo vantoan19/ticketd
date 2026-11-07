@@ -40,6 +40,8 @@ const backupInspectionSchema = z.object({
       retained_files: z.number(),
       retained_bytes: z.number(),
       remote_references: z.number(),
+      remote_bytes_included: z.boolean().optional(),
+      remote_access_verified: z.boolean().optional(),
     })
     .optional(),
   check: z.discriminatedUnion("status", [

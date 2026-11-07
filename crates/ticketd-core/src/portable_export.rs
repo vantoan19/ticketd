@@ -42,6 +42,8 @@ pub enum ExportStatus {
 pub struct ExportAttachment {
     pub uri: String,
     pub attachment_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<AttachmentKind>,
     pub display_name: String,
     pub original_filename: Option<String>,
     pub path: Option<String>,
@@ -121,6 +123,7 @@ impl Workspace {
             let mut entry = ExportAttachment {
                 uri: uri.clone(),
                 attachment_id: None,
+                kind: None,
                 display_name: uri.clone(),
                 original_filename: None,
                 path: None,
@@ -140,6 +143,7 @@ impl Workspace {
                 entry.attachment_id = Some(id.into());
                 match attachments::read_attachment(&tx, id) {
                     Ok(file) => {
+                        entry.kind = Some(file.kind.clone());
                         entry.display_name = file.display_name.clone();
                         entry.original_filename = Some(file.original_filename.clone());
                         if let Some(previous) = copied.get(id) {
@@ -162,7 +166,11 @@ impl Workspace {
             }
             entries.push(entry);
         }
-        body = rewrite(&body, &replacements);
+        let labels = entries
+            .iter()
+            .map(|entry| (entry.uri.clone(), entry.display_name.clone()))
+            .collect();
+        body = rewrite(&body, &replacements, &labels);
         if !direct.is_empty() {
             body.push_str("\n\n## Direct attachments\n\n");
             for id in direct {
@@ -325,7 +333,11 @@ fn selection_with_definitions(body: &str, context: &str) -> String {
 }
 
 /// Replace destinations only, leaving labels, surrounding prose and code literal.
-fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
+fn rewrite(
+    body: &str,
+    targets: &BTreeMap<String, String>,
+    labels: &BTreeMap<String, String>,
+) -> String {
     let parser = parse(body);
     let mut edits = Vec::new();
     for (_, definition) in parser.reference_definitions().iter() {
@@ -376,7 +388,12 @@ fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
                     edits.push((destination, target.clone()));
                 }
             } else if matches!(link_type, LinkType::Autolink) {
-                edits.push((range, format!("[{dest_url}]({target})")));
+                let label = markdown_text(
+                    labels
+                        .get(dest_url.as_ref())
+                        .map_or(dest_url.as_ref(), String::as_str),
+                );
+                edits.push((range, format!("[{label}]({target})")));
             }
         }
     }
