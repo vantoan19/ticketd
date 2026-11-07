@@ -111,6 +111,55 @@
 .attachment-library footer {
   margin-top: 16px;
 }
+.attachment-cleanup-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-width: min(680px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  font-size: var(--text-ui);
+}
+.attachment-cleanup-files {
+  min-height: 0;
+  max-height: 45dvh;
+  overflow: auto;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.attachment-cleanup-files > li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.attachment-cleanup-files label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.attachment-cleanup-files small,
+.attachment-cleanup-files p,
+.attachment-cleanup-files details {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+.attachment-cleanup-files p {
+  margin: 8px 0 0 24px;
+}
+.attachment-cleanup-files details {
+  margin: 8px 0 0 24px;
+}
+.attachment-cleanup-files input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.attachment-cleanup-footer {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
 @media (max-width: 640px) {
   .attachment-library {
     padding: 16px;

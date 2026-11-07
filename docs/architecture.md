@@ -201,11 +201,15 @@ leaves conservative protection for explicit review, without a time expiry.
 
 `Workspace::attachment_usage` returns a consistent snapshot of direct, embedded,
 draft and Undo protections, including recoverable Trash and unpromoted Activity
-details. Its eligibility is advisory: later cleanup must recheck it under its
-writer/file coordination. Retention never moves or deletes bytes and never takes
-the upload lock inside a database transaction. Later byte-moving operations must
-coordinate canonical writes, registration and Undo without reversing the existing
-file-lock-before-database-lock order.
+details. Its eligibility is advisory until explicit cleanup rechecks under its
+writer/file coordination. Quarantine moves only unused local snapshots into a
+fixed retained location. Canonical reference writes and available draft/Undo
+references restore those bytes under their existing writer boundary, never taking
+the upload lock inside a transaction. Cleanup and explicit restore take that lock
+before the writer lock. Both locations remain resolvable after failed commits.
+Backup briefly freezes writers for its database/path inventory and streams files
+with one open input at a time after releasing the writer barrier. See
+[ADR 0010](adr/0010-local-attachment-quarantine.md) for move, retry and backup races.
 
 Only upgrades with existing attachment records require review of legacy browser
 drafts. Startup imports every recoverable slot in the current profile, including

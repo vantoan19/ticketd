@@ -35,6 +35,8 @@ fn access_checks_preserve_authored_references_and_recover_only_the_original_file
     let file = workspace
         .reference_drive_file(&connection, "selected-doc", None, &SelectedFile)
         .unwrap();
+    let registered_at = file.added_at.clone();
+    assert!(registered_at.is_some());
     workspace
         .rename_attachment(&file.id, "Authored name")
         .unwrap();
@@ -83,6 +85,10 @@ fn access_checks_preserve_authored_references_and_recover_only_the_original_file
     drop(workspace);
     let workspace = Workspace::open(path).unwrap();
     assert_eq!(
+        workspace.attachment(&file.id).unwrap().added_at,
+        registered_at
+    );
+    assert_eq!(
         workspace.attachment(&file.id).unwrap().display_name,
         "Authored name"
     );
@@ -100,6 +106,27 @@ fn selected_native_files_are_reusable_current_references_without_local_bytes() {
         .reference_drive_file(&connection, "selected-doc", None, &SelectedFile)
         .unwrap();
     assert_eq!(file.kind, AttachmentKind::ExternalReference);
+    assert!(chrono::DateTime::parse_from_rfc3339(file.added_at.as_deref().unwrap()).is_ok());
+    assert!(
+        !workspace
+            .attachment_cleanup_review(&file.id)
+            .unwrap()
+            .eligible
+    );
+    assert!(workspace.quarantine_attachment(&file.id).is_err());
+    assert!(workspace.restore_attachment(&file.id).is_err());
+    assert_eq!(
+        workspace
+            .resolve_drive_reference(&file.id, &SelectedFile)
+            .unwrap()
+            .metadata
+            .id,
+        "selected-doc"
+    );
+    assert_eq!(
+        workspace.attachment(&file.id).unwrap().added_at,
+        file.added_at
+    );
     assert!(serde_json::to_value(&file).unwrap()["size_bytes"].is_null());
     assert_eq!(
         workspace.attachment_open_target(&file.id).unwrap(),

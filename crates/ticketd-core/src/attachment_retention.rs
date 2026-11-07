@@ -97,7 +97,7 @@ impl Workspace {
     }
 
     /// Atomically persist recovery prose and its derived attachment protections.
-    /// No expiry and no byte movement; missing/foreign links remain recoverable text.
+    /// Never expires or deletes bytes; missing/foreign links remain recoverable text.
     pub fn retain_draft(&mut self, draft: &DraftRetention) -> Result<DraftRetention, Error> {
         if draft.owner.trim().is_empty()
             || draft.owner.len() > 512
@@ -170,6 +170,16 @@ impl Workspace {
                     [id],
                     |r| r.get(0),
                 )?;
+                if exists {
+                    let file = crate::attachments::read_attachment(&tx, id)?;
+                    // Private recovery must still save prose containing missing bytes.
+                    // A canonical save performs strict restore/validation before committing.
+                    if file.quarantined
+                        && crate::attachments::validate_attachment_bytes(&tx, &file).is_ok()
+                    {
+                        crate::attachment_cleanup::restore_reference(&tx, id)?;
+                    }
+                }
                 exists.then_some(id)
             } else {
                 None

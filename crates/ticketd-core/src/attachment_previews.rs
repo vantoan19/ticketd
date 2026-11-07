@@ -405,31 +405,45 @@ pub(crate) fn open_snapshot(
     // Reject links/reparse points in every managed component, including the root.
     let mut path = root.clone();
     reject_link(&path)?;
-    for component in [&attachment.id, "bytes", &attachment.original_filename] {
-        path.push(component);
-        reject_link(&path)?;
-    }
+    path.push(&attachment.id);
+    reject_link(&path)?;
     let canonical_root = fs::canonicalize(&root).map_err(snapshot_io)?;
-    let canonical_path = fs::canonicalize(&path).map_err(snapshot_io)?;
-    if !canonical_path.starts_with(&canonical_root) {
-        return Err(invalid());
+    let open_at = |directory: &str| {
+        let mut candidate = path.clone();
+        for component in [directory, &attachment.original_filename] {
+            candidate.push(component);
+            reject_link(&candidate)?;
+        }
+        let canonical_path = fs::canonicalize(&candidate).map_err(snapshot_io)?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return Err(invalid());
+        }
+        // Reject special files before open (a pipe can block), then verify the actual handle too.
+        if !fs::metadata(&canonical_path)
+            .map_err(snapshot_io)?
+            .is_file()
+        {
+            return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are not a regular file. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
+        }
+        let file = File::open(&canonical_path).map_err(snapshot_io)?;
+        let metadata = file.metadata().map_err(snapshot_io)?;
+        if !metadata.is_file() || Some(metadata.len()) != attachment.size_bytes {
+            return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are incomplete. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
+        }
+        Ok((canonical_path, file))
+    };
+    // Undo can move quarantine -> bytes while a reader holds the upload lock.
+    // Retry only missing paths, and retain the checked handle rather than reopening it.
+    match open_at("bytes") {
+        Err(error) if error.status == PreviewStatus::Missing => match open_at("quarantine") {
+            Err(error) if error.status == PreviewStatus::Missing => open_at("bytes"),
+            result => result,
+        },
+        result => result,
     }
-    // Reject special files before open (a pipe can block), then verify the actual handle too.
-    if !fs::metadata(&canonical_path)
-        .map_err(snapshot_io)?
-        .is_file()
-    {
-        return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are not a regular file. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
-    }
-    let file = File::open(&canonical_path).map_err(snapshot_io)?;
-    let metadata = file.metadata().map_err(snapshot_io)?;
-    if !metadata.is_file() || Some(metadata.len()) != attachment.size_bytes {
-        return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are incomplete. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
-    }
-    Ok((canonical_path, file))
 }
 
-fn reject_link(path: &Path) -> Result<(), SnapshotFailure> {
+pub(crate) fn reject_link(path: &Path) -> Result<(), SnapshotFailure> {
     let metadata = fs::symlink_metadata(path).map_err(snapshot_io)?;
     #[cfg(windows)]
     let reparse = {

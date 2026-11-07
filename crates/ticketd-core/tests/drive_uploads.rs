@@ -717,6 +717,11 @@ fn uploaded_copy_is_discoverable_and_replays_without_source_after_restart() {
     let file = workspace
         .upload_drive_file("upload", &source, &destination(), &provider, |_, _| true)
         .unwrap();
+    let added = file
+        .added_at
+        .clone()
+        .expect("new uploaded copies record first registration");
+    assert!(chrono::DateTime::parse_from_rfc3339(&added).is_ok());
     let provenance = workspace.drive_upload("upload").unwrap();
     assert_eq!(provenance.state, DriveUploadState::Completed);
     assert_eq!(provenance.remote_file_id.as_deref(), Some("reserved-file"));
@@ -735,7 +740,7 @@ fn uploaded_copy_is_discoverable_and_replays_without_source_after_restart() {
     );
     drop(workspace);
     std::fs::remove_file(&source).unwrap();
-    let mut workspace = Workspace::open(path).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
     assert_eq!(
         workspace
             .upload_drive_file("upload", &source, &destination(), &provider, |_, _| true)
@@ -743,4 +748,25 @@ fn uploaded_copy_is_discoverable_and_replays_without_source_after_restart() {
         file
     );
     assert_eq!(provider.ids.lock().unwrap().as_slice(), ["reserved-file"]);
+    assert_eq!(
+        workspace
+            .rename_attachment(&file.id, "Uploaded evidence")
+            .unwrap()
+            .added_at
+            .as_deref(),
+        Some(added.as_str())
+    );
+    let backup = dir.path().join("uploaded-copy.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, backup).unwrap();
+    let restored = Workspace::open(target).unwrap();
+    assert_eq!(
+        restored.attachment(&file.id).unwrap().added_at.as_deref(),
+        Some(added.as_str())
+    );
+    assert_eq!(
+        restored.drive_upload("upload").unwrap(),
+        workspace.drive_upload("upload").unwrap()
+    );
 }

@@ -105,13 +105,18 @@ fn transfer(reader: &mut impl Read, writer: &mut impl Write) -> Result<(u64, Str
     Ok((total, format!("{:x}", hash.finalize())))
 }
 
-/// The caller holds the upload lock across the database snapshot and packaging.
-pub(crate) fn pack(connection: &Connection, root: &Path) -> Result<(), Error> {
+/// Capture paths while the database writer barrier holds, without retaining file handles.
+pub(crate) fn retained_file_inventory(root: &Path) -> Result<Vec<(String, PathBuf)>, Error> {
     if root.exists() && root.symlink_metadata()?.file_type().is_symlink() {
         return Err(Error::Backup("managed attachment storage must not be a symbolic link; preserve its files and restore a complete backup".into()));
     }
     let mut files = Vec::new();
     retained_files(root, root, &mut files)?;
+    Ok(files)
+}
+
+/// The caller holds the upload lock; ordinary writes can resume while bytes stream.
+pub(crate) fn pack(connection: &Connection, files: Vec<(String, PathBuf)>) -> Result<(), Error> {
     let has_attachments = table_exists(connection, "attachments")?
         && connection.query_row("SELECT EXISTS(SELECT 1 FROM attachments)", [], |r| {
             r.get::<_, bool>(0)
@@ -126,7 +131,28 @@ pub(crate) fn pack(connection: &Connection, root: &Path) -> Result<(), Error> {
          CREATE TABLE ticketd_backup_files(path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL);"
     )?;
     for (relative, source) in files {
-        let mut input = File::open(source)?;
+        let mut input = match File::open(&source) {
+            Ok(file) => file,
+            // Cleanup holds the upload lock, but canonical Undo may restore a file
+            // after inventory capture. It can only move quarantine -> bytes here.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && relative.contains("/quarantine/") =>
+            {
+                let parent = source
+                    .parent()
+                    .and_then(Path::parent)
+                    .ok_or_else(|| Error::Backup("invalid retained byte path".into()))?;
+                File::open(
+                    parent.join("bytes").join(
+                        source
+                            .file_name()
+                            .ok_or_else(|| Error::Backup("invalid retained filename".into()))?,
+                    ),
+                )?
+            }
+            Err(error) => return Err(error.into()),
+        };
         let size = input.metadata()?.len();
         let blob_size = i32::try_from(size).map_err(|_| {
             Error::Backup(format!(
@@ -211,8 +237,8 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
             let size: u64 = row.get(2)?;
             checked_path(&locator)?;
             let present = packaged && connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM ticketd_backup_files WHERE path=?1 AND size_bytes=?2 AND length(data)=?2)",
-                params![locator, size], |r| r.get::<_, bool>(0)
+                "SELECT EXISTS(SELECT 1 FROM ticketd_backup_files WHERE (path=?1 OR path=?3) AND size_bytes=?2 AND length(data)=?2)",
+                params![locator, size, crate::attachment_cleanup::quarantine_locator(&locator)], |r| r.get::<_, bool>(0)
             )?;
             if !present {
                 missing.push(name);

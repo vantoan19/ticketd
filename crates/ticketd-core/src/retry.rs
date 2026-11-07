@@ -12,6 +12,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    QuarantineAttachment {
+        id: String,
+    },
+    RestoreAttachment {
+        id: String,
+    },
     RenameAttachment {
         id: String,
         display_name: String,
@@ -284,6 +290,15 @@ impl Workspace {
                 .map(WriteResult::Attachment);
         }
         self.recover_uploads()?;
+        // File coordination must precede BEGIN; nested workflows reuse this scope.
+        let _file_moves = if matches!(
+            request,
+            WriteRequest::QuarantineAttachment { .. } | WriteRequest::RestoreAttachment { .. }
+        ) {
+            Some(self.attachment_backup_lock()?)
+        } else {
+            None
+        };
         let canonical = serde_json::to_string(&request)?;
         self.connection.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
@@ -328,6 +343,12 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::QuarantineAttachment { id } => {
+                WriteResult::Attachment(self.quarantine_attachment_locked(&id)?)
+            }
+            WriteRequest::RestoreAttachment { id } => {
+                WriteResult::Attachment(self.restore_attachment_locked(&id)?)
+            }
             WriteRequest::RenameAttachment { id, display_name } => {
                 WriteResult::Attachment(self.rename_attachment(&id, &display_name)?)
             }

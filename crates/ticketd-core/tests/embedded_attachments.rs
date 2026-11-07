@@ -394,6 +394,11 @@ fn schema_47_upgrade_keeps_retained_files_and_a_complete_pre_migration_backup() 
     drop(previous);
     std::fs::remove_file(source).unwrap();
     let workspace = Workspace::open(&path).unwrap();
+    // The reconstructed old table has no evidence of first registration time.
+    let file = ticketd_core::Attachment {
+        added_at: None,
+        ..file
+    };
     let uri = workspace.attachment_uri(&file.id).unwrap();
     assert_eq!(workspace.resolve_attachment_uri(&uri).unwrap(), file);
     let backups = workspace.safety_backups().unwrap();

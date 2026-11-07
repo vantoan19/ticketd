@@ -3,7 +3,13 @@ import { ChevronRight, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import type { Attachment, AttachmentState } from "@/lib/api/attachments";
+import {
+  attachments,
+  type Attachment,
+  type AttachmentState,
+} from "@/lib/api/attachments";
+import { formatDateTime, relativeDateTime } from "@/lib/format";
+import { AttachmentCleanup } from "./AttachmentCleanup";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
@@ -24,6 +30,9 @@ export function AttachmentLibrary({
   const [picker, setPicker] = useState(false);
   const [renaming, setRenaming] = useState<Attachment | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [cleanup, setCleanup] = useState(false);
+  const [restoreError, setRestoreError] = useState("");
+  const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, error } = useAttachmentSearch(
     search,
     state,
@@ -52,10 +61,15 @@ export function AttachmentLibrary({
             <h1>Attachments</h1>
             <p>Files used across your tickets and Documents.</p>
           </div>
-          <Button onClick={() => setPicker(true)}>
-            <Plus aria-hidden="true" />
-            Add files
-          </Button>
+          <div className="attachment-actions">
+            <Button variant="outline" onClick={() => setCleanup(true)}>
+              Clean up
+            </Button>
+            <Button onClick={() => setPicker(true)}>
+              <Plus aria-hidden="true" />
+              Add files
+            </Button>
+          </div>
         </header>
         <div className="attachment-library-tools">
           <Input
@@ -79,10 +93,12 @@ export function AttachmentLibrary({
               { value: "all", label: "All files" },
               { value: "in_use", label: "In use" },
               { value: "unused", label: "Unused" },
+              { value: "quarantined", label: "Quarantine" },
             ]}
           />
         </div>
         {error && <p role="alert">{error}</p>}
+        {restoreError && <p role="alert">{restoreError}</p>}
         {loading ? (
           <p role="status">Loading files…</p>
         ) : (
@@ -95,6 +111,7 @@ export function AttachmentLibrary({
                     <th>Storage</th>
                     <th>Size</th>
                     <th>Used in</th>
+                    <th>Added</th>
                     <th>
                       <span className="sr-only">Actions</span>
                     </th>
@@ -114,6 +131,7 @@ export function AttachmentLibrary({
                           <span>
                             {file.display_name}
                             <small>{file.original_filename}</small>
+                            {file.quarantined && <small>Quarantined</small>}
                           </span>
                         </button>
                       </td>
@@ -141,6 +159,40 @@ export function AttachmentLibrary({
                         </button>
                       </td>
                       <td>
+                        {file.added_at ? (
+                          <time
+                            dateTime={file.added_at}
+                            title={formatDateTime(file.added_at)}
+                          >
+                            {relativeDateTime(file.added_at)}
+                          </time>
+                        ) : (
+                          <span title="No registration date was recorded">
+                            Unknown
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {file.quarantined && (
+                          <Button
+                            variant="outline"
+                            aria-label={`Restore ${file.display_name}`}
+                            disabled={restoring !== null}
+                            onClick={() => {
+                              setRestoring(file.id);
+                              setRestoreError("");
+                              void attachments
+                                .restore(file.id, crypto.randomUUID())
+                                .then(() => setRefresh((value) => value + 1))
+                                .catch((reason: unknown) =>
+                                  setRestoreError(String(reason)),
+                                )
+                                .finally(() => setRestoring(null));
+                            }}
+                          >
+                            Restore
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           aria-label={`Rename ${file.display_name}`}
@@ -192,6 +244,12 @@ export function AttachmentLibrary({
             file={renaming}
             onClose={() => setRenaming(null)}
             onRenamed={() => setRefresh((value) => value + 1)}
+          />
+        )}
+        {cleanup && (
+          <AttachmentCleanup
+            onClose={() => setCleanup(false)}
+            onChanged={() => setRefresh((value) => value + 1)}
           />
         )}
       </section>
