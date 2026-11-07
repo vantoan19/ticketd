@@ -29,3 +29,15 @@ it("the collapsed sidebar keeps the manage menus and the source Retry reachable"
     /sidebar-heading|sidebar-source > button/,
   );
 });
+
+it("the Plan list toolbar shrinks its summary, not its Filter control", () => {
+  const plan = readFileSync(
+    join(__dirname, "..", "features/plans/plan.css"),
+    "utf8",
+  );
+  expect(plan).toMatch(/[.]plan-list-summary [{][^}]*text-overflow: ellipsis;/);
+  expect(plan).toMatch(
+    /[.]plan-list-toolbar > :not[(][^)]*[)] [{]\s*flex: none;/,
+  );
+  expect(rule(".ticket-list")).toMatch(/overflow-x: hidden;/);
+});

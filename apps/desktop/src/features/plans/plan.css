@@ -33,7 +33,7 @@
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .plan-list-spacer {
-  flex: 1;
+  flex: 1 0 0;
 }
 .ui-button-outline[aria-expanded="true"] {
   box-shadow: var(--shadow-small);
@@ -54,6 +54,9 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .plan-title-spacer {
@@ -574,4 +577,8 @@
 }
 .plan-counts {
   gap: 4px 16px;
+}
+/* The summary gives way; the controls keep their words. */
+.plan-list-toolbar > :not(.plan-list-summary, .plan-list-spacer) {
+  flex: none;
 }
