@@ -12,6 +12,7 @@ import {
   type AttachmentCleanupReview,
 } from "@/lib/api/attachments";
 import { formatSize } from "./format-size";
+import { usageContext } from "./usage-context";
 
 export function AttachmentCleanup({
   onClose,
@@ -157,12 +158,7 @@ export function AttachmentCleanup({
                       <ul>
                         {row.usage.protections.map((use) => (
                           <li key={`${use.kind}:${use.owner}`}>
-                            {use.kind === "draft"
-                              ? "Recoverable draft"
-                              : use.kind === "undo"
-                                ? "Retained for Undo"
-                                : use.kind.replaceAll("_", " ")}
-                            {use.trashed ? " · Trash" : ""} · {use.owner}
+                            {usageContext({ ...row.usage, protections: [use] })}
                           </li>
                         ))}
                       </ul>
