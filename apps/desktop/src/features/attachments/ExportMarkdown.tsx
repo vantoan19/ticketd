@@ -101,8 +101,10 @@ export function ExportMarkdownButton({
               </DialogTitle>
               <DialogDescription>
                 Markdown uses relative paths, and each local file is copied
-                once. Drive references remain links; unverified uploaded copies
-                are listed as omissions. Your content in ticketd is unchanged.
+                once. Drive references remain links. Uploaded copies are
+                downloaded only when their bytes match the recorded upload;
+                changed, unknown or unavailable copies are omitted. Your content
+                in ticketd is unchanged.
               </DialogDescription>
             </DialogHeader>
             {result.status === "partial" && (
@@ -168,7 +170,7 @@ export function ExportMarkdownButton({
                     <p>
                       {file.omission ??
                         (file.path
-                          ? `Copied · ${file.path}`
+                          ? `${file.kind === "uploaded_copy" ? "Verified uploaded copy" : "Copied"} · ${file.path}`
                           : "External link · current provider content; no local bytes")}
                     </p>
                     {file.external_url && (

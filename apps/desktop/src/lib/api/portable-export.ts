@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
+import { driveCopyStatusSchema } from "./attachments";
 
 export type MarkdownExportSource =
   | { kind: "document"; id: string }
@@ -26,6 +27,7 @@ const resultSchema = z.object({
       path: z.string().nullable(),
       external_url: z.string().nullable(),
       omission: z.string().nullable(),
+      copy_status: driveCopyStatusSchema.nullable().optional(),
     }),
   ),
 });

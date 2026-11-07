@@ -1052,3 +1052,21 @@ Uploaded copies retain input SHA-256 and observed provider checksum/version;
 remote editing can change them independently. They are not immutable snapshots,
 and byte export requires an explicit verified-download workflow. Backups retain
 only remote metadata and operations, never remote bytes, tokens or resumable URLs.
+
+Uploaded-copy previews distinguish changed, unavailable, unsupported and unknown
+comparison states while retaining last-known details, Open in Drive and Retry.
+`attachment drive-copy-status <id>` returns the same current metadata comparison
+without downloading bytes; ordinary existing-file references return no uploaded
+copy comparison. A matching metadata observation is not a guarantee of preserved
+original bytes. Provider versions can also change for metadata edits.
+
+Explicit file export and Export Markdown with files download an uploaded copy
+only when checksum, version, size and download capability support comparison.
+They check current metadata before and after the bounded download and compare
+actual bytes with the recorded upload SHA-256. Changed, unknown, unsupported or
+unavailable copies are omitted with reasons; portable manifests retain
+`uploaded_copy` classification and `copy_status`, and the UI/CLI return partial
+results alongside usable local snapshots and named current-source Drive links.
+Rejected downloads leave no exported file. Existing destinations are never
+overwritten, references and authored labels remain unchanged, and no download
+pins a revision, caches remote bytes automatically or changes the provider file.

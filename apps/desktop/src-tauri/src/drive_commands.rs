@@ -1,4 +1,15 @@
 use super::open_workspace;
+#[tauri::command(async)]
+pub fn drive_uploaded_copy_status(
+    id: String,
+) -> Result<Option<ticketd_core::drive::DriveCopyInspection>, String> {
+    let transport = GoogleTransport::default();
+    let provider =
+        ticketd_core::drive::GoogleDriveCopies::new(&PlatformCredentialStore, &transport);
+    open_workspace()
+        .and_then(|w| w.inspect_drive_uploaded_copy(&id, &provider))
+        .map_err(|e| e.to_string())
+}
 use serde::Serialize;
 use std::{
     collections::HashMap,

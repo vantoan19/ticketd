@@ -11,9 +11,11 @@ const nativeTypes: Record<string, string> = {
 /** Read last-known details only; opening this dialog does not require connectivity. */
 export function DriveReferenceDetails({
   id,
+  uploadedCopy = false,
   revision = 0,
 }: {
   id: string;
+  uploadedCopy?: boolean;
   revision?: number;
 }) {
   const [reference, setReference] = useState<DriveReference | null>(null);
@@ -49,7 +51,9 @@ export function DriveReferenceDetails({
       <dt>Size</dt>
       <dd>{formatSize(reference.metadata.size_bytes)}</dd>
       <dt>Storage</dt>
-      <dd>Google Drive · External reference</dd>
+      <dd>
+        Google Drive · {uploadedCopy ? "Uploaded copy" : "External reference"}
+      </dd>
     </>
   );
 }

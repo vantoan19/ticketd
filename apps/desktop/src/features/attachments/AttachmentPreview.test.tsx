@@ -137,6 +137,63 @@ const file = {
   locator: "file-1/bytes/screen.png",
 };
 
+test("uploaded copies show changed and unavailable observations with last-known details and explicit retry/export", async () => {
+  let status = "changed";
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview")
+      return {
+        attachment: { ...file, kind: "external_reference" },
+        status: "unavailable",
+        media_type: null,
+        message: "Open in Drive",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    const metadata = {
+      id: "blob",
+      name: "screen.png",
+      mime_type: "image/png",
+      size_bytes: 32,
+      web_url: "https://drive.google.com/file/d/blob/view",
+      resource_key: null,
+    };
+    if (command === "drive_configuration")
+      return { configured: false, message: "Setup deferred" };
+    if (command === "check_drive_reference")
+      return {
+        reference: { connection_id: "connection", metadata },
+        failure: { kind: "offline", message: "Drive is offline; retry." },
+      };
+    if (command === "drive_reference")
+      return { connection_id: "connection", metadata };
+    if (command === "drive_uploaded_copy_status")
+      return {
+        status,
+        message:
+          status === "changed"
+            ? "This copy has changed in Drive since upload."
+            : "Drive is offline; retry.",
+        last_known: metadata,
+        current: null,
+        error_kind: status === "unavailable" ? "offline" : null,
+      };
+    throw new Error(`Unexpected ${command}`);
+  });
+  render(<AttachmentPreview target={{ id: file.id }} onClose={() => {}} />);
+  await screen.findByRole("heading", {
+    name: "This copy has changed in Drive",
+  });
+  expect(screen.getAllByText(/Uploaded copy/).length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "Open in Drive" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
+  status = "unavailable";
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("heading", { name: "Uploaded copy unavailable" });
+  expect(screen.getByText("Screenshot")).toBeTruthy();
+  expect(screen.getByText(/Drive is offline/)).toBeTruthy();
+});
+
 test("Drive access refresh updates displayed metadata while preserving the authored title and open action", async () => {
   let size = 4;
   const remote = {
@@ -168,6 +225,7 @@ test("Drive access refresh updates displayed metadata while preserving the autho
         usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     if (command === "drive_reference") return metadata();
+    if (command === "drive_uploaded_copy_status") return null;
     if (command === "drive_configuration")
       return { configured: true, message: "Ready" };
     if (command === "check_drive_reference") {
