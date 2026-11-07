@@ -280,7 +280,6 @@ export function TicketWorkspaceView({
             panelRef={listPanelRef}
             minSize={360}
             defaultSize={384}
-            className="list-panel"
           >
             <TicketListPane
               workspace={workspace}
@@ -317,7 +316,6 @@ export function TicketWorkspaceView({
           <ResizablePanel
             id="detail"
             minSize={480}
-            className="detail-panel"
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.

@@ -225,7 +225,7 @@ export function TicketBoard({
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            className="board-card-menu"
+                            className="absolute top-1 right-1"
                             aria-label={`Change status of ${ticket.reference}`}
                             title={`Change status (saved: ${ticket.status})`}
                             disabled={

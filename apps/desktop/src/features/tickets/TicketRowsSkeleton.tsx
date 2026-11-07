@@ -11,13 +11,15 @@ export function TicketRowsSkeleton({ count = 6 }: { count?: number }) {
           <li key={index}>
             <span className="ticket-select" />
             <span className="ticket-row">
-              <Skeleton className="ticket-skeleton-icon" />
-              <Skeleton className="ticket-skeleton-ref" />
+              <span className="ticket-skeleton-icon">
+                <Skeleton className="size-full" />
+              </span>
+              <Skeleton className="h-3 w-9 self-center" />
               <Skeleton
-                className="ticket-skeleton-title"
+                className="h-3.5 self-center"
                 style={{ width: `${55 + ((index * 17) % 35)}%` }}
               />
-              <Skeleton className="ticket-skeleton-meta" />
+              <Skeleton className="col-start-3 my-0.75 h-2.5 w-24 self-center" />
             </span>
           </li>
         ))}

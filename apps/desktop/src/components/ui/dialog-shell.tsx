@@ -78,7 +78,7 @@ export function DialogShell({
             if (!blocked) onSubmit();
           }}
         >
-          <div className="flex items-start gap-3 pt-5 pr-[60px] pl-6">
+          <div className="flex items-start gap-3 pt-5 pr-15 pl-6">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
                 {title}
@@ -91,7 +91,7 @@ export function DialogShell({
           <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
             {children}
           </div>
-          <div className="dialog-shell-footer flex h-[60px] items-center gap-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
+          <div className="dialog-shell-footer flex h-15 items-center gap-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
             {footerLeading}
             <p
               id={reasonId}
