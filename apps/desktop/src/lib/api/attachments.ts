@@ -184,6 +184,17 @@ export const driveDestinationSchema = z.object({
   resource_key: z.string().nullable(),
 });
 export type DriveUploadDestination = z.infer<typeof driveDestinationSchema>;
+const uploadDestinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("local") }),
+  z.object({
+    kind: z.literal("google_drive"),
+    destination: driveDestinationSchema,
+    folder_name: z.string(),
+  }),
+]);
+export type AttachmentUploadDestination = z.infer<
+  typeof uploadDestinationSchema
+>;
 const driveConfigurationSchema = z.object({
   configured: z.boolean(),
   message: z.string(),
@@ -203,6 +214,24 @@ export const attachments = {
   },
   async openRemovedRemote(url: string) {
     await invoke("open_removed_drive_file", { url });
+  },
+  async uploadDestination() {
+    return uploadDestinationSchema.parse(
+      await invoke("attachment_upload_destination"),
+    );
+  },
+  async setUploadDestination(destination: DriveUploadDestination | null) {
+    return uploadDestinationSchema.parse(
+      await invoke("set_attachment_upload_destination", { destination }),
+    );
+  },
+  async beginUpload(
+    requestId: string,
+    explicit: AttachmentUploadDestination | null,
+  ) {
+    return uploadDestinationSchema.parse(
+      await invoke("begin_attachment_upload", { requestId, explicit }),
+    );
   },
   async inspectDriveCopy(id: string) {
     return driveCopyInspectionSchema

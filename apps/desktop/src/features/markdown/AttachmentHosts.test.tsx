@@ -72,7 +72,10 @@ const ticket: Ticket = {
 };
 function bridge() {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "import_attachment") return file;
@@ -111,7 +114,10 @@ async function insertInto(label: string) {
 
 test("reader replacement follows description autosave and retains the chosen occurrence after save failure", async () => {
   const nextUri = "ticketd://attachment/workspace-1/replacement";
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-1";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "resolve_attachment_uri") return file;
@@ -177,6 +183,9 @@ test.each(["reader", "rich"])(
     const nextUri = "ticketd://attachment/workspace-1/replacement";
     const records = new Map<string, Record<string, unknown>>();
     vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "attachment_upload_destination") return { kind: "local" };
+      if (command === "begin_attachment_upload")
+        return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
       if (command === "draft_cutover_pending") return false;
       if (command === "draft_retentions") return [...records.values()];
       if (command === "retain_draft") {

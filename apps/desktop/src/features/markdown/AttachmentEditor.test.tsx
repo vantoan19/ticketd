@@ -167,13 +167,16 @@ test("native file drops use physical coordinates and ignore other surfaces", asy
     return () => {};
   });
   vi.mocked(invoke).mockImplementation(async (command) =>
-    command === "attachment_workspace_id"
-      ? "workspace-test"
-      : command === "attachment_upload_limit"
-        ? 104857600
-        : command === "attachment_uri"
-          ? uri
-          : file,
+    command === "attachment_upload_destination" ||
+    command === "begin_attachment_upload"
+      ? { kind: "local" }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : command === "attachment_upload_limit"
+          ? 104857600
+          : command === "attachment_uri"
+            ? uri
+            : file,
   );
   const changed = vi.fn();
   function Draft() {
@@ -257,6 +260,9 @@ test.each(["rich", "source"])(
       },
     ];
     vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "attachment_upload_destination") return { kind: "local" };
+      if (command === "begin_attachment_upload")
+        return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
       if (command === "attachment_workspace_id")
         return "drive-editor-workspace";
       if (command === "attachment_upload_limit") return 104857600;
@@ -330,6 +336,9 @@ test.each(["rich", "source"])(
     ]);
     let fails = true;
     vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "attachment_upload_destination") return { kind: "local" };
+      if (command === "begin_attachment_upload")
+        return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
       if (command === "attachment_workspace_id") return "workspace-test";
       if (command === "attachment_upload_limit") return 104857600;
       if (command === "attachment_uri")
@@ -407,13 +416,16 @@ test.each(["paste", "drop"])(
   "%s captures file bytes in the shared source editor without native paths or premature links",
   async (kind) => {
     vi.mocked(invoke).mockImplementation(async (command) =>
-      command === "attachment_workspace_id"
-        ? "workspace-test"
-        : command === "attachment_upload_limit"
-          ? 104857600
-          : command === "attachment_uri"
-            ? uri
-            : file,
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+        ? { kind: "local" }
+        : command === "attachment_workspace_id"
+          ? "workspace-test"
+          : command === "attachment_upload_limit"
+            ? 104857600
+            : command === "attachment_uri"
+              ? uri
+              : file,
     );
     const changed = vi.fn();
     function Draft() {
@@ -492,7 +504,10 @@ const uri = "ticketd://attachment/workspace-1/file-1";
 
 test("rich attachment inspection and close leave the unsent editor draft untouched", async () => {
   const changed = vi.fn();
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-1";
     if (command === "resolve_attachment_uri") return file;
     if (command === "attachment_preview")
@@ -525,13 +540,16 @@ test("inserts a stored file at the rich caret without rewriting on focus or mode
   const changed = vi.fn();
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   vi.mocked(invoke).mockImplementation(async (command) =>
-    command === "attachment_workspace_id"
-      ? "workspace-test"
-      : command === "attachment_upload_limit"
-        ? 104857600
-        : command === "attachment_uri"
-          ? uri
-          : file,
+    command === "attachment_upload_destination" ||
+    command === "begin_attachment_upload"
+      ? { kind: "local" }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : command === "attachment_upload_limit"
+          ? 104857600
+          : command === "attachment_uri"
+            ? uri
+            : file,
   );
   function Draft() {
     const [value, setValue] = useState("Before after");
@@ -593,7 +611,10 @@ test("a failed upload cannot insert a valid link and retry keeps the upload iden
   const changed = vi.fn();
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let failed = true;
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "attachment_uri") return uri;
@@ -642,13 +663,16 @@ test("source insertion reuses a stored identity while preserving image syntax an
   const original = `![literal image label](${uri})\n\n<!-- preserve this source -->`;
   const changed = vi.fn();
   vi.mocked(invoke).mockImplementation(async (command) =>
-    command === "attachment_workspace_id"
-      ? "workspace-test"
-      : command === "attachment_upload_limit"
-        ? 104857600
-        : command === "attachment_uri"
-          ? uri
-          : file,
+    command === "attachment_upload_destination" ||
+    command === "begin_attachment_upload"
+      ? { kind: "local" }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : command === "attachment_upload_limit"
+          ? 104857600
+          : command === "attachment_uri"
+            ? uri
+            : file,
   );
   function Draft() {
     const [value, setValue] = useState(original);
@@ -692,11 +716,14 @@ test("source insertion inside a table escapes filename pipes without adding a co
   const original = "| File |\n| --- |\n| before after |";
   const changed = vi.fn();
   vi.mocked(invoke).mockImplementation(async (command) =>
-    command === "attachment_workspace_id"
-      ? "workspace-test"
-      : command === "attachment_uri"
-        ? uri
-        : { ...file, display_name: "trace | final" },
+    command === "attachment_upload_destination" ||
+    command === "begin_attachment_upload"
+      ? { kind: "local" }
+      : command === "attachment_workspace_id"
+        ? "workspace-test"
+        : command === "attachment_uri"
+          ? uri
+          : { ...file, display_name: "trace | final" },
   );
   function Draft() {
     const [value, setValue] = useState(original);

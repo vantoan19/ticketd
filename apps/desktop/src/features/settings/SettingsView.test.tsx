@@ -15,7 +15,13 @@ import { client } from "@/lib/api/client";
 import { notificationClient } from "@/lib/api/notifications";
 import { cliClient } from "@/lib/api/cli";
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue(104857600),
+  invoke: vi
+    .fn()
+    .mockImplementation(async (command: string) =>
+      command === "attachment_upload_destination"
+        ? { kind: "local" }
+        : 104857600,
+    ),
 }));
 
 vi.mock("@/lib/api/workspace", () => ({

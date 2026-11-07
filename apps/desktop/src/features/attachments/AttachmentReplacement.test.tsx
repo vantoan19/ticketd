@@ -35,7 +35,10 @@ const file = {
 };
 
 function bridge() {
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace";
     if (command === "resolve_attachment_uri") return file;
     if (command === "attachment_preview")

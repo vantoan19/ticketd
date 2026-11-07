@@ -34,6 +34,44 @@ pub struct SelectedUploadFolder {
     folder: DriveFolder,
 }
 
+#[tauri::command(async)]
+pub fn attachment_upload_destination() -> Result<ticketd_core::AttachmentUploadDestination, String>
+{
+    open_workspace()
+        .and_then(|w| w.attachment_upload_destination())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn begin_attachment_upload(
+    request_id: String,
+    explicit: Option<ticketd_core::AttachmentUploadDestination>,
+) -> Result<ticketd_core::AttachmentUploadDestination, String> {
+    open_workspace()
+        .and_then(|mut w| w.begin_attachment_upload(&request_id, explicit))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+pub fn set_attachment_upload_destination(
+    destination: Option<DriveUploadDestination>,
+) -> Result<ticketd_core::AttachmentUploadDestination, String> {
+    let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+    match destination {
+        None => workspace.set_local_upload_destination(),
+        Some(destination) => {
+            let transport = GoogleTransport::default();
+            let provider = GoogleDrive::new(
+                &destination.connection_id,
+                &PlatformCredentialStore,
+                &transport,
+            );
+            workspace.set_drive_upload_destination(&destination, &provider)
+        }
+    }
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn select_drive_upload_folder(
     app: tauri::AppHandle,

@@ -86,7 +86,20 @@ enum AttachmentCommand {
         #[arg(long)]
         bytes: Option<u64>,
     },
-    /// Store an immutable local snapshot; --request-id makes a lost response safe to retry
+    /// Read or change the default for new uploads; never moves existing files
+    Destination {
+        #[arg(long, conflicts_with = "drive")]
+        local: bool,
+        #[arg(long, requires_all = ["connection", "folder"])]
+        drive: bool,
+        #[arg(long, requires = "drive")]
+        connection: Option<String>,
+        #[arg(long, requires = "drive")]
+        folder: Option<String>,
+        #[arg(long, requires = "drive")]
+        resource_key: Option<String>,
+    },
+    /// Upload using the workspace default; retry keeps its original destination
     Add {
         path: String,
         #[arg(long)]
@@ -95,6 +108,9 @@ enum AttachmentCommand {
         name: Option<String>,
         #[arg(long)]
         request_id: Option<String>,
+        /// Explicit local upload without changing the workspace preference
+        #[arg(long)]
+        local: bool,
     },
     /// List direct ticket attachments, or all workspace uploads including unused files
     List {
@@ -2099,25 +2115,93 @@ fn attachment_command(
                 &serde_json::json!({ "limit_bytes": workspace.attachment_upload_limit()?, "default_bytes": ticketd_core::DEFAULT_ATTACHMENT_LIMIT }),
             )?
         }
+        AttachmentCommand::Destination {
+            local,
+            drive,
+            connection,
+            folder,
+            resource_key,
+        } => {
+            let saved = if local {
+                workspace.set_local_upload_destination()?
+            } else if drive {
+                let connection = connection.ok_or("--drive requires --connection")?;
+                let destination = ticketd_core::drive::DriveUploadDestination {
+                    connection_id: connection.clone(),
+                    folder_id: folder.ok_or("--drive requires --folder")?,
+                    resource_key,
+                };
+                let transport = ticketd_core::drive::GoogleTransport::default();
+                let provider = ticketd_core::drive::GoogleDrive::new(
+                    &connection,
+                    &ticketd_core::drive::PlatformCredentialStore,
+                    &transport,
+                );
+                workspace.set_drive_upload_destination(&destination, &provider)?
+            } else {
+                workspace.attachment_upload_destination()?
+            };
+            serde_json::to_string(&saved)?
+        }
         AttachmentCommand::Add {
             path,
             ticket,
             name,
             request_id,
+            local,
         } => {
-            let result = workspace.write(
-                request_id.as_deref(),
-                WriteRequest::ImportAttachment {
-                    source: path,
-                    display_name: name,
-                },
+            let request_id = request_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let destination = workspace.begin_attachment_upload(
+                &request_id,
+                local.then_some(ticketd_core::AttachmentUploadDestination::Local),
             )?;
-            let WriteResult::Attachment(file) = result else {
-                return Err("unexpected attachment result".into());
+            let file = match destination {
+                ticketd_core::AttachmentUploadDestination::Local => {
+                    let result = workspace.write(
+                        Some(&request_id),
+                        WriteRequest::ImportAttachment {
+                            source: path,
+                            display_name: name.clone(),
+                        },
+                    )?;
+                    let WriteResult::Attachment(file) = result else {
+                        return Err("unexpected attachment result".into());
+                    };
+                    file
+                }
+                ticketd_core::AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+                    let transport = ticketd_core::drive::GoogleTransport::default();
+                    let provider = ticketd_core::drive::GoogleDrive::new(
+                        &destination.connection_id,
+                        &ticketd_core::drive::PlatformCredentialStore,
+                        &transport,
+                    );
+                    let file = workspace.upload_drive_file(
+                        &request_id,
+                        &path,
+                        &destination,
+                        &provider,
+                        |_, _| true,
+                    ).map_err(|error| format!("Upload request {request_id} did not finish: {error}. Retry the same file with `attachment add --request-id {request_id}`; its original destination is retained. Use a new request ID for an explicit alternative."))?;
+                    if let Some(display_name) = name {
+                        match workspace.write(
+                            Some(&format!("upload-name:{request_id}")),
+                            WriteRequest::RenameAttachment {
+                                id: file.id.clone(),
+                                display_name,
+                            },
+                        )? {
+                            WriteResult::Attachment(file) => file,
+                            _ => return Err("unexpected attachment rename result".into()),
+                        }
+                    } else {
+                        file
+                    }
+                }
             };
             if let Some(ticket) = ticket {
                 workspace.set_ticket_attachment(&ticket, &file.id, true).map_err(|error| {
-                    format!("snapshot stored as {}; ticket association failed: {error}. Reuse it with `ticketd attachment link {} {ticket}`", file.id, file.id)
+                    format!("attachment stored as {}; ticket association failed: {error}. Reuse it with `ticketd attachment link {} {ticket}`", file.id, file.id)
                 })?;
             }
             serde_json::to_string(&file)?

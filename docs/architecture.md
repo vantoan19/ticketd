@@ -580,6 +580,21 @@ denial and positively observed trash are distinct; unknown 403/404 stays ambiguo
 
 ## Google Drive uploaded copies
 
+Schema 55 stores the workspace upload preference and per-request destination
+bindings. `attachment_upload_destination` reads last validated metadata offline;
+`set_drive_upload_destination` checks the existing provider's writable-folder
+capability before one atomic preference update. Validation and network failures
+preserve the prior value. Local selection requires no provider configuration.
+
+`begin_attachment_upload` freezes either the current preference or an explicit
+override in a short writer transaction before an upload effect. Both storage paths
+enforce the binding. Retries return the original destination, even after another
+process changes the default. Pre-55 local receipts/recovery manifests and Drive
+operation journals supply their historical destination instead of today's preference.
+The desktop's older capture records continue to pass their explicit original
+local/Drive choice. Preferences and bindings survive backup/restore and contain
+opaque account/folder metadata only, with no credentials or remote bytes.
+
 Schema 52 adds `drive_upload_operations`. Workspace workflows own per-file input
 bounds, a frozen temporary input and its SHA-256, destination validation, durable
 operation identity, remote ID reservation, reconciliation and attachment registration.

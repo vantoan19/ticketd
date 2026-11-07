@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -36,9 +37,182 @@ const file = (name: string) => ({
   locator: `${name}/bytes/${name}`,
 });
 
+test("new captures use the current workspace preference while recovered retries keep their original destination", async () => {
+  const drive = {
+    kind: "google_drive",
+    destination: {
+      connection_id: "account",
+      folder_id: "folder",
+      resource_key: null,
+    },
+    folder_name: "Team uploads",
+  };
+  let preference: unknown = drive;
+  const bindings = new Map<string, unknown>();
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "defaults-workspace";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "attachment_upload_destination") return preference;
+    if (command === "begin_attachment_upload") {
+      const { requestId, explicit } = args as {
+        requestId: string;
+        explicit: unknown;
+      };
+      const selected = bindings.get(requestId) ?? explicit ?? preference;
+      bindings.set(requestId, selected);
+      return selected;
+    }
+    if (command === "upload_drive_file")
+      throw new Error("Offline; retry Drive");
+    if (command === "import_attachment") return file("trace.log");
+    return null;
+  });
+  const view = render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  await screen.findByText("Destination: Google Drive · Team uploads");
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText(/Offline/);
+  const original = vi
+    .mocked(invoke)
+    .mock.calls.find(([command]) => command === "upload_drive_file")?.[1];
+  view.unmount();
+  preference = { kind: "local" };
+  render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  await screen.findByText("Destination: Local workspace");
+  const recovered = await screen.findByRole("listitem", { name: "trace.log" });
+  fireEvent.click(within(recovered).getByRole("button", { name: "Retry" }));
+  await within(recovered).findByText(/Offline/);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(
+        ([command]) => command === "upload_drive_file",
+      )[1]?.[1],
+  ).toMatchObject({
+    requestId: (original as { requestId: string }).requestId,
+    destination: drive.destination,
+  });
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "import_attachment"),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  await waitFor(() =>
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.some(([command]) => command === "import_attachment"),
+    ).toBe(true),
+  );
+});
+
+test("a late initial preference read cannot overwrite the destination captured for a new selection", async () => {
+  const drive = {
+    kind: "google_drive",
+    destination: {
+      connection_id: "account",
+      folder_id: "folder",
+      resource_key: null,
+    },
+    folder_name: "Team files",
+  };
+  let firstRead = true;
+  let finishOldRead: (value: unknown) => void = () => {};
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "late-preference";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "attachment_upload_destination") {
+      if (firstRead) {
+        firstRead = false;
+        return new Promise((resolve) => {
+          finishOldRead = resolve;
+        });
+      }
+      return drive;
+    }
+    if (command === "begin_attachment_upload") return drive;
+    if (command === "upload_drive_file") throw new Error("Drive is offline");
+    return null;
+  });
+  render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText(/Drive is offline/);
+  await act(async () => {
+    finishOldRead({ kind: "local" });
+  });
+  expect(
+    screen.getByText("Destination: Google Drive · Team files"),
+  ).toBeTruthy();
+});
+
+test("failed destination bindings keep the batch choice through a later preference change", async () => {
+  const drive = {
+    kind: "google_drive",
+    destination: {
+      connection_id: "account",
+      folder_id: "folder",
+      resource_key: null,
+    },
+    folder_name: "Team files",
+  };
+  let bindingFailed = true;
+  let preference: unknown = drive;
+  vi.mocked(open).mockResolvedValue(["C:/trace.log", "C:/queued.log"]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "binding-retry";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "attachment_upload_destination") return preference;
+    if (command === "begin_attachment_upload") {
+      if (bindingFailed) throw new Error("Workspace is temporarily read-only");
+      return (args as { explicit?: unknown })?.explicit ?? preference;
+    }
+    if (command === "upload_drive_file") throw new Error("Drive is offline");
+    return null;
+  });
+  render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText(/temporarily read-only/);
+  const queued = await screen.findByRole("listitem", { name: "queued.log" });
+  await within(queued).findByText(/temporarily read-only/);
+  bindingFailed = false;
+  preference = { kind: "local" };
+  fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await within(row).findByText(/Drive is offline/);
+  fireEvent.click(within(queued).getByRole("button", { name: "Retry" }));
+  await within(queued).findByText(/Drive is offline/);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "import_attachment"),
+  ).toBe(false);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "begin_attachment_upload"),
+  ).toHaveLength(4);
+});
+
 test("a purged upload replay stays unavailable instead of reporting stored or attaching", async () => {
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+    )
+      return { kind: "local" };
     if (command === "attachment_workspace_id") return "purged-replay";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "import_attachment" || command === "inspect_attachment")
@@ -69,6 +243,11 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   let purged = false;
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+    )
+      return { kind: "local" };
     if (command === "attachment_workspace_id") return "cached-purged-replay";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "import_attachment" || command === "inspect_attachment")
@@ -159,7 +338,10 @@ test("Drive failures retain their folder and operation; status checks precede re
   };
   let fail = true;
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "drive-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -222,7 +404,10 @@ test("Drive failures retain their folder and operation; status checks precede re
 });
 
 test("unmount cancels an unfinished Drive folder selection without starting uploads", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "folder-cancel";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -263,7 +448,10 @@ test("explicit local fallback uses a new operation and retains the original Driv
     resource_key: null,
   };
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "fallback-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -323,6 +511,9 @@ test("existing files search keeps related usage distinct and inserts selected id
   const related = file("ticket.log");
   const recent = file("recent.png");
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "search_attachments")
@@ -402,7 +593,10 @@ test("existing files search keeps related usage distinct and inserts selected id
 });
 
 test("a completed reuse cannot close a newer insertion session", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "search_attachments") return [];
@@ -444,6 +638,9 @@ test("a completed reuse cannot close a newer insertion session", async () => {
 
 test("replacement mode selects one existing file before changing a reference", async () => {
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "search_attachments")
@@ -474,12 +671,27 @@ test("replacement mode selects one existing file before changing a reference", a
   expect(picked.mock.calls[0]?.[0]).toEqual(file("second.txt"));
 });
 
-test("interrupted uploads recover original identities after remount and stay isolated by workspace", async () => {
+test("legacy-shaped local capture queues keep their destination under a new Drive default after remount", async () => {
   let workspace = "first-workspace";
+  let driveDefault = false;
   const requests: string[] = [];
   let interrupted = true;
   vi.mocked(open).mockResolvedValue(["C:/recover.txt", "C:/queued.txt"]);
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination")
+      return driveDefault
+        ? {
+            kind: "google_drive",
+            destination: {
+              connection_id: "account",
+              folder_id: "folder",
+              resource_key: null,
+            },
+            folder_name: "Team files",
+          }
+        : { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return workspace;
     if (command === "attachment_upload_limit") return 104857600;
     const params = args as Record<string, unknown>;
@@ -499,6 +711,7 @@ test("interrupted uploads recover original identities after remount and stay iso
   await waitFor(() => expect(requests).toHaveLength(1));
   const original = requests[0];
   first.unmount();
+  driveDefault = true;
   workspace = "another-workspace";
   const another = mount();
   await screen.findByText(/Up to/);
@@ -515,6 +728,11 @@ test("interrupted uploads recover original identities after remount and stay iso
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(picked).toHaveBeenCalled());
   expect(requests).toEqual([original, original]);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(([command]) => command === "upload_drive_file"),
+  ).toBe(false);
   recovered.unmount();
   mount();
   await screen.findByRole("listitem", { name: "queued.txt" });
@@ -545,6 +763,9 @@ test("mixed batches insert successes in selection order and retry the original f
   ]);
   let fails = true;
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     const source = String((args as Record<string, unknown>)?.source);
@@ -603,6 +824,9 @@ test("canceling one file suppresses late insertion, preserves its completed snap
     complete = resolve;
   });
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "cancel_attachment_upload") return;

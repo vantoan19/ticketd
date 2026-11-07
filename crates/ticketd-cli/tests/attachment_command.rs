@@ -85,6 +85,190 @@ fn cli_removes_only_unused_remote_records_and_returns_remaining_drive_guidance()
 }
 
 #[test]
+fn cli_upload_destination_persists_and_local_retries_keep_their_original_choice() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        run(dir.path(), &["attachment", "destination"])["kind"],
+        "local"
+    );
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"original").unwrap();
+    let file = run(
+        dir.path(),
+        &[
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--request-id",
+            "original",
+        ],
+    );
+    let invalid = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args([
+            "attachment",
+            "destination",
+            "--drive",
+            "--connection",
+            "invalid",
+            "--folder",
+            "folder",
+        ])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert_eq!(
+        run(dir.path(), &["attachment", "destination"])["kind"],
+        "local"
+    );
+    std::fs::remove_file(&source).unwrap();
+    assert_eq!(
+        run(
+            dir.path(),
+            &[
+                "attachment",
+                "add",
+                source.to_str().unwrap(),
+                "--request-id",
+                "original"
+            ]
+        ),
+        file
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "destination", "--local"])["kind"],
+        "local"
+    );
+}
+
+#[test]
+fn cli_drive_default_never_falls_back_and_earlier_local_receipts_stay_local() {
+    use ticketd_core::{Workspace, drive::*};
+    struct WritableFolder;
+    impl DriveUploadProvider for WritableFolder {
+        fn folder(&self, id: &str, _: Option<&str>) -> Result<DriveFolder, DriveError> {
+            Ok(DriveFolder {
+                id: id.into(),
+                name: "Team files".into(),
+                can_add_children: true,
+            })
+        }
+        fn reserve_file_id(&self) -> Result<String, DriveError> {
+            Err(DriveError::new(
+                DriveErrorKind::Unsupported,
+                "fixture cannot upload",
+            ))
+        }
+        fn uploaded_file(&self, _: &str) -> Result<Option<DriveUploadedFile>, DriveError> {
+            Err(DriveError::new(
+                DriveErrorKind::Unsupported,
+                "fixture cannot read",
+            ))
+        }
+        fn upload_blob(
+            &self,
+            _: &DriveUploadOperation,
+            _: &mut dyn std::io::Read,
+            _: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), DriveError> {
+            Err(DriveError::new(
+                DriveErrorKind::Unsupported,
+                "fixture cannot upload",
+            ))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let source = dir.path().join("trace.txt");
+    std::fs::write(&source, b"original").unwrap();
+    let original = run(
+        dir.path(),
+        &[
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--request-id",
+            "earlier-local",
+        ],
+    );
+    let mut workspace = Workspace::open(&path).unwrap();
+    let destination = DriveUploadDestination {
+        connection_id: uuid::Uuid::new_v4().to_string(),
+        folder_id: "folder".into(),
+        resource_key: None,
+    };
+    workspace
+        .set_drive_upload_destination(&destination, &WritableFolder)
+        .unwrap();
+    assert_eq!(
+        run(dir.path(), &["attachment", "destination"])["folder_name"],
+        "Team files"
+    );
+    std::fs::remove_file(&source).unwrap();
+    assert_eq!(
+        run(
+            dir.path(),
+            &[
+                "attachment",
+                "add",
+                source.to_str().unwrap(),
+                "--request-id",
+                "earlier-local"
+            ]
+        ),
+        original
+    );
+    std::fs::write(&source, b"original").unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env("TICKETD_TEST_WORKSPACE", &path)
+        .env_remove("TICKETD_GOOGLE_OAUTH_CLIENT_FILE")
+        .args([
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--request-id",
+            "drive-failed",
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("--request-id drive-failed"));
+    assert_eq!(
+        run(dir.path(), &["attachment", "list"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "destination"])["kind"],
+        "google_drive"
+    );
+    run(dir.path(), &["attachment", "destination", "--local"]);
+    assert!(matches!(
+        workspace
+            .begin_attachment_upload("drive-failed", None)
+            .unwrap(),
+        ticketd_core::AttachmentUploadDestination::GoogleDrive { .. }
+    ));
+    let local = run(
+        dir.path(),
+        &[
+            "attachment",
+            "add",
+            source.to_str().unwrap(),
+            "--local",
+            "--request-id",
+            "explicit-local",
+        ],
+    );
+    assert_eq!(local["kind"], "local_snapshot");
+}
+
+#[test]
 fn cli_reviews_quarantines_restores_and_replays_without_a_desktop() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("trace.txt");

@@ -41,7 +41,10 @@ const file = {
 test("unconfigured Drive keeps setup details collapsed and local sources usable", async () => {
   const diagnostic =
     "Set TICKETD_GOOGLE_OAUTH_CLIENT_FILE to a Desktop OAuth client JSON";
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "drive-test-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -75,7 +78,10 @@ test("unconfigured Drive keeps setup details collapsed and local sources usable"
 test("choosing an upload folder shows typed setup guidance collapsed while local capture stays usable", async () => {
   const diagnostic =
     "Set TICKETD_GOOGLE_OAUTH_CLIENT_FILE to a Desktop OAuth client JSON";
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "upload-setup-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -105,7 +111,10 @@ test("choosing an upload folder shows typed setup guidance collapsed while local
 });
 
 test("shared picker selects Drive references without changing local upload destination", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "drive-test-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -144,7 +153,10 @@ test.each(["inline", "library"])(
       },
     };
     vi.mocked(open).mockResolvedValue("C:/sharing");
-    vi.mocked(invoke).mockImplementation(async (command) => {
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "attachment_upload_destination") return { kind: "local" };
+      if (command === "begin_attachment_upload")
+        return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
       if (command === "check_drive_reference")
         return { reference, failure: null };
       if (command === "drive_configuration")
@@ -247,7 +259,10 @@ test.each(["inline", "library"])(
 
 test("mixed insertion results retain failed identity and retry before the later successful file", async () => {
   const second = { ...file, id: "drive-2", display_name: "Current sheet" };
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "drive-test-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -281,7 +296,10 @@ test("mixed insertion results retain failed identity and retry before the later 
 
 test("closing during browser selection cancels the operation and late results never insert", async () => {
   let finish: (value: unknown) => void = () => {};
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "drive-test-workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")
@@ -317,7 +335,10 @@ test("closing during browser selection cancels the operation and late results ne
 });
 
 test("reference replacement refuses multiple Drive choices before changing the selected reference", async () => {
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")

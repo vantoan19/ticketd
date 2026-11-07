@@ -329,6 +329,12 @@ impl Workspace {
                     };
                 }
             }
+            if let Some(id) = request_id {
+                let reserved: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM attachment_upload_destinations WHERE request_id=?1)", [id], |r| r.get(0))?;
+                if reserved {
+                    return Err(Error::RequestConflict(id.into()));
+                }
+            }
             let outcome = self.execute_write(request)?;
             if let Some(id) = request_id {
                 self.connection.execute(
