@@ -350,6 +350,14 @@ fn rewrite(
         }
     }
     for (event, range) in parser.into_offset_iter() {
+        if let Event::Start(Tag::Image { dest_url, .. }) = &event
+            && targets
+                .get(dest_url.as_ref())
+                .is_some_and(|target| target.starts_with("https://"))
+        {
+            // Provider viewer pages are links, not downloadable image content.
+            edits.push((range.start..range.start + 1, String::new()));
+        }
         if let Event::Html(ref html) | Event::InlineHtml(ref html) = event {
             for (at, uri) in html_uris(html) {
                 if let Some(target) = targets.get(uri) {

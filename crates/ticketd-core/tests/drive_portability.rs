@@ -167,6 +167,9 @@ fn generated_native_autolink_labels_use_readable_names_without_rewriting_authore
     let remote = workspace
         .reference_drive_file(&uuid::Uuid::new_v4().to_string(), "doc", None, &NativeFile)
         .unwrap();
+    workspace
+        .rename_attachment(&remote.id, "Plan [review] <v2>")
+        .unwrap();
     let uri = workspace.attachment_uri(&remote.id).unwrap();
     let result = workspace
         .export_markdown_with_files(
@@ -179,7 +182,7 @@ fn generated_native_autolink_labels_use_readable_names_without_rewriting_authore
     let body = std::fs::read_to_string(result.directory.join("content.md")).unwrap();
     assert_eq!(
         body,
-        "[Current plan](https://docs.google.com/document/d/doc/edit) and [my words](https://docs.google.com/document/d/doc/edit)"
+        r"[Plan \[review\] \<v2\>](https://docs.google.com/document/d/doc/edit) and [my words](https://docs.google.com/document/d/doc/edit)"
     );
 }
 
@@ -215,4 +218,43 @@ fn provider_links_cannot_persist_temporary_authorization_in_workspace_or_portabl
         assert!(!error.to_string().contains("temporary-secret"));
     }
     assert!(workspace.attachments(10, 0).unwrap().is_empty());
+    let url = "https://docs.google.com/document/d/doc/edit?resourcekey=retained-key&authuser=1&usp=sharing#heading=h.abc";
+    let file = workspace
+        .reference_drive_file(&connection, "doc", None, &Link(url.into()))
+        .unwrap();
+    let result = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Markdown {
+                body: format!("[Plan]({})", workspace.attachment_uri(&file.id).unwrap()),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(result.attachments[0].external_url.as_deref(), Some(url));
+}
+
+#[test]
+fn native_files_in_image_syntax_export_as_readable_provider_links_without_conversion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let remote = workspace
+        .reference_drive_file(&uuid::Uuid::new_v4().to_string(), "doc", None, &NativeFile)
+        .unwrap();
+    let uri = workspace.attachment_uri(&remote.id).unwrap();
+    let source = format!("See ![my plan]({uri}) and ![budget][native].\n\n[native]: {uri}");
+    let document = workspace.create_document(None, &source).unwrap();
+    let result = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Document {
+                id: document.id.clone(),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    let body = std::fs::read_to_string(result.directory.join("content.md")).unwrap();
+    assert_eq!(
+        body,
+        "See [my plan](https://docs.google.com/document/d/doc/edit) and [budget][native].\n\n[native]: https://docs.google.com/document/d/doc/edit"
+    );
+    assert_eq!(workspace.show_document(&document.id).unwrap().body, source);
 }

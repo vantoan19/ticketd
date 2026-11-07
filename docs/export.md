@@ -33,7 +33,9 @@ are omissions, never replaced with a different attachment's content. Files in
 linked Documents stay with those Documents and are not collected recursively.
 Generated autolink labels use the attachment's readable display name; authored
 labels stay literal. Google Docs, Sheets and Slides remain viewer links and are
-never converted into local files. Authorization parameters in provider links
+never converted into local files. Exported image syntax for a Drive reference
+becomes a link to its viewer rather than an image request to an HTML page;
+canonical Markdown stays unchanged. Authorization parameters in provider links
 are rejected before storage and again when preparing a portable link.
 
 Backup inspection separately reports `remote_bytes_included: false` and
