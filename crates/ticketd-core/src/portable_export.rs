@@ -220,8 +220,11 @@ impl Workspace {
         match file.kind {
             AttachmentKind::ExternalReference => {
                 let reference = self.drive_reference(&file.id)?;
-                if crate::drive::safe_web_url(&reference.metadata.web_url) {
-                    entry.external_url = Some(reference.metadata.web_url);
+                if crate::drive::safe_web_url(&reference.metadata.web_url)
+                    && let Ok(url) = url::Url::parse(&reference.metadata.web_url)
+                {
+                    entry.external_url =
+                        Some(url.to_string().replace('(', "%28").replace(')', "%29"));
                 } else {
                     entry.omission =
                         Some("Invalid provider link; select the file in Drive again.".into());

@@ -122,7 +122,7 @@ fn ticket_exports_direct_and_inline_colliding_names_without_flattening_linked_do
     let export = workspace
         .export_markdown_with_files(
             MarkdownExportSource::Ticket {
-                reference: ticket.reference,
+                reference: ticket.reference.clone(),
             },
             dir.path(),
         )
@@ -421,7 +421,7 @@ fn plain_ticket_titles_and_attachment_names_do_not_introduce_markdown_links_or_h
     let export = workspace
         .export_markdown_with_files(
             MarkdownExportSource::Ticket {
-                reference: ticket.reference,
+                reference: ticket.reference.clone(),
             },
             dir.path(),
         )
@@ -449,4 +449,157 @@ fn plain_ticket_titles_and_attachment_names_do_not_introduce_markdown_links_or_h
         .collect();
     assert!(text.contains(&title), "{text}");
     assert!(text.contains(name), "{text}");
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&direct.locator),
+    )
+    .unwrap();
+    let missing = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Ticket {
+                reference: ticket.reference,
+            },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(missing.status, ticketd_core::ExportStatus::Partial);
+    assert_eq!(missing.attachments.len(), 1);
+    let output = std::fs::read_to_string(missing.directory.join("content.md")).unwrap();
+    assert!(!pulldown_cmark::Parser::new(&output).any(|e| matches!(
+        e,
+        pulldown_cmark::Event::Html(_) | pulldown_cmark::Event::InlineHtml(_)
+    )));
+    assert_eq!(missing.attachments[0].display_name, name);
+}
+
+#[test]
+fn document_title_and_original_filename_remain_data_while_authored_markdown_stays_authored() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let original = "report [literal] `ticks`.log";
+    let file = workspace
+        .import_attachment_bytes("file", original, b"requested", |_, _| true)
+        .unwrap();
+    let other = workspace
+        .import_attachment_bytes("other", "private.log", b"not requested", |_, _| true)
+        .unwrap();
+    let title = format!(
+        "Plain [title]({}) <b>example</b>",
+        workspace.attachment_uri(&other.id).unwrap()
+    );
+    let authored = format!(
+        "Keep [**authored label**]({}) and `literal code`.",
+        workspace.attachment_uri(&file.id).unwrap()
+    );
+    let document = workspace.create_document(Some(&title), &authored).unwrap();
+    let export = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Document {
+                id: document.id.clone(),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(export.attachments.len(), 1);
+    assert_eq!(
+        export.attachments[0].original_filename.as_deref(),
+        Some(original)
+    );
+    let output = std::fs::read_to_string(export.directory.join("content.md")).unwrap();
+    assert!(output.contains("[**authored label**]"));
+    assert!(output.contains("`literal code`"));
+    assert!(
+        !output.contains(&title),
+        "Document export copies its canonical body, not its separate plain title"
+    );
+    assert_eq!(
+        workspace.show_document(&document.id).unwrap().body,
+        authored
+    );
+    let ticket = workspace.create_ticket("Original filename").unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &file.id, true)
+        .unwrap();
+    let direct = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Ticket {
+                reference: ticket.reference,
+            },
+            dir.path(),
+        )
+        .unwrap();
+    let output = std::fs::read_to_string(direct.directory.join("content.md")).unwrap();
+    let text: String = pulldown_cmark::Parser::new(&output)
+        .filter_map(|e| {
+            if let pulldown_cmark::Event::Text(text) = e {
+                Some(text.into_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(text.contains(original), "{text}");
+    assert_eq!(
+        std::fs::read(
+            direct
+                .directory
+                .join(direct.attachments[0].path.as_ref().unwrap())
+        )
+        .unwrap(),
+        b"requested"
+    );
+}
+
+struct ViewerUrlFile;
+impl ticketd_core::drive::AttachmentProvider for ViewerUrlFile {
+    fn metadata(
+        &self,
+        id: &str,
+        key: Option<&str>,
+    ) -> Result<ticketd_core::drive::DriveMetadata, ticketd_core::drive::DriveError> {
+        let mut metadata = ticketd_core::drive::AttachmentProvider::metadata(&NativeFile, id, key)?;
+        metadata.web_url = "https://docs.google.com/document/d/native/edit?hint=)attack".into();
+        Ok(metadata)
+    }
+}
+
+#[test]
+fn provider_viewer_url_remains_one_usable_destination_when_it_contains_markdown_punctuation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .reference_drive_file(
+            &uuid::Uuid::new_v4().to_string(),
+            "native",
+            None,
+            &ViewerUrlFile,
+        )
+        .unwrap();
+    let export = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Markdown {
+                body: format!(
+                    "Read [my plan]({})",
+                    workspace.attachment_uri(&file.id).unwrap()
+                ),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    let output = std::fs::read_to_string(export.directory.join("content.md")).unwrap();
+    let destinations: Vec<_> = pulldown_cmark::Parser::new(&output)
+        .filter_map(|event| {
+            if let pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) = event
+            {
+                Some(dest_url.into_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        destinations,
+        ["https://docs.google.com/document/d/native/edit?hint=%29attack"]
+    );
 }
