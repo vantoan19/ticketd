@@ -87,7 +87,7 @@ test("explicit local cleanup reviews protections and restores quarantine", async
   await screen.findByRole("button", { name: "Unused trace" });
   expect(screen.getByRole("columnheader", { name: "Added" })).toBeTruthy();
   fireEvent.click(
-    screen.getByRole("button", { name: "Clean up", exact: true }),
+    screen.getByRole("button", { name: "Clean up" }),
   );
   await screen.findByRole("dialog", { name: "Review unused attachments" });
   await screen.findByRole("checkbox", { name: "Select Unused trace" });
