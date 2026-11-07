@@ -24,7 +24,6 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -38,6 +37,7 @@ import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
 import { useContext, useRef, type RefObject } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
@@ -123,9 +123,9 @@ export function WorkspaceSidebar({
   // While the workspace graph is open no other entry reads as current.
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
-  const { state, toggleSidebar } = useSidebar();
+  const { sidebarCollapsed } = usePreferences();
   // The sheet below 768px is never collapsed to icons.
-  const collapsed = !isMobile && state === "collapsed";
+  const collapsed = !isMobile && sidebarCollapsed;
   const newTrigger = useRef<HTMLButtonElement>(null);
   // Choosing an item moves focus on its own; dismissing the menu returns it to New.
   const chose = useRef(false);
@@ -135,7 +135,8 @@ export function WorkspaceSidebar({
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
-      className={collapsed ? "sidebar sidebar-collapsed" : "sidebar"}
+      className="sidebar"
+      data-collapsed={collapsed || undefined}
       closeOnAction
     >
       <SidebarHeader className="sidebar-header">
@@ -143,9 +144,8 @@ export function WorkspaceSidebar({
           <strong>ticketd</strong>
           {!isMobile && (
             <IconButton
-              className="collapse-sidebar"
               label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={toggleSidebar}
+              onClick={() => setPreference("sidebarCollapsed", !collapsed)}
             >
               {collapsed ? (
                 <PanelLeftOpen aria-hidden="true" />
