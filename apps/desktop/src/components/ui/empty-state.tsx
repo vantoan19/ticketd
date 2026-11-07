@@ -85,7 +85,7 @@ export function EmptyState({
       role={role}
       className={cn("gap-3 p-6 text-wrap md:p-6", className)}
     >
-      <EmptyHeader className="max-w-[380px] gap-1">
+      <EmptyHeader className="max-w-95 gap-1">
         {icon && (
           <EmptyMedia
             variant="icon"

@@ -2093,7 +2093,8 @@ test("the ticket detail bounds its height so the document and rail can scroll on
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
-  const panel = container.querySelector<HTMLElement>(".detail-panel")!;
+  const panel =
+    container.querySelector<HTMLElement>(".ticket-detail")!.parentElement!;
   // The panel clips; if it scrolled, its child would have no bounded height.
   expect(panel.style.overflow).toBe("hidden");
   expect(panel.style.display).toBe("flex");

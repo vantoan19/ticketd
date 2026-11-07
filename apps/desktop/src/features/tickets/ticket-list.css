@@ -134,23 +134,8 @@
   align-self: center;
   width: 16px;
   height: 16px;
+  overflow: hidden;
   border-radius: var(--radius-pill);
-}
-.ticket-skeleton-ref {
-  align-self: center;
-  width: 36px;
-  height: 12px;
-}
-.ticket-skeleton-title {
-  align-self: center;
-  height: 14px;
-}
-.ticket-skeleton-meta {
-  grid-column: 3;
-  align-self: center;
-  width: 96px;
-  height: 10px;
-  margin-block: 3px;
 }
 .bulk-controls {
   position: sticky;

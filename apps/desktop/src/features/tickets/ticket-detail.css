@@ -22,6 +22,9 @@
 }
 /* A narrow detail keeps the header on one line: the reference copy is also in
    Ticket actions, and the reminder keeps its bell and accessible name. */
+.copy-reference {
+  display: inline-flex;
+}
 @container ticket-detail (max-width: 460px) {
   .detail-header .copy-reference,
   .detail-header .reminder-label {

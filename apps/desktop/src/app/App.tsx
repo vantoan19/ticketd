@@ -327,7 +327,6 @@ function AppContent() {
                   {isMobile && view !== "settings" && (
                     <div className="mobile-nav-bar">
                       <SidebarTrigger
-                        className="mobile-nav-trigger"
                         variant="ghost"
                         size="sm"
                         aria-label="Open navigation"

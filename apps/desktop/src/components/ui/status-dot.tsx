@@ -12,6 +12,16 @@ export type StatusDotTone =
   | "positive"
   | "attention";
 
+const TONE_COLOR: Record<StatusDotTone, string> = {
+  ready: "bg-status-ready",
+  checked: "bg-status-checked",
+  blocked: "bg-status-blocked",
+  unread: "bg-status-unread",
+  neutral: "bg-status-neutral",
+  positive: "bg-status-ready",
+  attention: "bg-status-blocked",
+};
+
 /** A small colored dot. Always place it beside a word; color alone carries no meaning. */
 export function StatusDot({
   tone,
@@ -28,7 +38,8 @@ export function StatusDot({
       data-slot="status-dot"
       data-tone={tone}
       className={cn(
-        "inline-block shrink-0 rounded-full bg-(--status-dot-color) data-[tone=ready]:[--status-dot-color:var(--status-ready)] data-[tone=checked]:[--status-dot-color:var(--status-checked)] data-[tone=blocked]:[--status-dot-color:var(--status-blocked)] data-[tone=unread]:[--status-dot-color:var(--status-unread)] data-[tone=neutral]:[--status-dot-color:var(--status-neutral)] data-[tone=positive]:[--status-dot-color:var(--status-ready)] data-[tone=attention]:[--status-dot-color:var(--status-blocked)]",
+        "inline-block shrink-0 rounded-full",
+        TONE_COLOR[tone],
         className,
       )}
       style={{ width: size, height: size }}

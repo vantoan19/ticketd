@@ -399,7 +399,6 @@ export function TicketProperties({
             <Button
               variant="link"
               size="sm"
-              className="duplicate-of-link"
               onClick={() => onOpenTicket?.(ticket.duplicate_of!)}
             >
               Duplicate of {ticket.duplicate_of}
@@ -412,7 +411,6 @@ export function TicketProperties({
             <Button
               variant="link"
               size="sm"
-              className="duplicate-of-link"
               onClick={() => onOpenTicket?.(resolvedTarget)}
             >
               Open {resolvedTarget}

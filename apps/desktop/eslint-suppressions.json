@@ -1,25 +1,17 @@
 {
-  "src/app/App.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/components/layout/WorkspaceSidebar.tsx": {
     "shadcn/no-restyle": {
       "count": 8
     }
   },
   "src/components/ui/command.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    },
     "shadcn/no-restyle": {
       "count": 8
     }
   },
   "src/components/ui/dialog-shell.tsx": {
     "shadcn/no-arbitrary-values": {
-      "count": 4
+      "count": 2
     },
     "shadcn/no-restyle": {
       "count": 6
@@ -27,20 +19,15 @@
   },
   "src/components/ui/dialog.tsx": {
     "shadcn/no-arbitrary-values": {
-      "count": 5
+      "count": 1
     },
     "shadcn/no-restyle": {
       "count": 1
     }
   },
-  "src/components/ui/dropdown-menu.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 2
-    }
-  },
   "src/components/ui/empty-state.tsx": {
     "shadcn/no-arbitrary-values": {
-      "count": 2
+      "count": 1
     },
     "shadcn/no-restyle": {
       "count": 12
@@ -49,11 +36,6 @@
   "src/components/ui/field.tsx": {
     "shadcn/no-restyle": {
       "count": 10
-    }
-  },
-  "src/components/ui/kbd.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
     }
   },
   "src/components/ui/picker.tsx": {
@@ -66,26 +48,11 @@
       "count": 5
     }
   },
-  "src/components/ui/segmented-control.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    }
-  },
-  "src/components/ui/select.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 3
-    }
-  },
   "src/components/ui/sidebar.tsx": {
     "shadcn/no-arbitrary-values": {
-      "count": 11
+      "count": 10
     },
     "shadcn/no-restyle": {
-      "count": 7
-    }
-  },
-  "src/components/ui/status-dot.tsx": {
-    "shadcn/no-arbitrary-values": {
       "count": 7
     }
   },
@@ -96,7 +63,7 @@
   },
   "src/components/ui/tooltip.tsx": {
     "shadcn/no-arbitrary-values": {
-      "count": 2
+      "count": 1
     }
   },
   "src/features/documents/DocumentEditor.tsx": {
@@ -138,9 +105,6 @@
     }
   },
   "src/features/settings/RestoreDialog.tsx": {
-    "shadcn/no-arbitrary-values": {
-      "count": 1
-    },
     "shadcn/no-restyle": {
       "count": 1
     }
@@ -217,7 +181,7 @@
   },
   "src/features/tickets/TicketBoard.tsx": {
     "shadcn/no-restyle": {
-      "count": 2
+      "count": 1
     }
   },
   "src/features/tickets/TicketDocuments.tsx": {
@@ -237,7 +201,7 @@
   },
   "src/features/tickets/TicketHeader.tsx": {
     "shadcn/no-restyle": {
-      "count": 6
+      "count": 3
     }
   },
   "src/features/tickets/TicketList.tsx": {
@@ -252,17 +216,12 @@
   },
   "src/features/tickets/TicketProperties.tsx": {
     "shadcn/no-restyle": {
-      "count": 4
-    }
-  },
-  "src/features/tickets/TicketRowsSkeleton.tsx": {
-    "shadcn/no-restyle": {
-      "count": 4
+      "count": 2
     }
   },
   "src/features/tickets/TicketWorkspaceView.tsx": {
     "shadcn/no-restyle": {
-      "count": 8
+      "count": 6
     }
   }
 }
