@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export const representativeMarkdown = `# Document editing\n\nSelect **some text** for formatting, or type / for a block. 日本語 café 🧭\n\n3. A numbered item\n   - Nested bullet\n4. Another item\n\n- [x] Completed checklist item\n- [ ] Remaining checklist item\n\n| Name | Value |\n| :--- | ---: |\n| Escaped \\| pipe | 42 |\n\n\`\`\`typescript\nconst greeting = "Hello";\n\`\`\`\n\n\`\`\`mermaid\ngraph TD\n  Draft --> Review\n  Review --> Done\n\`\`\`\n`;
@@ -122,7 +127,7 @@ export function PlatePrototype() {
             <AlertDescription>
               Your local draft is preserved. Autosave is paused.
             </AlertDescription>
-            <div className="flex gap-2">
+            <AlertActions>
               <Button
                 size="sm"
                 onClick={() => {
@@ -139,7 +144,7 @@ export function PlatePrototype() {
               >
                 Save my draft
               </Button>
-            </div>
+            </AlertActions>
           </Alert>
         )}
         <MarkdownEditor

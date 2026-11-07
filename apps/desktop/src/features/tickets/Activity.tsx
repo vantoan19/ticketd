@@ -622,7 +622,7 @@ export function Activity({
         </Alert>
       )}
       {(error || loadError) && (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertDescription>{error || loadError}</AlertDescription>
         </Alert>
       )}

@@ -335,17 +335,6 @@
   box-shadow: var(--shadow-border-base);
   overflow: hidden;
 }
-.plan-callout {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--muted);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.plan-callout button {
-  text-decoration: underline;
-}
 .plan-dependency-rows,
 .plan-blockers ul {
   display: flex;
