@@ -17,6 +17,10 @@ const statusIcons: Record<string, LucideIcon> = {
   Duplicate: CircleEqual,
 };
 
+/** The glyph of a status; Canceled and Duplicate never share Done’s. */
+export const statusIconFor = (status: string): LucideIcon =>
+  statusIcons[status] ?? Circle;
+
 /** The icon for a ticket status. Named by the status unless it sits beside the status word. */
 export function StatusIcon({
   status,

@@ -1068,7 +1068,7 @@ export function Activity({
             ) : (
               <EventRow
                 key={`history-${item.index}`}
-                icon={historyIcon(item.entry.kind)}
+                icon={historyIcon(item.entry.kind, item.entry.to_value)}
                 meta={
                   <>
                     ·{" "}

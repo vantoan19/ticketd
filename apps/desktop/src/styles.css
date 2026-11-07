@@ -632,6 +632,9 @@ body:has([data-slot="dialog-overlay"])
   background: var(--control-boundary);
   opacity: 0.35;
 }
+.ui-timeline[data-plain]::before {
+  display: none;
+}
 .ui-timeline > li {
   position: relative;
   z-index: 1;

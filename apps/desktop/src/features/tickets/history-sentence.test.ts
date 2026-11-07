@@ -77,3 +77,20 @@ test("source and publication history explain observations without inventing an i
     "Imported from acme/api#98",
   );
 });
+
+test("history icons never give Canceled, Duplicate or source changes the completed look", async () => {
+  const { historyIcon } = await import("./history-icon");
+  const { statusIconFor } = await import("./StatusIcon");
+  expect(historyIcon("status", "Canceled")).toBe(statusIconFor("Canceled"));
+  expect(historyIcon("status", "Duplicate")).not.toBe(statusIconFor("Done"));
+  expect(historyIcon("status", "In progress")).not.toBe(
+    historyIcon("status", "In review"),
+  );
+  for (const kind of [
+    "external_duplicate",
+    "ownership",
+    "publication_unresolved",
+    "future:kind",
+  ])
+    expect(historyIcon(kind)).not.toBe(statusIconFor("Done"));
+});

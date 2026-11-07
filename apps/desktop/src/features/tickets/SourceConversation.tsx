@@ -146,7 +146,7 @@ export function SourceConversation({
         />
       )}
       {entries && entries.length > 0 && (
-        <Timeline aria-label="Conversation">
+        <Timeline plain aria-label="Conversation">
           {entries.map((entry) =>
             entry.type === "comment" ? (
               <li key={`${entry.type}-${entry.id}`}>
