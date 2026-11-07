@@ -188,14 +188,6 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.board-empty {
-  padding: 24px 12px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
 .ticket-workspace.board-layout.board-unselected #list {
   flex: 1 1 0 !important;
 }

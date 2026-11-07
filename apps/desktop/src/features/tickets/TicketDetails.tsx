@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -6,6 +7,7 @@ import type { MentionTarget } from "@/features/tickets/Backlinks";
 import type { FollowedMention } from "@/features/tickets/useTicketWorkspace";
 import type { Plan } from "@/lib/api/plans";
 import { TicketPage } from "@/features/tickets/TicketPage";
+import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 type NoteTarget = { id: string; key: number };
 
 /** Two ways to arrive at a note (the Inbox, a backlink); the later one wins. */
@@ -69,6 +71,8 @@ export function TicketDetails({
       document.getElementById("detail-heading")?.focus();
     }
   }, [selected]);
+  const pane = useRef<HTMLElement>(null);
+  const narrow = useNarrowPane(pane);
   const [graphReference, setGraphReference] = useState<string | null>(null);
   // The graph belongs to the ticket it opened from; selecting another closes it.
   const graphOpen = graphReference !== null && graphReference === selected;
@@ -91,6 +95,7 @@ export function TicketDetails({
   );
   return (
     <section
+      ref={pane}
       className="ticket-detail"
       data-expanded={expanded || undefined}
       data-graph={graphOpen || undefined}
@@ -139,19 +144,23 @@ export function TicketDetails({
           </p>
         )}
         {selected === null && (
-          <div className="detail-empty">
-            <p>Select a ticket to read it here</p>
-            <p className="detail-empty-hint">
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
-            </p>
-          </div>
+          <EmptyState
+            size="hint"
+            title="Select a ticket to read it here"
+            footnote={
+              <>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
+              </>
+            }
+          />
         )}
         {Object.values(details).map((item) => (
           <TicketPage
             key={item.id}
             ticket={item}
             active={item.reference === selected}
+            narrow={narrow}
             projects={projects}
             plans={plans}
             revision={revision}

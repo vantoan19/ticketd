@@ -178,9 +178,6 @@
 .folder-path[data-empty="true"] {
   color: var(--muted-foreground);
 }
-.projects-empty {
-  margin-top: 16px;
-}
 .project-open-tickets {
   color: var(--muted-foreground);
 }

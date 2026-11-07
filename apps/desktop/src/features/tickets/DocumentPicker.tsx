@@ -92,7 +92,7 @@ export function DocumentPicker({
       </ul>
       {results !== null && shown.length === 0 && !error && (
         <EmptyState
-          inline
+          size="inline"
           role="status"
           icon={<FileText />}
           title={

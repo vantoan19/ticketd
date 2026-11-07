@@ -124,7 +124,7 @@ export function AddTicketsDialog({
         )}
         {results && results.length === 0 && !searchError && !done && (
           <EmptyState
-            inline
+            size="inline"
             icon={<SearchX />}
             title="No tickets to add"
             description="Nothing matches this search."
