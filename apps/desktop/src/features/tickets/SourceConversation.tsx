@@ -1,4 +1,5 @@
 import { Card, CardHeader } from "@/components/ui/card";
+import { EventRow, Timeline } from "@/components/ui/timeline";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState } from "react";
 import {
@@ -141,10 +142,10 @@ export function SourceConversation({
         </p>
       )}
       {entries && entries.length > 0 && (
-        <ol className="source-conversation-list">
-          {entries.map((entry) => (
-            <li key={`${entry.type}-${entry.id}`}>
-              {entry.type === "comment" ? (
+        <Timeline aria-label="Conversation">
+          {entries.map((entry) =>
+            entry.type === "comment" ? (
+              <li key={`${entry.type}-${entry.id}`}>
                 <Card asChild>
                   <article
                     aria-label={`Comment by ${entry.author} on ${name}, read-only`}
@@ -182,18 +183,23 @@ export function SourceConversation({
                     </div>
                   </article>
                 </Card>
-              ) : (
-                <EventRow entry={entry} name={name} now={now} />
-              )}
-            </li>
-          ))}
-        </ol>
+              </li>
+            ) : (
+              <SourceEvent
+                key={`${entry.type}-${entry.id}`}
+                entry={entry}
+                name={name}
+                now={now}
+              />
+            ),
+          )}
+        </Timeline>
       )}
     </section>
   );
 }
 
-function EventRow({
+function SourceEvent({
   entry,
   name,
   now,
@@ -202,22 +208,21 @@ function EventRow({
   name: string;
   now: number;
 }) {
-  const { text, icon: Icon } = describeEvent(entry);
+  const { text, icon } = describeEvent(entry);
   return (
-    <div className="source-event">
-      <span className="source-event-icon" aria-hidden="true">
-        <Icon size={16} />
-      </span>
-      <span className="source-event-text">
-        <strong>{entry.actor ?? "Someone"}</strong>
-        {text.slice((entry.actor ?? "Someone").length)} on {name}
-      </span>
-      <time
-        dateTime={entry.created_at}
-        title={formatDateTime(entry.created_at)}
-      >
-        {relativeDateTime(entry.created_at, now)}
-      </time>
-    </div>
+    <EventRow
+      icon={icon}
+      meta={
+        <time
+          dateTime={entry.created_at}
+          title={formatDateTime(entry.created_at)}
+        >
+          {relativeDateTime(entry.created_at, now)}
+        </time>
+      }
+    >
+      <strong>{entry.actor ?? "Someone"}</strong>
+      {text.slice((entry.actor ?? "Someone").length)} on {name}
+    </EventRow>
   );
 }

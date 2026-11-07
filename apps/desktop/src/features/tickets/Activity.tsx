@@ -27,7 +27,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Bot, FileText, MoreHorizontal, Plus, History } from "lucide-react";
+import { Bot, FileText, MoreHorizontal, Plus } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { EventRow, Timeline } from "@/components/ui/timeline";
 import {
   client,
   type AuthoredActivity,
@@ -35,7 +38,13 @@ import {
   type Project,
 } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
-import { historySentence } from "./history-sentence";
+import {
+  describeAdditions,
+  historySentence,
+  isAddition,
+} from "./history-sentence";
+import type { Entry } from "@/lib/api/history";
+import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
 import { revealInDetail } from "./detail-scroll";
@@ -215,9 +224,23 @@ export function Activity({
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
   );
-  const history = feed.flatMap((item) =>
-    item.type === "automatic" ? [item.event] : [],
-  );
+  // Additions of one kind by one agent in the same second share one row.
+  const history = feed
+    .flatMap((item) => (item.type === "automatic" ? [item.event] : []))
+    .reduce<{ entry: Entry; values: string[] }[]>((rows, entry) => {
+      const together = isAddition(entry)
+        ? rows.find(
+            (row) =>
+              isAddition(row.entry) &&
+              row.entry.kind === entry.kind &&
+              row.entry.editing_agent === entry.editing_agent &&
+              row.entry.timestamp.slice(0, 19) === entry.timestamp.slice(0, 19),
+          )
+        : undefined;
+      if (together) together.values.push(entry.to_value);
+      else rows.push({ entry, values: [entry.to_value] });
+      return rows;
+    }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<Draft>(() => loadDraft(ticketId));
@@ -556,10 +579,11 @@ export function Activity({
       timestamp: note.reported_at,
       note,
     })),
-    ...history.map((entry, index) => ({
+    ...history.map(({ entry, values }, index) => ({
       type: "history" as const,
       timestamp: entry.timestamp,
       entry,
+      values,
       index,
     })),
   ]
@@ -894,12 +918,11 @@ export function Activity({
           </EmptyHeader>
         </Empty>
       ) : (
-        <ol className="activity-list">
+        <Timeline aria-label="Activity timeline">
           {entries.map((item) =>
             item.type === "note" ? (
               <li
                 key={`note-${item.note.id}`}
-                className="activity-entry"
                 ref={
                   active &&
                   item.note.id === targetId &&
@@ -922,133 +945,158 @@ export function Activity({
                     : undefined
                 }
               >
-                <div className="activity-meta">
-                  <Bot aria-hidden="true" className="activity-author-icon" />
-                  <strong>{item.note.editing_agent ?? "You"}</strong>
-                  <span>
-                    update ·{" "}
-                    <time
-                      dateTime={item.note.reported_at}
-                      title={formatDateTime(item.note.reported_at)}
-                    >
-                      {relativeDateTime(item.note.reported_at, now)}
-                    </time>
-                  </span>
-                  {item.note.id === (newestNoteId ?? latestNoteId) && (
-                    <span className="activity-latest">Latest</span>
-                  )}
-                  {item.note.updated_at !== item.note.reported_at && (
-                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
-                  )}
-                  {!trashed && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                <Card>
+                  <CardHeader>
+                    <span className="activity-author">
+                      <Bot aria-hidden="true" size={14} />
+                      <strong>{item.note.editing_agent ?? "You"}</strong>
+                      <span>
+                        update ·{" "}
+                        <time
+                          dateTime={item.note.reported_at}
+                          title={formatDateTime(item.note.reported_at)}
+                        >
+                          {relativeDateTime(item.note.reported_at, now)}
+                        </time>
+                      </span>
+                    </span>
+                    <span className="activity-header-end">
+                      {item.note.id === (newestNoteId ?? latestNoteId) && (
+                        <Badge size="sm">Latest</Badge>
+                      )}
+                      {item.note.updated_at !== item.note.reported_at && (
+                        <span>
+                          Edited {formatDateTime(item.note.updated_at)}
+                        </span>
+                      )}
+                      {!trashed && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              disabled={pending}
+                              aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            onCloseAutoFocus={(event) => {
+                              // Focus goes to the composer, not back to the menu button.
+                              if (replied.current) {
+                                event.preventDefault();
+                                replied.current = false;
+                                setFocusUpdate((count) => count + 1);
+                              }
+                            }}
+                          >
+                            <DropdownMenuItem
+                              disabled={!!edit}
+                              onSelect={() => reply(item.note.brief)}
+                            >
+                              Reply
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() =>
+                                setEdit({
+                                  id: item.note.id,
+                                  original: item.note.brief,
+                                  content: item.note.brief,
+                                })
+                              }
+                            >
+                              Edit update
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              onSelect={() => setConfirmDelete(item.note.id)}
+                            >
+                              Delete update
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </span>
+                  </CardHeader>
+                  {confirmDelete === item.note.id && (
+                    <CardBody asChild>
+                      <p role="alertdialog" className="activity-confirm">
+                        {item.note.supporting_document_id
+                          ? "Delete update? Its details stay in Documents."
+                          : "Delete update?"}
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          disabled={pending}
+                          onClick={() => void remove(item.note.id)}
+                        >
+                          Delete update
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
-                          size="icon-sm"
-                          className="activity-menu"
-                          disabled={pending}
-                          aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
+                          size="sm"
+                          onClick={() => setConfirmDelete(null)}
                         >
-                          <MoreHorizontal />
+                          Keep update
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        onCloseAutoFocus={(event) => {
-                          // Focus goes to the composer, not back to the menu button.
-                          if (replied.current) {
-                            event.preventDefault();
-                            replied.current = false;
-                            setFocusUpdate((count) => count + 1);
-                          }
-                        }}
-                      >
-                        <DropdownMenuItem
-                          disabled={!!edit}
-                          onSelect={() => reply(item.note.brief)}
-                        >
-                          Reply
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            setEdit({
-                              id: item.note.id,
-                              original: item.note.brief,
-                              content: item.note.brief,
-                            })
-                          }
-                        >
-                          Edit update
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setConfirmDelete(item.note.id)}
-                        >
-                          Delete update
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      </p>
+                    </CardBody>
                   )}
-                </div>
-                {confirmDelete === item.note.id && (
-                  <p role="alertdialog" className="activity-confirm">
-                    {item.note.supporting_document_id
-                      ? "Delete update? Its details stay in Documents."
-                      : "Delete update?"}
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      disabled={pending}
-                      onClick={() => void remove(item.note.id)}
-                    >
-                      Delete update
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setConfirmDelete(null)}
-                    >
-                      Keep update
-                    </Button>
-                  </p>
-                )}
-                <ClampedBrief>
-                  <MarkdownDocument
-                    source={item.note.brief}
-                    select={select}
-                    revision={revision}
-                  />
-                </ClampedBrief>
-                {item.note.supporting_document_id && (
-                  <DetailsLink
-                    info={detailDocuments[item.note.supporting_document_id]}
-                    open={() =>
-                      openDocument?.(item.note.supporting_document_id!)
-                    }
-                  />
-                )}
+                  <CardBody>
+                    <ClampedBrief>
+                      <MarkdownDocument
+                        source={item.note.brief}
+                        select={select}
+                        revision={revision}
+                      />
+                    </ClampedBrief>
+                  </CardBody>
+                  {item.note.supporting_document_id && (
+                    <CardBody>
+                      <DetailsLink
+                        info={detailDocuments[item.note.supporting_document_id]}
+                        open={() =>
+                          openDocument?.(item.note.supporting_document_id!)
+                        }
+                      />
+                    </CardBody>
+                  )}
+                </Card>
               </li>
             ) : (
-              <li key={`history-${item.index}`} className="activity-history">
-                <History aria-hidden="true" className="activity-history-icon" />
-                <span>{historySentence(item.entry, lookups)}</span>
-                <time
-                  dateTime={item.entry.timestamp}
-                  title={formatDateTime(item.entry.timestamp)}
-                >
-                  {relativeDateTime(item.entry.timestamp, now)}
-                </time>
-                {item.entry.editing_agent && (
-                  <span>{attribution(item.entry.editing_agent)}</span>
-                )}
-              </li>
+              <EventRow
+                key={`history-${item.index}`}
+                icon={historyIcon(item.entry.kind)}
+                meta={
+                  <>
+                    ·{" "}
+                    <time
+                      dateTime={item.entry.timestamp}
+                      title={formatDateTime(item.entry.timestamp)}
+                    >
+                      {relativeDateTime(item.entry.timestamp, now)}
+                    </time>
+                    {item.entry.editing_agent && (
+                      <>
+                        {" "}
+                        · <span>{attribution(item.entry.editing_agent)}</span>
+                      </>
+                    )}
+                  </>
+                }
+              >
+                {item.values.length > 1
+                  ? describeAdditions(item.entry.kind, item.values)
+                  : historySentence(item.entry, lookups)}
+              </EventRow>
             ),
           )}
-        </ol>
+        </Timeline>
       )}
       {more && (
         <Button
