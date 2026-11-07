@@ -27,6 +27,7 @@ pub enum PreviewStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct AttachmentPreview {
     pub attachment: Attachment,
+    pub uploaded_copy: bool,
     pub status: PreviewStatus,
     pub media_type: Option<String>,
     pub message: Option<String>,
@@ -108,6 +109,7 @@ impl Workspace {
         };
         let can_open = self.attachment_open_target(id).is_ok();
         Ok(AttachmentPreview {
+            uploaded_copy: self.drive_uploaded_copy(id)?.is_some(),
             attachment,
             status,
             media_type,

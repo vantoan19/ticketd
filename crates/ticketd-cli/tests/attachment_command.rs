@@ -333,6 +333,34 @@ fn cli_replays_a_completed_drive_upload_with_the_source_and_desktop_absent() {
         run(dir.path(), &["attachment", "drive-uploads"])[0]["attachment_id"],
         file.id
     );
+    let status = run(dir.path(), &["attachment", "drive-copy-status", &file.id]);
+    assert_eq!(status["status"], "unavailable");
+    assert_eq!(status["last_known"]["name"], "trace.log");
+    assert!(status["message"].as_str().unwrap().contains("secure store"));
+    let ticket = run(dir.path(), &["create", "Export unavailable copy"]);
+    run(
+        dir.path(),
+        &[
+            "attachment",
+            "link",
+            &file.id,
+            ticket["reference"].as_str().unwrap(),
+        ],
+    );
+    let exported = run(
+        dir.path(),
+        &[
+            "export-markdown",
+            "--ticket",
+            ticket["reference"].as_str().unwrap(),
+            "--output",
+            dir.path().to_str().unwrap(),
+        ],
+    );
+    assert_eq!(exported["status"], "partial");
+    assert_eq!(exported["attachments"][0]["kind"], "uploaded_copy");
+    assert_eq!(exported["attachments"][0]["copy_status"], "unavailable");
+    assert!(exported["attachments"][0]["path"].is_null());
 }
 
 #[test]

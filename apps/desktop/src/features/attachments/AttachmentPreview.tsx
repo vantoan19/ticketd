@@ -12,6 +12,7 @@ import {
   attachments,
   type Attachment,
   type PreviewInfo,
+  type DriveCopyInspection,
 } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
@@ -106,6 +107,7 @@ export function AttachmentPreview({
     "initial" in target ? (target.initial ?? null) : null,
   );
   const [info, setInfo] = useState<PreviewInfo | null>(null);
+  const [copy, setCopy] = useState<DriveCopyInspection | null>(null);
   const [workspace, setWorkspace] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -133,6 +135,11 @@ export function AttachmentPreview({
       setWorkspace(owningWorkspace);
       setFile(preview.attachment);
       setInfo(preview);
+      setCopy(null);
+      if (preview.attachment.kind === "external_reference") {
+        const inspection = await attachments.inspectDriveCopy(resolved);
+        if (generation.current === current) setCopy(inspection);
+      }
     })().catch((reason: unknown) => {
       if (generation.current === current) setError(String(reason));
     });
@@ -168,6 +175,7 @@ export function AttachmentPreview({
       .catch(() => {});
   }
   const external = file?.kind === "external_reference";
+  const uploadedCopy = info?.uploaded_copy === true || copy !== null;
   const available = !external && info?.status === "available" && !failed;
   return (
     <Dialog
@@ -182,7 +190,9 @@ export function AttachmentPreview({
             <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
             <DialogDescription>
               {external
-                ? "Google Drive · External reference"
+                ? uploadedCopy
+                  ? "Google Drive · Uploaded copy"
+                  : "Google Drive · External reference"
                 : "Local snapshot"}
               {file?.size_bytes != null
                 ? ` · ${formatSize(file.size_bytes)}`
@@ -202,7 +212,7 @@ export function AttachmentPreview({
                 </Button>
                 {external && workspace && (
                   <ExportMarkdownButton
-                    label="Export link"
+                    label={uploadedCopy ? "Export" : "Export link"}
                     source={{
                       kind: "markdown",
                       body: `<ticketd://attachment/${workspace}/${file.id}>`,
@@ -237,16 +247,25 @@ export function AttachmentPreview({
               <div className="attachment-preview-fallback">
                 <File aria-hidden="true" />
                 <h3>
-                  {info?.status === "missing"
-                    ? "The local file could not be found"
-                    : info?.status === "incomplete"
-                      ? "Stored bytes are incomplete"
-                      : info || error
-                        ? "Preview unavailable"
-                        : "Loading preview…"}
+                  {copy
+                    ? {
+                        changed: "This copy has changed in Drive",
+                        unchanged: "Uploaded copy · Metadata matches upload",
+                        unknown: "Original-upload comparison unknown",
+                        unsupported: "Original-byte download unsupported",
+                        unavailable: "Uploaded copy unavailable",
+                      }[copy.status]
+                    : info?.status === "missing"
+                      ? "The local file could not be found"
+                      : info?.status === "incomplete"
+                        ? "Stored bytes are incomplete"
+                        : info || error
+                          ? "Preview unavailable"
+                          : "Loading preview…"}
                 </h3>
                 <p>
-                  {info?.message ??
+                  {copy?.message ??
+                    info?.message ??
                     (failed
                       ? "This media could not be displayed. Try again, or open or export it explicitly."
                       : "Its identity, name and references are preserved.")}
@@ -292,7 +311,10 @@ export function AttachmentPreview({
               <>
                 <dl className="attachment-metadata">
                   {external ? (
-                    <DriveReferenceDetails id={file.id} />
+                    <DriveReferenceDetails
+                      id={file.id}
+                      uploadedCopy={uploadedCopy}
+                    />
                   ) : (
                     <>
                       <dt>Type</dt>

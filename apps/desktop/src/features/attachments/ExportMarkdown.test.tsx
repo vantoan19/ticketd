@@ -21,6 +21,54 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+test("mixed export distinguishes verified uploaded copies from changed omissions", async () => {
+  vi.mocked(open).mockResolvedValue("C:/sharing");
+  vi.mocked(invoke).mockResolvedValue({
+    format_version: 1,
+    status: "partial",
+    directory: "C:/sharing/export",
+    markdown_path: "content.md",
+    manifest_path: "manifest.json",
+    attachments: [
+      {
+        uri: "ticketd://attachment/workspace/copy",
+        attachment_id: "copy",
+        kind: "uploaded_copy",
+        display_name: "Original.log",
+        original_filename: "trace.log",
+        path: "files/copy-trace.log",
+        external_url: null,
+        omission: null,
+        copy_status: "unchanged",
+      },
+      {
+        uri: "ticketd://attachment/workspace/changed",
+        attachment_id: "changed",
+        kind: "uploaded_copy",
+        display_name: "Changed.log",
+        original_filename: "trace.log",
+        path: null,
+        external_url: null,
+        omission: "Changed bytes were omitted; open in Drive or retry.",
+        copy_status: "changed",
+      },
+    ],
+  });
+  render(
+    <ExportMarkdownButton source={{ kind: "ticket", reference: "T-1" }} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Export Markdown with files" }),
+  );
+  await screen.findByRole("dialog", { name: "Export partially complete" });
+  expect(
+    screen.getByText("Verified uploaded copy · files/copy-trace.log"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Changed bytes were omitted; open in Drive or retry."),
+  ).toBeTruthy();
+});
+
 test("exports selected content and reports partial omissions without changing its source", async () => {
   vi.mocked(open).mockResolvedValue("C:/sharing");
   vi.mocked(invoke).mockResolvedValue({

@@ -96,6 +96,8 @@ enum AttachmentCommand {
     Inspect { id: String },
     /// Last-known Drive metadata and opaque connection handle; no network needed
     DriveInfo { id: String },
+    /// Compare current metadata with uploaded-copy provenance; never downloads bytes
+    DriveCopyStatus { id: String },
     /// Upload a new blob copy to an explicitly authorized writable Drive folder
     DriveUpload {
         path: String,
@@ -2187,6 +2189,14 @@ fn attachment_command(
                 &transport,
             );
             serde_json::to_string(&workspace.resolve_drive_reference(&id, &provider)?)?
+        }
+        AttachmentCommand::DriveCopyStatus { id } => {
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let provider = ticketd_core::drive::GoogleDriveCopies::new(
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            serde_json::to_string(&workspace.inspect_drive_uploaded_copy(&id, &provider)?)?
         }
         AttachmentCommand::Usage { id } => {
             serde_json::to_string(&workspace.attachment_usage(&id)?)?
