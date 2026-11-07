@@ -991,6 +991,25 @@ silently broadens `drive.file`, substitutes another file or caches remote bytes.
 
 ## 19. Google Drive uploads
 
+Settings > Attachments configures one workspace upload destination: Local workspace
+or an explicitly selected writable Google Drive folder. Changes apply immediately
+to newly created operations, without moving existing bytes. Failed folder validation,
+offline access or a read-only folder leaves the saved preference unchanged. The
+folder is checked again before upload; provider failure never switches to local.
+
+The shared insertion flow displays the destination and binds each new operation
+before uploading. Each queued, interrupted or completed operation keeps that choice
+through preference changes, retry and restart, including older local capture queues.
+An explicit per-operation choice does not change the workspace preference.
+
+`attachment destination` reads the same preference without network access;
+`attachment destination --local` selects local storage. `attachment destination
+--drive --connection <handle> --folder <id> [--resource-key KEY]` validates and saves
+a writable authorized folder. `attachment add` uses the default for a new request,
+and its original destination for a retry. `attachment add --local` explicitly chooses
+local storage for a new operation without changing the default. A conflicting choice
+on an existing request ID is rejected; use a new ID for a deliberate alternative.
+
 In the shared Upload flow, Choose Drive folder opens the system-browser Picker
 for one folder. The core verifies that it is writable before selection is accepted
 and again before each upload. File selection, drop and screenshot capture use the

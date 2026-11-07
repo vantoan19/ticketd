@@ -21,6 +21,7 @@ import {
   type UploadProgress,
   type DriveUploadDestination,
   type DriveConfiguration,
+  type AttachmentUploadDestination,
 } from "@/lib/api/attachments";
 import "@/features/tickets/ticket-attachments.css";
 import { useNativeFileDrop } from "./use-native-file-drop";
@@ -28,6 +29,7 @@ import { UploadRecovery, type UploadRecord } from "./upload-recovery";
 import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
+  intent?: AttachmentUploadDestination | null;
   state:
     "queued" | "uploading" | "attaching" | "inserted" | "failed" | "canceled";
   progress: UploadProgress;
@@ -65,8 +67,19 @@ export function AttachmentPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [limit, setLimit] = useState<number | null>(null);
-  const [destination, setDestination] = useState<DriveUploadDestination>();
-  const [folderName, setFolderName] = useState("");
+  const [workspaceDestination, setWorkspaceDestination] =
+    useState<AttachmentUploadDestination | null>(null);
+  const [explicitDestination, setExplicitDestination] =
+    useState<AttachmentUploadDestination | null>(null);
+  const displayedDestination = explicitDestination ?? workspaceDestination;
+  const destination: DriveUploadDestination | undefined =
+    displayedDestination?.kind === "google_drive"
+      ? displayedDestination.destination
+      : undefined;
+  const folderName =
+    displayedDestination?.kind === "google_drive"
+      ? displayedDestination.folder_name
+      : "";
   const [folderConfiguration, setFolderConfiguration] =
     useState<DriveConfiguration | null>(null);
   const folderSelection = useRef<string | null>(null);
@@ -129,6 +142,7 @@ export function AttachmentPicker({
   function changeOpen(next: boolean) {
     if (!next) {
       insertion.current += 1;
+      setExplicitDestination(null);
       if (folderSelection.current)
         void attachments
           .cancelDriveSelection(folderSelection.current)
@@ -139,6 +153,17 @@ export function AttachmentPicker({
   useEffect(() => {
     if (!open) return;
     let current = true;
+    void attachments
+      .uploadDestination()
+      .then((value) => {
+        if (current) setWorkspaceDestination(value);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setError(
+            `Could not read the upload destination: ${String(reason)}. New uploads must resolve their destination before starting.`,
+          );
+      });
     void attachments
       .uploadLimit()
       .then((value) => {
@@ -166,6 +191,7 @@ export function AttachmentPicker({
         update();
         try {
           const journal = await loadRecovery();
+          await bindDestination(next);
           if (!next.stored && typeof next.source !== "string") {
             const bound = await attachments.uploadLimit();
             if (next.source.size > bound)
@@ -248,7 +274,7 @@ export function AttachmentPicker({
       );
       return;
     }
-    const started = Date.now();
+    const started = (attempts.current.at(-1)?.order ?? 0) + 1;
     let index = 0;
     const batch: UploadAttempt[] = sources.map((source) => ({
       source,
@@ -259,7 +285,7 @@ export function AttachmentPicker({
       order: started + index++ / 1000,
       requestId: crypto.randomUUID(),
       linkRequestId: crypto.randomUUID(),
-      ...(destination ? { destination, destinationName: folderName } : {}),
+      intent: explicitDestination,
       state: "queued",
       progress: {
         copied: 0,
@@ -273,6 +299,7 @@ export function AttachmentPicker({
     // files queued behind a slow upload when the application is interrupted.
     for (const row of batch) {
       try {
+        await bindDestination(row);
         if (typeof row.source !== "string") {
           const bound = await attachments.uploadLimit();
           if (row.source.size > bound)
@@ -288,6 +315,16 @@ export function AttachmentPicker({
     }
     update();
     void run();
+  }
+  async function bindDestination(row: UploadAttempt) {
+    if (row.intent === undefined) return;
+    const bound = await attachments.beginUpload(row.requestId, row.intent);
+    if (bound.kind === "google_drive") {
+      row.destination = bound.destination;
+      row.destinationName = bound.folder_name;
+    }
+    if (!row.intent) setWorkspaceDestination(bound);
+    delete row.intent;
   }
   const dropFailure = useNativeFileDrop(
     dropTarget,
@@ -324,8 +361,11 @@ export function AttachmentPicker({
       folderSelection.current = operationId;
       const selected = await attachments.chooseDriveFolder(operationId);
       if (insertion.current === currentInsertion) {
-        setDestination(selected.destination);
-        setFolderName(selected.folder.name);
+        setExplicitDestination({
+          kind: "google_drive",
+          destination: selected.destination,
+          folder_name: selected.folder.name,
+        });
       }
     } catch (reason) {
       setError(String(reason));
@@ -423,9 +463,11 @@ export function AttachmentPicker({
                 {single ? "Choose file" : "Choose files"}
               </Button>
               <small>
-                {destination
-                  ? `Destination: Google Drive · ${folderName}`
-                  : "Destination: Local workspace"}
+                {!displayedDestination
+                  ? "Reading upload destination…"
+                  : destination
+                    ? `Destination: Google Drive · ${folderName}`
+                    : "Destination: Local workspace"}
               </small>
               <div className="attachment-actions">
                 <Button
@@ -440,8 +482,7 @@ export function AttachmentPicker({
                     variant="ghost"
                     disabled={busy}
                     onClick={() => {
-                      setDestination(undefined);
-                      setFolderName("");
+                      setExplicitDestination({ kind: "local" });
                     }}
                   >
                     Use local for new uploads

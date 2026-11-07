@@ -38,13 +38,16 @@ test.each(["close", "navigate"])(
       complete = resolve;
     });
     vi.mocked(invoke).mockImplementation(async (command) =>
-      command === "attachment_workspace_id"
-        ? "workspace-test"
-        : command === "attachment_upload_limit"
-          ? 104857600
-          : command === "import_attachment"
-            ? stored
-            : [],
+      command === "attachment_upload_destination" ||
+      command === "begin_attachment_upload"
+        ? { kind: "local" }
+        : command === "attachment_workspace_id"
+          ? "workspace-test"
+          : command === "attachment_upload_limit"
+            ? 104857600
+            : command === "import_attachment"
+              ? stored
+              : [],
     );
     const view = render(
       <TicketAttachments
@@ -86,7 +89,10 @@ const file = {
 test("a direct preview replaces only its selected ticket association through the atomic operation", async () => {
   const replacement = { ...file, id: "new-file", display_name: "New trace" };
   let replaced = false;
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments")
@@ -144,7 +150,10 @@ test("a direct preview replaces only its selected ticket association through the
 test("the rail uploads through the native picker, then associates the stored snapshot", async () => {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let linked = false;
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments") return linked ? [file] : [];
@@ -181,7 +190,10 @@ test("the rail uploads through the native picker, then associates the stored sna
 test("a failed association retains the completed upload and retry links the same ID", async () => {
   vi.mocked(open).mockResolvedValue("C:/trace.log");
   let attempts = 0;
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return (args as { explicit?: unknown })?.explicit ?? { kind: "local" };
     if (command === "attachment_workspace_id") return "workspace-test";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "ticket_attachments") return attempts > 1 ? [file] : [];

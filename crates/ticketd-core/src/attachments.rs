@@ -197,6 +197,7 @@ impl Workspace {
                 "supply a filename without directories or drive/stream syntax".into(),
             ));
         }
+        self.begin_attachment_upload(request_id, Some(crate::AttachmentUploadDestination::Local))?;
         let root = self.attachment_directory()?;
         fs::create_dir_all(&root)?;
         let _upload_lock = lock_uploads(&root)?;

@@ -4,6 +4,378 @@ use ticketd_core::{Workspace, drive::*};
 const CONNECTION: &str = "81aa7bfb-05c3-4934-a4e7-5c84e2cb83ec";
 
 #[test]
+#[ignore = "requires preserved actual schema54 CLI in TICKETD_SCHEMA54_CLI"]
+fn real_schema54_upgrade_keeps_legacy_destinations_and_complete_recovery() {
+    use ticketd_core::AttachmentUploadDestination;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"original bytes").unwrap();
+    let old_cli =
+        std::env::var_os("TICKETD_SCHEMA54_CLI").expect("supply the preserved schema54 CLI");
+    let old = |args: &[&str]| {
+        let result = std::process::Command::new(&old_cli)
+            .env("TICKETD_TEST_WORKSPACE", &path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&result.stdout).unwrap()
+    };
+    let original: ticketd_core::Attachment = serde_json::from_value(old(&[
+        "attachment",
+        "add",
+        source.to_str().unwrap(),
+        "--request-id",
+        "legacy-local",
+    ]))
+    .unwrap();
+    let orphan: ticketd_core::Attachment = serde_json::from_value(old(&[
+        "attachment",
+        "add",
+        source.to_str().unwrap(),
+        "--request-id",
+        "legacy-manifest",
+    ]))
+    .unwrap();
+    let uri = old(&["attachment", "uri", &original.id]);
+    let document = old(&[
+        "document",
+        "create",
+        "--body",
+        &format!("[Literal label]({})", uri.as_str().unwrap()),
+    ]);
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        fixture
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        54
+    );
+    // Fault injection: completed bytes/manifest survived but registration did not.
+    fixture
+        .execute(
+            "DELETE FROM request_outcomes WHERE id='legacy-manifest'",
+            [],
+        )
+        .unwrap();
+    fixture
+        .execute("DELETE FROM attachments WHERE id=?1", [&orphan.id])
+        .unwrap();
+    // Historical provider-boundary fixture, using the pre55 serialized journal contract.
+    let operation = DriveUploadOperation {
+        request_id: "legacy-drive".into(),
+        attachment_id: uuid::Uuid::new_v4().to_string(),
+        remote_file_id: Some("reserved-file".into()),
+        request: DriveUploadRequest {
+            destination: destination(),
+            filename: "trace.log".into(),
+            size_bytes: 14,
+            sha256: "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698".into(),
+        },
+        state: DriveUploadState::Uncertain,
+        provenance: None,
+    };
+    fixture
+        .execute(
+            "INSERT INTO drive_upload_operations VALUES (?1,?2,?3)",
+            rusqlite::params![
+                operation.request_id,
+                operation.attachment_id,
+                serde_json::to_string(&operation).unwrap()
+            ],
+        )
+        .unwrap();
+    drop(fixture);
+    std::fs::remove_file(&source).unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let mut next_folder = destination();
+    next_folder.folder_id = "new-folder".into();
+    let new_default = workspace
+        .set_drive_upload_destination(&next_folder, &Provider::default())
+        .unwrap();
+    for request in ["legacy-local", "legacy-manifest"] {
+        assert_eq!(
+            workspace.begin_attachment_upload(request, None).unwrap(),
+            AttachmentUploadDestination::Local
+        );
+    }
+    assert_eq!(
+        workspace
+            .import_attachment("legacy-local", &source, None)
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        workspace
+            .import_attachment("legacy-manifest", &source, None)
+            .unwrap(),
+        orphan
+    );
+    assert_eq!(
+        workspace
+            .embedded_attachments(document["id"].as_str().unwrap())
+            .unwrap(),
+        vec![original.clone()]
+    );
+    let backup = dir.path().join("complete.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let restored_path = dir.path().join("restored.db");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let mut restored = Workspace::open(&restored_path).unwrap();
+    assert_eq!(
+        restored.attachment_upload_destination().unwrap(),
+        new_default
+    );
+    restored.set_local_upload_destination().unwrap();
+    assert!(
+        matches!(restored.begin_attachment_upload("legacy-drive", None).unwrap(), AttachmentUploadDestination::GoogleDrive { destination: selected, .. } if selected == destination())
+    );
+    assert_eq!(restored.drive_upload("legacy-drive").unwrap(), operation);
+    let exported = dir.path().join("restored.log");
+    restored.export_attachment(&original.id, &exported).unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"original bytes");
+    let safety = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("pre-migration")
+        })
+        .unwrap();
+    assert!(
+        workspace
+            .inspect_backup(&safety)
+            .unwrap()
+            .attachment_content
+            .is_some()
+    );
+    let safety_target = dir.path().join("safety-restored.db");
+    Workspace::restore(&safety_target, &safety).unwrap();
+    let safety_workspace = Workspace::open(safety_target).unwrap();
+    assert_eq!(safety_workspace.attachment(&original.id).unwrap(), original);
+    assert_eq!(safety_workspace.attachment(&orphan.id).unwrap(), orphan);
+}
+
+#[test]
+fn workspace_upload_preference_persists_and_failed_validation_preserves_it() {
+    use ticketd_core::AttachmentUploadDestination;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let selected = workspace
+        .set_drive_upload_destination(&destination(), &Provider::default())
+        .unwrap();
+    assert!(
+        matches!(&selected, AttachmentUploadDestination::GoogleDrive { folder_name, .. } if folder_name == "Uploads")
+    );
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.attachment_upload_destination().unwrap(), selected);
+    let offline = Provider {
+        folder_offline: true,
+        ..Provider::default()
+    };
+    assert!(
+        workspace
+            .set_drive_upload_destination(&destination(), &offline)
+            .unwrap_err()
+            .to_string()
+            .contains("offline")
+    );
+    assert_eq!(workspace.attachment_upload_destination().unwrap(), selected);
+    let readonly = Provider {
+        readonly: true,
+        ..Provider::default()
+    };
+    assert!(
+        workspace
+            .set_drive_upload_destination(&destination(), &readonly)
+            .unwrap_err()
+            .to_string()
+            .contains("writable")
+    );
+    let mut invalid = destination();
+    invalid.folder_id = "../invalid".into();
+    assert!(
+        workspace
+            .set_drive_upload_destination(&invalid, &Provider::default())
+            .is_err()
+    );
+    assert_eq!(workspace.attachment_upload_destination().unwrap(), selected);
+    workspace.set_local_upload_destination().unwrap();
+    assert_eq!(
+        Workspace::open(&path)
+            .unwrap()
+            .attachment_upload_destination()
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+}
+
+#[test]
+fn new_uploads_bind_the_preference_once_across_changes_restart_and_explicit_overrides() {
+    use ticketd_core::AttachmentUploadDestination;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("local-capture", None)
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let drive = workspace
+        .set_drive_upload_destination(&destination(), &Provider::default())
+        .unwrap();
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("drive-capture", None)
+            .unwrap(),
+        drive
+    );
+    workspace.set_local_upload_destination().unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("drive-capture", None)
+            .unwrap(),
+        drive
+    );
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("local-capture", None)
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("new-capture", None)
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    assert!(
+        workspace
+            .begin_attachment_upload("drive-capture", Some(AttachmentUploadDestination::Local))
+            .is_err()
+    );
+    workspace
+        .set_drive_upload_destination(&destination(), &Provider::default())
+        .unwrap();
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("explicit-local", Some(AttachmentUploadDestination::Local))
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let restored_path = dir.path().join("restored.db");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let mut restored = Workspace::open(restored_path).unwrap();
+    assert_eq!(restored.attachment_upload_destination().unwrap(), drive);
+    assert_eq!(
+        restored
+            .begin_attachment_upload("local-capture", None)
+            .unwrap(),
+        AttachmentUploadDestination::Local
+    );
+}
+
+#[test]
+fn bound_destinations_cannot_be_changed_by_other_upload_adapters_or_concurrent_preferences() {
+    use ticketd_core::AttachmentUploadDestination;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.db");
+    let source = dir.path().join("trace.log");
+    std::fs::write(&source, b"original bytes").unwrap();
+    let mut workspace = Workspace::open(&path).unwrap();
+    let mut other = Workspace::open(&path).unwrap();
+    let provider = Provider::default();
+    let drive = workspace
+        .set_drive_upload_destination(&destination(), &provider)
+        .unwrap();
+    workspace
+        .begin_attachment_upload("drive-bound", None)
+        .unwrap();
+    assert!(
+        workspace
+            .import_attachment("drive-bound", &source, None)
+            .is_err()
+    );
+    let file = workspace
+        .upload_drive_file("drive-bound", &source, &destination(), &provider, |_, _| {
+            other.set_local_upload_destination().unwrap();
+            true
+        })
+        .unwrap();
+    assert_eq!(
+        workspace
+            .begin_attachment_upload("drive-bound", None)
+            .unwrap(),
+        drive
+    );
+    assert_eq!(
+        workspace
+            .drive_uploaded_copy(&file.id)
+            .unwrap()
+            .unwrap()
+            .request
+            .destination,
+        destination()
+    );
+    assert_eq!(
+        workspace.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+    workspace
+        .begin_attachment_upload("local-bound", None)
+        .unwrap();
+    assert!(
+        workspace
+            .upload_drive_file("local-bound", &source, &destination(), &provider, |_, _| {
+                true
+            })
+            .is_err()
+    );
+    assert!(workspace.drive_upload("local-bound").is_err());
+    assert_eq!(provider.ids.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn reserved_upload_identity_cannot_be_claimed_by_an_unrelated_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    workspace.begin_attachment_upload("reserved", None).unwrap();
+    assert!(
+        workspace
+            .write(
+                Some("reserved"),
+                ticketd_core::WriteRequest::CreateTicket {
+                    title: "Unrelated".into(),
+                    project_id: None
+                }
+            )
+            .is_err()
+    );
+}
+
+#[test]
 #[ignore = "requires the preserved schema51 executable in TICKETD_SCHEMA51_CLI"]
 fn real_schema51_upgrade_preserves_local_receipts_references_and_complete_safety_backup() {
     let dir = tempfile::tempdir().unwrap();
@@ -103,6 +475,7 @@ struct Provider {
     fail_before: std::sync::atomic::AtomicBool,
     fail_after: bool,
     readonly: bool,
+    folder_offline: bool,
     unverified: bool,
     database: Option<std::path::PathBuf>,
     allocation_failed: bool,
@@ -111,6 +484,12 @@ struct Provider {
 #[allow(clippy::unwrap_used)] // Fixture failures must fail the test, never become provider errors.
 impl DriveUploadProvider for Provider {
     fn folder(&self, id: &str, _: Option<&str>) -> Result<DriveFolder, DriveError> {
+        if self.folder_offline {
+            return Err(DriveError::new(
+                DriveErrorKind::Offline,
+                "Drive is offline; retry or choose local explicitly",
+            ));
+        }
         Ok(DriveFolder {
             id: id.into(),
             name: "Uploads".into(),

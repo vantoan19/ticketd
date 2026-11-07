@@ -52,7 +52,9 @@ pub(crate) fn copy(source: &Connection, destination: &mut Connection) -> Result<
 }
 
 /// Each table a ticketd workspace has, with the format version that added it.
-const TABLES: [(&str, i64); 52] = [
+const TABLES: [(&str, i64); 54] = [
+    ("attachment_upload_destinations", 55),
+    ("attachment_upload_destination", 55),
     ("drive_upload_operations", 52),
     ("drive_references", 51),
     ("attachment_draft_cutover", 50),

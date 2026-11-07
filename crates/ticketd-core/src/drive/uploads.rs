@@ -276,6 +276,13 @@ impl Workspace {
                 "supply a valid upload request ID and filename".into(),
             ));
         }
+        self.begin_attachment_upload(
+            request_id,
+            Some(crate::AttachmentUploadDestination::GoogleDrive {
+                destination: destination.clone(),
+                folder_name: destination.folder_id.clone(),
+            }),
+        )?;
         // Cross-process ownership has no lease expiry during a slow network request.
         // Process exit releases this lock; all DB transactions remain short.
         let _lock = self.drive_upload_lock(request_id)?;
