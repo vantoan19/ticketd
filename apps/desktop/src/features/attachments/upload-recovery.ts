@@ -13,6 +13,7 @@ const recordSchema = z.object({
   source: z.union([z.string(), z.instanceof(File)]),
   stored: attachmentSchema.optional(),
   destination: driveDestinationSchema.optional(),
+  destinationName: z.string().optional(),
 });
 export type UploadRecord = z.infer<typeof recordSchema>;
 

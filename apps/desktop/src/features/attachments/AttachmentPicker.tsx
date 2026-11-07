@@ -255,7 +255,7 @@ export function AttachmentPicker({
       order: started + index++ / 1000,
       requestId: crypto.randomUUID(),
       linkRequestId: crypto.randomUUID(),
-      ...(destination ? { destination } : {}),
+      ...(destination ? { destination, destinationName: folderName } : {}),
       state: "queued",
       progress: {
         copied: 0,
@@ -488,7 +488,8 @@ export function AttachmentPicker({
                       )}
                       {row.destination && (
                         <p className="attachment-hint">
-                          Google Drive · Folder {row.destination.folder_id} ·
+                          Google Drive ·{" "}
+                          {row.destinationName || "Selected upload folder"} ·
                           Uploaded copy · Original bytes are not guaranteed. Any
                           completed file remains in Drive.
                         </p>

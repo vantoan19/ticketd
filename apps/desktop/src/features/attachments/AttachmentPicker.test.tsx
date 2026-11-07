@@ -189,7 +189,7 @@ test("explicit local fallback uses a new operation and retains the original Driv
   ).toBeTruthy();
   first.unmount();
   render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
-  await screen.findByText(/Folder original-folder/);
+  await screen.findByText(/Google Drive · Uploads · Uploaded copy/);
   expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
   expect(
     vi
