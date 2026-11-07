@@ -866,7 +866,7 @@ Activity details remain uses; deleting an Activity removes its brief use while
 preserving its supporting Document and its files. Cleanup must check eligibility
 again when it executes.
 
-**Reclaim local storage** opens an explicit review in the attachment library,
+**Clean up** opens an explicit local-storage review in the attachment library,
 including eligibility reasons and protected references. Chosen unused local files
 move to reversible quarantine; no automatic deletion occurs. The Quarantine filter
 keeps their metadata discoverable and Restore makes the same identity reusable.

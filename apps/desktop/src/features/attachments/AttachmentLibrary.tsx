@@ -63,7 +63,7 @@ export function AttachmentLibrary({
           </div>
           <div className="attachment-actions">
             <Button variant="outline" onClick={() => setCleanup(true)}>
-              Reclaim local storage
+              Clean up
             </Button>
             <Button onClick={() => setPicker(true)}>
               <Plus aria-hidden="true" />

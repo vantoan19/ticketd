@@ -72,7 +72,7 @@ test("explicit local cleanup reviews protections and restores quarantine", async
             ],
           },
         },
-      ];
+      ].reverse();
     if (command === "quarantine_attachment") {
       quarantined = true;
       return { ...file, quarantined };
@@ -87,15 +87,25 @@ test("explicit local cleanup reviews protections and restores quarantine", async
   await screen.findByRole("button", { name: "Unused trace" });
   expect(screen.getByRole("columnheader", { name: "Added" })).toBeTruthy();
   fireEvent.click(
-    screen.getByRole("button", { name: "Reclaim local storage" }),
+    screen.getByRole("button", { name: "Clean up", exact: true }),
   );
   await screen.findByRole("dialog", { name: "Review unused attachments" });
-  expect(
-    await screen.findByText("Protected by recoverable draft"),
-  ).toBeTruthy();
+  await screen.findByRole("checkbox", { name: "Select Unused trace" });
+  const protections = screen.getByText("Protected or unavailable (1)");
+  expect(protections.closest("details")).toHaveProperty("open", false);
+  fireEvent.click(protections);
+  expect(screen.getByText("Protected · Recoverable draft")).toBeTruthy();
+  expect(screen.queryByText("Protected by recoverable draft")).toBeNull();
   expect(
     screen.getByRole("checkbox", { name: "Select Draft trace" }),
   ).toHaveProperty("disabled", true);
+  expect(
+    screen
+      .getByRole("checkbox", { name: "Select Unused trace" })
+      .compareDocumentPosition(
+        screen.getByRole("checkbox", { name: "Select Draft trace" }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select Unused trace" }),
   );
