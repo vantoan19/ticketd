@@ -1197,8 +1197,8 @@ body:has([data-slot="dialog-overlay"])
   align-items: center;
   gap: 4px;
 }
-/* The reading column and the property rail. The rail moves below the column
-   when the detail pane is narrower than 652px; see properties.css. */
+/* The reading column and the property rail. Below 652px the rail is
+   replaced by a chip bar under the title; see properties.css. */
 .detail-content {
   min-height: 100%;
   display: grid;
