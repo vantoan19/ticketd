@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,8 +42,7 @@ export function Subtickets({
   const summary = `${done} of ${total} done`;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
-      <div className="detail-section-heading">
-        <h3 id={headingId}>Subtickets</h3>
+      <SectionHeader title="Subtickets" titleId={headingId} actions={add}>
         {total > 0 && (
           <>
             <Progress
@@ -53,8 +53,7 @@ export function Subtickets({
             <span className="subtickets-summary">{summary}</span>
           </>
         )}
-        {add}
-      </div>
+      </SectionHeader>
       {external && (
         <p className="source-caption">
           Subtickets are local. Publishing never includes them.
