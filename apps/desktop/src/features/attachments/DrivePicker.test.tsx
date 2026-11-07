@@ -221,7 +221,7 @@ test.each(["inline", "library"])(
       },
       output: "C:/sharing",
     });
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("button", { name: "Export link" }),
