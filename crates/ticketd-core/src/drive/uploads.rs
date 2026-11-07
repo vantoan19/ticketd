@@ -417,7 +417,7 @@ impl Workspace {
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
-            "INSERT INTO attachments(id,display_name,original_filename,size_bytes,kind,locator) VALUES (?1,?2,?2,?3,'external_reference',?4) ON CONFLICT(id) DO NOTHING",
+            "INSERT INTO attachments(id,display_name,original_filename,size_bytes,kind,locator,added_at) VALUES (?1,?2,?2,?3,'external_reference',?4,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING",
             params![
                 operation.attachment_id,
                 operation.request.filename,
