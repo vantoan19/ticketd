@@ -307,242 +307,264 @@ export function TicketListPane({
                     onCreate(trigger, status),
                 })}
             />
-          ) : queryError ? (
-            <EmptyState
-              role="alert"
-              icon={<AlertCircle />}
-              title="Could not load tickets"
-              description="Try refreshing the current view."
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void refresh()}
-                >
-                  Retry
-                </Button>
-              }
-            />
-          ) : loading && tickets.length === 0 ? (
-            <TicketRowsSkeleton />
-          ) : tickets.length === 0 ? (
-            trash ? (
-              <EmptyState
-                icon={<Trash2 />}
-                title="Trash is empty"
-                description="Trashed tickets wait here until you restore them."
-              />
-            ) : filtered ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={
-                  query ? `No tickets match “${query}”` : "No matching tickets"
-                }
-                description={
-                  query
-                    ? `Searched titles, descriptions and updates in ${scopeName}${
-                        filterCount
-                          ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
-                          : ""
-                      }.`
-                    : "Nothing matches the current filters."
-                }
-                action={
-                  query || tags || status || availability || family || plan ? (
-                    <>
-                      {query && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setQuery("");
-                            setOffset(0);
-                          }}
-                        >
-                          Clear search
-                        </Button>
-                      )}
-                      {(tags || status || availability || family || plan) && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={clearFilters}
-                        >
-                          Clear filters
-                        </Button>
-                      )}
-                    </>
-                  ) : undefined
-                }
-              />
-            ) : planScope ? (
-              <EmptyState
-                icon={<Layers />}
-                title="No tickets in this Plan"
-                description="Start with a new ticket, or bring in existing ones."
-                action={
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={(event) => onCreate(event.currentTarget)}
-                    >
-                      <Plus data-icon="inline-start" /> Create ticket
-                    </Button>
+          ) : (
+            <div className="ticket-scroll">
+              {queryError ? (
+                <EmptyState
+                  role="alert"
+                  icon={<AlertCircle />}
+                  title="Could not load tickets"
+                  description="Try refreshing the current view."
+                  action={
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => planState.setAdding(true)}
+                      onClick={() => void refresh()}
                     >
-                      Add existing tickets
+                      Retry
                     </Button>
-                  </>
-                }
-              />
-            ) : navigation.project !== "all" ||
-              navigation.plan ||
-              navigation.kind !== "all" ? (
-              <EmptyState
-                icon={<TicketIcon />}
-                title="No tickets in this scope"
-                description="Create a ticket or choose another view."
-                action={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(event) => onCreate(event.currentTarget)}
-                  >
-                    Create ticket
-                  </Button>
-                }
-              />
-            ) : (
-              <EmptyState
-                icon={<TicketIcon />}
-                title="Your workspace is ready"
-                description="Create your first ticket to start keeping track of work."
-                action={
-                  <Button
-                    size="sm"
-                    onClick={(event) => onCreate(event.currentTarget)}
-                  >
-                    <Plus data-icon="inline-start" /> Create your first ticket
-                  </Button>
-                }
-              />
-            )
-          ) : (
-            <>
-              {showBulk && bulk.selection.length > 0 && (
-                // The bar is last in the page but is the next thing to reach.
-                <a
-                  className="skip-link"
-                  href="#bulk-controls"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    document.getElementById("bulk-controls")?.focus();
-                  }}
-                >
-                  Skip to selection actions
-                </a>
-              )}
-              <TicketList
-                tickets={visibleTickets}
-                scope={{
-                  showPlan: !navigation.plan,
-                  showProject: navigation.project === "all",
-                  plans,
-                  projects,
-                }}
-                selected={selected}
-                readyView={navigation.kind === "ready"}
-                simple={ticketRows === "simple"}
-                // A status filter keeps its group header (board C); only the
-                // dedicated Ready and In progress views drop it.
-                singleStatus={
-                  navigation.kind === "ready" || navigation.kind === "progress"
-                }
-                {...(grouped &&
-                  counts && {
-                    grouping: {
-                      counts,
-                      ...(!addDisabled && {
-                        onAdd: (status: string, trigger: HTMLButtonElement) => {
-                          if (status === "Duplicate") setMarkingDuplicate(true);
-                          else onCreate(trigger, status);
-                        },
-                      }),
-                    },
-                  })}
-                selectable={!trash}
-                selectionDisabled={bulk.pending}
-                bulkSelection={bulk.selection}
-                onToggle={bulk.toggle}
-                onOpen={onOpen}
-                {...(scopedPlan &&
-                  planWritable && {
-                    rowAction: (ticket: Ticket) => (
+                  }
+                />
+              ) : loading && tickets.length === 0 ? (
+                <TicketRowsSkeleton />
+              ) : tickets.length === 0 ? (
+                trash ? (
+                  <EmptyState
+                    icon={<Trash2 />}
+                    title="Trash is empty"
+                    description="Trashed tickets wait here until you restore them."
+                  />
+                ) : filtered ? (
+                  <EmptyState
+                    icon={<SearchX />}
+                    title={
+                      query
+                        ? `No tickets match “${query}”`
+                        : "No matching tickets"
+                    }
+                    description={
+                      query
+                        ? `Searched titles, descriptions and updates in ${scopeName}${
+                            filterCount
+                              ? `, with ${filterCount} ${filterCount === 1 ? "filter" : "filters"} on`
+                              : ""
+                          }.`
+                        : "Nothing matches the current filters."
+                    }
+                    action={
+                      query ||
+                      tags ||
+                      status ||
+                      availability ||
+                      family ||
+                      plan ? (
+                        <>
+                          {query && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setQuery("");
+                                setOffset(0);
+                              }}
+                            >
+                              Clear search
+                            </Button>
+                          )}
+                          {(tags ||
+                            status ||
+                            availability ||
+                            family ||
+                            plan) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={clearFilters}
+                            >
+                              Clear filters
+                            </Button>
+                          )}
+                        </>
+                      ) : undefined
+                    }
+                  />
+                ) : planScope ? (
+                  <EmptyState
+                    icon={<Layers />}
+                    title="No tickets in this Plan"
+                    description="Start with a new ticket, or bring in existing ones."
+                    action={
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={(event) => onCreate(event.currentTarget)}
+                        >
+                          <Plus data-icon="inline-start" /> Create ticket
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => planState.setAdding(true)}
+                        >
+                          Add existing tickets
+                        </Button>
+                      </>
+                    }
+                  />
+                ) : navigation.project !== "all" ||
+                  navigation.plan ||
+                  navigation.kind !== "all" ? (
+                  <EmptyState
+                    icon={<TicketIcon />}
+                    title="No tickets in this scope"
+                    description="Create a ticket or choose another view."
+                    action={
                       <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={planState.pending}
-                        aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
-                        title="Remove from Plan"
-                        onClick={() =>
-                          void planState
-                            .run(() =>
-                              plansClient.setMember(ticket.reference, null),
-                            )
-                            .then((done) => {
-                              if (done)
-                                setRemoved({
-                                  reference: ticket.reference,
-                                  plan: scopedPlan.id,
-                                  name: scopedPlan.name,
-                                });
-                            })
-                        }
+                        variant="outline"
+                        size="sm"
+                        onClick={(event) => onCreate(event.currentTarget)}
                       >
-                        <X />
+                        Create ticket
                       </Button>
-                    ),
-                  })}
-              />
-            </>
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={<TicketIcon />}
+                    title="Your workspace is ready"
+                    description="Create your first ticket to start keeping track of work."
+                    action={
+                      <Button
+                        size="sm"
+                        onClick={(event) => onCreate(event.currentTarget)}
+                      >
+                        <Plus data-icon="inline-start" /> Create your first
+                        ticket
+                      </Button>
+                    }
+                  />
+                )
+              ) : (
+                <>
+                  {showBulk && bulk.selection.length > 0 && (
+                    // The bar is last in the page but is the next thing to reach.
+                    <a
+                      className="skip-link"
+                      href="#bulk-controls"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        document.getElementById("bulk-controls")?.focus();
+                      }}
+                    >
+                      Skip to selection actions
+                    </a>
+                  )}
+                  <TicketList
+                    tickets={visibleTickets}
+                    scope={{
+                      showPlan: !navigation.plan,
+                      showProject: navigation.project === "all",
+                      plans,
+                      projects,
+                    }}
+                    selected={selected}
+                    readyView={navigation.kind === "ready"}
+                    simple={ticketRows === "simple"}
+                    // A status filter keeps its group header (board C); only the
+                    // dedicated Ready and In progress views drop it.
+                    singleStatus={
+                      navigation.kind === "ready" ||
+                      navigation.kind === "progress"
+                    }
+                    {...(grouped &&
+                      counts && {
+                        grouping: {
+                          counts,
+                          ...(!addDisabled && {
+                            onAdd: (
+                              status: string,
+                              trigger: HTMLButtonElement,
+                            ) => {
+                              if (status === "Duplicate")
+                                setMarkingDuplicate(true);
+                              else onCreate(trigger, status);
+                            },
+                          }),
+                        },
+                      })}
+                    selectable={!trash}
+                    selectionDisabled={bulk.pending}
+                    bulkSelection={bulk.selection}
+                    onToggle={bulk.toggle}
+                    onOpen={onOpen}
+                    {...(scopedPlan &&
+                      planWritable && {
+                        rowAction: (ticket: Ticket) => (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={planState.pending}
+                            aria-label={`Remove ${ticket.reference} from ${scopedPlan.name}`}
+                            title="Remove from Plan"
+                            onClick={() =>
+                              void planState
+                                .run(() =>
+                                  plansClient.setMember(ticket.reference, null),
+                                )
+                                .then((done) => {
+                                  if (done)
+                                    setRemoved({
+                                      reference: ticket.reference,
+                                      plan: scopedPlan.id,
+                                      name: scopedPlan.name,
+                                    });
+                                })
+                            }
+                          >
+                            <X />
+                          </Button>
+                        ),
+                      })}
+                  />
+                </>
+              )}
+              {!trash &&
+                workspace.layout === "list" &&
+                (offset > 0 || total > PAGE_SIZE) && (
+                  <div className="pagination">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      ref={previousButton}
+                      disabled={offset === 0}
+                      onClick={() => {
+                        paged.current = "previous";
+                        setOffset(Math.max(0, offset - PAGE_SIZE));
+                      }}
+                    >
+                      Previous
+                    </Button>
+                    <span>
+                      {" "}
+                      Showing {offset + 1}–{offset + tickets.length} of{" "}
+                      {total}{" "}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      ref={nextButton}
+                      disabled={offset + tickets.length >= total}
+                      onClick={() => {
+                        paged.current = "next";
+                        setOffset(offset + PAGE_SIZE);
+                      }}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                )}
+            </div>
           )}
-          {!trash &&
-            workspace.layout === "list" &&
-            (offset > 0 || total > PAGE_SIZE) && (
-              <div className="pagination">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  ref={previousButton}
-                  disabled={offset === 0}
-                  onClick={() => {
-                    paged.current = "previous";
-                    setOffset(Math.max(0, offset - PAGE_SIZE));
-                  }}
-                >
-                  Previous
-                </Button>
-                <span>
-                  {" "}
-                  Showing {offset + 1}–{offset + tickets.length} of {total}{" "}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  ref={nextButton}
-                  disabled={offset + tickets.length >= total}
-                  onClick={() => {
-                    paged.current = "next";
-                    setOffset(offset + PAGE_SIZE);
-                  }}
-                >
-                  Next
-                </Button>
-              </div>
-            )}
         </>
       }
       <MarkDuplicateDialog

@@ -39,7 +39,7 @@ it("the Plan list toolbar shrinks its summary, not its Filter control", () => {
   expect(plan).toMatch(
     /[.]plan-list-toolbar > :not[(][^)]*[)] [{]\s*flex: none;/,
   );
-  expect(rule(".ticket-list")).toMatch(/overflow-x: hidden;/);
+  expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });
 
 it("the split switches on the content panel's width, not the window's", () => {
@@ -60,4 +60,17 @@ it("Progress stays visible under forced colours", () => {
   expect(css).toMatch(
     /@media [(]forced-colors: active[)] [{][^]*?[.]ui-progress [{][^}]*border: 1px solid CanvasText;/,
   );
+});
+
+it("the window never scrolls and only the list rows scroll under a fixed header", () => {
+  // The pane is a clipping column; if it were the scroller, the header would
+  // scroll away with the rows.
+  expect(rule(".ticket-list")).toMatch(/display: flex;/);
+  expect(rule(".ticket-list")).toMatch(/flex-direction: column;/);
+  expect(rule(".ticket-list")).toMatch(/overflow: hidden;/);
+  expect(rule(".ticket-list")).not.toMatch(/overflow-y: auto;/);
+  expect(rule(".ticket-scroll")).toMatch(/flex: 1 1 0;/);
+  expect(rule(".ticket-scroll")).toMatch(/min-height: 0;/);
+  expect(rule(".ticket-scroll")).toMatch(/overflow-y: auto;/);
+  expect(rule(".ticket-scroll")).toMatch(/overflow-x: hidden;/);
 });

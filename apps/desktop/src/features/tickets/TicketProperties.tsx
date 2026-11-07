@@ -285,6 +285,16 @@ export function TicketProperties({
       <RailSection label={label}>{feedback}</RailSection>
     );
   }
+  // The rail shows it under Status; the chip bar gives it its own line after the chips.
+  const latestUpdate = (ticket.status === "In progress" ||
+    ticket.status === "In review") && (
+    <LatestUpdate
+      reference={ticket.reference}
+      active={active}
+      revision={revision}
+      onOpen={onOpenNote}
+    />
+  );
   const Container = chips ? "div" : "aside";
   return (
     <Container
@@ -427,14 +437,7 @@ export function TicketProperties({
           )}
         </>,
       )}
-      {(ticket.status === "In progress" || ticket.status === "In review") && (
-        <LatestUpdate
-          reference={ticket.reference}
-          active={active}
-          revision={revision}
-          onOpen={onOpenNote}
-        />
-      )}
+      {!chips && latestUpdate}
       <ConfirmLeaveDuplicate
         canonical={ticket.duplicate_of ?? ""}
         status={leaving}
@@ -573,6 +576,7 @@ export function TicketProperties({
         <small role="status">{vocabularyError}</small>
       )}
       {children}
+      {chips && latestUpdate}
     </Container>
   );
 }

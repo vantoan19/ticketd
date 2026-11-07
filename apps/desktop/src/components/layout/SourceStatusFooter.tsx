@@ -37,13 +37,25 @@ export function SourceStatusFooter() {
                     : state === "partial"
                       ? `${name} partly refreshed`
                       : `${name} not synced yet`;
+        // The line under the label; the collapsed sidebar hides it, so the
+        // tooltip repeats it.
+        const detail =
+          state === "refreshing"
+            ? !status.tracked_tickets
+              ? `Checking ${name} tickets`
+              : `Checking ${status.tracked_tickets} ${name} ${status.tracked_tickets === 1 ? "ticket" : "tickets"}`
+            : warning
+              ? synced
+                ? `${name} last synced ${synced}`
+                : "Showing saved content"
+              : `${synced ?? "Not synced yet"}${intervalSecs ? ` · every ${Math.round(intervalSecs / 60)} min` : ""}`;
         return (
           <div className="sidebar-source" key={status.provider}>
             <button
               type="button"
               className="sidebar-source-line"
               onClick={openSettings}
-              title={`${label}. Open ${name} settings`}
+              title={`${label}. ${detail}. Open ${name} settings`}
             >
               <span className="sidebar-source-label">
                 {state !== "refreshing" && (
@@ -60,17 +72,7 @@ export function SourceStatusFooter() {
                 )}
                 {label}
               </span>
-              <small>
-                {state === "refreshing"
-                  ? !status.tracked_tickets
-                    ? `Checking ${name} tickets`
-                    : `Checking ${status.tracked_tickets} ${name} ${status.tracked_tickets === 1 ? "ticket" : "tickets"}`
-                  : warning
-                    ? synced
-                      ? `${name} last synced ${synced}`
-                      : "Showing saved content"
-                    : `${synced ?? "Not synced yet"}${intervalSecs ? ` · every ${Math.round(intervalSecs / 60)} min` : ""}`}
-              </small>
+              <small>{detail}</small>
             </button>
             {warning && (
               <Button

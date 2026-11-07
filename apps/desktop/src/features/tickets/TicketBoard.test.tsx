@@ -480,7 +480,9 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
     clientWidth: { configurable: true, value: 560 },
   });
   const column = screen.getByRole("region", { name: "In progress column" });
-  expect(within(column).getByText("No In progress tickets")).toBeTruthy();
+  // The column header names the status, so every empty column reads alike and
+  // the copy never wraps beside its action.
+  expect(within(column).getByText("No tickets")).toBeTruthy();
   const body = column.querySelector<HTMLElement>(".board-column-body")!;
   vi.spyOn(body, "getBoundingClientRect").mockReturnValue(
     new DOMRect(280, 32, 280, 568),
@@ -604,7 +606,7 @@ test("a column empty because of Ready filtering accepts a drag and explains the 
       screen.getByRole("region", { name: "Ticket status board" }),
     ).queryByText("Ticket 1"),
   ).toBeNull();
-  expect(screen.getAllByText("No matching tickets")).toHaveLength(6);
+  expect(screen.getAllByText("No matches")).toHaveLength(6);
 });
 
 test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
@@ -1157,7 +1159,7 @@ test("List is the default and Board keeps all six columns, including empty statu
   ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByText(
-      "No Done tickets",
+      "No tickets",
     ),
   ).toBeTruthy();
   expect(

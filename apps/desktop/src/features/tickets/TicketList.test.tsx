@@ -319,3 +319,25 @@ test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {
   renderList([ticket({})], { simple: true, readyView: true });
   expect(screen.queryByText("Ready")).toBeNull();
 });
+
+test("a simple row's name carries its Ready and Blocked words", () => {
+  renderList(
+    [
+      ticket({}),
+      ticket({
+        id: "t2",
+        reference: "T-2",
+        title: "Second ticket",
+        availability: "Blocked",
+        prerequisites: [prerequisite("T-9", "Todo")],
+      }),
+    ],
+    { simple: true },
+  );
+  expect(
+    screen.getByRole("button", { name: /First ticket.*Ready/ }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /Second ticket.*Blocked/ }),
+  ).toBeTruthy();
+});

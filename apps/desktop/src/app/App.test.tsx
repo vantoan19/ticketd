@@ -1426,6 +1426,23 @@ const counted = (counts: Partial<typeof zeroCounts>) => {
   return merged;
 };
 
+test("the list header stays outside the scroller that holds the rows", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    count_tickets: counted({ todo: 120 }),
+  });
+  const scroller = document.querySelector(".ticket-scroll");
+  expect(scroller).toBeTruthy();
+  // Title, toolbar and source tabs stay fixed; rows and paging scroll under them.
+  expect(
+    scroller?.contains(screen.getByRole("heading", { name: "All tickets" })),
+  ).toBe(false);
+  expect(scroller?.contains(document.querySelector(".ticket-rows"))).toBe(true);
+  expect(scroller?.contains(screen.getByRole("button", { name: "Next" }))).toBe(
+    true,
+  );
+});
+
 test("totals and group counts describe the whole result, not the loaded page", async () => {
   await renderBulk({
     find_tickets: () => [
