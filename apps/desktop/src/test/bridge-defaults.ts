@@ -14,6 +14,8 @@ export function bridgeDefault(
   args?: { id?: string; reference?: string },
 ): unknown {
   switch (command) {
+    case "attachment_upload_destination":
+      return { kind: "local" };
     case "attachment_upload_limit":
       return 104857600;
     case "attachment_workspace_id":
