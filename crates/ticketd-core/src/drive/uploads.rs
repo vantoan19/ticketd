@@ -343,7 +343,7 @@ impl Workspace {
                 provenance: None,
             };
             self.connection.execute(
-                "INSERT INTO drive_upload_operations VALUES (?1,?2,?3)",
+                "INSERT INTO drive_upload_operations(request_id,attachment_id,operation) VALUES (?1,?2,?3)",
                 params![
                     operation.request_id,
                     operation.attachment_id,
@@ -417,7 +417,7 @@ impl Workspace {
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
-            "INSERT INTO attachments VALUES (?1,?2,?2,?3,'external_reference',?4) ON CONFLICT(id) DO NOTHING",
+            "INSERT INTO attachments(id,display_name,original_filename,size_bytes,kind,locator) VALUES (?1,?2,?2,?3,'external_reference',?4) ON CONFLICT(id) DO NOTHING",
             params![
                 operation.attachment_id,
                 operation.request.filename,
@@ -426,7 +426,7 @@ impl Workspace {
             ],
         )?;
         tx.execute(
-            "INSERT INTO drive_references VALUES (?1,?2,?3,?4) ON CONFLICT(attachment_id) DO UPDATE SET metadata=excluded.metadata",
+            "INSERT INTO drive_references(attachment_id,connection_id,file_id,metadata) VALUES (?1,?2,?3,?4) ON CONFLICT(attachment_id) DO UPDATE SET metadata=excluded.metadata",
             params![
                 operation.attachment_id,
                 operation.request.destination.connection_id,
