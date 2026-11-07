@@ -603,6 +603,72 @@ body:has([data-slot="dialog-overlay"])
   line-height: var(--text-caption-line);
 }
 
+/* Timeline: one 2px line behind the badges and cards of an activity list. */
+.ui-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ui-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 14px;
+  left: 13px;
+  width: 2px;
+  background: var(--control-boundary);
+  opacity: 0.35;
+}
+.ui-timeline > li {
+  position: relative;
+  z-index: 1;
+}
+.ui-event-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  overflow-wrap: anywhere;
+}
+.ui-event-row-badge {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.ui-event-row-badge svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-event-row strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-event-row-text {
+  min-width: 0;
+}
+.ui-event-row-meta {
+  margin-inline-start: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+
 /* Marks shared by every feature: tags, references, counts and progress. */
 .ui-badge {
   display: inline-block;

@@ -17,7 +17,7 @@ const KNOWN: Record<string, number> = {
   "features/settings/restore-review.css": 6,
   "features/settings/settings.css": 9,
   "features/settings/sources/sources.css": 8,
-  "features/tickets/activity.css": 3,
+  "features/tickets/activity.css": 1,
   "features/tickets/backlinks.css": 1,
   "features/tickets/create-ticket.css": 3,
   "features/tickets/dependency-graph.css": 5,
