@@ -55,3 +55,9 @@ it("the split switches on the content panel's width, not the window's", () => {
     /@container plan-workspace [(]max-width: 839px[)]/,
   );
 });
+
+it("Progress stays visible under forced colours", () => {
+  expect(css).toMatch(
+    /@media [(]forced-colors: active[)] [{][^]*?[.]ui-progress [{][^}]*border: 1px solid CanvasText;/,
+  );
+});

@@ -804,6 +804,15 @@ body:has([data-slot="dialog-overlay"])
   height: 100%;
   background: var(--foreground);
 }
+/* Forced colours drop backgrounds: the track gets an edge and the fill a system colour. */
+@media (forced-colors: active) {
+  .ui-progress {
+    border: 1px solid CanvasText;
+  }
+  .ui-progress-indicator {
+    background: Highlight;
+  }
+}
 
 .workspace {
   display: flex;
