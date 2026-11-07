@@ -339,6 +339,38 @@ fn cleanup_rechecks_drafts_undo_saved_content_and_recoverable_trash() {
 }
 
 #[test]
+fn unresolved_foreign_drafts_do_not_hide_unused_local_files_from_cleanup_discovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .import_attachment_bytes("upload", "trace.txt", b"local", |_, _| true)
+        .unwrap();
+    workspace
+        .retain_draft(&DraftRetention {
+            owner: "foreign-draft".into(),
+            kind: "draft".into(),
+            revision: 0,
+            payload: None,
+            markdown: vec![format!(
+                "[Foreign](ticketd://attachment/{}/{})",
+                uuid::Uuid::new_v4(),
+                file.id
+            )],
+        })
+        .unwrap();
+    let files = workspace
+        .search_attachments(&AttachmentQuery {
+            state: ticketd_core::AttachmentState::Unused,
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].attachment.id, file.id);
+    assert!(files[0].usage.eligible);
+    assert!(files[0].usage.protections.is_empty());
+}
+
+#[test]
 fn failed_database_commit_after_byte_moves_preserves_export_and_safe_retry() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

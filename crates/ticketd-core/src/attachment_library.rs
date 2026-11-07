@@ -81,7 +81,7 @@ impl Workspace {
             "WITH used AS (
                 SELECT attachment_id FROM ticket_attachments
                 UNION SELECT attachment_id FROM embedded_attachments WHERE attachment_id IS NOT NULL
-                UNION SELECT attachment_id FROM attachment_draft_references
+                UNION SELECT attachment_id FROM attachment_draft_references WHERE attachment_id IS NOT NULL
              ), related_sources AS (
                 SELECT ?1 AS id WHERE ?1 IS NOT NULL
                 UNION SELECT id FROM activities WHERE ticket_id=?1
