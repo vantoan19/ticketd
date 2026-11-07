@@ -188,6 +188,7 @@ export function TicketFilters(p: Props) {
               aria-label="Ticket filters"
             >
               <SectionHeader
+                bar
                 level={2}
                 title="Filters"
                 actions={

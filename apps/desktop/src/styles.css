@@ -718,6 +718,9 @@ body:has([data-slot="dialog-overlay"])
   padding: 0 6px;
   line-height: 18px;
 }
+.ui-badge-raised {
+  background: var(--surface);
+}
 .ui-badge-source {
   font-family: var(--font-mono);
 }
@@ -784,6 +787,14 @@ body:has([data-slot="dialog-overlay"])
 .ui-section-header[data-divided] {
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+/* bar: the panel header, 44px with a hairline under it. */
+.ui-section-header[data-bar] {
+  flex: none;
+  flex-wrap: nowrap;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 var(--group-hairline);
 }
 [data-slot="section-header-actions"] {
   display: flex;

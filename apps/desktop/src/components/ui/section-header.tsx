@@ -17,6 +17,7 @@ export function SectionHeader({
   children,
   actions,
   divided = false,
+  bar = false,
   className,
 }: {
   title: ReactNode;
@@ -26,6 +27,8 @@ export function SectionHeader({
   children?: ReactNode;
   actions?: ReactNode;
   divided?: boolean;
+  /** A fixed 44px band that opens a panel, with a hairline under it. */
+  bar?: boolean;
   className?: string;
 }) {
   const Heading = `h${level}` as const;
@@ -33,6 +36,7 @@ export function SectionHeader({
     <div
       data-slot="section-header"
       data-divided={divided ? "" : undefined}
+      data-bar={bar ? "" : undefined}
       className={cn("ui-section-header", className)}
     >
       <Heading id={titleId}>{title}</Heading>

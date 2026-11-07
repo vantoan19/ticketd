@@ -120,9 +120,6 @@
   flex: 1;
   gap: 6px;
 }
-.rail-tags-picker [data-slot="badge"] {
-  background: var(--surface);
-}
 .rail-tags-chevron {
   flex: none;
   width: 14px;

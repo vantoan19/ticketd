@@ -529,7 +529,9 @@ export function TicketProperties({
                   {ticket.tags.length ? (
                     <span className="rail-tags">
                       {ticket.tags.map((tag) => (
-                        <Badge key={tag}>{tag}</Badge>
+                        <Badge key={tag} tone={chips ? "default" : "raised"}>
+                          {tag}
+                        </Badge>
                       ))}
                     </span>
                   ) : (

@@ -14,10 +14,16 @@ const badgeVariants = cva("ui-badge", {
       default: "",
       sm: "ui-badge-sm",
     },
+    // `raised` sits on a recessed control, such as the property rail’s tag picker.
+    tone: {
+      default: "",
+      raised: "ui-badge-raised",
+    },
   },
   defaultVariants: {
     variant: "tag",
     size: "default",
+    tone: "default",
   },
 });
 
@@ -31,6 +37,7 @@ function Badge({
   className,
   variant = "tag",
   size = "default",
+  tone = "default",
   asChild = false,
   ...props
 }: React.ComponentProps<"span"> &
@@ -43,7 +50,7 @@ function Badge({
     <Comp
       data-slot="badge"
       data-variant={variant}
-      className={cn(badgeVariants({ variant, size }), className)}
+      className={cn(badgeVariants({ variant, size, tone }), className)}
       {...props}
     />
   );
