@@ -29,6 +29,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import {
   Popover,
   PopoverContent,
@@ -787,6 +788,12 @@ export function DocumentEditor({
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
             {statusLine}
+            {!writing && (
+              <ExportMarkdownButton
+                compact
+                source={{ kind: "markdown", body }}
+              />
+            )}
             <SegmentedControl
               aria-label="Document mode"
               value={writing ? "edit" : "read"}

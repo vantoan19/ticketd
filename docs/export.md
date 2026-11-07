@@ -1,5 +1,48 @@
 # Workspace export format
 
+## Portable Markdown with files
+
+`ticketd export-markdown --ticket T-1 --output FOLDER` exports a ticket's title,
+description and direct attachments. Use `--document ID` for a saved Document, or
+`--markdown-file PATH` for selected/current Markdown (`-` reads stdin). Exactly
+one source is required. The standalone CLI needs no desktop process.
+
+`FOLDER` must already exist. Each invocation creates a fresh `ticketd-export-*`
+subfolder containing `content.md`, `files/` and `manifest.json`; it never
+overwrites earlier exports. A failed write removes its temporary bundle. Copy
+the whole subfolder when sharing, so relative file links remain usable.
+
+The JSON result and manifest have `format_version: 1`, `status` (`complete` or
+`partial`), `directory`, `markdown_path`, `manifest_path`, and `attachments`.
+The CLI result gives the created directory; the portable manifest uses `.` so
+its paths continue to resolve after the bundle moves.
+Each attachment entry records its `uri`, nullable `attachment_id`, `display_name`,
+nullable `original_filename`, and exactly one result: relative `path`,
+`external_url`, or an actionable `omission`. Missing/foreign references preserve
+their readable Markdown links and cause `partial`; consumers must inspect status
+even when the command succeeds. Files with the same name get identity-prefixed,
+portable filenames; repeated identities share copied bytes. Code examples are
+left literal. No private storage locator or credential is exported.
+
+External Drive references use their last-known validated provider viewer URL,
+without download, conversion, or an offline-availability promise. A complete
+export means every requested reference has a file or external link; it does not
+mean every external link is accessible to the recipient. Missing local bytes
+are omissions, never replaced with a different attachment's content. Files in
+linked Documents stay with those Documents and are not collected recursively.
+
+Desktop ticket headers and Document readers offer **Export Markdown with files**.
+The shared editor exports selected rich/source content, or its current full
+Markdown when nothing is selected, without saving or changing its draft.
+Source selections carry only the reference definitions they use, including when
+those definitions sit outside the selected range; unrelated content is excluded.
+Ordinary copy-as-Markdown keeps internal workspace links. The blocked-publication
+dialog's **Export with files** shares the same workflow and never publishes.
+The result dialog reports omissions and offers **Show Markdown** and **Show
+manifest** in the system file manager.
+
+## Workspace JSON snapshot
+
 `ticketd export` writes a UTF-8 JSON document to stdout. `ticketd export --file PATH`
 writes a new file; the desktop's Settings Export card opens a native save dialog. File
 exports refuse to overwrite an existing path and are published only after the

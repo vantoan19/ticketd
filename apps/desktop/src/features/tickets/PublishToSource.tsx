@@ -34,6 +34,7 @@ import { useSourceActivity } from "./source-activity";
 import { formatDateTime } from "@/lib/format";
 import { providerName } from "./ticket-source";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import "./publication.css";
 
 /** The Source rail's content for a ticket that has never had an external identity. */
@@ -495,6 +496,12 @@ export function PublishDialog({
           >
             {phase.kind === "unresolved" ? "Close" : "Cancel"}
           </Button>
+          {phase.kind === "blocked" && (
+            <ExportMarkdownButton
+              source={{ kind: "ticket", reference: ticket.reference }}
+              label="Export with files"
+            />
+          )}
           {phase.kind === "blocked" && (
             <Button
               size="sm"

@@ -1604,3 +1604,61 @@ html[data-theme="dark"][data-input="pointer"]
   padding-left: calc(24px + 360px);
   padding-bottom: calc(48px + 47px);
 }
+/* Export results share the existing dialog tokens in light and dark themes. */
+.portable-export-dialog {
+  width: min(680px, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+.portable-export-files {
+  display: grid;
+  gap: 12px;
+  font-size: var(--text-ui);
+  min-width: 0;
+}
+.portable-export-files li {
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.portable-export-files svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.portable-export-warning {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-ui);
+}
+.portable-export-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: 1px solid var(--border);
+}
+.portable-export-summary div {
+  display: flex;
+  flex-direction: column-reverse;
+  padding: 16px;
+}
+.portable-export-summary div + div {
+  border-left: 1px solid var(--border);
+}
+.portable-export-summary dt {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.portable-export-summary dd {
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+.portable-export-files p {
+  color: var(--muted-foreground);
+}

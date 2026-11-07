@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { PublishDialog } from "./PublishToSource";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import {
   publicationReason,
   usePublishTarget,
@@ -212,6 +213,10 @@ export function TicketHeader({
               Restore
             </Button>
           )}
+          <ExportMarkdownButton
+            compact
+            source={{ kind: "ticket", reference: ticket.reference }}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton

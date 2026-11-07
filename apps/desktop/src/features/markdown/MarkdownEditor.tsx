@@ -15,7 +15,7 @@ import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, keymap } from "@codemirror/view";
-import { TextApi, NodeApi, type Value } from "platejs";
+import { RangeApi, TextApi, NodeApi, type Value } from "platejs";
 import {
   Plate,
   PlateContent,
@@ -119,6 +119,7 @@ import {
   Eye,
 } from "lucide-react";
 import { CopySourceButton } from "./CopySourceButton";
+import { ExportMarkdownButton } from "@/features/attachments/ExportMarkdown";
 import { MermaidDiagram } from "./MermaidDiagram";
 import {
   checklistRule,
@@ -1289,6 +1290,33 @@ export function MarkdownEditor({
           compact
           source={value}
           label={`Copy ${label} Markdown`}
+        />
+        <ExportMarkdownButton
+          compact
+          source={() => {
+            const selection = sourceEditor.current?.view?.state.selection.main;
+            if (source && selection && !selection.empty)
+              return {
+                kind: "selection",
+                body: value.slice(selection.from, selection.to),
+                context: value,
+              };
+            const nativeSelection = window.getSelection();
+            const rich =
+              !source &&
+              nativeSelection &&
+              container.current?.contains(nativeSelection.anchorNode)
+                ? editor.api.toSlateRange(nativeSelection, {
+                    exactMatch: false,
+                    suppressThrow: true,
+                  })
+                : editor.selection;
+            const selected =
+              !source && rich && !RangeApi.isCollapsed(rich)
+                ? writeMarkdown(editor.api.fragment(rich))
+                : value;
+            return { kind: "markdown", body: selected };
+          }}
         />
         {source && !readOnly && (
           <Button
