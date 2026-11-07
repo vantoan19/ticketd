@@ -1470,5 +1470,8 @@ test("cards retain source, project, Plan and core readiness context; project and
   expect(screen.getByRole("button", { name: /T-3.*Ticket 3/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Release plan" }));
   await settle();
-  expect(screen.queryByRole("button", { name: "Display" })).toBeNull();
+  // A Plan takes its layout from its header, so Display offers only Rows.
+  fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  expect(screen.getByRole("radiogroup", { name: "Rows" })).toBeTruthy();
+  expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
 });

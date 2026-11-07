@@ -16,8 +16,11 @@ import "./display-menu.css";
  */
 export function DisplayMenu({
   onError,
+  rowsOnly = false,
 }: {
   onError: (message: string) => void;
+  /** Plans and Trash take their layout elsewhere; only Rows applies there. */
+  rowsOnly?: boolean;
 }) {
   const { ticketLayout, ticketRows } = usePreferences();
   return (
@@ -31,22 +34,26 @@ export function DisplayMenu({
       <PopoverContent align="end" aria-label="Display">
         <PopoverTitle>Display</PopoverTitle>
         <div className="display-menu">
-          <span id="display-layout">Layout</span>
-          <SegmentedControl
-            compact
-            aria-labelledby="display-layout"
-            value={ticketLayout}
-            onValueChange={(value) => {
-              if (!setPreference("ticketLayout", value))
-                onError(
-                  "Could not remember ticket layout. Check local storage and try again.",
-                );
-            }}
-            options={[
-              { value: "list", label: "List", icon: <List /> },
-              { value: "board", label: "Board", icon: <Columns3 /> },
-            ]}
-          />
+          {!rowsOnly && (
+            <>
+              <span id="display-layout">Layout</span>
+              <SegmentedControl
+                compact
+                aria-labelledby="display-layout"
+                value={ticketLayout}
+                onValueChange={(value) => {
+                  if (!setPreference("ticketLayout", value))
+                    onError(
+                      "Could not remember ticket layout. Check local storage and try again.",
+                    );
+                }}
+                options={[
+                  { value: "list", label: "List", icon: <List /> },
+                  { value: "board", label: "Board", icon: <Columns3 /> },
+                ]}
+              />
+            </>
+          )}
           <span id="display-rows">Rows</span>
           <SegmentedControl
             compact

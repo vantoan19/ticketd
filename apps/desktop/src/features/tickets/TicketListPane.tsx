@@ -208,6 +208,7 @@ export function TicketListPane({
           )}
           <span className="plan-list-spacer" />
           <TicketFilters part="controls" labeledFilter {...filterProps} />
+          <DisplayMenu onError={workspace.setError} rowsOnly />
         </div>
       ) : (
         <div className="list-header">
@@ -238,9 +239,10 @@ export function TicketListPane({
           {!trash && (
             <TicketFilters part="controls" labeledFilter {...filterProps} />
           )}
-          {!trash && !navigation.plan && (
-            <DisplayMenu onError={workspace.setError} />
-          )}
+          <DisplayMenu
+            onError={workspace.setError}
+            rowsOnly={trash || Boolean(navigation.plan)}
+          />
           {configuredSources.length > 0 && (
             <SourceRefresh
               providers={configuredSources}
