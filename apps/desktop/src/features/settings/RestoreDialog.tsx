@@ -384,6 +384,14 @@ export function RestoreDialog({
                     : links and metadata only. Remote file bytes and account
                     credentials are not backed up.
                   </p>
+                  {inspection.attachment_content.remote_references > 0 && (
+                    <p className="restore-muted">
+                      Restoring does not verify Drive access. If unavailable,
+                      connect the appropriate account and select the file again
+                      in the attachment picker's Google Drive tab. Last-known
+                      names and references are preserved.
+                    </p>
+                  )}
                 </div>
               )}
               <p className="restore-muted">

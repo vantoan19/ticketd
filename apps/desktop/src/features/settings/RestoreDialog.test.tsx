@@ -121,6 +121,10 @@ test("restore review reports complete retained local files and remote reference 
   expect(within(dialog).getByText(/1 remote reference/).textContent).toContain(
     "metadata only",
   );
+  expect(
+    within(dialog).getByText(/Restoring does not verify Drive access/)
+      .textContent,
+  ).toContain("select the file again");
   expect(replaceButton(dialog).disabled).toBe(false);
 });
 

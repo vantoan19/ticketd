@@ -100,9 +100,9 @@ export function ExportMarkdownButton({
                   : "Export complete"}
               </DialogTitle>
               <DialogDescription>
-                Markdown uses relative paths. Each local file is copied once;
-                external files remain provider links. Your content in ticketd is
-                unchanged.
+                Markdown uses relative paths, and each local file is copied
+                once. Drive references remain links; unverified uploaded copies
+                are listed as omissions. Your content in ticketd is unchanged.
               </DialogDescription>
             </DialogHeader>
             {result.status === "partial" && (
@@ -143,6 +143,12 @@ export function ExportMarkdownButton({
                 </div>
               ))}
             </dl>
+            {result.attachments.some((file) => file.external_url) && (
+              <p className="text-sm">
+                Drive files remain online. Recipients need access in Google
+                Drive; this export does not include their bytes.
+              </p>
+            )}
             <p className="break-all text-sm">{result.directory}</p>
             <ul
               className="portable-export-files"
@@ -174,7 +180,7 @@ export function ExportMarkdownButton({
             </ul>
             {result.status === "partial" && (
               <p role="status">
-                Missing files keep their readable references. Review the
+                Omitted files keep their readable references. Review the
                 manifest before sharing.
               </p>
             )}

@@ -38,10 +38,20 @@ pub enum ExportStatus {
     Partial,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportAttachmentKind {
+    LocalSnapshot,
+    ExternalReference,
+    UploadedCopy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportAttachment {
     pub uri: String,
     pub attachment_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<ExportAttachmentKind>,
     pub display_name: String,
     pub original_filename: Option<String>,
     pub path: Option<String>,
@@ -121,6 +131,7 @@ impl Workspace {
             let mut entry = ExportAttachment {
                 uri: uri.clone(),
                 attachment_id: None,
+                kind: None,
                 display_name: uri.clone(),
                 original_filename: None,
                 path: None,
@@ -140,9 +151,16 @@ impl Workspace {
                 entry.attachment_id = Some(id.into());
                 match attachments::read_attachment(&tx, id) {
                     Ok(file) => {
+                        entry.kind = Some(match file.kind {
+                            AttachmentKind::LocalSnapshot => ExportAttachmentKind::LocalSnapshot,
+                            AttachmentKind::ExternalReference => {
+                                ExportAttachmentKind::ExternalReference
+                            }
+                        });
                         entry.display_name = file.display_name.clone();
                         entry.original_filename = Some(file.original_filename.clone());
                         if let Some(previous) = copied.get(id) {
+                            entry.kind.clone_from(&previous.kind);
                             entry.path.clone_from(&previous.path);
                             entry.external_url.clone_from(&previous.external_url);
                             entry.omission.clone_from(&previous.omission);
@@ -162,7 +180,11 @@ impl Workspace {
             }
             entries.push(entry);
         }
-        body = rewrite(&body, &replacements);
+        let labels = entries
+            .iter()
+            .map(|entry| (entry.uri.clone(), entry.display_name.clone()))
+            .collect();
+        body = rewrite(&body, &replacements, &labels);
         if !direct.is_empty() {
             body.push_str("\n\n## Direct attachments\n\n");
             for id in direct {
@@ -219,6 +241,11 @@ impl Workspace {
     ) -> Result<(), Error> {
         match file.kind {
             AttachmentKind::ExternalReference => {
+                if self.drive_uploaded_copy(&file.id)?.is_some() {
+                    entry.kind = Some(ExportAttachmentKind::UploadedCopy);
+                    entry.omission = Some("Drive uploaded-copy bytes have not been downloaded and verified against the recorded upload. Open in Drive to inspect current content; verified byte export is unavailable.".into());
+                    return Ok(());
+                }
                 let reference = self.drive_reference(&file.id)?;
                 if crate::drive::safe_web_url(&reference.metadata.web_url)
                     && let Ok(url) = url::Url::parse(&reference.metadata.web_url)
@@ -324,8 +351,12 @@ fn selection_with_definitions(body: &str, context: &str) -> String {
     output
 }
 
-/// Replace destinations only, leaving labels, surrounding prose and code literal.
-fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
+/// Rewrite portable destinations; provider viewer pages become readable links.
+fn rewrite(
+    body: &str,
+    targets: &BTreeMap<String, String>,
+    labels: &BTreeMap<String, String>,
+) -> String {
     let parser = parse(body);
     let mut edits = Vec::new();
     for (_, definition) in parser.reference_definitions().iter() {
@@ -338,15 +369,31 @@ fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
         }
     }
     for (event, range) in parser.into_offset_iter() {
+        if let Event::Start(Tag::Image { dest_url, .. }) = &event
+            && targets
+                .get(dest_url.as_ref())
+                .is_some_and(|target| target.starts_with("https://"))
+        {
+            // Provider viewer pages are links, not downloadable image content.
+            edits.push((range.start..range.start + 1, String::new()));
+        }
         if let Event::Html(ref html) | Event::InlineHtml(ref html) = event {
+            let images = external_html_images(html, targets, labels);
             for (at, uri) in html_uris(html) {
-                if let Some(target) = targets.get(uri) {
+                if !images.iter().any(|(range, _)| range.contains(&at))
+                    && let Some(target) = targets.get(uri)
+                {
                     edits.push((
                         range.start + at..range.start + at + uri.len(),
-                        target.clone(),
+                        html_text(target),
                     ));
                 }
             }
+            edits.extend(
+                images.into_iter().map(|(image, link)| {
+                    (range.start + image.start..range.start + image.end, link)
+                }),
+            );
         } else if let Event::Start(
             Tag::Link {
                 link_type,
@@ -376,7 +423,12 @@ fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
                     edits.push((destination, target.clone()));
                 }
             } else if matches!(link_type, LinkType::Autolink) {
-                edits.push((range, format!("[{dest_url}]({target})")));
+                let label = markdown_text(
+                    labels
+                        .get(dest_url.as_ref())
+                        .map_or(dest_url.as_ref(), String::as_str),
+                );
+                edits.push((range, format!("[{label}]({target})")));
             }
         }
     }
@@ -387,6 +439,110 @@ fn rewrite(body: &str, targets: &BTreeMap<String, String>) -> String {
         output.replace_range(range, &target);
     }
     output
+}
+
+/// Only replace img tags whose src is a known external attachment viewer.
+fn external_html_images(
+    html: &str,
+    targets: &BTreeMap<String, String>,
+    labels: &BTreeMap<String, String>,
+) -> Vec<(std::ops::Range<usize>, String)> {
+    let mut images = Vec::new();
+    let mut covered_until = 0;
+    for (start, _) in html.match_indices('<') {
+        if start < covered_until {
+            continue;
+        }
+        if html[start..].starts_with("<!--") {
+            covered_until = html[start + 4..]
+                .find("-->")
+                .map_or(html.len(), |end| start + 4 + end + 3);
+            continue;
+        }
+        let tag = &html[start + 1..];
+        let mut quote = None;
+        let end = tag.char_indices().find_map(|(offset, c)| {
+            if quote == Some(c) {
+                quote = None;
+            } else if quote.is_none() {
+                if matches!(c, '\'' | '"') {
+                    quote = Some(c);
+                } else if c == '>' {
+                    return Some(offset);
+                }
+            }
+            None
+        });
+        // An unfinished tag consumes the remainder; its attribute text is not more tags.
+        let Some(end) = end else { break };
+        covered_until = start + 1 + end + 1;
+        let tag = &tag[..end];
+        if !tag
+            .get(..3)
+            .is_some_and(|name| name.eq_ignore_ascii_case("img"))
+            || !tag.as_bytes().get(3).is_some_and(u8::is_ascii_whitespace)
+        {
+            continue;
+        }
+        let attributes = &tag[3..];
+        let Some(src) = html_attribute(attributes, "src") else {
+            continue;
+        };
+        let Some(target) = targets
+            .get(src)
+            .filter(|target| target.starts_with("https://"))
+        else {
+            continue;
+        };
+        let text =
+            if let Some(alt) = html_attribute(attributes, "alt").filter(|alt| !alt.is_empty()) {
+                // Preserve authored character references while making raw angle brackets text.
+                alt.replace('<', "&lt;").replace('>', "&gt;")
+            } else {
+                html_text(labels.get(src).map_or(src, String::as_str))
+            };
+        images.push((
+            start..covered_until,
+            format!("<a href=\"{}\">{text}</a>", html_text(target)),
+        ));
+    }
+    images
+}
+
+fn html_attribute<'a>(mut attributes: &'a str, wanted: &str) -> Option<&'a str> {
+    loop {
+        attributes = attributes.trim_start();
+        let end = attributes
+            .find(|c: char| c.is_whitespace() || matches!(c, '=' | '/'))
+            .unwrap_or(attributes.len());
+        if end == 0 {
+            return None;
+        }
+        let name = &attributes[..end];
+        attributes = attributes[end..].trim_start();
+        let Some(value) = attributes.strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim_start();
+        let (value, rest) = if let Some(quote @ ('\'' | '"')) = value.chars().next() {
+            let end = value[1..].find(quote)? + 1;
+            (&value[1..end], &value[end + 1..])
+        } else {
+            let end = value.find(char::is_whitespace).unwrap_or(value.len());
+            (&value[..end], &value[end..])
+        };
+        if name.eq_ignore_ascii_case(wanted) {
+            return Some(value);
+        }
+        attributes = rest;
+    }
+}
+
+fn html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn parse(body: &str) -> Parser<'_> {

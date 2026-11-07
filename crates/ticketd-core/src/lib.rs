@@ -29,7 +29,9 @@ pub use duplicates::{
 mod evidence;
 mod export;
 mod portable_export;
-pub use portable_export::{ExportAttachment, ExportStatus, MarkdownExport, MarkdownExportSource};
+pub use portable_export::{
+    ExportAttachment, ExportAttachmentKind, ExportStatus, MarkdownExport, MarkdownExportSource,
+};
 mod location;
 pub use context::{ContextOptions, TicketContext};
 pub use evidence::{Evidence, EvidenceInput, EvidenceKind};

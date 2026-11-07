@@ -70,6 +70,12 @@ pub struct AttachmentBackupContent {
     pub retained_bytes: u64,
     /// Metadata and references only; remote bytes are never implied.
     pub remote_references: u64,
+    /// Backup validates local retention, never downloads provider content.
+    #[serde(default)]
+    pub remote_bytes_included: bool,
+    /// Restoring metadata does not establish connectivity or authorization.
+    #[serde(default)]
+    pub remote_access_verified: bool,
 }
 
 /// Why a copy of the workspace was kept next to it.

@@ -17,7 +17,8 @@ The JSON result and manifest have `format_version: 1`, `status` (`complete` or
 The CLI result gives the created directory; the portable manifest uses `.` so
 its paths continue to resolve after the bundle moves.
 Each attachment entry records its `uri`, nullable `attachment_id`, `display_name`,
-nullable `original_filename`, and exactly one result: relative `path`,
+nullable `kind` (`local_snapshot`, `external_reference`, or `uploaded_copy`), nullable
+`original_filename`, and exactly one result: relative `path`,
 `external_url`, or an actionable `omission`. Missing/foreign references preserve
 their readable Markdown links and cause `partial`; consumers must inspect status
 even when the command succeeds. Files with the same name get identity-prefixed,
@@ -30,6 +31,25 @@ export means every requested reference has a file or external link; it does not
 mean every external link is accessible to the recipient. Missing local bytes
 are omissions, never replaced with a different attachment's content. Files in
 linked Documents stay with those Documents and are not collected recursively.
+Generated autolink labels use the attachment's readable display name; authored
+labels stay literal. Google Docs, Sheets and Slides remain viewer links and are
+never converted into local files. Exported image syntax for a Drive reference
+becomes a link to its viewer rather than an image request to an HTML page;
+canonical Markdown stays unchanged. Authorization parameters in provider links
+are rejected before storage and again when preparing a portable link.
+
+Backup inspection separately reports `remote_bytes_included: false` and
+`remote_access_verified: false` alongside local retained-file counts. A valid
+backup guarantees its retained local bytes, while remote references retain
+identity and last-known metadata only. Restore does not contact Google or
+restore account credentials. If a restored file is unavailable, connect the
+appropriate account and select it again in the Google Drive tab; do not replace
+it silently or infer deletion from failed access. Drive upload provenance and
+original-byte verification are separate from current-source references.
+An uploaded copy is identified from durable upload provenance, even though its
+storage kind is also external. Until downloaded bytes can be verified against
+that provenance, export reports an omission and `partial`, preserving the
+reference instead of treating the copy as a complete current-source link export.
 
 Desktop ticket headers and Document readers offer **Export Markdown with files**.
 The shared editor exports selected rich/source content, or its current full
@@ -40,6 +60,8 @@ Ordinary copy-as-Markdown keeps internal workspace links. The blocked-publicatio
 dialog's **Export with files** shares the same workflow and never publishes.
 The result dialog reports omissions and offers **Show Markdown** and **Show
 manifest** in the system file manager.
+Drive attachment previews offer **Export link**, using this same workflow for a
+named provider link without a download or native-file conversion.
 
 ## Workspace JSON snapshot
 

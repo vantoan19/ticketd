@@ -273,4 +273,24 @@ pub fn safe_web_url(value: &str) -> bool {
         && url.username().is_empty()
         && url.password().is_none()
         && url.port().is_none()
+        && !url
+            .query_pairs()
+            .chain(url::form_urlencoded::parse(
+                url.fragment().unwrap_or_default().as_bytes(),
+            ))
+            .any(|(key, _)| {
+                matches!(
+                    key.to_ascii_lowercase().as_str(),
+                    "access_token"
+                        | "refresh_token"
+                        | "id_token"
+                        | "token"
+                        | "code"
+                        | "client_secret"
+                        | "code_verifier"
+                        | "code_challenge"
+                        | "state"
+                        | "authorization"
+                )
+            })
 }
