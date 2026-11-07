@@ -1695,7 +1695,9 @@ body:has([data-slot="dialog-overlay"])
   max-height: 320px;
 }
 
-@media (max-width: 1071px) {
+/* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
+   the split for longer. 840px is useNarrowPane’s STACK_MIN_WIDTH. */
+@container plan-workspace (max-width: 839px) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }

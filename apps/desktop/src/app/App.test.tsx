@@ -12,7 +12,15 @@ import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
 class ResizeObserverStub {
-  observe() {}
+  constructor(private callback: ResizeObserverCallback) {}
+  // The Tickets workspace stacks its panes when the content panel is narrow.
+  observe(target: Element) {
+    if (narrowViewport && target.classList.contains("plan-workspace"))
+      this.callback(
+        [{ contentRect: { width: 500 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+  }
   unobserve() {}
   disconnect() {}
 }

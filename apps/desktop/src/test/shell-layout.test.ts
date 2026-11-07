@@ -41,3 +41,17 @@ it("the Plan list toolbar shrinks its summary, not its Filter control", () => {
   );
   expect(rule(".ticket-list")).toMatch(/overflow-x: hidden;/);
 });
+
+it("the split switches on the content panel's width, not the window's", () => {
+  const read = (path: string) =>
+    readFileSync(join(__dirname, "..", path), "utf8");
+  for (const file of [
+    "styles.css",
+    "features/tickets/ticket-board.css",
+    "features/tickets/TicketWorkspaceView.tsx",
+  ])
+    expect(read(file)).not.toMatch(/1071/);
+  expect(read("styles.css")).toMatch(
+    /@container plan-workspace [(]max-width: 839px[)]/,
+  );
+});

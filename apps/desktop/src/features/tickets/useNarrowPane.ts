@@ -9,13 +9,16 @@ const RAIL_MIN_WIDTH = 652;
  * rail and the drafts inside it are not remounted when the workspace is shown
  * again.
  */
-export function useNarrowPane(ref: RefObject<HTMLElement | null>) {
+export function useNarrowPane(
+  ref: RefObject<HTMLElement | null>,
+  minWidth = RAIL_MIN_WIDTH,
+) {
   const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const pane = ref.current;
     if (!pane || typeof ResizeObserver === "undefined") return;
     const measure = (width: number) => {
-      if (width > 0) setNarrow(width < RAIL_MIN_WIDTH);
+      if (width > 0) setNarrow(width < minWidth);
     };
     measure(pane.clientWidth);
     const observer = new ResizeObserver(([entry]) => {
@@ -23,6 +26,6 @@ export function useNarrowPane(ref: RefObject<HTMLElement | null>) {
     });
     observer.observe(pane);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, minWidth]);
   return narrow;
 }

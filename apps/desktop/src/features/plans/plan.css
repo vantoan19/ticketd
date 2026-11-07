@@ -9,6 +9,7 @@
   border-bottom: 1px solid var(--header-boundary);
 }
 .plan-workspace {
+  container: plan-workspace / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
