@@ -397,3 +397,56 @@ fn portable_filename_bounds_preserve_the_original_file_extension() {
         b"sample"
     );
 }
+
+#[test]
+fn plain_ticket_titles_and_attachment_names_do_not_introduce_markdown_links_or_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let direct = workspace
+        .import_attachment_bytes("direct", "trace.log", b"requested", |_, _| true)
+        .unwrap();
+    let other = workspace
+        .import_attachment_bytes("other", "private.log", b"not requested", |_, _| true)
+        .unwrap();
+    let title = format!(
+        "Literal [example]({}) <em>title</em>",
+        workspace.attachment_uri(&other.id).unwrap()
+    );
+    let name = "<script>literal</script> [name] `ticks`";
+    workspace.rename_attachment(&direct.id, name).unwrap();
+    let ticket = workspace.create_ticket(&title).unwrap();
+    workspace
+        .set_ticket_attachment(&ticket.reference, &direct.id, true)
+        .unwrap();
+    let export = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Ticket {
+                reference: ticket.reference,
+            },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(
+        export.attachments.len(),
+        1,
+        "a plain title is not an authored attachment reference"
+    );
+    let output = std::fs::read_to_string(export.directory.join("content.md")).unwrap();
+    let events: Vec<_> = pulldown_cmark::Parser::new(&output).collect();
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        pulldown_cmark::Event::Html(_) | pulldown_cmark::Event::InlineHtml(_)
+    )));
+    let text: String = events
+        .iter()
+        .filter_map(|e| {
+            if let pulldown_cmark::Event::Text(text) = e {
+                Some(text.as_ref())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(text.contains(&title), "{text}");
+    assert!(text.contains(name), "{text}");
+}

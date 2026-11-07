@@ -85,7 +85,9 @@ impl Workspace {
                 (
                     format!(
                         "# {} · {}\n\n{}",
-                        ticket.reference, ticket.title, ticket.body
+                        ticket.reference,
+                        markdown_text(&ticket.title),
+                        ticket.body
                     ),
                     ids,
                 )
@@ -173,11 +175,7 @@ impl Workspace {
                         .as_ref()
                         .or(entry.external_url.as_ref())
                         .unwrap_or(&entry.uri);
-                    let label = entry
-                        .display_name
-                        .replace('\\', "\\\\")
-                        .replace('[', "\\[")
-                        .replace(']', "\\]");
+                    let label = markdown_text(&entry.display_name);
                     body.push_str(&format!("- [{label}]({target})\n"));
                 }
             }
@@ -279,6 +277,18 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Plain metadata must not introduce authored references, formatting or active HTML.
+fn markdown_text(text: &str) -> String {
+    let mut output = String::new();
+    for c in text.chars() {
+        if c.is_ascii_punctuation() {
+            output.push('\\');
+        }
+        output.push(if matches!(c, '\r' | '\n') { ' ' } else { c });
+    }
+    output
 }
 
 fn selection_with_definitions(body: &str, context: &str) -> String {
