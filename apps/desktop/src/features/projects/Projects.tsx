@@ -9,6 +9,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import {
   DropdownMenu,
@@ -139,7 +140,7 @@ function CheckoutRow({
       </div>
     );
   return (
-    <div className="checkout-row">
+    <Item>
       <span className="checkout-text">
         <PathText path={path} />
         <span className="checkout-note">
@@ -172,7 +173,7 @@ function CheckoutRow({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </Item>
   );
 }
 

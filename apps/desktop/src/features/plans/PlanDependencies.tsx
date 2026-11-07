@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Layers, Link2, Network } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Canvas, SelectionPanel } from "@/features/tickets/DependencyGraph";
@@ -430,7 +431,7 @@ export function PlanDependencies({
                       : "Add blocker";
                 return (
                   <li key={member.reference}>
-                    <div className="plan-dependency-row">
+                    <Item>
                       <StatusIcon status={member.status} size={14} decorative />
                       <span className="plan-dependency-title">
                         <Reference>{member.reference}</Reference> {member.title}
@@ -447,7 +448,7 @@ export function PlanDependencies({
                         <Link2 aria-hidden="true" />
                         {label}
                       </Button>
-                    </div>
+                    </Item>
                     {open && (
                       <Blockers
                         key={member.reference}
