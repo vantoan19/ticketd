@@ -985,6 +985,7 @@ export function DocumentEditor({
           {!initial || writing ? (
             <LazyMarkdownEditor
               recoveryOwner={recoveryOwner}
+              attachmentTicketReference={currentTicket}
               value={head ? body.slice(head.length) : body}
               onChange={(value) => {
                 const next = head + value;

@@ -758,6 +758,24 @@ exportable. Opening never happens automatically. Detach from ticket removes only
 that direct association, preserving bytes and other uses, including recoverable
 trash. Files in linked Documents do not become direct ticket attachments.
 
+Attachments under the sidebar's Context group opens the workspace library.
+Search matches display names, original filenames, stable IDs, storage kinds and
+known byte sizes, plus cached external filenames, file IDs and MIME types, with
+All files, In use and Unused filters. Search never downloads remote content. In-use includes
+saved references, recoverable drafts, Undo and Trash. Unused is a reference state,
+not permission to delete: legacy-draft review can still withhold cleanup.
+Results are paged (50 in desktop, at most 1,000 per core query). Existing files
+offers the same search inside the shared picker, prioritizing the current
+ticket's related files, then recent uploads. Selection order controls insertion;
+reusing a file never copies its bytes or changes its identity.
+Local image thumbnails load lazily for supported files up to 5 MiB. Larger files
+keep a file icon and the explicit shared preview, so a library does not
+automatically buffer many large media responses.
+
+Rename changes only the display name. The original filename and every literal
+Markdown label, including an initially generated filename label, stay unchanged.
+Completed uploads remain searchable when insertion was abandoned.
+
 Inline links and direct attachment rows share a media preview dialog. Supported
 images, video and audio are attempted locally with explicit playback controls;
 unsupported files/codecs and failed rendering keep metadata and open/export
@@ -824,6 +842,11 @@ The standalone CLI exposes `attachment add <path> [--ticket T-1] [--name NAME]
 `attachment link <id> <ticket>`, `attachment detach <id> <ticket>`, and
 `attachment export <id> <new-path>`. Use `--request-id` to safely retry an upload.
 `attachment uri <id>` returns its workspace-scoped URI for authored Markdown.
+`attachment search [text] [--state all|in-use|unused] [--related-ticket T-1]
+[--limit N] [--offset N]` returns metadata with usage and related-file context.
+`attachment list` also accepts `--limit` and `--offset`, including with `--ticket`.
+`attachment rename <id> <display-name> [--request-id ID]` changes metadata only;
+retrying the same rename request cannot overwrite a later change.
 Failed association reports the completed Attachment ID for explicit reuse.
 `attachment limit [--bytes <positive-byte-count>]` reads or changes the same
 workspace upload limit; rejection explains the current bound and recovery command.

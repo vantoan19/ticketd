@@ -124,8 +124,18 @@ test("reader replacement follows description autosave and retains the chosen occ
         can_open: false,
         usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
-    if (command === "list_attachments")
-      return [{ ...file, id: "replacement", display_name: "Replacement" }];
+    if (command === "search_attachments")
+      return [{ ...file, id: "replacement", display_name: "Replacement" }].map(
+        (attachment) => ({
+          attachment,
+          related: false,
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        }),
+      );
     if (command === "inspect_attachment")
       return { ...file, id: "replacement", display_name: "Replacement" };
     if (command === "attachment_uri") return nextUri;
@@ -142,7 +152,10 @@ test("reader replacement follows description autosave and retains the chosen occ
   );
   expect(invoke).not.toHaveBeenCalledWith("change_ticket", expect.anything());
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   const expected = `[Trace](${nextUri}) and [Keep](${uri})`;
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith(
@@ -186,8 +199,18 @@ test.each(["reader", "rich"])(
           can_open: false,
           usage: { total: 1, entries: [], legacy_drafts_pending: false },
         };
-      if (command === "list_attachments")
-        return [{ ...file, id: "replacement", display_name: "Replacement" }];
+      if (command === "search_attachments")
+        return [
+          { ...file, id: "replacement", display_name: "Replacement" },
+        ].map((attachment) => ({
+          attachment,
+          related: false,
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        }));
       if (command === "inspect_attachment")
         return { ...file, id: "replacement", display_name: "Replacement" };
       if (command === "attachment_uri") return nextUri;
@@ -213,7 +236,10 @@ test.each(["reader", "rich"])(
       await screen.findByRole("button", { name: "Choose a replacement" }),
     );
     fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+    fireEvent.click(
+      await screen.findByRole("radio", { name: "Select Replacement" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
     await within(
       screen.getByRole("dialog", { name: "Attach file" }),
     ).findByText(/Retention unavailable/);

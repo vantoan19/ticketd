@@ -580,6 +580,7 @@ export function TicketEditor({
             <LazyMarkdownEditor
               value={draft.body}
               recoveryOwner={recoveryOwner}
+              attachmentTicketReference={ticket.reference}
               onChange={(body) => edit({ ...draft, body })}
               label="Description"
               autoFocus={editingBody}

@@ -1,0 +1,125 @@
+.attachment-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+.attachment-library-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px var(--page-gutter);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  font-size: var(--text-caption);
+}
+.attachment-library-bar nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+.attachment-library-bar nav svg {
+  width: 16px;
+  height: 16px;
+}
+.attachment-library {
+  padding: 28px var(--page-gutter);
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+.attachment-library header,
+.attachment-library-tools,
+.attachment-library footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.attachment-library header {
+  margin-bottom: 24px;
+}
+.attachment-library h1 {
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.attachment-library p,
+.attachment-library footer {
+  font-size: var(--text-ui);
+  color: var(--muted-foreground);
+}
+.attachment-library-tools {
+  margin-bottom: 20px;
+}
+.attachment-library-tools input {
+  max-width: 320px;
+}
+.attachment-table-scroll {
+  position: relative;
+  overflow: auto;
+}
+.attachment-library table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--text-ui);
+}
+.attachment-library th {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.attachment-library th,
+.attachment-library td {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 8px;
+}
+.attachment-library td:first-child {
+  width: 40%;
+  min-width: 200px;
+}
+.attachment-library td:not(:first-child),
+.attachment-library th:not(:first-child) {
+  white-space: nowrap;
+}
+.attachment-library td small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+.attachment-usage-link {
+  color: var(--primary);
+  text-align: left;
+}
+.attachment-usage-link:hover {
+  text-decoration: underline;
+}
+.attachment-usage-link:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.attachment-library footer {
+  margin-top: 16px;
+}
+@media (max-width: 640px) {
+  .attachment-library {
+    padding: 16px;
+  }
+  .attachment-library-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .attachment-library-tools input {
+    max-width: none;
+  }
+}

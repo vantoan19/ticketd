@@ -51,6 +51,15 @@ and association table, separate from Documents, source connectors, and
 Implementation evidence. Storage kinds are `local_snapshot` and `external_reference`;
 there is no remote deletion operation.
 
+`Workspace::search_attachments` returns bounded results and their direct,
+embedded, Document, draft, Undo and Trash usage from one read snapshot. Literal
+filename/metadata search and in-use/unused filtering run in core before paging;
+current-ticket context ranks related files ahead of recent workspace uploads.
+Ranking never turns linked Document files into direct ticket associations.
+Desktop library and insertion search use this same query as the independent CLI.
+Display-name changes use `rename_attachment` and the retryable write interface;
+they never rewrite Markdown labels, original filenames, upload outcomes or bytes.
+
 Snapshots live in `<database-path>.attachments/<attachment-id>/bytes/` beside
 the workspace database. Core upload validates a regular file and the workspace upload
 bound, writes into a temporary directory, syncs bytes and a recovery manifest,

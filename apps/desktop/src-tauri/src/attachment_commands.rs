@@ -219,6 +219,43 @@ pub fn list_attachments(limit: u32, offset: u32) -> Result<Vec<Attachment>, Stri
 }
 
 #[tauri::command]
+pub async fn search_attachments(
+    query: ticketd_core::AttachmentQuery,
+) -> Result<Vec<ticketd_core::AttachmentSearchResult>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.search_attachments(&query))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn rename_attachment(
+    id: String,
+    display_name: String,
+    request_id: String,
+) -> Result<Attachment, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        match open_workspace()
+            .and_then(|mut w| {
+                w.write(
+                    Some(&request_id),
+                    WriteRequest::RenameAttachment { id, display_name },
+                )
+            })
+            .map_err(|e| e.to_string())?
+        {
+            WriteResult::Attachment(file) => Ok(file),
+            _ => Err("Unexpected attachment rename result".into()),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn inspect_attachment(id: String) -> Result<Attachment, String> {
     open_workspace()
         .and_then(|w| w.attachment(&id))

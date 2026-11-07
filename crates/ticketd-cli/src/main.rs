@@ -26,6 +26,27 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Search filenames and available metadata with usage context, recent first
+    Search {
+        #[arg(default_value = "")]
+        search: String,
+        #[arg(long, value_enum, default_value_t = AttachmentStateArg::All)]
+        state: AttachmentStateArg,
+        /// Prioritize related files without flattening Document ownership
+        #[arg(long)]
+        related_ticket: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Change the display name only; authored labels and original bytes stay unchanged
+    Rename {
+        id: String,
+        display_name: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Read or change the workspace's per-file upload limit (default 100 MiB); existing snapshots stay unchanged
     Limit {
         /// Positive byte bound, enforced while copying actual bytes
@@ -91,6 +112,13 @@ enum AttachmentCommand {
     Detach { id: String, ticket: String },
     /// Copy stored bytes to a new file without overwriting an existing destination
     Export { id: String, path: String },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum AttachmentStateArg {
+    All,
+    InUse,
+    Unused,
 }
 
 #[derive(Subcommand)]
@@ -1941,6 +1969,36 @@ fn attachment_command(
     command: AttachmentCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
     Ok(match command {
+        AttachmentCommand::Search {
+            search,
+            state,
+            related_ticket,
+            limit,
+            offset,
+        } => serde_json::to_string(&workspace.search_attachments(
+            &ticketd_core::AttachmentQuery {
+                search,
+                state: match state {
+                    AttachmentStateArg::All => ticketd_core::AttachmentState::All,
+                    AttachmentStateArg::InUse => ticketd_core::AttachmentState::InUse,
+                    AttachmentStateArg::Unused => ticketd_core::AttachmentState::Unused,
+                },
+                ticket: related_ticket,
+                limit,
+                offset,
+            },
+        )?)?,
+        AttachmentCommand::Rename {
+            id,
+            display_name,
+            request_id,
+        } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RenameAttachment { id, display_name },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected attachment rename result".into()),
+        },
         AttachmentCommand::Limit { bytes } => {
             if let Some(bytes) = bytes {
                 workspace.set_attachment_upload_limit(bytes)?;
@@ -1977,7 +2035,12 @@ fn attachment_command(
             limit,
             offset,
         } => serde_json::to_string(&match ticket {
-            Some(ticket) => workspace.ticket_attachments(&ticket)?,
+            Some(ticket) => workspace
+                .ticket_attachments(&ticket)?
+                .into_iter()
+                .skip(offset as usize)
+                .take(limit.min(1000) as usize)
+                .collect(),
             None => workspace.attachments(limit, offset)?,
         })?,
         AttachmentCommand::Inspect { id } => serde_json::to_string(&workspace.attachment(&id)?)?,

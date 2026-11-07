@@ -48,8 +48,18 @@ function bridge() {
         usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
     if (command === "attachment_upload_limit") return 104857600;
-    if (command === "list_attachments")
-      return [{ ...file, id: "new", display_name: "Replacement" }];
+    if (command === "search_attachments")
+      return [{ ...file, id: "new", display_name: "Replacement" }].map(
+        (attachment) => ({
+          attachment,
+          related: false,
+          usage: {
+            eligible: true,
+            legacy_drafts_pending: false,
+            protections: [],
+          },
+        }),
+      );
     if (command === "inspect_attachment")
       return { ...file, id: "new", display_name: "Replacement" };
     if (command === "attachment_uri") return newUri;
@@ -67,7 +77,10 @@ test("replacement changes only the chosen inline occurrence and preserves image 
     await screen.findByRole("button", { name: "Choose a replacement" }),
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `Before [Keep **this**](${oldUri}) and ![Chosen label](${newUri}) after.`,
@@ -90,7 +103,10 @@ test("replacement refuses a changed draft rather than guessing which reference m
     <MarkdownDocument source={`${source} changed`} onChange={change} />,
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   expect((await screen.findByRole("alert")).textContent).toContain(
     "content changed",
   );
@@ -107,7 +123,10 @@ test("shared reference definitions stay intact when one reference-style use is r
     await screen.findByRole("button", { name: "Choose a replacement" }),
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `Before [Chosen](${newUri}) and [Keep][file].\n\n[file]: ${oldUri}\n`,
@@ -126,7 +145,10 @@ test("a destination-shaped label and an inline title survive selected replacemen
     await screen.findByRole("button", { name: "Choose a replacement" }),
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(change).toHaveBeenCalledWith(
       `[Chosen \\](${oldUri}) label](${newUri} "keep title")`,
@@ -154,7 +176,10 @@ test("canceling a pending replacement leaves the original reference intact", asy
     await screen.findByRole("button", { name: "Choose a replacement" }),
   );
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Replacement/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select Replacement" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("attachment_uri", { id: "new" }),
   );

@@ -1427,6 +1427,8 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::attachment_workspace_id,
             attachment_commands::set_attachment_upload_limit,
             attachment_commands::list_attachments,
+            attachment_commands::search_attachments,
+            attachment_commands::rename_attachment,
             attachment_commands::inspect_attachment,
             attachment_commands::ticket_attachments,
             attachment_commands::set_ticket_attachment,

@@ -81,6 +81,66 @@ fn portable_markdown_exports_ticket_document_and_selected_input_without_desktop(
 }
 
 #[test]
+fn cli_searches_usage_and_renames_without_changing_inline_labels_or_reuploading() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("original.txt");
+    std::fs::write(&path, b"stored bytes").unwrap();
+    let file = run(dir.path(), &["attachment", "add", path.to_str().unwrap()]);
+    let id = file["id"].as_str().unwrap();
+    let renamed = run(
+        dir.path(),
+        &[
+            "attachment",
+            "rename",
+            id,
+            "Readable name",
+            "--request-id",
+            "rename-cli",
+        ],
+    );
+    assert_eq!(renamed["original_filename"], "original.txt");
+    assert_eq!(renamed["id"], id);
+    let results = run(
+        dir.path(),
+        &[
+            "attachment",
+            "search",
+            "readable",
+            "--state",
+            "unused",
+            "--limit",
+            "1",
+        ],
+    );
+    assert_eq!(results[0]["attachment"], renamed);
+    assert_eq!(results[0]["usage"]["protections"], serde_json::json!([]));
+    assert_eq!(
+        run(
+            dir.path(),
+            &["attachment", "search", "readable", "--offset", "1"]
+        ),
+        serde_json::json!([])
+    );
+    let ticket = run(dir.path(), &["create", "Reuse"]);
+    let reference = ticket["reference"].as_str().unwrap();
+    run(dir.path(), &["attachment", "link", id, reference]);
+    assert_eq!(
+        run(
+            dir.path(),
+            &["attachment", "search", "original", "--state", "in-use"]
+        )[0]["usage"]["protections"][0]["kind"],
+        "ticket_attachment"
+    );
+    assert_eq!(
+        run(
+            dir.path(),
+            &["attachment", "list", "--ticket", reference, "--limit", "0"]
+        ),
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn cli_explains_and_changes_the_shared_workspace_upload_limit() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(

@@ -78,6 +78,18 @@ afterEach(() => {
   expect(unknown).toEqual([]);
 });
 
+test("Attachments opens from the existing Context navigation without replacing ticket views", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
+  expect(
+    await screen.findByRole("heading", { name: "Attachments" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("searchbox", { name: "Search files" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /^All tickets/ }));
+  expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
+});
+
 async function openManageMenu(label: string, item: string) {
   fireEvent.keyDown(screen.getByRole("button", { name: label }), {
     key: "Enter",

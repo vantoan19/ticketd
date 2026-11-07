@@ -100,7 +100,16 @@ test("a direct preview replaces only its selected ticket association through the
         can_open: false,
         usage: { total: 0, entries: [], legacy_drafts_pending: false },
       };
-    if (command === "list_attachments") return [replacement];
+    if (command === "search_attachments")
+      return [replacement].map((attachment) => ({
+        attachment,
+        related: false,
+        usage: {
+          eligible: true,
+          legacy_drafts_pending: false,
+          protections: [],
+        },
+      }));
     if (command === "inspect_attachment") return replacement;
     if (command === "replace_ticket_attachment") {
       replaced = true;
@@ -115,7 +124,10 @@ test("a direct preview replaces only its selected ticket association through the
   await screen.findByText("The local file could not be found");
   fireEvent.click(screen.getByRole("button", { name: "Choose a replacement" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
-  fireEvent.click(await screen.findByRole("button", { name: /New trace/ }));
+  fireEvent.click(
+    await screen.findByRole("radio", { name: "Select New trace" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   await screen.findByRole("button", { name: "New trace" });
   expect(invoke).toHaveBeenCalledWith("replace_ticket_attachment", {
     reference: "T-1",
