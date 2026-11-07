@@ -77,7 +77,9 @@ export function PurgeAttachment({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Permanently purge this file?</DialogTitle>
+          <DialogTitle className="pr-6">
+            Permanently purge this file?
+          </DialogTitle>
           <DialogDescription>
             {pending
               ? "This permanent purge is pending. Retry to finish deletion and confirm completion; it cannot be undone."
