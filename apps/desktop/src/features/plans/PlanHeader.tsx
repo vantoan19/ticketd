@@ -304,7 +304,7 @@ export function PlanHeader({
         </div>
       )}
       {(actionError || loadError) && (
-        <Alert variant="destructive" role="alert">
+        <Alert tone="error" role="alert">
           <AlertDescription>{actionError || loadError}</AlertDescription>
         </Alert>
       )}
