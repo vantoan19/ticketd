@@ -18,7 +18,7 @@ import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
-import { setPreference, usePreferences, useThemeSync } from "@/lib/preferences";
+import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
@@ -268,7 +268,6 @@ function AppContent() {
           >
             <SidebarProvider
               open={!sidebarCollapsed}
-              onOpenChange={(open) => setPreference("sidebarCollapsed", !open)}
             >
               <a
                 className="skip-link"
@@ -316,6 +315,7 @@ function AppContent() {
                       scope(...args);
                     }}
                     navigation={navigation}
+                    onError={workspace.setError}
                     setCreating={(value) => {
                       if (value) setCreateStatus(undefined);
                       setCreating(value);

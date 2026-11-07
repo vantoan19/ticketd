@@ -96,6 +96,7 @@ export function WorkspaceSidebar({
   setCreating,
   createTriggerRef,
   navigation,
+  onError,
 }: {
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
@@ -119,6 +120,7 @@ export function WorkspaceSidebar({
   ) => void;
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
+  onError: (message: string) => void;
 }) {
   // While the workspace graph is open no other entry reads as current.
   const view: View | null = workspaceGraphOpen ? null : viewName;
@@ -145,7 +147,12 @@ export function WorkspaceSidebar({
           {!isMobile && (
             <IconButton
               label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              onClick={() => setPreference("sidebarCollapsed", !collapsed)}
+              onClick={() => {
+                if (!setPreference("sidebarCollapsed", !collapsed))
+                  onError(
+                    "Could not save the sidebar state. Check local storage and try again.",
+                  );
+              }}
             >
               {collapsed ? (
                 <PanelLeftOpen aria-hidden="true" />

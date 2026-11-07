@@ -1960,6 +1960,28 @@ test("the sidebar collapses to named icons, expands again, and remembers the cho
   expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
 });
 
+test("Ctrl+B belongs to the editors and never toggles the sidebar", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  fireEvent.keyDown(window, { key: "b", metaKey: true });
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("a failed save of the sidebar state says so and leaves the sidebar as it was", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new Error("quota");
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  setItem.mockRestore();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Could not save the sidebar state",
+  );
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
 test("a narrow window keeps the sheet and offers no collapse button", async () => {
   narrowViewport = true;
   await renderBulk({});
