@@ -204,14 +204,6 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.board-empty {
-  padding: 24px 12px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
 .ticket-workspace.board-layout.board-unselected #list {
   flex: 1 1 0 !important;
 }

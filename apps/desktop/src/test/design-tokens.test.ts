@@ -28,7 +28,7 @@ const KNOWN: Record<string, number> = {
   "features/tickets/properties.css": 1,
   "features/tickets/publication.css": 3,
   "features/tickets/subtickets.css": 1,
-  "features/tickets/ticket-board.css": 7,
+  "features/tickets/ticket-board.css": 6,
   "features/tickets/ticket-detail.css": 3,
   "features/tickets/ticket-documents.css": 3,
   "features/tickets/ticket-filters.css": 6,

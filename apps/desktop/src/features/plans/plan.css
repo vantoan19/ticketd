@@ -427,10 +427,6 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.plan-empty-actions {
-  display: flex;
-  gap: 8px;
-}
 .plan-add-done {
   margin: 0;
   color: var(--muted-foreground);
@@ -510,9 +506,10 @@
 .ticket-detail[data-empty] .detail-scroll {
   display: flex;
 }
-.ticket-detail[data-empty] .detail-empty {
+.ticket-detail[data-empty] [data-slot="empty-state"][data-size="hint"] {
   flex: 1;
   min-height: 0;
+  padding: 48px 24px;
 }
 
 /* Nothing to draw: legend strip over a centred empty state, in a 760 x 420

@@ -19,7 +19,7 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   DropdownMenu,
@@ -886,13 +886,10 @@ export function Activity({
           Loading activity…
         </p>
       ) : entries.length === 0 && !error && !loadError ? (
-        <Empty className="activity-empty">
-          <EmptyHeader>
-            <EmptyDescription>
-              No updates or recorded changes yet.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <EmptyState
+          size="inline"
+          description="No updates or recorded changes yet."
+        />
       ) : (
         <ol className="activity-list">
           {entries.map((item) =>

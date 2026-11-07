@@ -30,6 +30,54 @@ test("an empty state names what will appear and offers its action", () => {
   expect(screen.getByRole("button", { name: "Do it" })).toBeTruthy();
 });
 
+test("an inline empty state keeps its words and action in one status row", () => {
+  render(
+    <EmptyState
+      size="inline"
+      role="status"
+      description="Link a pull request."
+      action={<button>Add</button>}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "Link a pull request.",
+  );
+  expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
+});
+
+test("a hint empty state is a quiet line with its footnote and no action", () => {
+  render(
+    <EmptyState
+      size="hint"
+      title="Select a ticket to read it here"
+      footnote={<kbd>Enter</kbd>}
+    />,
+  );
+  expect(screen.getByText("Select a ticket to read it here")).toBeTruthy();
+  expect(screen.getByText("Enter")).toBeTruthy();
+  expect(screen.queryByRole("button")).toBeNull();
+});
+
+test("a block empty state lays several actions side by side", () => {
+  render(
+    <EmptyState
+      icon={<svg />}
+      title="Nothing"
+      description="Nothing yet."
+      action={
+        <>
+          <button>One</button>
+          <button>Two</button>
+        </>
+      }
+    />,
+  );
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
+    "One",
+    "Two",
+  ]);
+});
+
 test("a picker is named by its label and current value", () => {
   render(
     <Picker

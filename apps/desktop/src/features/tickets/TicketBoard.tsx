@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -274,10 +275,14 @@ export function TicketBoard({
                   );
                 })}
                 {loading && total === null && (
-                  <p className="board-empty">Loading tickets…</p>
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading tickets…"
+                  />
                 )}
                 {!loading && !error && items.length === 0 && (
-                  <p className="board-empty">No matching tickets</p>
+                  <EmptyState size="inline" description="No matching tickets" />
                 )}
                 {total !== null && items.length < total && (
                   <>

@@ -339,7 +339,7 @@ export function TicketListPane({
                 }
                 action={
                   query || tags || status || availability || family || plan ? (
-                    <div className="plan-empty-actions">
+                    <>
                       {query && (
                         <Button
                           variant="outline"
@@ -361,7 +361,7 @@ export function TicketListPane({
                           Clear filters
                         </Button>
                       )}
-                    </div>
+                    </>
                   ) : undefined
                 }
               />
@@ -371,7 +371,7 @@ export function TicketListPane({
                 title="No tickets in this Plan"
                 description="Start with a new ticket, or bring in existing ones."
                 action={
-                  <div className="plan-empty-actions">
+                  <>
                     <Button
                       size="sm"
                       onClick={(event) => onCreate(event.currentTarget)}
@@ -385,7 +385,7 @@ export function TicketListPane({
                     >
                       Add existing tickets
                     </Button>
-                  </div>
+                  </>
                 }
               />
             ) : navigation.project !== "all" ||

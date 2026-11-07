@@ -480,7 +480,9 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
     clientWidth: { configurable: true, value: 560 },
   });
   const column = screen.getByRole("region", { name: "In progress column" });
-  const body = within(column).getByText("No matching tickets").parentElement!;
+  const body = within(column)
+    .getByText("No matching tickets")
+    .closest("[data-slot=empty-state]")!.parentElement!;
   vi.spyOn(body, "getBoundingClientRect").mockReturnValue(
     new DOMRect(280, 32, 280, 568),
   );

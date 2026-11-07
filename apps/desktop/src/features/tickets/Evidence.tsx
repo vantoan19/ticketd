@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -179,9 +180,10 @@ export function Evidence({
         }
       />
       {!items.length && (
-        <p className="evidence-empty text-muted-foreground text-xs">
-          Link a pull request, commit, or verification result.
-        </p>
+        <EmptyState
+          size="inline"
+          description="Link a pull request, commit, or verification result."
+        />
       )}
       {error && !composing && <p role="alert">{error}</p>}
       {confirmDelete && (
