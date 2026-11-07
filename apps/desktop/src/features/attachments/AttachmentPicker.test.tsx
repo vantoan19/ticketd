@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { IDBFactory } from "fake-indexeddb";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -109,6 +110,49 @@ test("new captures use the current workspace preference while recovered retries 
         .mock.calls.some(([command]) => command === "import_attachment"),
     ).toBe(true),
   );
+});
+
+test("a late initial preference read cannot overwrite the destination captured for a new selection", async () => {
+  const drive = {
+    kind: "google_drive",
+    destination: {
+      connection_id: "account",
+      folder_id: "folder",
+      resource_key: null,
+    },
+    folder_name: "Team files",
+  };
+  let firstRead = true;
+  let finishOldRead: (value: unknown) => void = () => {};
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "late-preference";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "attachment_upload_destination") {
+      if (firstRead) {
+        firstRead = false;
+        return new Promise((resolve) => {
+          finishOldRead = resolve;
+        });
+      }
+      return drive;
+    }
+    if (command === "begin_attachment_upload") return drive;
+    if (command === "upload_drive_file") throw new Error("Drive is offline");
+    return null;
+  });
+  render(
+    <AttachmentPicker open onOpenChange={() => {}} onPick={async () => {}} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText(/Drive is offline/);
+  await act(async () => {
+    finishOldRead({ kind: "local" });
+  });
+  expect(
+    screen.getByText("Destination: Google Drive · Team files"),
+  ).toBeTruthy();
 });
 
 test("failed destination bindings keep the batch choice through a later preference change", async () => {

@@ -71,6 +71,7 @@ export function AttachmentPicker({
     useState<AttachmentUploadDestination | null>(null);
   const [explicitDestination, setExplicitDestination] =
     useState<AttachmentUploadDestination | null>(null);
+  const destinationRead = useRef(0);
   const displayedDestination = explicitDestination ?? workspaceDestination;
   const destination: DriveUploadDestination | undefined =
     displayedDestination?.kind === "google_drive"
@@ -153,13 +154,15 @@ export function AttachmentPicker({
   useEffect(() => {
     if (!open) return;
     let current = true;
+    const readRevision = ++destinationRead.current;
     void attachments
       .uploadDestination()
       .then((value) => {
-        if (current) setWorkspaceDestination(value);
+        if (current && readRevision === destinationRead.current)
+          setWorkspaceDestination(value);
       })
       .catch((reason: unknown) => {
-        if (current)
+        if (current && readRevision === destinationRead.current)
           setError(
             `Could not read the upload destination: ${String(reason)}. New uploads must resolve their destination before starting.`,
           );
@@ -282,11 +285,13 @@ export function AttachmentPicker({
     let intent: AttachmentUploadDestination;
     try {
       journal = await loadRecovery();
+      const readRevision = ++destinationRead.current;
       // Freeze one core preference snapshot for this selection, including files
       // queued behind a slow or temporarily failed destination binding.
       intent = explicitDestination ?? (await attachments.uploadDestination());
       if (insertion.current !== currentInsertion) return;
-      if (!explicitDestination) setWorkspaceDestination(intent);
+      if (!explicitDestination && readRevision === destinationRead.current)
+        setWorkspaceDestination(intent);
     } catch (reason) {
       setError(
         `Could not prepare upload destination and recovery: ${String(reason)}. No new uploads were started.`,
