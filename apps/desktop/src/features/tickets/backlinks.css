@@ -68,7 +68,7 @@
 }
 .mention-passage mark {
   padding: 0 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-segment);
   background: var(--muted);
   color: var(--foreground);
   font-weight: 500;

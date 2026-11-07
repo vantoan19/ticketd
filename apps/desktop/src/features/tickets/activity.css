@@ -37,7 +37,7 @@
   /* Frame: a 1px #DBDBDB edge, a step stronger than the base border. */
   box-shadow: inset 0 0 0 1px
     color-mix(in srgb, var(--foreground) 16%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--muted-foreground);
   font-size: var(--text-ui);

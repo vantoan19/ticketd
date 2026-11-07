@@ -33,7 +33,7 @@
   gap: 4px;
   height: 24px;
   padding: 0 4px 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   font-size: var(--text-ui);
@@ -45,7 +45,7 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   color: var(--muted-foreground);
 }
 /* The chip is 24px tall; the hit area still reaches the 32px minimum. */
@@ -87,7 +87,7 @@
   width: 100%;
   min-height: 32px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
 }
 .source-suggestions li button:hover {
@@ -151,7 +151,7 @@
   gap: 4px;
   min-height: 40px;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);
 }
 .source-chip-input:focus-within {
@@ -176,7 +176,7 @@
   outline: none;
 }
 .source-chip {
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   box-shadow: none;
   font-family: var(--font-mono);
   font-size: var(--text-code);
@@ -185,7 +185,7 @@
 .source-chip button {
   width: 20px;
   height: 20px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 .source-suggestions {
   position: absolute;
@@ -193,7 +193,7 @@
   inset-inline: 0;
   top: 100%;
   margin-top: 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-menu);
 }
 .source-preview {
@@ -218,7 +218,7 @@
 .source-preview-table-scroll {
   overflow-x: auto;
   margin-top: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);
 }
 .source-preview table {

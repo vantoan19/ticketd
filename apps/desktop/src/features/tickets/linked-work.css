@@ -236,7 +236,7 @@
   margin-top: 4px;
   max-height: 220px;
   overflow-y: auto;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);
 }
 .link-ticket-results button {

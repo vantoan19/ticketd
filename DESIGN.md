@@ -170,6 +170,7 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Default control                        | 40px   | Search, form inputs, primary form actions             |
 | Large control                          | 48px   | Deliberately prominent actions / coarse-pointer forms |
 | Default radius `--radius`              | 6px    | Inputs, buttons, small controls                       |
+| Segment radius `--radius-segment`      | 4px    | Segments, keys and other small inner shapes           |
 | Marketing radius                       | 8px    | Reserved; not a replacement control radius            |
 | Elevated panel radius `--radius-panel` | 12px   | Content panel, cards, menus, dialogs, sheets          |
 | Pill radius `--radius-pill`            | 9999px | Tags or compact badges only                           |
@@ -178,6 +179,8 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 | Page gutter                            | 24px   | Workspace and management content gutters              |
 | Standard content width                 | 1200px | Management content maximum                            |
 | Wide content width                     | 1400px | Wide content views where useful                       |
+
+Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (14% in light, 24% in dark). Hairlines at `#0000000f` use `--group-hairline`, the placeholder `#8f8f8f` uses `--control-boundary`, and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 

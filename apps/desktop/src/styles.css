@@ -81,7 +81,8 @@
   --error-foreground: #991b1b;
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
-  --radius: 6px;
+  --radius: var(--radius);
+  --radius-segment: 4px;
   --radius-panel: 12px;
   --radius-pill: 9999px;
   --font-mono:
@@ -261,7 +262,7 @@
     color: var(--foreground);
     background: var(--surface);
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius);
     box-shadow: var(--shadow-border);
     font-size: var(--text-ui);
     line-height: 20px;
@@ -290,7 +291,7 @@
 
 .ui-button {
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: var(--text-ui);
   font-weight: 400;
   line-height: 14px;
@@ -368,7 +369,7 @@
   color: var(--foreground);
   background: var(--surface);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border);
   font-size: var(--text-ui);
   font-weight: 400;
@@ -383,7 +384,7 @@
    :where() keeps this at the specificity of .ui-select, so the focus ring and
    the invalid ring below still win by order. */
 .ui-select.ui-picker:where(:not([aria-invalid="true"], :disabled)) {
-  box-shadow: inset 0 0 0 1px #00000024;
+  box-shadow: inset var(--shadow-border-base);
 }
 /* Label, value, chevron: the value follows the label rather than centring when
    the picker is stretched. */
@@ -423,7 +424,7 @@
   color: var(--popover-foreground);
   background: var(--popover);
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
 }
 .ui-popover {
   max-width: calc(100vw - 32px);
@@ -442,10 +443,10 @@
   box-shadow: var(--shadow-modal);
 }
 .ui-sheet[data-side="left"] {
-  border-radius: 0 12px 12px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
 }
 .ui-sheet[data-side="right"] {
-  border-radius: 12px 0 0 12px;
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
@@ -506,7 +507,7 @@ body:has([data-slot="dialog-overlay"])
 [data-slot="dropdown-menu-item"] {
   min-height: 32px;
   font-size: var(--text-ui);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 /* Notice (components/ui/alert.tsx): one inline message with a tone. */
@@ -807,7 +808,7 @@ body:has([data-slot="dialog-overlay"])
   left: 8px;
   z-index: 100;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--foreground);
   box-shadow: var(--shadow-menu);
@@ -888,7 +889,7 @@ body:has([data-slot="dialog-overlay"])
   text-underline-offset: 2px;
 }
 .sidebar-source-line:focus-visible {
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -933,7 +934,7 @@ body:has([data-slot="dialog-overlay"])
   width: 100%;
   height: 32px;
   padding: 0 10px 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
   overflow: hidden;
@@ -984,7 +985,7 @@ body:has([data-slot="dialog-overlay"])
 .sidebar-heading[data-active] {
   height: 28px;
   padding-left: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--sidebar-accent);
   color: var(--foreground);
 }
@@ -993,7 +994,7 @@ body:has([data-slot="dialog-overlay"])
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
 }
 .sidebar-heading button:hover {
@@ -1068,7 +1069,7 @@ body:has([data-slot="dialog-overlay"])
   min-height: 0;
   flex-direction: column;
   margin: 8px 8px 8px 0;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   overflow: hidden;
   background: var(--surface);
   box-shadow: var(--shadow-small);
@@ -1090,7 +1091,7 @@ body:has([data-slot="dialog-overlay"])
   width: 32px;
   height: 32px;
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
 }
 .icon-button:hover {
@@ -1106,6 +1107,7 @@ body:has([data-slot="dialog-overlay"])
   flex: 1;
   min-height: 0;
 }
+/* !important: the panel group sets display inline, which only !important beats. */
 .ticket-workspace[hidden] {
   display: none !important;
 }
@@ -1167,7 +1169,7 @@ body:has([data-slot="dialog-overlay"])
   padding: 0 8px;
   color: var(--muted-foreground);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .search input {
   padding: 0;
@@ -1321,7 +1323,7 @@ body:has([data-slot="dialog-overlay"])
 .editor-title textarea:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
 }
 .editor-save-state {
   margin-top: 12px;
@@ -1358,6 +1360,8 @@ body:has([data-slot="dialog-overlay"])
 .return-to-list {
   display: none;
 }
+/* !important here and in the narrow block: the panel library sets flex and
+   size inline on #list and #detail, so only !important wins. */
 .ticket-workspace.expanded #list,
 .ticket-workspace.expanded .split-handle {
   display: none !important;
@@ -1536,7 +1540,7 @@ body:has([data-slot="dialog-overlay"])
 }
 .markdown-document :not(pre) > code {
   background: var(--recessed);
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   padding: 4px;
 }
 .markdown-document pre,
@@ -1568,7 +1572,7 @@ body:has([data-slot="dialog-overlay"])
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--shadow-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .markdown-code-block {
   /* The frame's hairline sits inside the 64px box, not around it (+2px). */
@@ -1714,6 +1718,8 @@ body:has([data-slot="dialog-overlay"])
     flex-wrap: wrap;
   }
 }
+/* !important is the point: reduced motion must beat every component's own
+   transition and animation timing. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1736,7 +1742,7 @@ body:has([data-slot="dialog-overlay"])
 }
 #detail-heading:focus-visible {
   outline: none;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--focus-ring);
 }
 .pagination {
@@ -1750,7 +1756,7 @@ body:has([data-slot="dialog-overlay"])
   gap: 4px;
   padding: 8px;
   width: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .sidebar-source-line:hover {
   background: var(--accent);
@@ -1826,7 +1832,7 @@ html[data-input="pointer"]
   .ui-select.ui-picker:focus-visible:where(
     :not([aria-invalid="true"], :disabled)
   ) {
-  box-shadow: inset 0 0 0 1px #00000024;
+  box-shadow: inset var(--shadow-border-base);
 }
 html[data-theme="dark"][data-input="pointer"]
   .ui-select.ui-picker:focus-visible:where(
@@ -1839,7 +1845,7 @@ html[data-theme="dark"][data-input="pointer"]
   gap: 8px;
   margin: 0 0 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   color: var(--muted-foreground);

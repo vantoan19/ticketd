@@ -117,11 +117,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow:
-    var(--shadow-border-base),
-    0 8px 24px #0003;
+  box-shadow: var(--shadow-menu);
   pointer-events: none;
 }
 .ui-button.board-card {
@@ -188,6 +186,7 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
+/* !important: the panel library sets flex inline on the panels (see styles.css). */
 .ticket-workspace.board-layout.board-unselected #list {
   flex: 1 1 0 !important;
 }
@@ -217,6 +216,7 @@
   }
 }
 @media (max-width: 1071px) {
+  /* !important: beats the panel library's inline flex. */
   .ticket-workspace.board-layout #list {
     flex: 1 1 0 !important;
   }

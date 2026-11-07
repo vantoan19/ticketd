@@ -8,31 +8,13 @@ import { expect, it } from "vitest";
 
 const srcDir = join(__dirname, "..");
 
+// Every remaining entry has its reason in the stylesheet. The !important ones
+// beat the panel library's inline flex and display on the ticket workspace, or
+// implement reduced motion. The #000 of a mask is alpha, not a color.
 const KNOWN: Record<string, number> = {
-  "features/documents/context-graph.css": 12,
-  "features/documents/documents.css": 7,
-  "features/markdown/markdown-editor.css": 5,
-  "features/plans/plan.css": 7,
-  "features/projects/projects.css": 6,
-  "features/settings/restore-review.css": 6,
-  "features/settings/settings.css": 9,
-  "features/settings/sources/sources.css": 8,
-  "features/tickets/activity.css": 1,
-  "features/tickets/backlinks.css": 1,
-  "features/tickets/create-ticket.css": 3,
-  "features/tickets/dependency-graph.css": 5,
-  "features/tickets/description.css": 1,
-  "features/tickets/duplicate-review.css": 3,
-  "features/tickets/inbox.css": 3,
-  "features/tickets/linked-work.css": 1,
-  "features/tickets/properties.css": 1,
-  "features/tickets/publication.css": 3,
-  "features/tickets/ticket-board.css": 6,
-  "features/tickets/ticket-detail.css": 2,
-  "features/tickets/ticket-documents.css": 3,
-  "features/tickets/ticket-filters.css": 6,
-  "features/tickets/ticket-list.css": 5,
-  "styles.css": 34,
+  "features/documents/context-graph.css": 2,
+  "features/tickets/ticket-board.css": 4,
+  "styles.css": 11,
 };
 
 function filesUnder(dir: string): string[] {
