@@ -1,0 +1,273 @@
+{
+  "src/app/App.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/components/layout/WorkspaceSidebar.tsx": {
+    "shadcn/no-restyle": {
+      "count": 8
+    }
+  },
+  "src/components/ui/alert.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 2
+    }
+  },
+  "src/components/ui/command.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    },
+    "shadcn/no-restyle": {
+      "count": 8
+    }
+  },
+  "src/components/ui/dialog-shell.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 4
+    },
+    "shadcn/no-restyle": {
+      "count": 6
+    }
+  },
+  "src/components/ui/dialog.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 5
+    },
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/components/ui/dropdown-menu.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 2
+    }
+  },
+  "src/components/ui/empty-state.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 2
+    },
+    "shadcn/no-restyle": {
+      "count": 12
+    }
+  },
+  "src/components/ui/field.tsx": {
+    "shadcn/no-restyle": {
+      "count": 10
+    }
+  },
+  "src/components/ui/kbd.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    }
+  },
+  "src/components/ui/picker.tsx": {
+    "shadcn/no-restyle": {
+      "count": 3
+    }
+  },
+  "src/components/ui/resizable.tsx": {
+    "shadcn/no-restyle": {
+      "count": 5
+    }
+  },
+  "src/components/ui/segmented-control.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    }
+  },
+  "src/components/ui/select.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 3
+    }
+  },
+  "src/components/ui/sidebar.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 11
+    },
+    "shadcn/no-restyle": {
+      "count": 7
+    }
+  },
+  "src/components/ui/status-dot.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 7
+    }
+  },
+  "src/components/ui/switch.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    }
+  },
+  "src/components/ui/tooltip.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 2
+    }
+  },
+  "src/features/documents/DocumentEditor.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    },
+    "shadcn/no-restyle": {
+      "count": 9
+    }
+  },
+  "src/features/documents/Documents.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/markdown/MarkdownEditor.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/markdown/MermaidDiagram.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/plans/PlanDocuments.tsx": {
+    "shadcn/no-restyle": {
+      "count": 4
+    }
+  },
+  "src/features/plans/PlanHeader.tsx": {
+    "shadcn/no-restyle": {
+      "count": 3
+    }
+  },
+  "src/features/projects/Projects.tsx": {
+    "shadcn/no-restyle": {
+      "count": 3
+    }
+  },
+  "src/features/settings/RestoreDialog.tsx": {
+    "shadcn/no-arbitrary-values": {
+      "count": 1
+    },
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/settings/SettingsView.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/Activity.tsx": {
+    "shadcn/no-restyle": {
+      "count": 4
+    }
+  },
+  "src/features/tickets/BulkControls.tsx": {
+    "shadcn/no-restyle": {
+      "count": 3
+    }
+  },
+  "src/features/tickets/BulkTagDialog.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/Duplicates.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/Inbox.tsx": {
+    "shadcn/no-restyle": {
+      "count": 5
+    }
+  },
+  "src/features/tickets/LinkedWork.tsx": {
+    "shadcn/no-restyle": {
+      "count": 5
+    }
+  },
+  "src/features/tickets/MarkDuplicateDialog.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/PublishToSource.tsx": {
+    "shadcn/no-restyle": {
+      "count": 6
+    }
+  },
+  "src/features/tickets/ReadOnlySource.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/Reminder.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/ResolvePublication.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/Subtickets.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/TakeOwnership.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/TicketBoard.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/TicketDocuments.tsx": {
+    "shadcn/no-restyle": {
+      "count": 3
+    }
+  },
+  "src/features/tickets/TicketEditor.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/TicketFilters.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/TicketHeader.tsx": {
+    "shadcn/no-restyle": {
+      "count": 6
+    }
+  },
+  "src/features/tickets/TicketList.tsx": {
+    "shadcn/no-restyle": {
+      "count": 1
+    }
+  },
+  "src/features/tickets/TicketListPane.tsx": {
+    "shadcn/no-restyle": {
+      "count": 2
+    }
+  },
+  "src/features/tickets/TicketProperties.tsx": {
+    "shadcn/no-restyle": {
+      "count": 5
+    }
+  },
+  "src/features/tickets/TicketRowsSkeleton.tsx": {
+    "shadcn/no-restyle": {
+      "count": 4
+    }
+  },
+  "src/features/tickets/TicketWorkspaceView.tsx": {
+    "shadcn/no-restyle": {
+      "count": 8
+    }
+  }
+}

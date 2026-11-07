@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10",
+    "@shadcn/lint": "0.2.5",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7",
     "eslint-plugin-react-refresh": "^0.5.7",
