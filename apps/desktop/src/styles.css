@@ -1049,26 +1049,39 @@ body:has([data-slot="dialog-overlay"])
 .sidebar[data-collapsed] .sidebar-count > :not([data-slot="status-dot"]) {
   display: none;
 }
+/* A heading becomes a divider. One that carries a manage menu keeps its button,
+   so the Projects and Plans pages stay one click away. */
 .sidebar[data-collapsed] .sidebar-heading {
-  height: 1px;
-  margin: 10px 8px;
+  justify-content: center;
+  margin: 10px 0 0;
   padding: 0;
-  background: var(--border);
   font-size: 0;
 }
-.sidebar[data-collapsed] .sidebar-heading > * {
-  display: none;
+.sidebar[data-collapsed] .sidebar-heading:not(:has(button)) {
+  height: 1px;
+  margin: 10px 8px;
+  background: var(--border);
 }
 .sidebar[data-collapsed] .sidebar-sources {
   align-items: center;
   padding: 0 0 8px;
 }
+/* The dot stands for the line, which keeps its name and tooltip; Retry stays. */
 .sidebar[data-collapsed] .sidebar-source-line {
+  justify-content: center;
+  width: 36px;
+  height: 32px;
   font-size: 0;
 }
-.sidebar[data-collapsed] .sidebar-source-line small,
-.sidebar[data-collapsed] .sidebar-source > button:not(.sidebar-source-line) {
+.sidebar[data-collapsed] .sidebar-source-label {
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-source-line small {
   display: none;
+}
+.sidebar[data-collapsed] .sidebar-source > button:not(.sidebar-source-line) {
+  width: 36px;
+  padding-inline: 0;
 }
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {

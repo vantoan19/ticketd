@@ -19,3 +19,13 @@ it.each([".workspace", ".content-panel"])(
     expect(rule(selector)).toMatch(/overflow: clip;/);
   },
 );
+
+it("the collapsed sidebar keeps the manage menus and the source Retry reachable", () => {
+  const hidden = [...css.matchAll(/(\n[^{}\n]*[{][^}]*display: none;[^}]*})/g)]
+    .map((m) => m[1] ?? "")
+    .filter((block) => block.includes("[data-collapsed]"));
+  const names = hidden.map((block) => block.split("{")[0]?.trim());
+  expect(names.join("\n")).not.toMatch(
+    /sidebar-heading|sidebar-source > button/,
+  );
+});

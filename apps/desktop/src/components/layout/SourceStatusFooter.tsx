@@ -43,7 +43,7 @@ export function SourceStatusFooter() {
               type="button"
               className="sidebar-source-line"
               onClick={openSettings}
-              title={`Open ${name} settings`}
+              title={`${label}. Open ${name} settings`}
             >
               <span className="sidebar-source-label">
                 {state !== "refreshing" && (
