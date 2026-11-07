@@ -259,6 +259,27 @@ fn selecting_a_completed_item_during_registration_recovery_keeps_the_upload_iden
     );
     assert_eq!(workspace.attachments(10, 0).unwrap().len(), 1);
     assert_eq!(provider.ids.lock().unwrap().len(), 1);
+    let provenance = workspace
+        .drive_uploaded_copy(&selected.id)
+        .unwrap()
+        .unwrap();
+    workspace
+        .rename_attachment(&selected.id, "Authored uploaded copy")
+        .unwrap();
+    workspace
+        .resolve_drive_reference(&selected.id, &provider)
+        .unwrap();
+    assert_eq!(
+        workspace
+            .drive_uploaded_copy(&selected.id)
+            .unwrap()
+            .unwrap(),
+        provenance
+    );
+    assert_eq!(
+        workspace.attachment(&selected.id).unwrap().display_name,
+        "Authored uploaded copy"
+    );
 }
 
 #[test]

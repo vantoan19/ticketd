@@ -18,6 +18,79 @@ impl AttachmentProvider for SelectedFile {
 }
 
 #[test]
+fn access_checks_preserve_authored_references_and_recover_only_the_original_file_and_account() {
+    struct Denied;
+    impl AttachmentProvider for Denied {
+        fn metadata(&self, _: &str, _: Option<&str>) -> Result<DriveMetadata, DriveError> {
+            Err(DriveError::new(
+                ticketd_core::drive::DriveErrorKind::PermissionDenied,
+                "Request access in Drive",
+            ))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let file = workspace
+        .reference_drive_file(&connection, "selected-doc", None, &SelectedFile)
+        .unwrap();
+    workspace
+        .rename_attachment(&file.id, "Authored name")
+        .unwrap();
+    let uri = workspace.attachment_uri(&file.id).unwrap();
+    let body = format!("My [literal label]({uri}) stays here.");
+    let document = workspace.create_document(None, &body).unwrap();
+    let previous = workspace.drive_reference(&file.id).unwrap();
+    let status = workspace.check_drive_reference(&file.id, &Denied).unwrap();
+    assert_eq!(status.reference, previous);
+    assert_eq!(
+        status.failure.unwrap().kind,
+        ticketd_core::drive::DriveErrorKind::PermissionDenied
+    );
+    for (account, selected) in [
+        (connection.clone(), "different-file"),
+        (uuid::Uuid::new_v4().to_string(), "selected-doc"),
+    ] {
+        let selection = ticketd_core::drive::DriveSelection {
+            connection_id: account,
+            file_ids: vec![selected.into()],
+        };
+        assert!(
+            workspace
+                .recover_drive_reference(&file.id, &selection, &SelectedFile)
+                .is_err()
+        );
+        assert_eq!(workspace.attachments(10, 0).unwrap().len(), 1);
+    }
+    let selection = ticketd_core::drive::DriveSelection {
+        connection_id: connection,
+        file_ids: vec!["selected-doc".into()],
+    };
+    assert_eq!(
+        workspace
+            .recover_drive_reference(&file.id, &selection, &SelectedFile)
+            .unwrap(),
+        previous
+    );
+    assert!(
+        workspace
+            .check_drive_reference(&file.id, &SelectedFile)
+            .unwrap()
+            .failure
+            .is_none()
+    );
+    drop(workspace);
+    let workspace = Workspace::open(path).unwrap();
+    assert_eq!(
+        workspace.attachment(&file.id).unwrap().display_name,
+        "Authored name"
+    );
+    assert_eq!(workspace.show_document(&document.id).unwrap().body, body);
+    assert!(!dir.path().join("workspace.sqlite3.attachments").exists());
+}
+
+#[test]
 fn selected_native_files_are_reusable_current_references_without_local_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

@@ -527,8 +527,25 @@ workspace serialize refresh-token rotation; access tokens stay in memory.
 Transport diagnostics omit URLs, headers and bodies, and Google redirects are
 not followed. Workspace backups/JSON export contain reference metadata, never
 credentials or remote bytes. The standalone CLI uses the same core/vault namespace;
-no desktop process is needed. Portable Drive-link export and richer recovery/remote
-record cleanup are separate workflows.
+no desktop process is needed. Portable Drive-link export and remote record cleanup
+are separate workflows.
+
+`check_drive_reference` returns an explicit access observation with typed provider
+failure and last-known metadata; access is not persisted as a workspace-wide fact
+because credentials belong to each OS user. Failed reads never erase metadata.
+Successful refresh changes current provider metadata and known size, preserving
+local display names, original filenames, authored Markdown and immutable uploaded-copy
+provenance. Network calls precede short database transactions.
+
+`begin_drive_reference_recovery` constrains native Picker recovery to one original
+file and account/client handle. Callback processing verifies both before loading
+or saving credentials; `recover_drive_reference` rechecks the selection at the
+Workspace boundary before metadata refresh. Wrong selection is not replacement.
+React displays recovery state and Tauri translates browser/cancellation requests;
+the standalone CLI prints the same bounded session URL for explicit browser opening.
+Neither adapter decides authorization policy or changes sharing. Error classification
+uses provider evidence: app-not-authorized, reconnect, explicit file-permission
+denial and positively observed trash are distinct; unknown 403/404 stays ambiguous.
 
 ## Google Drive uploaded copies
 

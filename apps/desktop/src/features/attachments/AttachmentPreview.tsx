@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Download, ExternalLink, File, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +21,7 @@ import {
 } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
+import { DriveAccessRecovery } from "./DriveAccessRecovery";
 import { formatSize } from "./format-size";
 import "./attachment-preview.css";
 
@@ -107,6 +114,7 @@ export function AttachmentPreview({
   const [info, setInfo] = useState<PreviewInfo | null>(null);
   const [workspace, setWorkspace] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const refreshDrive = useCallback(() => setAttempt((value) => value + 1), []);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -215,7 +223,9 @@ export function AttachmentPreview({
         </DialogHeader>
         <div className="attachment-preview-layout">
           <div className="attachment-preview-stage">
-            {available && file && info.media_type ? (
+            {external && file ? (
+              <DriveAccessRecovery id={file.id} onRefresh={refreshDrive} />
+            ) : available && file && info.media_type ? (
               <Media
                 key={`${workspace}/${file.id}/${attempt}`}
                 file={file}
@@ -265,7 +275,7 @@ export function AttachmentPreview({
               <>
                 <dl className="attachment-metadata">
                   {external ? (
-                    <DriveReferenceDetails id={file.id} />
+                    <DriveReferenceDetails id={file.id} revision={attempt} />
                   ) : (
                     <>
                       <dt>Type</dt>

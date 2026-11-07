@@ -9,7 +9,13 @@ const nativeTypes: Record<string, string> = {
 };
 
 /** Read last-known details only; opening this dialog does not require connectivity. */
-export function DriveReferenceDetails({ id }: { id: string }) {
+export function DriveReferenceDetails({
+  id,
+  revision = 0,
+}: {
+  id: string;
+  revision?: number;
+}) {
   const [reference, setReference] = useState<DriveReference | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -25,7 +31,7 @@ export function DriveReferenceDetails({ id }: { id: string }) {
     return () => {
       current = false;
     };
-  }, [id]);
+  }, [id, revision]);
   if (!reference)
     return (
       <>

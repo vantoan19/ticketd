@@ -18,6 +18,8 @@ pub enum DriveErrorKind {
     Unconfigured,
     Reauthorize,
     SelectFile,
+    PermissionDenied,
+    Missing,
     InaccessibleOrMissing,
     Offline,
     RateLimited,
@@ -68,6 +70,13 @@ pub struct DriveReference {
     pub metadata: DriveMetadata,
 }
 
+/// An explicit observation, not a cached assertion about the current account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriveAccess {
+    pub reference: DriveReference,
+    pub failure: Option<DriveError>,
+}
+
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
     // SQLite's documented table-rebuild procedure, with foreign keys disabled by
     // the migration owner and checked before commit. Existing child rows stay intact.
@@ -82,6 +91,51 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 }
 
 impl Workspace {
+    /// Inspect current access without discarding last-known details on provider failure.
+    pub fn check_drive_reference(
+        &mut self,
+        id: &str,
+        provider: &dyn AttachmentProvider,
+    ) -> Result<DriveAccess, Error> {
+        let reference = self.drive_reference(id)?;
+        match self.resolve_drive_reference(id, provider) {
+            Ok(reference) => Ok(DriveAccess {
+                reference,
+                failure: None,
+            }),
+            Err(Error::Drive(failure)) => Ok(DriveAccess {
+                reference,
+                failure: Some(failure),
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Recovery must never substitute another file or account for existing uses.
+    pub fn recover_drive_reference(
+        &mut self,
+        id: &str,
+        selection: &DriveSelection,
+        provider: &dyn AttachmentProvider,
+    ) -> Result<DriveReference, Error> {
+        let reference = self.drive_reference(id)?;
+        validate_recovery_selection(&reference, selection)?;
+        self.resolve_drive_reference(id, provider)
+    }
+
+    pub fn begin_drive_reference_recovery(
+        &self,
+        id: &str,
+        client: DesktopOAuthClient,
+        timeout: std::time::Duration,
+    ) -> Result<PickerSession, Error> {
+        Ok(PickerSession::begin_recovery(
+            client,
+            timeout,
+            self.drive_reference(id)?,
+        )?)
+    }
+
     /// Network resolution precedes the short atomic write. Repeated/concurrent
     /// selection of the same connection/file preserves the workspace identity.
     pub fn reference_drive_file(
@@ -155,6 +209,25 @@ impl Workspace {
         )?;
         self.drive_reference(id)
     }
+}
+
+pub(super) fn validate_recovery_selection(
+    reference: &DriveReference,
+    selection: &DriveSelection,
+) -> Result<(), DriveError> {
+    if selection.connection_id != reference.connection_id {
+        return Err(DriveError::new(
+            DriveErrorKind::Reauthorize,
+            "Reconnect with the original Google account and ticketd OAuth client; the existing reference was not changed",
+        ));
+    }
+    if selection.file_ids.as_slice() != [reference.metadata.id.as_str()] {
+        return Err(DriveError::new(
+            DriveErrorKind::SelectFile,
+            "Select only the original file in the Drive Picker; choosing a replacement is a separate action and the existing reference was not changed",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_metadata(file_id: &str, metadata: &DriveMetadata) -> Result<(), DriveError> {
