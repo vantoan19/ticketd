@@ -18,6 +18,7 @@ import {
   attachments,
   type Attachment,
   type PreviewInfo,
+  type DriveCopyInspection,
 } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
@@ -113,6 +114,7 @@ export function AttachmentPreview({
     "initial" in target ? (target.initial ?? null) : null,
   );
   const [info, setInfo] = useState<PreviewInfo | null>(null);
+  const [copy, setCopy] = useState<DriveCopyInspection | null>(null);
   const [workspace, setWorkspace] = useState("");
   const [attempt, setAttempt] = useState(0);
   const refreshDrive = useCallback(() => setAttempt((value) => value + 1), []);
@@ -141,6 +143,11 @@ export function AttachmentPreview({
       setWorkspace(owningWorkspace);
       setFile(preview.attachment);
       setInfo(preview);
+      setCopy(null);
+      if (preview.attachment.kind === "external_reference") {
+        const inspection = await attachments.inspectDriveCopy(resolved);
+        if (generation.current === current) setCopy(inspection);
+      }
     })().catch((reason: unknown) => {
       if (generation.current === current) setError(String(reason));
     });
@@ -176,6 +183,7 @@ export function AttachmentPreview({
       .catch(() => {});
   }
   const external = file?.kind === "external_reference";
+  const uploadedCopy = info?.uploaded_copy === true || copy !== null;
   const available = !external && info?.status === "available" && !failed;
   const purgeUnavailable =
     file?.purge_state === "pending" || file?.purge_state === "purged";
@@ -192,7 +200,9 @@ export function AttachmentPreview({
             <DialogTitle>{file?.display_name ?? "Attachment"}</DialogTitle>
             <DialogDescription>
               {external
-                ? "Google Drive · External reference"
+                ? uploadedCopy
+                  ? "Google Drive · Uploaded copy"
+                  : "Google Drive · External reference"
                 : "Local snapshot"}
               {file?.size_bytes != null
                 ? ` · ${formatSize(file.size_bytes)}`
@@ -212,7 +222,7 @@ export function AttachmentPreview({
                 </Button>
                 {external && workspace && (
                   <ExportMarkdownButton
-                    label="Export link"
+                    label={uploadedCopy ? "Export" : "Export link"}
                     source={{
                       kind: "markdown",
                       body: `<ticketd://attachment/${workspace}/${file.id}>`,
@@ -236,7 +246,12 @@ export function AttachmentPreview({
         <div className="attachment-preview-layout">
           <div className="attachment-preview-stage">
             {external && file ? (
-              <DriveAccessRecovery id={file.id} onRefresh={refreshDrive} />
+              <DriveAccessRecovery
+                id={file.id}
+                onRefresh={refreshDrive}
+                uploadedCopy={uploadedCopy}
+                copy={copy}
+              />
             ) : available && file && info.media_type ? (
               <Media
                 key={`${workspace}/${file.id}/${attempt}`}
@@ -308,7 +323,11 @@ export function AttachmentPreview({
               <>
                 <dl className="attachment-metadata">
                   {external ? (
-                    <DriveReferenceDetails id={file.id} revision={attempt} />
+                    <DriveReferenceDetails
+                      id={file.id}
+                      revision={attempt}
+                      uploadedCopy={uploadedCopy}
+                    />
                   ) : (
                     <>
                       <dt>Type</dt>
@@ -400,7 +419,7 @@ export function AttachmentPreview({
         <footer className="attachment-preview-footer">
           <p className="attachment-hint">
             {external
-              ? "Removing a link keeps this external reference in your workspace."
+              ? "Google Drive · Removing a link keeps the file in Drive."
               : purgeUnavailable
                 ? "Local bytes are unavailable. Its name, identity and references are preserved."
                 : "Local snapshot · Removing a link keeps this file in your workspace."}

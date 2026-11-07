@@ -5,6 +5,7 @@ import {
   attachments,
   type DriveAccess,
   type DriveConfiguration,
+  type DriveCopyInspection,
 } from "@/lib/api/attachments";
 import { DriveSetupNotice } from "./DriveSetupNotice";
 
@@ -26,9 +27,13 @@ const headings = {
 export function DriveAccessRecovery({
   id,
   onRefresh,
+  uploadedCopy = false,
+  copy = null,
 }: {
   id: string;
   onRefresh: () => void;
+  uploadedCopy?: boolean;
+  copy?: DriveCopyInspection | null;
 }) {
   const [access, setAccess] = useState<DriveAccess | null>(null);
   const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
@@ -91,7 +96,7 @@ export function DriveAccessRecovery({
       if (generation.current !== current || observation.current !== sequence)
         return;
       setAccess(result);
-      if (!result.failure) onRefresh();
+      if (!result.failure || uploadedCopy) onRefresh();
     } catch (reason) {
       if (generation.current === current) setError(String(reason));
     } finally {
@@ -121,15 +126,28 @@ export function DriveAccessRecovery({
     <div className="attachment-preview-fallback" aria-busy={busy}>
       <File aria-hidden="true" />
       <h3>
-        {kind
-          ? headings[kind]
-          : access
-            ? "Current source in Google Drive"
-            : "Checking Drive access…"}
+        {copy
+          ? {
+              changed: "This copy has changed in Drive",
+              unchanged: "Uploaded copy · Metadata matches upload",
+              unknown: "Original-upload comparison unknown",
+              unsupported: "Original-byte download unsupported",
+              unavailable: "Uploaded copy unavailable",
+            }[copy.status]
+          : kind
+            ? headings[kind]
+            : access
+              ? uploadedCopy
+                ? "Uploaded copy in Google Drive"
+                : "Current source in Google Drive"
+              : "Checking Drive access…"}
       </h3>
       <p role="status">
-        {access?.failure?.message ??
-          "Current source content · No local snapshot. Open this file in Drive; its content can change independently. Remote bytes are not cached automatically."}
+        {copy?.message ??
+          access?.failure?.message ??
+          (uploadedCopy
+            ? "Uploaded copy · Content can change in Drive. Export verifies original bytes; remote content is not cached automatically."
+            : "Current source content · No local snapshot. Open this file in Drive; its content can change independently. Remote bytes are not cached automatically.")}
       </p>
       {(kind === "permission_denied" || kind === "inaccessible_or_missing") && (
         <>
@@ -168,7 +186,7 @@ export function DriveAccessRecovery({
         disabled={busy}
         onClick={() => void check(false)}
       >
-        {kind ? "Retry" : "Refresh details"}
+        {kind || uploadedCopy ? "Retry" : "Refresh details"}
       </Button>
       {selecting && (
         <Button

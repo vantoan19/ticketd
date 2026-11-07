@@ -534,6 +534,24 @@ impl Workspace {
     /// Export stored bytes without overwriting an existing destination or leaving partial output.
     pub fn export_attachment(&self, id: &str, destination: impl AsRef<Path>) -> Result<(), Error> {
         let attachment = self.attachment(id)?;
+        if attachment.kind == AttachmentKind::ExternalReference
+            && self.drive_uploaded_copy(id)?.is_some()
+        {
+            let transport = crate::drive::GoogleTransport::default();
+            let provider = crate::drive::GoogleDriveCopies::new(
+                &crate::drive::PlatformCredentialStore,
+                &transport,
+            );
+            let result = self.export_drive_uploaded_copy(id, destination, &provider)?;
+            return if result.status == crate::drive::DriveCopyStatus::Unchanged {
+                Ok(())
+            } else {
+                Err(Error::Attachment(format!(
+                    "Uploaded-copy bytes were not verified: {}",
+                    result.message
+                )))
+            };
+        }
         let (_, mut source) =
             crate::attachment_previews::open_snapshot(&self.connection, &attachment)
                 .map_err(|error| Error::Attachment(error.message))?;

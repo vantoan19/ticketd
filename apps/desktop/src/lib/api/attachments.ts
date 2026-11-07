@@ -46,6 +46,7 @@ export type AttachmentSearchResult = z.infer<
 >;
 const previewSchema = z.object({
   attachment: attachmentSchema,
+  uploaded_copy: z.boolean().optional(),
   status: z.enum([
     "available",
     "unsupported",
@@ -131,6 +132,28 @@ const driveReferenceSchema = z.object({
   }),
 });
 export type DriveReference = z.infer<typeof driveReferenceSchema>;
+export const driveCopyStatusSchema = z.enum([
+  "unchanged",
+  "changed",
+  "unknown",
+  "unsupported",
+  "unavailable",
+]);
+const driveCopyInspectionSchema = z.object({
+  status: driveCopyStatusSchema,
+  message: z.string(),
+  last_known: driveReferenceSchema.shape.metadata,
+  current: z
+    .object({
+      metadata: driveReferenceSchema.shape.metadata,
+      sha256_checksum: z.string().nullable(),
+      version: z.string().nullable(),
+      can_download: z.boolean().nullable(),
+    })
+    .nullable(),
+  error_kind: z.string().nullable(),
+});
+export type DriveCopyInspection = z.infer<typeof driveCopyInspectionSchema>;
 const driveAccessSchema = z.object({
   reference: driveReferenceSchema,
   failure: z
@@ -195,6 +218,11 @@ export const attachments = {
     return uploadDestinationSchema.parse(
       await invoke("begin_attachment_upload", { requestId, explicit }),
     );
+  },
+  async inspectDriveCopy(id: string) {
+    return driveCopyInspectionSchema
+      .nullable()
+      .parse(await invoke("drive_uploaded_copy_status", { id }));
   },
   async cleanupReview(id: string) {
     return cleanupReviewSchema.parse(

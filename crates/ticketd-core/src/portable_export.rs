@@ -57,6 +57,8 @@ pub struct ExportAttachment {
     pub path: Option<String>,
     pub external_url: Option<String>,
     pub omission: Option<String>,
+    #[serde(default)]
+    pub copy_status: Option<crate::drive::DriveCopyStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,20 @@ impl Workspace {
         &self,
         source: MarkdownExportSource,
         output: impl AsRef<Path>,
+    ) -> Result<MarkdownExport, Error> {
+        let transport = crate::drive::GoogleTransport::default();
+        let provider = crate::drive::GoogleDriveCopies::new(
+            &crate::drive::PlatformCredentialStore,
+            &transport,
+        );
+        self.export_markdown_with_files_with_drive(source, output, &provider)
+    }
+
+    pub fn export_markdown_with_files_with_drive(
+        &self,
+        source: MarkdownExportSource,
+        output: impl AsRef<Path>,
+        provider: &dyn crate::drive::DriveCopyProvider,
     ) -> Result<MarkdownExport, Error> {
         // Use the same file-lock-before-SQLite order as backup and upload recovery.
         let _files = self.attachment_backup_lock()?;
@@ -127,6 +143,7 @@ impl Workspace {
         let mut entries = Vec::new();
         let mut replacements = BTreeMap::new();
         let mut copied = BTreeMap::<String, ExportAttachment>::new();
+        let mut remote = BTreeMap::new();
         for uri in uris {
             let mut entry = ExportAttachment {
                 uri: uri.clone(),
@@ -137,6 +154,7 @@ impl Workspace {
                 path: None,
                 external_url: None,
                 omission: None,
+                copy_status: None,
             };
             let prefix = format!("ticketd://attachment/{workspace_id}/");
             let normalized = if uri
@@ -166,6 +184,12 @@ impl Workspace {
                             entry.omission.clone_from(&previous.omission);
                         } else {
                             self.copy_export_attachment(&file, stage.path(), &mut entry)?;
+                            if entry.kind == Some(ExportAttachmentKind::UploadedCopy)
+                                && let Some(operation) = self.drive_uploaded_copy(id)?
+                            {
+                                remote
+                                    .insert(id.to_owned(), (operation, self.drive_reference(id)?));
+                            }
                             copied.insert(id.into(), entry.clone());
                         }
                     }
@@ -175,10 +199,42 @@ impl Workspace {
             } else {
                 entry.omission = Some("This reference belongs to another workspace; export it from its owning workspace.".into());
             }
-            if let Some(target) = entry.path.as_ref().or(entry.external_url.as_ref()) {
-                replacements.insert(uri, target.clone());
-            }
             entries.push(entry);
+        }
+        tx.commit()?;
+        drop(_files);
+        // Local inputs have been copied from one protected snapshot. Never hold
+        // the file barrier or SQLite transaction while waiting on a provider.
+        for (id, (operation, reference)) in remote {
+            if let Some(entry) = copied.get_mut(&id) {
+                let relative = export_filename(&id, &operation.request.filename);
+                let output = stage.path().join(&relative);
+                let inspection =
+                    crate::drive::copies::export_copy(&operation, &reference, provider, &output)?;
+                entry.copy_status = Some(inspection.status);
+                entry.omission = (inspection.status != crate::drive::DriveCopyStatus::Unchanged)
+                    .then(|| {
+                        format!(
+                            "Uploaded-copy bytes were not verified: {}",
+                            inspection.message
+                        )
+                    });
+                if entry.omission.is_none() {
+                    entry.path = Some(relative);
+                }
+            }
+        }
+        for entry in &mut entries {
+            if let Some(previous) = entry.attachment_id.as_ref().and_then(|id| copied.get(id)) {
+                entry.path.clone_from(&previous.path);
+                entry.omission.clone_from(&previous.omission);
+                entry.copy_status = previous.copy_status;
+            }
+        }
+        for entry in &entries {
+            if let Some(target) = entry.path.as_ref().or(entry.external_url.as_ref()) {
+                replacements.insert(entry.uri.clone(), target.clone());
+            }
         }
         let labels = entries
             .iter()
@@ -228,7 +284,6 @@ impl Workspace {
         if let Some(parent) = stage.path().parent() {
             attachments::sync_directory(parent)?;
         }
-        tx.commit()?;
         let _ = stage.keep();
         Ok(result)
     }
@@ -268,20 +323,7 @@ impl Workspace {
                     };
                 // Identity-prefixed ASCII names are collision safe on case-insensitive
                 // filesystems, and cannot introduce paths, reserved names or Markdown syntax.
-                let name: String = file
-                    .original_filename
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect();
-                // Bound the component while retaining the suffix and file extension.
-                let name = &name[name.len().saturating_sub(100)..];
-                let relative = format!("files/{}-{name}", file.id);
+                let relative = export_filename(&file.id, &file.original_filename);
                 let output = folder.join(&relative);
                 let mut destination = fs::File::create(&output)?;
                 let count = std::io::copy(&mut input, &mut destination)?;
@@ -300,6 +342,20 @@ impl Workspace {
         }
         Ok(())
     }
+}
+
+fn export_filename(id: &str, filename: &str) -> String {
+    let name: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("files/{id}-{}", &name[name.len().saturating_sub(100)..])
 }
 
 fn write_synced(path: &Path, bytes: &[u8]) -> Result<(), Error> {

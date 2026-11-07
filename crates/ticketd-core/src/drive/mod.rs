@@ -10,7 +10,11 @@ mod oauth;
 pub use oauth::*;
 mod uploads;
 pub use uploads::*;
+pub(crate) mod copies;
 mod upload_provider;
+pub use copies::*;
+mod copy_provider;
+pub use copy_provider::GoogleDriveCopies;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
