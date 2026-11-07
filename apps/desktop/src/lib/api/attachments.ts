@@ -120,8 +120,42 @@ const driveReferenceSchema = z.object({
   }),
 });
 export type DriveReference = z.infer<typeof driveReferenceSchema>;
+export const driveDestinationSchema = z.object({
+  connection_id: z.string(),
+  folder_id: z.string(),
+  resource_key: z.string().nullable(),
+});
+export type DriveUploadDestination = z.infer<typeof driveDestinationSchema>;
+const driveConfigurationSchema = z.object({
+  configured: z.boolean(),
+  message: z.string(),
+});
+export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
+  async openDriveUpload(requestId: string) {
+    await invoke("open_drive_upload", { requestId });
+  },
+  async chooseDriveFolder(operationId: string) {
+    return z
+      .object({
+        destination: driveDestinationSchema,
+        folder: z.object({
+          id: z.string(),
+          name: z.string(),
+          can_add_children: z.boolean(),
+        }),
+      })
+      .parse(await invoke("select_drive_upload_folder", { operationId }));
+  },
+  async checkDriveUpload(requestId: string) {
+    return z
+      .object({
+        state: z.enum(["pending", "uncertain", "completed", "cancelled"]),
+        attachment: attachmentSchema.nullable(),
+      })
+      .parse(await invoke("check_drive_upload", { requestId }));
+  },
   async preview(workspace: string, id: string) {
     return previewSchema.parse(
       await invoke("attachment_preview", { workspace, id }),
@@ -134,9 +168,7 @@ export const attachments = {
     return driveReferenceSchema.parse(await invoke("drive_reference", { id }));
   },
   async driveConfiguration() {
-    return z
-      .object({ configured: z.boolean(), message: z.string() })
-      .parse(await invoke("drive_configuration"));
+    return driveConfigurationSchema.parse(await invoke("drive_configuration"));
   },
   async selectDrive(operationId: string) {
     return z
@@ -220,6 +252,7 @@ export const attachments = {
     source: CaptureSource,
     requestId: string,
     onProgress: (value: UploadProgress) => void,
+    destination?: DriveUploadDestination,
   ) {
     const progress = new Channel<unknown>();
     progress.onmessage = (value) => onProgress(progressSchema.parse(value));
@@ -239,6 +272,7 @@ export const attachments = {
         filename: source.name,
         requestId,
         progress: progress.toJSON(),
+        destination,
       }).replace(
         /[\u007f-\uffff]/g,
         (character) =>
@@ -251,7 +285,12 @@ export const attachments = {
       );
     }
     return attachmentSchema.parse(
-      await invoke("import_attachment", { source, requestId, progress }),
+      await invoke(destination ? "upload_drive_file" : "import_attachment", {
+        source,
+        requestId,
+        progress,
+        ...(destination ? { destination } : {}),
+      }),
     );
   },
   async cancel(requestId: string) {

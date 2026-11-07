@@ -71,6 +71,24 @@ pub struct DriveSelection {
     pub file_ids: Vec<String>,
 }
 impl PickerSession {
+    pub fn begin_folder(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
+        let mut session = Self::begin(client, timeout)?;
+        let mut url =
+            url::Url::parse(&session.authorization_url).map_err(|_| invalid_response())?;
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(k, _)| k != "allow_multiple")
+            .collect();
+        url.set_query(None);
+        url.query_pairs_mut().extend_pairs(pairs).extend_pairs([
+            ("allow_multiple", "false"),
+            ("allow_folder_selection", "true"),
+            ("mimetypes", "application/vnd.google-apps.folder"),
+        ]);
+        session.authorization_url = url.into();
+        Ok(session)
+    }
     pub fn begin(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
         let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| loopback_error())?;
         listener

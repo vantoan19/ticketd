@@ -950,3 +950,31 @@ uses the OS user's existing authorization. An unselected file gets selection
 instructions, never broader scopes. Byte export refuses external references and
 instructs the caller to open current content in Drive; portable-link export is a
 separate workflow.
+
+## 19. Google Drive uploads
+
+In the shared Upload flow, Choose Drive folder opens the system-browser Picker
+for one folder. The core verifies that it is writable before selection is accepted
+and again before each upload. File selection, drop and screenshot capture use the
+same independent per-file states and workspace upload bound as local uploads.
+Each queued file retains its chosen account/folder even if the destination for
+new files changes. Failures never switch storage automatically.
+
+An upload has a durable operation and a pre-generated remote blob ID before
+sending bytes. Retry checks that same ID and verifies provenance, size and digest
+before registering a completed uploaded copy. Check status performs reconciliation
+without sending bytes. Unsupported verification stays uncertain, with Open in
+Drive available. Retry must use the original input bytes; uploading a revision
+requires a new operation and attachment identity. Completed copies remain in
+Existing files if insertion or reference saving fails. Canceling an upload or
+abandoning insertion never deletes a completed remote file. Upload locally instead
+is explicit and creates a separate local upload, preserving the Drive operation.
+
+`attachment drive-upload <path> --connection <handle> --folder <id> --request-id
+<id> [--resource-key KEY] [--ticket T-n]` uses the same workflows without a desktop
+process. `attachment drive-uploads` lists operation metadata; `attachment
+drive-upload-status <id> [--check]` inspects or reconciles a saved operation.
+Uploaded copies retain input SHA-256 and observed provider checksum/version;
+remote editing can change them independently. They are not immutable snapshots,
+and byte export requires an explicit verified-download workflow. Backups retain
+only remote metadata and operations, never remote bytes, tokens or resumable URLs.

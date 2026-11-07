@@ -153,6 +153,7 @@ pub async fn capture_attachment(
         filename: String,
         request_id: String,
         progress: tauri::ipc::JavaScriptChannelId,
+        destination: Option<ticketd_core::drive::DriveUploadDestination>,
     }
     let metadata: Metadata = serde_json::from_str(
         request
@@ -171,6 +172,7 @@ pub async fn capture_attachment(
         filename,
         request_id,
         progress,
+        destination,
     } = metadata;
     let progress = Some(progress.channel_on(webview));
     let (guard, canceled) = start_upload(&request_id)?;
@@ -178,9 +180,59 @@ pub async fn capture_attachment(
         let _guard = guard;
         open_workspace()
             .and_then(|mut w| {
+                if let Some(destination) = destination {
+                    let transport = ticketd_core::drive::GoogleTransport::default();
+                    let provider = ticketd_core::drive::GoogleDrive::new(
+                        &destination.connection_id,
+                        &ticketd_core::drive::PlatformCredentialStore,
+                        &transport,
+                    );
+                    return w.upload_drive_bytes(
+                        &request_id,
+                        &filename,
+                        &bytes,
+                        &destination,
+                        &provider,
+                        |copied, total| report_progress(&progress, &canceled, copied, total),
+                    );
+                }
                 w.import_attachment_bytes(&request_id, &filename, &bytes, |copied, total| {
                     report_progress(&progress, &canceled, copied, total)
                 })
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn upload_drive_file(
+    webview: tauri::Webview,
+    source: String,
+    request_id: String,
+    destination: ticketd_core::drive::DriveUploadDestination,
+    progress: Option<tauri::ipc::JavaScriptChannelId>,
+) -> Result<Attachment, String> {
+    let progress = progress.map(|channel| channel.channel_on(webview));
+    let (guard, canceled) = start_upload(&request_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let transport = ticketd_core::drive::GoogleTransport::default();
+        let provider = ticketd_core::drive::GoogleDrive::new(
+            &destination.connection_id,
+            &ticketd_core::drive::PlatformCredentialStore,
+            &transport,
+        );
+        open_workspace()
+            .and_then(|mut w| {
+                w.upload_drive_file(
+                    &request_id,
+                    source,
+                    &destination,
+                    &provider,
+                    |copied, total| report_progress(&progress, &canceled, copied, total),
+                )
             })
             .map_err(|e| e.to_string())
     })

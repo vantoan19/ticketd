@@ -94,6 +94,13 @@ A workspace-scoped file identity with a display name, original filename, availab
 **External attachment reference**:
 An Attachment resolving current provider content rather than a local snapshot. Google Drive references use the connected person's per-file application authorization and existing sharing permissions. Google Docs, Sheets, and Slides open in Drive without conversion. Last-known metadata survives access failures; removing a reference never deletes the remote file.
 
+**Uploaded copy**:
+An Attachment uploaded by ticketd to an explicitly selected remote folder. Its
+operation, remote identity, input digest and observed checksum/version are retained
+for recovery. The provider can change the content independently; an uploaded copy
+does not promise preserved original bytes. A revision uses a new upload operation
+and attachment identity. Cancellation and removal never delete the remote file.
+
 **Recoverable draft**:
 Unpublished editor content retained independently of a ticket, Document, or Activity save. Its attachment references protect files while the editor is closed. Independently recoverable Undo states have separate protection; saving or discarding the current draft does not imply permission to delete their files.
 

@@ -172,6 +172,126 @@ fn cli_explains_and_changes_the_shared_workspace_upload_limit() {
 }
 
 #[test]
+fn cli_exposes_upload_recovery_without_desktop_or_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        run(dir.path(), &["attachment", "drive-uploads"]),
+        serde_json::json!([])
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "drive-upload-status", "unknown"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("operation not found"));
+    let help = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["attachment", "drive-upload", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    let text = String::from_utf8_lossy(&help.stdout);
+    assert!(text.contains("--folder"));
+    assert!(text.contains("--request-id"));
+}
+
+#[test]
+fn cli_replays_a_completed_drive_upload_with_the_source_and_desktop_absent() {
+    use ticketd_core::drive::*;
+    struct Provider(std::sync::Mutex<Option<DriveUploadedFile>>);
+    #[allow(clippy::unwrap_used)] // Deterministic external provider fixture.
+    impl DriveUploadProvider for Provider {
+        fn folder(&self, id: &str, _: Option<&str>) -> Result<DriveFolder, DriveError> {
+            Ok(DriveFolder {
+                id: id.into(),
+                name: "Uploads".into(),
+                can_add_children: true,
+            })
+        }
+        fn reserve_file_id(&self) -> Result<String, DriveError> {
+            Ok("blob-id".into())
+        }
+        fn uploaded_file(&self, _: &str) -> Result<Option<DriveUploadedFile>, DriveError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        fn upload_blob(
+            &self,
+            operation: &DriveUploadOperation,
+            _: &mut dyn std::io::Read,
+            _: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), DriveError> {
+            *self.0.lock().unwrap() = Some(DriveUploadedFile {
+                metadata: DriveMetadata {
+                    id: "blob-id".into(),
+                    name: "trace.log".into(),
+                    mime_type: "application/octet-stream".into(),
+                    size_bytes: Some(14),
+                    web_url: "https://drive.google.com/file/d/blob-id/view".into(),
+                    resource_key: None,
+                },
+                sha256_checksum: Some(
+                    "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698".into(),
+                ),
+                version: Some("7".into()),
+                operation_id: Some(operation.attachment_id.clone()),
+                parent_ids: vec!["folder".into()],
+            });
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = ticketd_core::Workspace::open(&path).unwrap();
+    let destination = DriveUploadDestination {
+        connection_id: "81aa7bfb-05c3-4934-a4e7-5c84e2cb83ec".into(),
+        folder_id: "folder".into(),
+        resource_key: None,
+    };
+    let file = workspace
+        .upload_drive_bytes(
+            "completed",
+            "trace.log",
+            b"original bytes",
+            &destination,
+            &Provider(Default::default()),
+            |_, _| true,
+        )
+        .unwrap();
+    drop(workspace);
+    assert_eq!(
+        run(
+            dir.path(),
+            &[
+                "attachment",
+                "drive-upload",
+                dir.path().join("trace.log").to_str().unwrap(),
+                "--connection",
+                &destination.connection_id,
+                "--folder",
+                "folder",
+                "--request-id",
+                "completed"
+            ]
+        ),
+        serde_json::to_value(&file).unwrap()
+    );
+    assert_eq!(
+        run(
+            dir.path(),
+            &["attachment", "drive-upload-status", "completed", "--check"]
+        )["state"],
+        "completed"
+    );
+    assert_eq!(
+        run(dir.path(), &["attachment", "drive-uploads"])[0]["attachment_id"],
+        file.id
+    );
+}
+
+#[test]
 fn independent_cli_processes_add_inspect_reuse_export_and_detach_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let ticket = run(dir.path(), &["create", "Investigate"]);
