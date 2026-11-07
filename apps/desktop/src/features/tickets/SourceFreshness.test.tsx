@@ -181,6 +181,27 @@ test("an unavailable source shows the failure, the last good sync and a working 
   expect(refreshAll).toHaveBeenCalled();
 });
 
+test("the tooltip carries the detail line the collapsed sidebar hides", () => {
+  render(
+    withActivity(
+      {
+        sources: [
+          status({
+            health: "unavailable",
+            error: { code: "unavailable", message: "Network is down." },
+            failing_since: minutesAgo(12),
+            unavailable_tickets: 3,
+          }),
+        ],
+      },
+      <SourceStatusFooter />,
+    ),
+  );
+  expect(
+    screen.getByTitle(/3 source issues. GitHub last synced 4 min ago./),
+  ).toBeTruthy();
+});
+
 test("a rate limit reads as delayed, not unavailable", () => {
   render(
     withActivity(

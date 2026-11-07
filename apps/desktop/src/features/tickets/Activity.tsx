@@ -607,10 +607,8 @@ export function Activity({
       <SectionHeader
         divided
         title="Activity"
-        actions={
-          sourceName && (
-            <span>Only in ticketd · never sent to {sourceName}</span>
-          )
+        caption={
+          sourceName && <>Only in ticketd · never sent to {sourceName}</>
         }
       >
         <SegmentedControl

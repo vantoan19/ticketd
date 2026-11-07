@@ -363,7 +363,6 @@ export function Follow({
           size="sm"
           role="switch"
           aria-checked={following}
-          aria-label="Follow"
           onClick={() => void toggle()}
         >
           <Eye data-icon="inline-start" aria-hidden="true" />

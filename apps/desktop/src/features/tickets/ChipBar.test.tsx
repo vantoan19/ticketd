@@ -112,7 +112,7 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   // Rail order, each chip named by its property and value.
   expect(
     [...bar.querySelectorAll("button, [role=combobox], [role=switch]")].map(
-      (chip) => chip.getAttribute("aria-label"),
+      (chip) => chip.getAttribute("aria-label") ?? chip.textContent,
     ),
   ).toEqual([
     "Status: In progress",
@@ -126,11 +126,14 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   expect(
     within(bar).getByRole("button", { name: "Source: Local" }),
   ).toBeTruthy();
-  // Follow is a chip that reads Following once on, and keeps its name.
+  // Follow is a chip whose name is its visible text (WCAG 2.5.3), so it reads
+  // Following once on.
   const follow = within(bar).getByRole("switch", { name: "Follow" });
   expect(follow.textContent).toBe("Follow");
+  expect(follow.hasAttribute("aria-label")).toBe(false);
   fireEvent.click(follow);
   await waitFor(() => expect(follow.textContent).toBe("Following"));
+  expect(within(bar).getByRole("switch", { name: "Following" })).toBe(follow);
   expect(follow.getAttribute("aria-checked")).toBe("true");
 
   // The Project chip opens the rail's picker, and choosing saves.
@@ -185,5 +188,11 @@ test("narrow, an active ticket still shows its Latest update under the chips", a
   const bar = await screen.findByRole("group", { name: "Ticket properties" });
   expect(
     await within(bar).findByRole("heading", { name: "Latest update" }),
+  ).toBeTruthy();
+  // On its own line after the last chip, not between Status and the others.
+  const last = within(bar).getByRole("button", { name: "Manage reminder" });
+  const latest = within(bar).getByRole("heading", { name: "Latest update" });
+  expect(
+    last.compareDocumentPosition(latest) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
 });

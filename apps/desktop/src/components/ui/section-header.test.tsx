@@ -51,3 +51,29 @@ it("marks the divided option", () => {
       ?.hasAttribute("data-divided"),
   ).toBe(true);
 });
+
+it("puts a caption in its own slot after the controls, apart from the actions", () => {
+  const { container } = render(
+    <SectionHeader
+      title="Activity"
+      caption="Only in ticketd"
+      actions={<button type="button">Add</button>}
+    >
+      <button type="button">Mode</button>
+    </SectionHeader>,
+  );
+  const caption = container.querySelector(
+    '[data-slot="section-header-caption"]',
+  );
+  expect(caption?.textContent).toBe("Only in ticketd");
+  expect(
+    screen
+      .getByRole("button", { name: "Mode" })
+      .compareDocumentPosition(caption!) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    container
+      .querySelector('[data-slot="section-header-actions"]')
+      ?.contains(caption),
+  ).toBe(false);
+});

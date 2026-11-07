@@ -298,9 +298,7 @@ export function TicketBoard({
                 {!loading && !error && items.length === 0 && (
                   <EmptyState
                     size="inline"
-                    description={
-                      narrowed ? "No matching tickets" : `No ${status} tickets`
-                    }
+                    description={narrowed ? "No matches" : "No tickets"}
                     action={
                       narrowed ? (
                         <Button

@@ -6,7 +6,8 @@ import { Count } from "@/components/ui/count";
  * The heading row every section shares: a title in the heading role (`level`
  * picks h1 to h3, default h3), an optional `count`, optional controls after
  * it (`children`: a segmented control, progress, a caption), and `actions`
- * pushed to the end. `divided` draws a hairline above it to set sections
+ * pushed to the end. `caption` is a muted line of its own under the row.
+ * `divided` draws a hairline above it to set sections
  * apart. It owns no data.
  */
 export function SectionHeader({
@@ -16,6 +17,7 @@ export function SectionHeader({
   count,
   children,
   actions,
+  caption,
   divided = false,
   bar = false,
   className,
@@ -26,6 +28,8 @@ export function SectionHeader({
   count?: ReactNode;
   children?: ReactNode;
   actions?: ReactNode;
+  /** A muted note on its own line under the row, at every width. */
+  caption?: ReactNode;
   divided?: boolean;
   /** A fixed 44px band that opens a panel, with a hairline under it. */
   bar?: boolean;
@@ -51,6 +55,7 @@ export function SectionHeader({
       </Heading>
       {children}
       {actions && <span data-slot="section-header-actions">{actions}</span>}
+      {caption && <small data-slot="section-header-caption">{caption}</small>}
     </div>
   );
 }

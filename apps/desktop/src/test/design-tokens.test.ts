@@ -96,3 +96,40 @@ it("the radius tokens match DESIGN.md section 4", () => {
   expect(radius("--radius-panel")).toBe("12px");
   expect(radius("--radius-pill")).toBe("9999px");
 });
+
+it("feature stylesheets do not restyle a shared part's colour, type or fill", () => {
+  // docs/agents/ui.md step 1: a change to colour, type, size or shape of a
+  // shared part is a variant on the part, not a selector in a feature file.
+  const restyled: string[] = [];
+  for (const file of filesUnder(srcDir)) {
+    const key = relative(srcDir, file).replaceAll("\\", "/");
+    if (key === "styles.css") continue;
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = (rule[1] ?? "").trim();
+      const last = selector.split(/[\s>+~,]+/).at(-1) ?? "";
+      if (
+        /\[data-(?:slot="(?:badge|section-header-actions|section-header-caption)"|variant="(?:source|tag|doc)")\]/.test(
+          last,
+        ) &&
+        /(?:^|[;\s])(?:background|color|font-size|line-height)\s*:/.test(
+          rule[2] ?? "",
+        )
+      )
+        restyled.push(`${key}: ${selector}`);
+    }
+  }
+  expect(restyled).toEqual([]);
+});
+
+it("the utility radii that shadcn parts use resolve to the one --radius", () => {
+  // `rounded-md` and `rounded-lg` come from the Tailwind theme; a literal there
+  // (Tailwind's own lg is 8px) puts an 8px corner beside the 6px of everything else.
+  const css = readFileSync(join(srcDir, "styles.css"), "utf8");
+  const theme = css.slice(css.indexOf("@theme inline"));
+  for (const name of ["--radius-md", "--radius-lg"])
+    expect(
+      new RegExp(name + ": *([^;]+);").exec(theme)?.[1]?.trim(),
+      name,
+    ).toBe("var(--radius)");
+});

@@ -97,6 +97,9 @@ export function TicketWorkspaceView({
       node = node.parentElement
     )
       node.scrollTop = 0;
+    // The rows scroll in their own element inside the list pane.
+    const rows = listRef.current?.querySelector(".ticket-scroll");
+    if (rows) rows.scrollTop = 0;
   }, [planScope]);
   const planState = usePlanView(
     planScope,

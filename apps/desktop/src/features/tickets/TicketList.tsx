@@ -231,6 +231,8 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
   return (
     <Badge
       variant="source"
+      // Raised: the pill keeps its fill when the row is hovered or selected.
+      tone="raised"
       title={`Owned by ${source.provider_name}: ${source.display}`}
     >
       <span className="sr-only">

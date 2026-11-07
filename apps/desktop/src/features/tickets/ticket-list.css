@@ -379,11 +379,6 @@
   margin-left: auto;
 }
 
-/* The owner of an externally owned ticket, after its title: source mark and number. */
-.ticket-rows li:hover [data-variant="source"],
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) [data-variant="source"] {
-  background: var(--surface);
-}
 /* Source filter follows the inset canvas composition. */
 .source-filter {
   padding: 8px 8px 0;
