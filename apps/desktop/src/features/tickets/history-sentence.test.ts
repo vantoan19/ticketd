@@ -80,9 +80,9 @@ test("source and publication history explain observations without inventing an i
 
 test("history icons never give Canceled, Duplicate or source changes the completed look", async () => {
   const { historyIcon } = await import("./history-icon");
-  const { statusIconFor } = await import("./StatusIcon");
-  expect(historyIcon("status", "Canceled")).toBe(statusIconFor("Canceled"));
-  expect(historyIcon("status", "Duplicate")).not.toBe(statusIconFor("Done"));
+  const { statusIcons } = await import("./status-icons");
+  expect(historyIcon("status", "Canceled")).toBe(statusIcons["Canceled"]!);
+  expect(historyIcon("status", "Duplicate")).not.toBe(statusIcons["Done"]!);
   expect(historyIcon("status", "In progress")).not.toBe(
     historyIcon("status", "In review"),
   );
@@ -92,5 +92,5 @@ test("history icons never give Canceled, Duplicate or source changes the complet
     "publication_unresolved",
     "future:kind",
   ])
-    expect(historyIcon(kind)).not.toBe(statusIconFor("Done"));
+    expect(historyIcon(kind)).not.toBe(statusIcons["Done"]!);
 });

@@ -266,9 +266,7 @@ function AppContent() {
               refreshAll: () => refreshSources(),
             }}
           >
-            <SidebarProvider
-              open={!sidebarCollapsed}
-            >
+            <SidebarProvider open={!sidebarCollapsed}>
               <a
                 className="skip-link"
                 href="#main-content"

@@ -10,11 +10,11 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react";
-import { statusIconFor } from "./StatusIcon";
+import { statusIcons } from "./status-icons";
 
 /** The badge icon for a recorded change of `kind`; a status change shows its new status. */
 export function historyIcon(kind: string, to = ""): LucideIcon {
-  if (kind === "status") return statusIconFor(to);
+  if (kind === "status") return statusIcons[to] ?? Circle;
   if (kind === "external_duplicate") return CircleEqual;
   if (kind === "evidence") return ShieldCheck;
   if (kind === "project") return Package;
