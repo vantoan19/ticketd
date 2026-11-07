@@ -96,6 +96,61 @@ test("retry refreshes a cached completed upload after permanent purge", async ()
   ).toHaveLength(1);
 });
 
+test("a cached Drive upload receipt cannot promise library availability after record removal", async () => {
+  let removed = false;
+  const destination = {
+    connection_id: "connection",
+    folder_id: "folder",
+    resource_key: null,
+  };
+  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "removed-drive-replay";
+    if (command === "attachment_upload_limit") return 104857600;
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready" };
+    if (command === "select_drive_upload_folder")
+      return {
+        destination,
+        folder: { id: "folder", name: "Diagnostics", can_add_children: true },
+      };
+    if (command === "inspect_attachment" && removed)
+      throw new Error(
+        "No longer registered in ticketd. The file remains in Drive; choose it again to re-add it.",
+      );
+    if (command === "upload_drive_file" || command === "inspect_attachment")
+      return {
+        ...file("trace.log"),
+        kind: "external_reference",
+        locator: "drive:connection:reserved",
+      };
+    return null;
+  });
+  const picked = vi.fn().mockRejectedValue(new Error("Insertion failed"));
+  render(<AttachmentPicker open onOpenChange={() => {}} onPick={picked} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose Drive folder" }));
+  await screen.findByText(/Destination: Google Drive/);
+  fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  const row = await screen.findByRole("listitem", { name: "trace.log" });
+  await within(row).findByText("Insertion failed");
+  removed = true;
+  fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(within(row).getByRole("alert").textContent).toContain(
+      "No longer registered",
+    ),
+  );
+  expect(picked).toHaveBeenCalledTimes(1);
+  expect(
+    within(row).queryByText(/remains in Drive and Existing files/i),
+  ).toBeNull();
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([name]) => name === "upload_drive_file"),
+  ).toHaveLength(1);
+});
+
 test("Drive failures retain their folder and operation; status checks precede retry and local fallback is explicit", async () => {
   const destination = {
     connection_id: "connection",

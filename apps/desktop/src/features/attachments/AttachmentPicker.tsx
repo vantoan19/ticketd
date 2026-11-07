@@ -502,13 +502,13 @@ export function AttachmentPicker({
                       {row.error && <p role="alert">{row.error}</p>}
                       {row.stored && row.state !== "inserted" && (
                         <p className="attachment-hint">
-                          Stored as {row.stored.id}.{" "}
+                          Upload receipt: {row.stored.id}.{" "}
                           {row.stored.purge_state === "purged" ||
                           row.stored.purge_state === "pending"
                             ? "Local bytes are unavailable. Its identity remains in Existing files for inspection."
                             : row.destination
-                              ? "The uploaded copy remains in Drive and Existing files, including after cancellation."
-                              : "The snapshot remains available in Existing files."}
+                              ? "Any completed file remains in Drive. Retry checks whether its ticketd record is still registered."
+                              : "Retry checks current availability before reuse. Inspect its identity in Existing files."}
                         </p>
                       )}
                       {row.destination && (
