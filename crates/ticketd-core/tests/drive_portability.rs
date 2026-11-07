@@ -258,3 +258,49 @@ fn native_files_in_image_syntax_export_as_readable_provider_links_without_conver
     );
     assert_eq!(workspace.show_document(&document.id).unwrap().body, source);
 }
+
+#[test]
+fn html_images_of_drive_files_export_readable_links_while_local_images_remain_images() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let remote = workspace
+        .reference_drive_file(&uuid::Uuid::new_v4().to_string(), "doc", None, &NativeFile)
+        .unwrap();
+    let local = workspace
+        .import_attachment_bytes("local", "image.png", b"retained image", |_, _| true)
+        .unwrap();
+    let remote_uri = workspace.attachment_uri(&remote.id).unwrap();
+    let local_uri = workspace.attachment_uri(&local.id).unwrap();
+    let source = format!(
+        "Before <img alt='my &amp; <readable> plan' src=\"{remote_uri}\"> after.\n\n<div>\n<IMG SRC='{remote_uri}' />\n<img src=\"{local_uri}\" alt=\"local\">\n<span title='<img src=\"{remote_uri}\">'>keep literal</span>\n</div>"
+    );
+    let document = workspace.create_document(None, &source).unwrap();
+    let result = workspace
+        .export_markdown_with_files(
+            MarkdownExportSource::Document {
+                id: document.id.clone(),
+            },
+            dir.path(),
+        )
+        .unwrap();
+    let body = std::fs::read_to_string(result.directory.join("content.md")).unwrap();
+    assert!(body.contains("Before <a href=\"https://docs.google.com/document/d/doc/edit\">my &amp; &lt;readable&gt; plan</a> after."), "{body}");
+    assert!(
+        body.contains("<a href=\"https://docs.google.com/document/d/doc/edit\">Current plan</a>"),
+        "{body}"
+    );
+    let local_path = result
+        .attachments
+        .iter()
+        .find(|entry| entry.attachment_id.as_deref() == Some(local.id.as_str()))
+        .unwrap()
+        .path
+        .as_deref()
+        .unwrap();
+    assert!(
+        body.contains(&format!("<img src=\"{local_path}\" alt=\"local\">")),
+        "{body}"
+    );
+    assert!(body.contains("<span title='<img src=\"https://docs.google.com/document/d/doc/edit\">'>keep literal</span>"), "{body}");
+    assert_eq!(workspace.show_document(&document.id).unwrap().body, source);
+}
