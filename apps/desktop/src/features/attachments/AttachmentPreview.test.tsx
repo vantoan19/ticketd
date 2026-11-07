@@ -137,6 +137,58 @@ const file = {
   locator: "file-1/bytes/screen.png",
 };
 
+test("Drive access refresh updates displayed metadata while preserving the authored title and open action", async () => {
+  let size = 4;
+  const remote = {
+    ...file,
+    kind: "external_reference",
+    display_name: "My authored title",
+    size_bytes: size,
+  };
+  const metadata = () => ({
+    connection_id: "opaque-account",
+    metadata: {
+      id: "remote-file",
+      name: "Current source name",
+      mime_type: "text/plain",
+      size_bytes: size,
+      web_url: "https://drive.google.com/file/d/remote-file/view",
+      resource_key: null,
+    },
+  });
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview")
+      return {
+        attachment: { ...remote, size_bytes: size },
+        status: "unsupported",
+        media_type: null,
+        message: "No local snapshot",
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    if (command === "drive_reference") return metadata();
+    if (command === "drive_configuration")
+      return { configured: true, message: "Ready" };
+    if (command === "check_drive_reference") {
+      size = 8;
+      return { reference: metadata(), failure: null };
+    }
+    if (command === "open_attachment") return;
+    throw new Error(`Unexpected command ${command}`);
+  });
+  render(<AttachmentPreview target={{ id: remote.id }} onClose={() => {}} />);
+  await screen.findByText("Current source in Google Drive");
+  await screen.findByText("Google Drive · External reference · 8 B");
+  expect(
+    screen.getByRole("heading", { name: "My authored title" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open in Drive" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("open_attachment", { id: remote.id }),
+  );
+});
+
 test("quarantined content offers explicit same-identity restore without replacing a reference", async () => {
   let quarantined = true;
   vi.mocked(invoke).mockImplementation(async (command) => {

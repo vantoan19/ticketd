@@ -131,6 +131,29 @@ const driveReferenceSchema = z.object({
   }),
 });
 export type DriveReference = z.infer<typeof driveReferenceSchema>;
+const driveAccessSchema = z.object({
+  reference: driveReferenceSchema,
+  failure: z
+    .object({
+      kind: z.enum([
+        "unconfigured",
+        "reauthorize",
+        "select_file",
+        "permission_denied",
+        "missing",
+        "inaccessible_or_missing",
+        "offline",
+        "rate_limited",
+        "unsupported",
+        "invalid_response",
+        "cancelled",
+        "uncertain",
+      ]),
+      message: z.string(),
+    })
+    .nullable(),
+});
+export type DriveAccess = z.infer<typeof driveAccessSchema>;
 export const driveDestinationSchema = z.object({
   connection_id: z.string(),
   folder_id: z.string(),
@@ -151,6 +174,16 @@ export const attachments = {
   },
   async purge(id: string) {
     return attachmentSchema.parse(await invoke("purge_attachment", { id }));
+  },
+  async checkDriveReference(id: string) {
+    return driveAccessSchema.parse(
+      await invoke("check_drive_reference", { id }),
+    );
+  },
+  async recoverDriveReference(id: string, operationId: string) {
+    return driveAccessSchema.parse(
+      await invoke("recover_drive_reference", { id, operationId }),
+    );
   },
   async cleanupReviews(offset: number) {
     return z

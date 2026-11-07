@@ -86,6 +86,74 @@ impl DriveTransport for DifferentAccount {
     }
 }
 
+#[test]
+fn recovery_picker_rejects_other_accounts_or_files_before_saving_credentials() {
+    use ticketd_core::{
+        Workspace,
+        drive::{AttachmentProvider, DriveErrorKind, DriveMetadata},
+    };
+    struct File;
+    impl AttachmentProvider for File {
+        fn metadata(&self, id: &str, _: Option<&str>) -> Result<DriveMetadata, DriveError> {
+            Ok(DriveMetadata {
+                id: id.into(),
+                name: "Plan".into(),
+                mime_type: "text/plain".into(),
+                size_bytes: Some(3),
+                web_url: format!("https://drive.google.com/file/d/{id}/view"),
+                resource_key: None,
+            })
+        }
+    }
+    struct NoSave;
+    impl CredentialStore for NoSave {
+        fn load(&self, _: &str) -> Result<DriveCredential, DriveError> {
+            unreachable!("rejected recovery must not load credentials")
+        }
+        fn save(&self, _: &str, _: &DriveCredential) -> Result<(), DriveError> {
+            unreachable!("rejected recovery must not save credentials")
+        }
+    }
+    let original = select_native(&Http);
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .reference_drive_file(&original.connection_id, "first", None, &File)
+        .unwrap();
+    for (transport, selected, expected) in [
+        (
+            &DifferentAccount as &'static dyn DriveTransport,
+            "first",
+            DriveErrorKind::Reauthorize,
+        ),
+        (&Http, "other", DriveErrorKind::SelectFile),
+    ] {
+        let session = workspace
+            .begin_drive_reference_recovery(
+                &file.id,
+                DesktopOAuthClient::new("client.apps.googleusercontent.com".into(), None).unwrap(),
+                Duration::from_secs(5),
+            )
+            .unwrap();
+        let url = url::Url::parse(session.authorization_url()).unwrap();
+        let fields: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(fields["allow_multiple"], "false");
+        assert_eq!(fields["scope"], ticketd_core::drive::DRIVE_FILE_SCOPE);
+        let redirect = url::Url::parse(&fields["redirect_uri"]).unwrap();
+        let worker =
+            std::thread::spawn(move || session.finish(transport, &NoSave, &AtomicBool::new(false)));
+        let mut socket = TcpStream::connect(("127.0.0.1", redirect.port().unwrap())).unwrap();
+        write!(socket, "GET /oauth2callback?state={}&code=authorization-secret&picked_file_ids={selected} HTTP/1.1\r\nHost: {}\r\n\r\n",fields["state"],redirect.authority()).unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        assert_eq!(worker.join().unwrap().err().unwrap().kind, expected);
+        assert_eq!(
+            workspace.attachments(10, 0).unwrap(),
+            std::slice::from_ref(&file)
+        );
+    }
+}
+
 #[allow(clippy::unwrap_used)] // Loopback test setup; not a production path.
 fn select_native(transport: &'static dyn DriveTransport) -> ticketd_core::drive::DriveSelection {
     let session = PickerSession::begin(

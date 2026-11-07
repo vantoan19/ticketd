@@ -162,6 +162,181 @@ fn unselected_file_has_explicit_picker_guidance_instead_of_broader_authorization
 }
 
 #[test]
+fn proven_permission_denial_and_trash_are_distinct_from_ambiguous_missing() {
+    for (status, body, kind) in [
+        (
+            403,
+            br#"{"error":{"errors":[{"reason":"insufficientFilePermissions"}]}}"#.as_slice(),
+            DriveErrorKind::PermissionDenied,
+        ),
+        (
+            200,
+            br#"{"id":"file","name":"Last name","mimeType":"text/plain","trashed":true}"#
+                .as_slice(),
+            DriveErrorKind::Missing,
+        ),
+        (
+            404,
+            br#"{"error":{"errors":[{"reason":"notFound"}]}}"#.as_slice(),
+            DriveErrorKind::InaccessibleOrMissing,
+        ),
+        (
+            403,
+            b"unknown denial".as_slice(),
+            DriveErrorKind::InaccessibleOrMissing,
+        ),
+        (
+            200,
+            br#"{"id":"another-file","name":"Unrelated","mimeType":"text/plain","trashed":true}"#
+                .as_slice(),
+            DriveErrorKind::InvalidResponse,
+        ),
+        (
+            503,
+            br#"{"error":{"errors":[{"reason":"appNotAuthorizedToFile"}]}}"#.as_slice(),
+            DriveErrorKind::Offline,
+        ),
+    ] {
+        let transport = Http {
+            requests: Mutex::new(vec![]),
+            responses: Mutex::new(vec![
+                DriveResponse {
+                    headers: vec![],
+                    status: 200,
+                    body: br#"{"access_token":"secret-access"}"#.to_vec(),
+                },
+                DriveResponse {
+                    headers: vec![],
+                    status,
+                    body: body.to_vec(),
+                },
+            ]),
+        };
+        let error = GoogleDrive::new("connection", &Vault, &transport)
+            .metadata("file", None)
+            .unwrap_err();
+        assert_eq!(error.kind, kind);
+        assert!(!error.message.contains("secret"));
+    }
+}
+
+#[test]
+fn workspace_transport_recovery_refreshes_only_metadata_and_keeps_secrets_out_of_portable_data() {
+    use ticketd_core::Workspace;
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let response = |status, body: &[u8]| DriveResponse {
+        headers: vec![],
+        status,
+        body: body.to_vec(),
+    };
+    let token = || {
+        response(
+            200,
+            br#"{"access_token":"secret-access","refresh_token":"secret-rotated"}"#,
+        )
+    };
+    let transport = Http {
+        requests: Mutex::new(vec![]),
+        responses: Mutex::new(vec![
+            token(),
+            response(
+                200,
+                br#"{"id":"file","name":"Original","mimeType":"text/plain","size":"4"}"#,
+            ),
+            token(),
+            response(
+                403,
+                br#"{"error":{"errors":[{"reason":"appNotAuthorizedToFile"}]}}"#,
+            ),
+            token(),
+            response(
+                403,
+                br#"{"error":{"errors":[{"reason":"insufficientFilePermissions"}]}}"#,
+            ),
+            token(),
+            response(404, br#"{"error":{"errors":[{"reason":"notFound"}]}}"#),
+            response(503, b"secret-provider-response"),
+            token(),
+            response(
+                200,
+                br#"{"id":"file","name":"Renamed in Drive","mimeType":"text/plain","size":"8"}"#,
+            ),
+        ]),
+    };
+    let provider = GoogleDrive::new(&connection, &Vault, &transport);
+    let file = workspace
+        .reference_drive_file(&connection, "file", None, &provider)
+        .unwrap();
+    workspace
+        .rename_attachment(&file.id, "Local display name")
+        .unwrap();
+    let previous = workspace.drive_reference(&file.id).unwrap();
+    for kind in [
+        DriveErrorKind::SelectFile,
+        DriveErrorKind::PermissionDenied,
+        DriveErrorKind::InaccessibleOrMissing,
+        DriveErrorKind::Offline,
+    ] {
+        let status = workspace
+            .check_drive_reference(&file.id, &provider)
+            .unwrap();
+        assert_eq!(status.failure.unwrap().kind, kind);
+        assert_eq!(status.reference, previous);
+    }
+    let selection = ticketd_core::drive::DriveSelection {
+        connection_id: connection.clone(),
+        file_ids: vec!["file".into()],
+    };
+    // Account/file proof came from the Picker boundary; this call resolves metadata only.
+    assert_eq!(
+        workspace
+            .recover_drive_reference(&file.id, &selection, &provider)
+            .unwrap()
+            .metadata
+            .name,
+        "Renamed in Drive"
+    );
+    assert_eq!(
+        workspace.attachment(&file.id).unwrap().display_name,
+        "Local display name"
+    );
+    assert_eq!(
+        workspace.attachment(&file.id).unwrap().original_filename,
+        "Original"
+    );
+    assert_eq!(workspace.attachment(&file.id).unwrap().size_bytes, Some(8));
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let bytes = std::fs::read(backup).unwrap();
+    let json = workspace.export().unwrap().to_string();
+    for secret in [
+        "secret-refresh",
+        "secret-access",
+        "secret-rotated",
+        "secret-provider-response",
+    ] {
+        assert!(!json.contains(secret));
+        assert!(
+            !bytes
+                .windows(secret.len())
+                .any(|part| part == secret.as_bytes())
+        );
+    }
+    let requests = transport.requests.lock().unwrap();
+    assert_eq!(requests.len(), 11);
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.url == "https://oauth2.googleapis.com/token"
+                || (r.method == "GET"
+                    && r.url.contains("/files/file?")
+                    && !r.url.contains("alt=media")))
+    );
+}
+
+#[test]
 fn ambiguous_missing_offline_rate_limit_and_invalid_scope_are_not_misreported() {
     for (status, expected) in [
         (503, DriveErrorKind::Offline),

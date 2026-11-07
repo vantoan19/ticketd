@@ -1418,6 +1418,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             drive_commands::drive_configuration,
             drive_commands::drive_reference,
+            drive_commands::check_drive_reference,
+            drive_commands::recover_drive_reference,
             drive_commands::select_drive_files,
             drive_commands::select_drive_upload_folder,
             drive_commands::check_drive_upload,

@@ -984,6 +984,26 @@ instructions, never broader scopes. Byte export refuses external references and
 instructs the caller to open current content in Drive; portable-link export is a
 separate workflow.
 
+Opening a Drive reference checks metadata access without downloading content.
+Authorize file opens the system-browser Picker for the original file; Reconnect
+requires the original account and OAuth client. Picking a different account or
+file leaves the reference unchanged. Retry checks current access, preserving
+last-known details, authored labels, original names and all other uses.
+
+File selection for ticketd, expired account authorization, proven permission
+denial, Drive trash and provider/rate-limit failures have separate recovery
+messages. A generic 403 or 404 remains inaccessible-or-missing: ticketd does not
+infer deletion from an ambiguous response. Open in Drive lets the person review
+availability or request access from the owner; ticketd never changes sharing.
+
+`attachment drive-status <id>` returns last-known metadata and a typed `failure`
+(null after a successful metadata refresh). `drive-resolve` returns a nonzero
+exit with a stable error kind and retry/authorization/Open in Drive instructions
+on failure. `attachment drive-authorize <id>` prints a one-shot system-browser
+Picker URL and waits up to three minutes for explicit original-file selection.
+The CLI uses the same OS credential store without a desktop process. No command
+silently broadens `drive.file`, substitutes another file or caches remote bytes.
+
 ## 19. Google Drive uploads
 
 In the shared Upload flow, Choose Drive folder opens the system-browser Picker
