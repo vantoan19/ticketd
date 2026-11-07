@@ -155,4 +155,7 @@ test("remote removal is explicit, keeps a Drive link and retries the same reques
       screen.queryByRole("button", { name: file.display_name }),
     ).toBeNull(),
   );
+  await waitFor(() =>
+    expect(document.activeElement?.textContent).toBe("Clean up"),
+  );
 });

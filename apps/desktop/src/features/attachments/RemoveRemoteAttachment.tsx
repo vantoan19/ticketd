@@ -18,10 +18,12 @@ export function RemoveRemoteAttachment({
   file,
   onClose,
   onChanged,
+  onRemovedFocus,
 }: {
   file: Attachment;
   onClose: () => void;
   onChanged: () => void;
+  onRemovedFocus?: () => void;
 }) {
   const [review, setReview] = useState<AttachmentCleanupReview | null>(null);
   const [result, setResult] = useState<Awaited<
@@ -70,6 +72,12 @@ export function RemoveRemoteAttachment({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           cancel.current?.focus();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (result && onRemovedFocus) {
+            event.preventDefault();
+            onRemovedFocus();
+          }
         }}
       >
         <DialogHeader>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronRight, Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,7 @@ export function AttachmentLibrary({
   const [cleanup, setCleanup] = useState(false);
   const [purging, setPurging] = useState<Attachment | null>(null);
   const [removing, setRemoving] = useState<Attachment | null>(null);
+  const cleanupTrigger = useRef<HTMLButtonElement>(null);
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, error } = useAttachmentSearch(
@@ -66,7 +67,11 @@ export function AttachmentLibrary({
             <p>Files used across your tickets and Documents.</p>
           </div>
           <div className="attachment-actions">
-            <Button variant="outline" onClick={() => setCleanup(true)}>
+            <Button
+              ref={cleanupTrigger}
+              variant="outline"
+              onClick={() => setCleanup(true)}
+            >
               Clean up
             </Button>
             <Button onClick={() => setPicker(true)}>
@@ -300,6 +305,7 @@ export function AttachmentLibrary({
             file={removing}
             onClose={() => setRemoving(null)}
             onChanged={() => setRefresh((value) => value + 1)}
+            onRemovedFocus={() => cleanupTrigger.current?.focus()}
           />
         )}
       </section>
