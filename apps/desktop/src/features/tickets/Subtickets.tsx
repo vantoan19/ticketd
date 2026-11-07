@@ -42,7 +42,12 @@ export function Subtickets({
   const summary = `${done} of ${total} done`;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
-      <SectionHeader title="Subtickets" titleId={headingId} actions={add}>
+      <SectionHeader
+        divided
+        title="Subtickets"
+        titleId={headingId}
+        actions={add}
+      >
         {total > 0 && (
           <>
             <Progress
