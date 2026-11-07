@@ -65,10 +65,12 @@ impl Workspace {
         let bytes = stage.path().join("bytes");
         let result = export_copy(&operation, &reference, provider, &bytes)?;
         if result.status == DriveCopyStatus::Unchanged {
-            std::fs::hard_link(&bytes, destination).map_err(|e| match e.kind() {
-                std::io::ErrorKind::AlreadyExists => Error::FileExists(destination.into()),
-                _ => Error::from(e),
-            })?;
+            tempfile::TempPath::try_from_path(bytes)?
+                .persist_noclobber(destination)
+                .map_err(|e| match e.error.kind() {
+                    std::io::ErrorKind::AlreadyExists => Error::FileExists(destination.into()),
+                    _ => Error::from(e.error),
+                })?;
             crate::attachments::sync_directory(parent)?;
         }
         Ok(result)
@@ -210,14 +212,33 @@ pub(crate) fn export_copy(
     let downloaded = provider.download(reference, operation.request.size_bytes, &mut writer);
     let matches = writer.count == operation.request.size_bytes
         && format!("{:x}", writer.hash.finalize()) == operation.request.sha256;
-    let result=match downloaded {
-        Err(error)=>DriveCopyInspection { status:if error.kind==DriveErrorKind::Unsupported { DriveCopyStatus::Unsupported } else { DriveCopyStatus::Unavailable }, message:error.message, error_kind:Some(error.kind), ..before },
-        Ok(()) if !matches=>DriveCopyInspection { status:DriveCopyStatus::Changed, message:"Downloaded bytes no longer match the original upload; no bytes were exported. Open in Drive or retry.".into(), ..before },
-        Ok(())=> {
-            let after=inspect(operation,reference,provider);
-            if after.status==DriveCopyStatus::Unchanged && before.current!=after.current {
-                DriveCopyInspection { status:DriveCopyStatus::Unknown, message:"Drive metadata changed during export; no original-byte claim can be made. Retry.".into(), ..after }
-            } else { after }
+    let result = match downloaded {
+        Err(error) => DriveCopyInspection {
+            status: if error.kind == DriveErrorKind::Unsupported {
+                DriveCopyStatus::Unsupported
+            } else {
+                DriveCopyStatus::Unavailable
+            },
+            message: error.message,
+            error_kind: Some(error.kind),
+            ..before
+        },
+        Ok(()) if !matches => DriveCopyInspection {
+            status: DriveCopyStatus::Changed,
+            message: "Downloaded bytes no longer match the original upload; no bytes were exported. Open in Drive or retry.".into(),
+            ..before
+        },
+        Ok(()) => {
+            let after = inspect(operation, reference, provider);
+            if after.status == DriveCopyStatus::Unchanged && before.current != after.current {
+                DriveCopyInspection {
+                    status: DriveCopyStatus::Unknown,
+                    message: "Drive metadata changed during export; no original-byte claim can be made. Retry.".into(),
+                    ..after
+                }
+            } else {
+                after
+            }
         }
     };
     if result.status == DriveCopyStatus::Unchanged {

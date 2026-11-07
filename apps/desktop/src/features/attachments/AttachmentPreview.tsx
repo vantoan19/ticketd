@@ -262,25 +262,16 @@ export function AttachmentPreview({
               <div className="attachment-preview-fallback">
                 <File aria-hidden="true" />
                 <h3>
-                  {copy
-                    ? {
-                        changed: "This copy has changed in Drive",
-                        unchanged: "Uploaded copy · Metadata matches upload",
-                        unknown: "Original-upload comparison unknown",
-                        unsupported: "Original-byte download unsupported",
-                        unavailable: "Uploaded copy unavailable",
-                      }[copy.status]
-                    : info?.status === "missing"
-                      ? "The local file could not be found"
-                      : info?.status === "incomplete"
-                        ? "Stored bytes are incomplete"
-                        : info || error
-                          ? "Preview unavailable"
-                          : "Loading preview…"}
+                  {info?.status === "missing"
+                    ? "The local file could not be found"
+                    : info?.status === "incomplete"
+                      ? "Stored bytes are incomplete"
+                      : info || error
+                        ? "Preview unavailable"
+                        : "Loading preview…"}
                 </h3>
                 <p>
-                  {copy?.message ??
-                    info?.message ??
+                  {info?.message ??
                     (failed
                       ? "This media could not be displayed. Try again, or open or export it explicitly."
                       : "Its identity, name and references are preserved.")}
