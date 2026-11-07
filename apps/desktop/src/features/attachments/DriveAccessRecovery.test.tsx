@@ -63,6 +63,7 @@ test("per-file authorization uses recovery Picker and refreshes without replacin
 test("offline retry and denied guidance preserve uncertainty and use no automatic byte download", async () => {
   let kind = "offline";
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "open_attachment") return;
     if (command === "drive_configuration")
       return { configured: true, message: "Ready" };
     if (command === "check_drive_reference")
@@ -82,6 +83,14 @@ test("offline retry and denied guidance preserve uncertainty and use no automati
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("Drive permission denied");
   expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
+  fireEvent.click(
+    screen.getByRole("button", { name: "Request access in Drive" }),
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("open_attachment", {
+      id: "attachment",
+    }),
+  );
 });
 
 test("unmount cancels an active recovery and ignores its late completion", async () => {

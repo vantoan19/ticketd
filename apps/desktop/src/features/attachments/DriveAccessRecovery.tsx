@@ -95,6 +95,19 @@ export function DriveAccessRecovery({
     }
   }
 
+  async function requestAccess() {
+    const current = generation.current;
+    setBusy(true);
+    setError("");
+    try {
+      await attachments.open(id);
+    } catch (reason) {
+      if (generation.current === current) setError(String(reason));
+    } finally {
+      if (generation.current === current) setBusy(false);
+    }
+  }
+
   const kind = access?.failure?.kind;
   return (
     <div className="attachment-preview-fallback" aria-busy={busy}>
@@ -111,10 +124,19 @@ export function DriveAccessRecovery({
           "Current source content · No local snapshot. Open this file in Drive; its content can change independently. Remote bytes are not cached automatically."}
       </p>
       {(kind === "permission_denied" || kind === "inaccessible_or_missing") && (
-        <p>
-          Open in Drive and request access from its owner, then retry. ticketd
-          does not change sharing.
-        </p>
+        <>
+          <p>
+            Open in Drive and request access from its owner, then retry. ticketd
+            does not change sharing.
+          </p>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => void requestAccess()}
+          >
+            Request access in Drive
+          </Button>
+        </>
       )}
       {kind === "select_file" && (
         <p>
