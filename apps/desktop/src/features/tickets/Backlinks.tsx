@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from "react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { documents } from "@/features/documents/api";
 import { Button } from "@/components/ui/button";
+import { SectionHeader } from "@/components/ui/section-header";
 import { client } from "@/lib/api/client";
 import { plainPassage } from "./plain-passage";
 import { EmphasizedPassage } from "./reference-passage";
@@ -114,16 +115,17 @@ export function Backlinks({
     return null;
   return (
     <section className="backlinks" aria-label="Mentioned in">
-      <h3>
-        Mentioned in{" "}
-        <span className="text-muted-foreground">
-          {offset === 0
+      <SectionHeader
+        divided
+        title="Mentioned in"
+        count={
+          offset === 0
             ? links.length < 20
               ? links.length + documentLinks.length
               : "20+"
-            : ""}
-        </span>
-      </h3>
+            : undefined
+        }
+      />
       {error && <p role="alert">{error}</p>}
       <ul className="backlink-list">
         {documentLinks.map((link) => (

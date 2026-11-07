@@ -1,5 +1,6 @@
 import { SectionHeader } from "@/components/ui/section-header";
 import type { ReactNode } from "react";
+import { Card, CardBody, CardFooter, CardHeader } from "@/components/ui/card";
 import {
   settingsCardId,
   type SettingsCardKey,
@@ -16,7 +17,7 @@ export function SettingsCard({
 }: {
   id: SettingsCardKey;
   title: string;
-  /** A sentence under the title; with `actions` they sit at the top right. */
+  /** A sentence at the top of the card body. */
   description?: ReactNode;
   /** Controls beside the title, such as Edit. */
   actions?: ReactNode;
@@ -25,23 +26,29 @@ export function SettingsCard({
 }) {
   const headingId = `${settingsCardId(id)}-heading`;
   return (
-    <section
-      id={settingsCardId(id)}
-      className="settings-card"
-      aria-labelledby={headingId}
-      tabIndex={-1}
-    >
-      <SectionHeader
-        level={2}
-        titleId={headingId}
-        title={title}
-        actions={actions}
-      />
-      {description && (
-        <p className="settings-card-description">{description}</p>
-      )}
-      {children}
-      {footer && <div className="settings-card-footer">{footer}</div>}
-    </section>
+    <Card asChild>
+      <section
+        id={settingsCardId(id)}
+        aria-labelledby={headingId}
+        tabIndex={-1}
+      >
+        <CardHeader>
+          <SectionHeader
+            className="flex-1"
+            level={2}
+            titleId={headingId}
+            title={title}
+            actions={actions}
+          />
+        </CardHeader>
+        <CardBody>
+          {description && (
+            <p className="settings-card-description">{description}</p>
+          )}
+          {children}
+        </CardBody>
+        {footer && <CardFooter>{footer}</CardFooter>}
+      </section>
+    </Card>
   );
 }

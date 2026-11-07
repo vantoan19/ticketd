@@ -581,6 +581,7 @@ export function Activity({
     <section className="activity" aria-label="Activity">
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
+        divided
         title="Activity"
         actions={
           sourceName && (
