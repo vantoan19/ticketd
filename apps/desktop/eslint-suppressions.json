@@ -152,7 +152,7 @@
   },
   "src/features/tickets/Activity.tsx": {
     "shadcn/no-restyle": {
-      "count": 3
+      "count": 2
     }
   },
   "src/features/tickets/BulkControls.tsx": {
