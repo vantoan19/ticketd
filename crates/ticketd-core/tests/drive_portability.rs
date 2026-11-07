@@ -315,3 +315,122 @@ fn html_images_of_drive_files_export_readable_links_while_local_images_remain_im
     assert!(body.contains("<span title='<img src=\"https://docs.google.com/document/d/doc/edit\">'>keep literal</span>"), "{body}");
     assert_eq!(workspace.show_document(&document.id).unwrap().body, source);
 }
+
+#[test]
+fn uploaded_copies_keep_provenance_after_restore_and_are_partial_until_bytes_are_verified() {
+    use ticketd_core::drive::{
+        DriveFolder, DriveUploadDestination, DriveUploadOperation, DriveUploadProvider,
+        DriveUploadedFile,
+    };
+    #[derive(Default)]
+    struct Upload(std::sync::Mutex<Option<DriveUploadedFile>>);
+    #[allow(clippy::unwrap_used)] // Deterministic external upload fixture.
+    impl DriveUploadProvider for Upload {
+        fn folder(&self, id: &str, _: Option<&str>) -> Result<DriveFolder, DriveError> {
+            Ok(DriveFolder {
+                id: id.into(),
+                name: "Uploads".into(),
+                can_add_children: true,
+            })
+        }
+        fn reserve_file_id(&self) -> Result<String, DriveError> {
+            Ok("uploaded-file".into())
+        }
+        fn uploaded_file(&self, _: &str) -> Result<Option<DriveUploadedFile>, DriveError> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        fn upload_blob(
+            &self,
+            operation: &DriveUploadOperation,
+            input: &mut dyn std::io::Read,
+            _: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), DriveError> {
+            let mut bytes = Vec::new();
+            input.read_to_end(&mut bytes).unwrap();
+            assert_eq!(bytes, b"original bytes");
+            *self.0.lock().unwrap() = Some(DriveUploadedFile {
+                metadata: DriveMetadata {
+                    id: "uploaded-file".into(),
+                    name: "upload.log".into(),
+                    mime_type: "text/plain".into(),
+                    size_bytes: Some(14),
+                    web_url: "https://drive.google.com/file/d/uploaded-file/view".into(),
+                    resource_key: None,
+                },
+                sha256_checksum: Some(
+                    "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698".into(),
+                ),
+                version: Some("1".into()),
+                operation_id: Some(operation.attachment_id.clone()),
+                parent_ids: vec!["folder".into()],
+            });
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let uploaded = workspace
+        .upload_drive_bytes(
+            "upload",
+            "upload.log",
+            b"original bytes",
+            &DriveUploadDestination {
+                connection_id: connection.clone(),
+                folder_id: "folder".into(),
+                resource_key: None,
+            },
+            &Upload::default(),
+            |_, _| true,
+        )
+        .unwrap();
+    let native = workspace
+        .reference_drive_file(&connection, "doc", None, &NativeFile)
+        .unwrap();
+    let uri = workspace.attachment_uri(&uploaded.id).unwrap();
+    let upper = uri.replacen("ticketd", "TICKETD", 1);
+    let body = format!(
+        "[Copy]({uri}) and [again]({upper}) and [Current plan]({})",
+        workspace.attachment_uri(&native.id).unwrap()
+    );
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let restored_path = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let restored = Workspace::open(restored_path).unwrap();
+    assert_eq!(
+        restored.drive_uploaded_copy(&uploaded.id).unwrap(),
+        workspace.drive_uploaded_copy(&uploaded.id).unwrap()
+    );
+    let result = restored
+        .export_markdown_with_files(MarkdownExportSource::Markdown { body }, dir.path())
+        .unwrap();
+    assert_eq!(result.status, ExportStatus::Partial);
+    let json = serde_json::to_value(&result).unwrap();
+    let copies: Vec<_> = json["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["attachment_id"] == uploaded.id)
+        .collect();
+    assert_eq!(copies.len(), 2);
+    for entry in copies {
+        assert_eq!(entry["kind"], "uploaded_copy");
+        assert!(entry["omission"].as_str().unwrap().contains("verified"));
+        assert!(entry["external_url"].is_null());
+        assert!(entry["path"].is_null());
+    }
+    let entry = result
+        .attachments
+        .iter()
+        .find(|entry| entry.attachment_id.as_deref() == Some(native.id.as_str()))
+        .unwrap();
+    assert!(entry.external_url.is_some());
+    assert!(entry.omission.is_none());
+    assert_eq!(
+        std::fs::read_dir(result.directory.join("files"))
+            .unwrap()
+            .count(),
+        0
+    );
+}

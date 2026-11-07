@@ -67,8 +67,8 @@ fn mixed_portable_outputs_and_restore_exclude_credentials_and_need_no_provider_a
         }
     }
     let transport = Http { requests: Mutex::new(vec![]), responses: Mutex::new(vec![
-        DriveResponse { status: 200, body: br#"{"access_token":"private-access-token","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() },
-        DriveResponse { status: 200, body: br#"{"id":"doc-123","name":"Plan","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/doc-123/edit","isAppAuthorized":true,"unexpectedToken":"private-response-token"}"#.to_vec() },
+        DriveResponse { status: 200, headers: vec![], body: br#"{"access_token":"private-access-token","scope":"https://www.googleapis.com/auth/drive.file"}"#.to_vec() },
+        DriveResponse { status: 200, headers: vec![], body: br#"{"id":"doc-123","name":"Plan","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/doc-123/edit","isAppAuthorized":true,"unexpectedToken":"private-response-token"}"#.to_vec() },
     ]) };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

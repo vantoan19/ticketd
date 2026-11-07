@@ -38,12 +38,20 @@ pub enum ExportStatus {
     Partial,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportAttachmentKind {
+    LocalSnapshot,
+    ExternalReference,
+    UploadedCopy,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportAttachment {
     pub uri: String,
     pub attachment_id: Option<String>,
     #[serde(default)]
-    pub kind: Option<AttachmentKind>,
+    pub kind: Option<ExportAttachmentKind>,
     pub display_name: String,
     pub original_filename: Option<String>,
     pub path: Option<String>,
@@ -143,10 +151,16 @@ impl Workspace {
                 entry.attachment_id = Some(id.into());
                 match attachments::read_attachment(&tx, id) {
                     Ok(file) => {
-                        entry.kind = Some(file.kind.clone());
+                        entry.kind = Some(match file.kind {
+                            AttachmentKind::LocalSnapshot => ExportAttachmentKind::LocalSnapshot,
+                            AttachmentKind::ExternalReference => {
+                                ExportAttachmentKind::ExternalReference
+                            }
+                        });
                         entry.display_name = file.display_name.clone();
                         entry.original_filename = Some(file.original_filename.clone());
                         if let Some(previous) = copied.get(id) {
+                            entry.kind.clone_from(&previous.kind);
                             entry.path.clone_from(&previous.path);
                             entry.external_url.clone_from(&previous.external_url);
                             entry.omission.clone_from(&previous.omission);
@@ -227,6 +241,11 @@ impl Workspace {
     ) -> Result<(), Error> {
         match file.kind {
             AttachmentKind::ExternalReference => {
+                if self.drive_uploaded_copy(&file.id)?.is_some() {
+                    entry.kind = Some(ExportAttachmentKind::UploadedCopy);
+                    entry.omission = Some("Drive uploaded-copy bytes have not been downloaded and verified against the recorded upload. Open in Drive to inspect current content; verified byte export is unavailable.".into());
+                    return Ok(());
+                }
                 let reference = self.drive_reference(&file.id)?;
                 if crate::drive::safe_web_url(&reference.metadata.web_url)
                     && let Ok(url) = url::Url::parse(&reference.metadata.web_url)

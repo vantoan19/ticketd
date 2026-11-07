@@ -18,7 +18,7 @@ const resultSchema = z.object({
       uri: z.string(),
       attachment_id: z.string().nullable(),
       kind: z
-        .enum(["local_snapshot", "external_reference"])
+        .enum(["local_snapshot", "external_reference", "uploaded_copy"])
         .nullable()
         .optional(),
       display_name: z.string(),

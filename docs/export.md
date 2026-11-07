@@ -17,7 +17,7 @@ The JSON result and manifest have `format_version: 1`, `status` (`complete` or
 The CLI result gives the created directory; the portable manifest uses `.` so
 its paths continue to resolve after the bundle moves.
 Each attachment entry records its `uri`, nullable `attachment_id`, `display_name`,
-nullable `kind` (`local_snapshot` or `external_reference`), nullable
+nullable `kind` (`local_snapshot`, `external_reference`, or `uploaded_copy`), nullable
 `original_filename`, and exactly one result: relative `path`,
 `external_url`, or an actionable `omission`. Missing/foreign references preserve
 their readable Markdown links and cause `partial`; consumers must inspect status
@@ -46,6 +46,10 @@ restore account credentials. If a restored file is unavailable, connect the
 appropriate account and select it again in the Google Drive tab; do not replace
 it silently or infer deletion from failed access. Drive upload provenance and
 original-byte verification are separate from current-source references.
+An uploaded copy is identified from durable upload provenance, even though its
+storage kind is also external. Until downloaded bytes can be verified against
+that provenance, export reports an omission and `partial`, preserving the
+reference instead of treating the copy as a complete current-source link export.
 
 Desktop ticket headers and Document readers offer **Export Markdown with files**.
 The shared editor exports selected rich/source content, or its current full
