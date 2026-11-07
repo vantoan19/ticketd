@@ -195,7 +195,7 @@
   gap: 16px;
 }
 .project-name-input::placeholder {
-  color: var(--control-boundary);
+  color: var(--disabled-foreground);
 }
 .folder-picker .ui-button {
   padding: 0 10px;

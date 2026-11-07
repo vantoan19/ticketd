@@ -387,7 +387,8 @@
   outline: 1px solid var(--input-focus);
   outline-offset: 0;
 }
-/* Every Picker wears the same outline wherever it sits (board D: #00000024).
+/* Every Picker wears the same outline wherever it sits (board D, drawn with
+   --shadow-border-base: 8% in light, 14% in dark).
    :where() keeps this at the specificity of .ui-select, so the focus ring and
    the invalid ring below still win by order. */
 .ui-select.ui-picker:where(:not([aria-invalid="true"], :disabled)) {

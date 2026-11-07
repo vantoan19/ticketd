@@ -40,7 +40,9 @@ function findings(css: string): string[] {
         /radius$/.test(name) &&
         /\d(?:px|rem)\b/.test(value) &&
         !value.includes("var(");
-      if (rawColor.test(value) || literalRadius)
+      // A literal fallback, var(--radius-md, 8px), hides a raw value inside a token.
+      const literalFallback = /var[(][^)]*, *[^)]*(?:#[0-9a-f]{3,8}|[0-9]px)/i;
+      if (rawColor.test(value) || literalRadius || literalFallback.test(value))
         found.push(`${name}: ${value}`);
       if (value.includes("!important")) found.push(`${name}: ${value}`);
     }

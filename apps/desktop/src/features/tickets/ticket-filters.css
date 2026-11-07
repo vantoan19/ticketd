@@ -231,7 +231,7 @@
   padding-inline: 8px 4px;
 }
 .parent-search input::placeholder {
-  color: var(--control-boundary);
+  color: var(--disabled-foreground);
 }
 .parent-search-icon {
   color: var(--control-boundary);
