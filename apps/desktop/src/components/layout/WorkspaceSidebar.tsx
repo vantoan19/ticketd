@@ -12,6 +12,8 @@ import {
   Archive,
   FileText,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -22,6 +24,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -120,6 +123,9 @@ export function WorkspaceSidebar({
   // While the workspace graph is open no other entry reads as current.
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
+  const { state, toggleSidebar } = useSidebar();
+  // The sheet below 768px is never collapsed to icons.
+  const collapsed = !isMobile && state === "collapsed";
   const newTrigger = useRef<HTMLButtonElement>(null);
   // Choosing an item moves focus on its own; dismissing the menu returns it to New.
   const chose = useRef(false);
@@ -129,12 +135,25 @@ export function WorkspaceSidebar({
   return (
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
-      className="sidebar"
+      className={collapsed ? "sidebar sidebar-collapsed" : "sidebar"}
       closeOnAction
     >
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <strong>ticketd</strong>
+          {!isMobile && (
+            <IconButton
+              className="collapse-sidebar"
+              label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleSidebar}
+            >
+              {collapsed ? (
+                <PanelLeftOpen aria-hidden="true" />
+              ) : (
+                <PanelLeftClose aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton
@@ -181,6 +200,9 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
+                tooltip={
+                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
+                }
                 aria-label={
                   unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
                 }
@@ -203,6 +225,7 @@ export function WorkspaceSidebar({
                   !navigation.plan &&
                   view === "tickets"
                 }
+                tooltip="All tickets"
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
@@ -214,6 +237,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "ready" && view === "tickets"}
+                tooltip="Ready"
                 onClick={() => scope("ready")}
               >
                 <CirclePlay size={16} /> Ready
@@ -223,6 +247,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "progress" && view === "tickets"}
+                tooltip="In progress"
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
@@ -255,6 +280,7 @@ export function WorkspaceSidebar({
                       isActive={
                         navigation.project === p.id && view === "tickets"
                       }
+                      tooltip={p.name}
                       onClick={() => scope("all", p.id)}
                     >
                       <Folder size={16} /> <span title={p.name}>{p.name}</span>
@@ -266,6 +292,7 @@ export function WorkspaceSidebar({
                     isActive={
                       navigation.project === "unlinked" && view === "tickets"
                     }
+                    tooltip="No project"
                     onClick={() => scope("all", "unlinked")}
                   >
                     {/* Dashed: not a project, the tickets that have none. */}
@@ -286,6 +313,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={view === "documents"}
+                    tooltip="Documents"
                     onClick={() => setView("documents")}
                   >
                     <FileText size={16} /> Documents
@@ -294,6 +322,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={workspaceGraphOpen}
+                    tooltip="Workspace graph"
                     onClick={() => openGraph?.("__workspace__")}
                   >
                     <Network size={16} /> Workspace graph
@@ -321,6 +350,7 @@ export function WorkspaceSidebar({
                         isActive={
                           navigation.plan === e.id && view === "tickets"
                         }
+                        tooltip={e.name}
                         onClick={() => scope("all", "all", e.id)}
                       >
                         <Layers size={16} />{" "}
@@ -336,6 +366,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={view === "archived-plans"}
+                    tooltip="Archived Plans"
                     onClick={() => setView("archived-plans")}
                   >
                     <Archive size={16} /> Archived Plans
@@ -356,6 +387,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "trash" && view === "tickets"}
+                tooltip="Trash"
                 onClick={() => scope("trash")}
               >
                 <Trash2 size={16} /> Trash
@@ -365,6 +397,7 @@ export function WorkspaceSidebar({
               <SidebarMenuButton
                 id="sidebar-settings"
                 isActive={view === "settings"}
+                tooltip="Settings"
                 onClick={() => setView("settings")}
               >
                 <Settings size={16} /> Settings

@@ -798,6 +798,64 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .sidebar-heading + .sidebar-nav {
   margin-top: 0;
 }
+/* Collapsed: a 52px icon column. Names stay on the buttons as tooltips and
+   accessible names; counts give way to the unread dot at the icon's corner. */
+.sidebar-collapsed {
+  width: 52px;
+}
+.sidebar-collapsed .brand {
+  flex-direction: column;
+  height: auto;
+  padding: 8px 0;
+}
+.sidebar-collapsed .brand strong {
+  display: none;
+}
+.sidebar-collapsed .collapse-sidebar,
+.sidebar-collapsed .new-ticket {
+  margin-left: 0;
+}
+.sidebar-collapsed .sidebar-nav button {
+  position: relative;
+  justify-content: center;
+  width: 36px;
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  font-size: 0;
+}
+.sidebar-collapsed .sidebar-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin: 0;
+  gap: 0;
+  font-size: 0;
+}
+.sidebar-collapsed .sidebar-count > :not([data-slot="status-dot"]) {
+  display: none;
+}
+.sidebar-collapsed .sidebar-heading {
+  height: 1px;
+  margin: 10px 8px;
+  padding: 0;
+  background: var(--border);
+  font-size: 0;
+}
+.sidebar-collapsed .sidebar-heading > * {
+  display: none;
+}
+.sidebar-collapsed .sidebar-sources {
+  align-items: center;
+  padding: 0 0 8px;
+}
+.sidebar-collapsed .sidebar-source-line {
+  font-size: 0;
+}
+.sidebar-collapsed .sidebar-source-line small,
+.sidebar-collapsed .sidebar-source > button:not(.sidebar-source-line) {
+  display: none;
+}
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {
   display: flex;

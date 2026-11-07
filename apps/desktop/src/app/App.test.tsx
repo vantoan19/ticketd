@@ -1942,6 +1942,30 @@ test("a sidebar view leaves an open workspace graph", async () => {
   expect(screen.queryByText("Back to workspace graph")).toBeNull();
 });
 
+test("the sidebar collapses to named icons, expands again, and remembers the choice", async () => {
+  const ticket = bulkTicket(1);
+  const handlers = { find_tickets: () => [ticket], show_ticket: () => ticket };
+  await renderBulk(handlers);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+  for (const name of ["Documents", "Workspace graph", "Trash", "Settings"])
+    expect(screen.getByRole("button", { name })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "New ticket" })).toBeTruthy();
+  cleanup();
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("a narrow window keeps the sheet and offers no collapse button", async () => {
+  narrowViewport = true;
+  await renderBulk({});
+  expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
+});
+
 test("opening the workspace graph from Plans does not stack the Plans list", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({
