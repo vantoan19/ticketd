@@ -88,6 +88,7 @@ fn index_content(
         let id = uri.strip_prefix(&prefix);
         if let Some(id) = id.filter(|_| validate_new && !previous.contains(uri)) {
             let file = crate::attachments::read_attachment(tx, id)?;
+            crate::attachment_cleanup::restore_reference(tx, id)?;
             crate::attachments::validate_attachment_reference(tx, &file)?;
         }
     }

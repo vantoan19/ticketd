@@ -9,6 +9,8 @@ export const attachmentSchema = z.object({
   size_bytes: z.number().nonnegative().nullable(),
   kind: z.enum(["local_snapshot", "external_reference"]),
   locator: z.string(),
+  quarantined: z.boolean().optional(),
+  added_at: z.string().nullable().optional(),
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 export const attachmentUsageSchema = z.object({
@@ -24,7 +26,14 @@ export const attachmentUsageSchema = z.object({
   ),
 });
 export type AttachmentUsage = z.infer<typeof attachmentUsageSchema>;
-export type AttachmentState = "all" | "in_use" | "unused";
+export type AttachmentState = "all" | "in_use" | "unused" | "quarantined";
+const cleanupReviewSchema = z.object({
+  attachment: attachmentSchema,
+  eligible: z.boolean(),
+  reason: z.string(),
+  usage: attachmentUsageSchema,
+});
+export type AttachmentCleanupReview = z.infer<typeof cleanupReviewSchema>;
 const attachmentSearchResultSchema = z.object({
   attachment: attachmentSchema,
   usage: attachmentUsageSchema,
@@ -133,6 +142,21 @@ const driveConfigurationSchema = z.object({
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
+  async cleanupReviews(offset: number) {
+    return z
+      .array(cleanupReviewSchema)
+      .parse(await invoke("attachment_cleanup_reviews", { limit: 50, offset }));
+  },
+  async quarantine(id: string, requestId: string) {
+    return attachmentSchema.parse(
+      await invoke("quarantine_attachment", { id, requestId }),
+    );
+  },
+  async restore(id: string, requestId: string) {
+    return attachmentSchema.parse(
+      await invoke("restore_attachment", { id, requestId }),
+    );
+  },
   async openDriveUpload(requestId: string) {
     await invoke("open_drive_upload", { requestId });
   },

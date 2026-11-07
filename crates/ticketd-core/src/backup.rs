@@ -129,6 +129,21 @@ pub(crate) fn missing_tables(
             missing.push(table);
         }
     }
+    if version >= 53 && table_exists(connection, "attachments")? {
+        for (column, object) in [
+            ("quarantined", "attachments.quarantined"),
+            ("added_at", "attachments.added_at"),
+        ] {
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attachments') WHERE name=?1)",
+                [column],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                missing.push(object);
+            }
+        }
+    }
     // Context identities and derived indexes need their maintenance triggers;
     // missing triggers silently corrupt subsequent writes after a restore.
     for (trigger, introduced) in [
@@ -279,8 +294,20 @@ pub(crate) fn save_snapshot(
     }
     let staged = tempfile::NamedTempFile::new_in(parent)?;
     let mut destination = Connection::open(staged.path())?;
+    // Byte-restoring reference writes take only the SQLite writer lock. Freeze them
+    // for the snapshot/path inventory, never for hashing/copying large file bodies.
+    let barrier = if let Some(path) = source.path().filter(|path| !path.is_empty()) {
+        let barrier = Connection::open(path)?;
+        barrier.busy_timeout(Duration::from_secs(10))?;
+        barrier.execute_batch("BEGIN IMMEDIATE")?;
+        Some(barrier)
+    } else {
+        None
+    };
     copy(source, &mut destination)?;
-    crate::backup_archive::pack(&destination, root)?;
+    let files = crate::backup_archive::retained_file_inventory(root)?;
+    drop(barrier);
+    crate::backup_archive::pack(&destination, files)?;
     if check_schema {
         validate(&destination)?;
     }

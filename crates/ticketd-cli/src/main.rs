@@ -26,6 +26,26 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Review unused local storage and protected references; never moves or deletes files
+    CleanupReview {
+        id: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
+    /// Reclaim local storage by reversible quarantine after rechecking all protections
+    Quarantine {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
+    /// Restore quarantined local bytes under their original attachment identity
+    Restore {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Search filenames and available metadata with usage context, recent first
     Search {
         #[arg(default_value = "")]
@@ -141,6 +161,7 @@ enum AttachmentStateArg {
     All,
     InUse,
     Unused,
+    Quarantined,
 }
 
 #[derive(Subcommand)]
@@ -1991,6 +2012,24 @@ fn attachment_command(
     command: AttachmentCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
     Ok(match command {
+        AttachmentCommand::CleanupReview { id, limit, offset } => match id {
+            Some(id) => serde_json::to_string(&workspace.attachment_cleanup_review(&id)?)?,
+            None => serde_json::to_string(&workspace.attachment_cleanup_reviews(limit, offset)?)?,
+        },
+        AttachmentCommand::Quarantine { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::QuarantineAttachment { id },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected quarantine result".into()),
+        },
+        AttachmentCommand::Restore { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RestoreAttachment { id },
+        )? {
+            WriteResult::Attachment(file) => serde_json::to_string(&file)?,
+            _ => return Err("unexpected restore result".into()),
+        },
         AttachmentCommand::Search {
             search,
             state,
@@ -2004,6 +2043,7 @@ fn attachment_command(
                     AttachmentStateArg::All => ticketd_core::AttachmentState::All,
                     AttachmentStateArg::InUse => ticketd_core::AttachmentState::InUse,
                     AttachmentStateArg::Unused => ticketd_core::AttachmentState::Unused,
+                    AttachmentStateArg::Quarantined => ticketd_core::AttachmentState::Quarantined,
                 },
                 ticket: related_ticket,
                 limit,
