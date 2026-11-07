@@ -16,10 +16,6 @@
   padding: 0;
   list-style: none;
 }
-.source-card-header strong {
-  color: var(--foreground);
-  font-weight: 500;
-}
 .source-card-actions {
   display: flex;
   flex-wrap: nowrap;
