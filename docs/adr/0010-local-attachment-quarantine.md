@@ -28,6 +28,12 @@ they never acquire the upload lock from inside it. Retryable quarantine/restore
 requests commit their original outcomes with state, so replay cannot repeat a move
 after a later restore or reference.
 
+The checked reader tries active bytes, quarantine, then active bytes again only
+when a path is missing. This bounded retry covers a canonical Undo moving the
+file during inspection; incomplete bytes and unsafe paths still fail explicitly.
+Portable export retains that checked open handle through copying rather than
+reopening its path, preventing false omissions during the one-way restore.
+
 ## Complete backups
 
 The upload lock excludes imports, cleanup and future purge. A separate SQLite

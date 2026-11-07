@@ -90,6 +90,136 @@ fn complete_backup_restores_quarantined_files_and_recovery_state() {
 }
 
 #[test]
+fn portable_export_reads_quarantine_without_restoring_or_rewriting_its_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .import_attachment_bytes("upload", "trace.txt", b"portable quarantine", |_, _| true)
+        .unwrap();
+    let body = format!(
+        "Keep [custom label]({})",
+        workspace.attachment_uri(&file.id).unwrap()
+    );
+    workspace.quarantine_attachment(&file.id).unwrap();
+    let exported = workspace
+        .export_markdown_with_files(
+            ticketd_core::MarkdownExportSource::Markdown { body },
+            dir.path(),
+        )
+        .unwrap();
+    assert_eq!(exported.status, ticketd_core::ExportStatus::Complete);
+    assert_eq!(
+        exported.attachments[0].attachment_id.as_deref(),
+        Some(file.id.as_str())
+    );
+    let relative = exported.attachments[0].path.as_ref().unwrap();
+    assert_eq!(
+        std::fs::read(exported.directory.join(relative)).unwrap(),
+        b"portable quarantine"
+    );
+    assert!(
+        std::fs::read_to_string(exported.directory.join("content.md"))
+            .unwrap()
+            .contains(&format!("[custom label]({relative})"))
+    );
+    assert!(workspace.attachment(&file.id).unwrap().quarantined);
+}
+
+#[test]
+fn portable_export_racing_canonical_undo_never_omits_retained_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let mut files = Vec::new();
+    let mut body = String::new();
+    for index in 0..64 {
+        let file = workspace
+            .import_attachment_bytes(
+                &format!("upload-{index}"),
+                "trace.txt",
+                b"retained",
+                |_, _| true,
+            )
+            .unwrap();
+        body.push_str(&format!(
+            "[Trace]({})\n\n",
+            workspace.attachment_uri(&file.id).unwrap()
+        ));
+        workspace.quarantine_attachment(&file.id).unwrap();
+        files.push(file);
+    }
+    let start = std::sync::Barrier::new(2);
+    let exported = std::thread::scope(|scope| {
+        let writer = scope.spawn(|| {
+            let mut editor = Workspace::open(&path).unwrap();
+            start.wait();
+            editor.create_document(None, &body).unwrap();
+        });
+        start.wait();
+        let exported = workspace
+            .export_markdown_with_files(
+                ticketd_core::MarkdownExportSource::Markdown { body: body.clone() },
+                dir.path(),
+            )
+            .unwrap();
+        writer.join().unwrap();
+        exported
+    });
+    assert_eq!(
+        exported.status,
+        ticketd_core::ExportStatus::Complete,
+        "{:?}",
+        exported
+            .attachments
+            .iter()
+            .filter_map(|entry| entry.omission.as_ref())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(exported.attachments.len(), files.len());
+    for entry in &exported.attachments {
+        assert_eq!(
+            std::fs::read(exported.directory.join(entry.path.as_ref().unwrap())).unwrap(),
+            b"retained"
+        );
+    }
+}
+
+#[test]
+fn checked_snapshot_reads_survive_canonical_undo_location_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let bytes =
+        b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
+    let file = workspace
+        .import_attachment_bytes("image", "trace.png", bytes, |_, _| true)
+        .unwrap();
+    let body = format!("[Image]({})", workspace.attachment_uri(&file.id).unwrap());
+    workspace.quarantine_attachment(&file.id).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let start = std::sync::Barrier::new(5);
+    std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    let reader = Workspace::open(&path).unwrap();
+                    start.wait();
+                    for _ in 0..256 {
+                        let mut media = reader.attachment_media(&identity, &file.id).unwrap();
+                        assert_eq!(media.read(0, bytes.len() as u64).unwrap(), bytes);
+                    }
+                })
+            })
+            .collect();
+        start.wait();
+        workspace.create_document(None, &body).unwrap();
+        for reader in readers {
+            reader.join().unwrap();
+        }
+    });
+}
+
+#[test]
 fn added_time_is_truthful_and_stable_across_rename_replay_and_backup() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
