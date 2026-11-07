@@ -162,6 +162,84 @@ pub fn drive_reference(id: String) -> Result<ticketd_core::drive::DriveReference
         .and_then(|w| w.drive_reference(&id))
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub async fn check_drive_reference(id: String) -> Result<ticketd_core::drive::DriveAccess, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let reference = workspace.drive_reference(&id).map_err(|e| e.to_string())?;
+        let transport = GoogleTransport::default();
+        let provider = GoogleDrive::new(
+            &reference.connection_id,
+            &PlatformCredentialStore,
+            &transport,
+        );
+        workspace
+            .check_drive_reference(&id, &provider)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "Drive access check could not finish".to_owned())?
+}
+
+#[tauri::command]
+pub async fn recover_drive_reference(
+    app: tauri::AppHandle,
+    operations: tauri::State<'_, DrivePickerOperations>,
+    id: String,
+    operation_id: String,
+) -> Result<ticketd_core::drive::DriveAccess, String> {
+    if operation_id.trim().is_empty() || operation_id.len() > 128 {
+        return Err("invalid Drive selection operation".into());
+    }
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let operations = Arc::clone(&operations.0);
+    {
+        let mut active = operations
+            .lock()
+            .map_err(|_| "Drive picker state is unavailable")?;
+        if !active.is_empty() {
+            return Err("another Drive selection is active; complete or cancel it first".into());
+        }
+        active.insert(operation_id.clone(), Arc::clone(&cancelled));
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut workspace = open_workspace().map_err(|e| e.to_string())?;
+        let session = workspace
+            .begin_drive_reference_recovery(
+                &id,
+                DesktopOAuthClient::from_environment().map_err(|e| e.to_string())?,
+                Duration::from_secs(180),
+            )
+            .map_err(|e| e.to_string())?;
+        app.opener()
+            .open_url(session.authorization_url(), None::<&str>)
+            .map_err(|_| "could not open the system browser for Drive recovery".to_owned())?;
+        let transport = GoogleTransport::default();
+        let selection = session
+            .finish(&transport, &PlatformCredentialStore, &cancelled)
+            .map_err(|e| e.to_string())?;
+        let provider = GoogleDrive::new(
+            &selection.connection_id,
+            &PlatformCredentialStore,
+            &transport,
+        );
+        workspace
+            .recover_drive_reference(&id, &selection, &provider)
+            .map(|reference| ticketd_core::drive::DriveAccess {
+                reference,
+                failure: None,
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "Drive recovery could not finish".to_owned());
+    operations
+        .lock()
+        .map_err(|_| "Drive picker state is unavailable")?
+        .remove(&operation_id);
+    result?
+}
 #[tauri::command]
 pub fn drive_configuration() -> DriveConfiguration {
     match DesktopOAuthClient::from_environment() {

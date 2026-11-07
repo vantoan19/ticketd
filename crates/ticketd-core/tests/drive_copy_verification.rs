@@ -7,6 +7,20 @@ use ticketd_core::{Workspace, drive::*};
 const CONNECTION: &str = "81aa7bfb-05c3-4934-a4e7-5c84e2cb83ec";
 const DIGEST: &str = "52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698";
 
+struct Existing;
+impl AttachmentProvider for Existing {
+    fn metadata(&self, id: &str, _: Option<&str>) -> Result<DriveMetadata, DriveError> {
+        Ok(DriveMetadata {
+            id: id.into(),
+            name: "Current plan".into(),
+            mime_type: "application/vnd.google-apps.document".into(),
+            size_bytes: None,
+            web_url: format!("https://docs.google.com/document/d/{id}/edit"),
+            resource_key: None,
+        })
+    }
+}
+
 #[derive(Default)]
 struct Provider {
     uploaded: Mutex<Option<DriveUploadedFile>>,
@@ -73,6 +87,7 @@ impl DriveCopyProvider for Provider {
         Ok(())
     }
 }
+#[allow(clippy::unwrap_used)] // Controlled upload fixture; setup failure must fail the test.
 fn upload(w: &mut Workspace, p: &Provider) -> ticketd_core::Attachment {
     w.upload_drive_bytes(
         "upload",
@@ -251,9 +266,13 @@ fn mixed_exports_report_typed_omissions_and_remove_unverified_downloads_includin
             .import_attachment_bytes("local", "trace.log", b"immutable local", |_, _| true)
             .unwrap();
         let remote_uri = w.attachment_uri(&file.id).unwrap();
+        let native = w
+            .reference_drive_file(CONNECTION, "doc", None, &Existing)
+            .unwrap();
         let body = format!(
-            "[Uploaded words]({remote_uri}) and [Again]({remote_uri}) and [Local]({})",
-            w.attachment_uri(&local.id).unwrap()
+            "[Uploaded words]({remote_uri}) and [Again]({remote_uri}) and [Local]({}) and [My plan]({})",
+            w.attachment_uri(&local.id).unwrap(),
+            w.attachment_uri(&native.id).unwrap()
         );
         let original = w.drive_uploaded_copy(&file.id).unwrap();
         let provider = Scenario {
@@ -280,6 +299,16 @@ fn mixed_exports_report_typed_omissions_and_remove_unverified_downloads_includin
         assert_eq!(omitted["copy_status"], status, "{mode}");
         assert!(omitted["omission"].as_str().is_some(), "{mode}");
         assert!(omitted["path"].is_null());
+        let native_entry = export
+            .attachments
+            .iter()
+            .find(|e| e.attachment_id.as_deref() == Some(native.id.as_str()))
+            .unwrap();
+        assert_eq!(
+            native_entry.external_url.as_deref(),
+            Some("https://docs.google.com/document/d/doc/edit")
+        );
+        assert!(native_entry.omission.is_none());
         assert_eq!(
             std::fs::read_dir(export.directory.join("files"))
                 .unwrap()

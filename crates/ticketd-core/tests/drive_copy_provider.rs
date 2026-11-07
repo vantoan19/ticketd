@@ -98,3 +98,62 @@ fn native_content_is_not_converted_or_downloaded_even_when_provider_called_direc
     assert_eq!(error.kind, DriveErrorKind::Unsupported);
     assert!(http.requests.lock().unwrap().is_empty());
 }
+
+#[test]
+fn ranged_download_handles_multiple_chunks_and_refuses_inconsistent_or_short_responses() {
+    let http = Http {
+        requests: Mutex::new(vec![]),
+        responses: Mutex::new(vec![
+            token(),
+            DriveResponse {
+                status: 206,
+                body: vec![b'a'; 262144],
+                headers: vec![("content-range".into(), "bytes 0-262143/262147".into())],
+            },
+            DriveResponse {
+                status: 206,
+                body: b"end".to_vec(),
+                headers: vec![("Content-Range".into(), "bytes 262144-262146/262147".into())],
+            },
+        ]),
+    };
+    let provider = GoogleDriveCopies::new(&Vault, &http);
+    let mut output = Vec::new();
+    provider
+        .download(&reference(), 262147, &mut output)
+        .unwrap();
+    assert_eq!(output.len(), 262147);
+    assert_eq!(&output[262144..], b"end");
+    assert_eq!(
+        http.requests.lock().unwrap()[2]
+            .headers
+            .iter()
+            .find(|(k, _)| k == "Range")
+            .unwrap()
+            .1,
+        "bytes=262144-262146"
+    );
+    for (range, bytes) in [
+        ("bytes 0-13/15", &b"original bytes"[..]),
+        ("bytes 0-13/14", &b"short"[..]),
+    ] {
+        let http = Http {
+            requests: Mutex::new(vec![]),
+            responses: Mutex::new(vec![
+                token(),
+                DriveResponse {
+                    status: 206,
+                    body: bytes.into(),
+                    headers: vec![("Content-Range".into(), range.into())],
+                },
+            ]),
+        };
+        let mut output = Vec::new();
+        assert!(
+            GoogleDriveCopies::new(&Vault, &http)
+                .download(&reference(), 14, &mut output)
+                .is_err()
+        );
+        assert!(output.is_empty());
+    }
+}

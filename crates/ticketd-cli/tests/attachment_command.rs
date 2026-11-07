@@ -479,6 +479,35 @@ fn independent_cli_reuses_authorized_drive_identity_without_desktop_or_snapshot_
         run(dir.path(), &["attachment", "drive-info", &file.id])["metadata"]["mime_type"],
         "application/vnd.google-apps.spreadsheet"
     );
+    let status = run(dir.path(), &["attachment", "drive-status", &file.id]);
+    assert_eq!(status["reference"]["metadata"]["id"], "sheet-123");
+    assert_eq!(status["failure"]["kind"], "reauthorize");
+    let failure = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "drive-resolve", &file.id])
+        .output()
+        .unwrap();
+    assert!(!failure.status.success());
+    let message = String::from_utf8_lossy(&failure.stderr);
+    assert!(message.contains("reauthorize"));
+    assert!(message.contains(&format!("drive-authorize {}", file.id)));
+    assert!(message.contains("https://docs.google.com/spreadsheets/d/sheet-123/edit"));
+    let authorize = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .env_remove("TICKETD_GOOGLE_OAUTH_CLIENT_FILE")
+        .args(["attachment", "drive-authorize", &file.id])
+        .output()
+        .unwrap();
+    assert!(!authorize.status.success());
+    assert!(
+        String::from_utf8_lossy(&authorize.stderr).contains("TICKETD_GOOGLE_OAUTH_CLIENT_FILE")
+    );
     assert_eq!(
         run(dir.path(), &["attachment", "inspect", &file.id])["kind"],
         "external_reference"

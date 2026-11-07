@@ -131,6 +131,10 @@ enum AttachmentCommand {
     },
     /// Resolve current Drive metadata without downloading or converting content
     DriveResolve { id: String },
+    /// Check current access, returning typed recovery status and last-known metadata
+    DriveStatus { id: String },
+    /// Reconnect and authorize the original file in system-browser Picker (open the printed URL)
+    DriveAuthorize { id: String },
     /// Explain saved, Trash, draft and Undo protections (eligibility is advisory)
     Usage { id: String },
     /// Finish legacy draft migration only after importing/reviewing every desktop profile
@@ -2013,6 +2017,7 @@ fn attachment_command(
     workspace: &mut Workspace,
     command: AttachmentCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    let status_only = matches!(&command, AttachmentCommand::DriveStatus { .. });
     Ok(match command {
         AttachmentCommand::CleanupReview { id, limit, offset } => match id {
             Some(id) => serde_json::to_string(&workspace.attachment_cleanup_review(&id)?)?,
@@ -2180,7 +2185,33 @@ fn attachment_command(
             }
             serde_json::to_string(&file)?
         }
-        AttachmentCommand::DriveResolve { id } => {
+        AttachmentCommand::DriveAuthorize { id } => {
+            let session = workspace.begin_drive_reference_recovery(
+                &id,
+                ticketd_core::drive::DesktopOAuthClient::from_environment()?,
+                std::time::Duration::from_secs(180),
+            )?;
+            let reference = workspace.drive_reference(&id)?;
+            eprintln!(
+                "Open this URL in your system browser, reconnect with the original Google account, and select only {} (file ID {}). No sharing changes will be made:\n{}",
+                reference.metadata.name,
+                reference.metadata.id,
+                session.authorization_url()
+            );
+            let transport = ticketd_core::drive::GoogleTransport::default();
+            let selection = session.finish(
+                &transport,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &std::sync::atomic::AtomicBool::new(false),
+            )?;
+            let provider = ticketd_core::drive::GoogleDrive::new(
+                &selection.connection_id,
+                &ticketd_core::drive::PlatformCredentialStore,
+                &transport,
+            );
+            serde_json::to_string(&workspace.recover_drive_reference(&id, &selection, &provider)?)?
+        }
+        AttachmentCommand::DriveResolve { id } | AttachmentCommand::DriveStatus { id } => {
             let reference = workspace.drive_reference(&id)?;
             let transport = ticketd_core::drive::GoogleTransport::default();
             let provider = ticketd_core::drive::GoogleDrive::new(
@@ -2188,7 +2219,15 @@ fn attachment_command(
                 &ticketd_core::drive::PlatformCredentialStore,
                 &transport,
             );
-            serde_json::to_string(&workspace.resolve_drive_reference(&id, &provider)?)?
+            let access = workspace.check_drive_reference(&id, &provider)?;
+            if status_only {
+                serde_json::to_string(&access)?
+            } else {
+                if let Some(error) = access.failure {
+                    return Err(format!("{}; retry: ticketd attachment drive-resolve {id}; reconnect/authorize this file: ticketd attachment drive-authorize {id}; open {} in Drive to review availability or request access from its owner; no sharing changes are made", serde_json::to_string(&error)?, access.reference.metadata.web_url).into());
+                }
+                serde_json::to_string(&access.reference)?
+            }
         }
         AttachmentCommand::DriveCopyStatus { id } => {
             let transport = ticketd_core::drive::GoogleTransport::default();

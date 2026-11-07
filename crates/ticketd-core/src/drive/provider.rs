@@ -285,12 +285,15 @@ pub(super) fn parse_metadata(
         is_app_authorized: Option<bool>,
     }
     let file: File = serde_json::from_slice(body).map_err(|_| invalid_response())?;
+    if file.id != id {
+        return Err(invalid_response());
+    }
     if file.is_app_authorized == Some(false) {
         return Err(select_file());
     }
     if file.trashed == Some(true) {
         return Err(DriveError::new(
-            DriveErrorKind::InaccessibleOrMissing,
+            DriveErrorKind::Missing,
             "the file is in Drive trash; restore it in Drive or choose another file",
         ));
     }
@@ -354,7 +357,7 @@ pub(super) fn metadata_error(response: &DriveResponse) -> DriveError {
         .flatten()
         .filter_map(|e| e["reason"].as_str())
         .collect();
-    if reasons.contains(&"appNotAuthorizedToFile") {
+    if response.status == 403 && reasons.contains(&"appNotAuthorizedToFile") {
         return select_file();
     }
     match response.status {
@@ -378,6 +381,10 @@ pub(super) fn metadata_error(response: &DriveResponse) -> DriveError {
                 "Drive is rate limited; wait and retry",
             )
         }
+        403 if reasons.contains(&"insufficientFilePermissions") => DriveError::new(
+            DriveErrorKind::PermissionDenied,
+            "Drive denied permission for this file; open it in Drive and request access from its owner, then retry; ticketd never changes sharing",
+        ),
         403 | 404 => DriveError::new(
             DriveErrorKind::InaccessibleOrMissing,
             "Drive cannot provide this file: it may be inaccessible or missing; select it again or request access from its owner in Drive",

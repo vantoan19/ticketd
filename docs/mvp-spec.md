@@ -969,6 +969,26 @@ instructions, never broader scopes. Byte export refuses external references and
 instructs the caller to open current content in Drive; portable-link export is a
 separate workflow.
 
+Opening a Drive reference checks metadata access without downloading content.
+Authorize file opens the system-browser Picker for the original file; Reconnect
+requires the original account and OAuth client. Picking a different account or
+file leaves the reference unchanged. Retry checks current access, preserving
+last-known details, authored labels, original names and all other uses.
+
+File selection for ticketd, expired account authorization, proven permission
+denial, Drive trash and provider/rate-limit failures have separate recovery
+messages. A generic 403 or 404 remains inaccessible-or-missing: ticketd does not
+infer deletion from an ambiguous response. Open in Drive lets the person review
+availability or request access from the owner; ticketd never changes sharing.
+
+`attachment drive-status <id>` returns last-known metadata and a typed `failure`
+(null after a successful metadata refresh). `drive-resolve` returns a nonzero
+exit with a stable error kind and retry/authorization/Open in Drive instructions
+on failure. `attachment drive-authorize <id>` prints a one-shot system-browser
+Picker URL and waits up to three minutes for explicit original-file selection.
+The CLI uses the same OS credential store without a desktop process. No command
+silently broadens `drive.file`, substitutes another file or caches remote bytes.
+
 ## 19. Google Drive uploads
 
 In the shared Upload flow, Choose Drive folder opens the system-browser Picker
@@ -996,3 +1016,21 @@ Uploaded copies retain input SHA-256 and observed provider checksum/version;
 remote editing can change them independently. They are not immutable snapshots,
 and byte export requires an explicit verified-download workflow. Backups retain
 only remote metadata and operations, never remote bytes, tokens or resumable URLs.
+
+Uploaded-copy previews distinguish changed, unavailable, unsupported and unknown
+comparison states while retaining last-known details, Open in Drive and Retry.
+`attachment drive-copy-status <id>` returns the same current metadata comparison
+without downloading bytes; ordinary existing-file references return no uploaded
+copy comparison. A matching metadata observation is not a guarantee of preserved
+original bytes. Provider versions can also change for metadata edits.
+
+Explicit file export and Export Markdown with files download an uploaded copy
+only when checksum, version, size and download capability support comparison.
+They check current metadata before and after the bounded download and compare
+actual bytes with the recorded upload SHA-256. Changed, unknown, unsupported or
+unavailable copies are omitted with reasons; portable manifests retain
+`uploaded_copy` classification and `copy_status`, and the UI/CLI return partial
+results alongside usable local snapshots and named current-source Drive links.
+Rejected downloads leave no exported file. Existing destinations are never
+overwritten, references and authored labels remain unchanged, and no download
+pins a revision, caches remote bytes automatically or changes the provider file.

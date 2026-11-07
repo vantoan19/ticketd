@@ -12,9 +12,11 @@ const nativeTypes: Record<string, string> = {
 export function DriveReferenceDetails({
   id,
   uploadedCopy = false,
+  revision = 0,
 }: {
   id: string;
   uploadedCopy?: boolean;
+  revision?: number;
 }) {
   const [reference, setReference] = useState<DriveReference | null>(null);
   const [error, setError] = useState("");
@@ -31,7 +33,7 @@ export function DriveReferenceDetails({
     return () => {
       current = false;
     };
-  }, [id]);
+  }, [id, revision]);
   if (!reference)
     return (
       <>

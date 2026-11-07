@@ -132,8 +132,23 @@ test("shared picker selects Drive references without changing local upload desti
 test.each(["inline", "library"])(
   "%s native references offer Open in Drive and describe current content without byte export",
   async (entry) => {
+    const reference = {
+      connection_id: "connection",
+      metadata: {
+        id: "doc-1",
+        name: "Current plan",
+        mime_type: "application/vnd.google-apps.document",
+        size_bytes: null,
+        web_url: "https://docs.google.com/document/d/doc-1/edit",
+        resource_key: null,
+      },
+    };
     vi.mocked(open).mockResolvedValue("C:/sharing");
     vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "check_drive_reference")
+        return { reference, failure: null };
+      if (command === "drive_configuration")
+        return { configured: true, message: "Ready" };
       if (command === "attachment_workspace_id") return "drive-test-workspace";
       if (command === "attachment_upload_limit") return 104857600;
       if (command === "resolve_attachment_uri") return file;

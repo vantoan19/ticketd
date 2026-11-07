@@ -501,8 +501,10 @@ It is separate from ticket-source connectors. Uploads use the separate
 `drive::DriveUploadProvider` capability; neither interface exposes deletion,
 overwrites, conversion or sharing changes.
 The Google implementation can exchange/refresh authorization, read account
-identity and read explicitly authorized file metadata. It neither downloads nor
-converts Google-native content and cannot change sharing or delete a remote file.
+identity and read explicitly authorized file metadata. A separate read-only
+`DriveCopyProvider` inspects and downloads uploaded blob copies for explicit
+export. It never downloads or converts Google-native content and cannot change
+sharing or delete a remote file.
 
 `Workspace::reference_drive_file` resolves outside a SQLite transaction, validates
 metadata and viewer URLs, then atomically stores/reuses a workspace attachment
@@ -531,8 +533,25 @@ workspace serialize refresh-token rotation; access tokens stay in memory.
 Transport diagnostics omit URLs, headers and bodies, and Google redirects are
 not followed. Workspace backups/JSON export contain reference metadata, never
 credentials or remote bytes. The standalone CLI uses the same core/vault namespace;
-no desktop process is needed. Portable Drive-link export and richer recovery/remote
-record cleanup are separate workflows.
+no desktop process is needed. Portable Drive-link export and remote record cleanup
+are separate workflows.
+
+`check_drive_reference` returns an explicit access observation with typed provider
+failure and last-known metadata; access is not persisted as a workspace-wide fact
+because credentials belong to each OS user. Failed reads never erase metadata.
+Successful refresh changes current provider metadata and known size, preserving
+local display names, original filenames, authored Markdown and immutable uploaded-copy
+provenance. Network calls precede short database transactions.
+
+`begin_drive_reference_recovery` constrains native Picker recovery to one original
+file and account/client handle. Callback processing verifies both before loading
+or saving credentials; `recover_drive_reference` rechecks the selection at the
+Workspace boundary before metadata refresh. Wrong selection is not replacement.
+React displays recovery state and Tauri translates browser/cancellation requests;
+the standalone CLI prints the same bounded session URL for explicit browser opening.
+Neither adapter decides authorization policy or changes sharing. Error classification
+uses provider evidence: app-not-authorized, reconnect, explicit file-permission
+denial and positively observed trash are distinct; unknown 403/404 stays ambiguous.
 
 ## Google Drive uploaded copies
 
@@ -567,8 +586,27 @@ second create or requiring the source when remote completion can be verified.
 Completed copies use the remote `external_reference` storage locator with separate
 immutable upload provenance, exposed by `drive_uploaded_copy`. They remain reusable
 if insertion or reference saving fails. They are uploaded copies, not local
-snapshots. Byte export remains unavailable until a workflow can download and
-verify current content against provenance. Backup/restore and JSON export retain
+snapshots. Explicit byte export verifies current content against provenance.
+Backup/restore and JSON export retain
 operation metadata and remote references only, with no tokens, session URLs,
 source paths or cached remote bytes. Remote content is retained after cancellation,
 local fallback and record cleanup.
+
+`inspect_drive_uploaded_copy` compares immutable upload SHA-256, size and recorded
+version with current metadata without downloading or updating provenance. Its
+`unchanged` status describes metadata only. Missing checksum/version/size or
+capability evidence is `unknown`; unsupported downloads, changed observations and
+typed access failures remain distinct. A changed version may represent metadata
+changes rather than changed bytes, so export conservatively omits it.
+
+Both `export_attachment` and the existing portable Markdown exporter use the
+same verified-download workflow. The Google adapter reads authenticated blob
+ranges of at most 256 KiB, checks range/length responses and preserves resource
+keys. Core stages output, bounds and hashes actual bytes, and requires matching
+before/after metadata observations before publishing a file. Failed or unstable
+downloads remove staged bytes and return explicit status; there is no revision
+pinning or automatic cache. Portable format 1 adds nullable `copy_status` to
+uploaded-copy entries, retaining old manifest compatibility. Omissions make the
+result partial without changing canonical Markdown or current-source links.
+Local inputs are copied from the existing protected snapshot before network
+reads; no provider call holds a SQLite transaction or attachment file barrier.

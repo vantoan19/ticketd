@@ -65,12 +65,34 @@ pub struct PickerSession {
     state: String,
     verifier: String,
     timeout: Duration,
+    recovery: Option<super::DriveReference>,
 }
 pub struct DriveSelection {
     pub connection_id: String,
     pub file_ids: Vec<String>,
 }
 impl PickerSession {
+    pub(super) fn begin_recovery(
+        client: DesktopOAuthClient,
+        timeout: Duration,
+        reference: super::DriveReference,
+    ) -> Result<Self, DriveError> {
+        let mut session = Self::begin(client, timeout)?;
+        let mut url =
+            url::Url::parse(&session.authorization_url).map_err(|_| invalid_response())?;
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .into_owned()
+            .filter(|(k, _)| k != "allow_multiple")
+            .collect();
+        url.set_query(None);
+        url.query_pairs_mut()
+            .extend_pairs(pairs)
+            .append_pair("allow_multiple", "false");
+        session.authorization_url = url.into();
+        session.recovery = Some(reference);
+        Ok(session)
+    }
     pub fn begin_folder(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
         let mut session = Self::begin(client, timeout)?;
         let mut url =
@@ -124,6 +146,7 @@ impl PickerSession {
             state,
             verifier,
             timeout: timeout.min(Duration::from_secs(180)),
+            recovery: None,
         })
     }
     pub fn authorization_url(&self) -> &str {
@@ -258,6 +281,15 @@ impl PickerSession {
                 .as_bytes(),
             )
             .to_string();
+            if let Some(reference) = &self.recovery {
+                super::validate_recovery_selection(
+                    reference,
+                    &DriveSelection {
+                        connection_id: connection_id.clone(),
+                        file_ids: file_ids.clone(),
+                    },
+                )?;
+            }
             let _lock = credential_lock(&connection_id)?;
             let refresh_token = match token.refresh_token.filter(|s| !s.is_empty()) {
                 Some(token) => token,
