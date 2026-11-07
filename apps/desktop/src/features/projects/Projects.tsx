@@ -401,7 +401,11 @@ export function Projects({
         you are in.
       </p>
       {loading ? (
-        <p className="projects-empty settings-hint">Loading projects…</p>
+        <EmptyState
+          size="inline"
+          role="status"
+          description="Loading projects…"
+        />
       ) : projects.length === 0 ? (
         <EmptyState
           icon={<Folder aria-hidden />}

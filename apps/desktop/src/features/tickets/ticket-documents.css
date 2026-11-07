@@ -129,11 +129,6 @@
   max-height: 14rem;
   overflow-y: auto;
 }
-.document-picker-empty {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
 
 .ticket-documents-edit {
   flex: none;

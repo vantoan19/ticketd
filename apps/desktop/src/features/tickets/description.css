@@ -13,8 +13,7 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.description-document,
-.description-empty {
+.description-document {
   display: block;
   margin-top: 0;
   min-height: 48px;

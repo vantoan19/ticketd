@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { TicketHeader } from "@/features/tickets/TicketHeader";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -139,13 +140,16 @@ export function TicketDetails({
           </p>
         )}
         {selected === null && (
-          <div className="detail-empty">
-            <p>Select a ticket to read it here</p>
-            <p className="detail-empty-hint">
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
-            </p>
-          </div>
+          <EmptyState
+            size="hint"
+            title="Select a ticket to read it here"
+            footnote={
+              <>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd> move <Kbd>Enter</Kbd> open
+              </>
+            }
+          />
         )}
         {Object.values(details).map((item) => (
           <TicketPage

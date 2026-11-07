@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import "./description.css";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -583,16 +584,21 @@ export function TicketEditor({
               </div>
             </div>
           ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              className="description-empty"
-              ref={editButton}
-              onClick={() => setBodyMode("editing")}
-            >
-              Add a description…
-            </Button>
+            <EmptyState
+              size="inline"
+              description="No description yet."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  ref={editButton}
+                  onClick={() => setBodyMode("editing")}
+                >
+                  Add a description…
+                </Button>
+              }
+            />
           ))}
       </div>
       <p role="status" className="editor-save-state">

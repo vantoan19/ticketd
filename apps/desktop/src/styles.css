@@ -451,7 +451,8 @@
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
-body:has([data-slot="dialog-overlay"]) .detail-empty {
+body:has([data-slot="dialog-overlay"])
+  [data-slot="empty-state"][data-size="hint"] {
   visibility: hidden;
 }
 .ui-popover[data-state="open"],
@@ -1231,29 +1232,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
     overflow-y: auto;
   }
 }
-.detail-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 320px;
-  margin: 0;
-  padding: 48px 24px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.detail-empty p {
-  margin: 0;
-}
-.detail-empty-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .ticket-personal-actions {
   display: flex;
   align-items: center;
@@ -1851,7 +1829,9 @@ html[data-theme="dark"][data-input="pointer"]
 /* Filters panel open (board C): the panel covers the left of the detail pane,
    so the empty state centres in the space to its right (centre x 1120) and sits
    23.5px higher, as the frame draws it. */
-.ticket-workspace[data-filters-open] .ticket-detail[data-empty] .detail-empty {
+.ticket-workspace[data-filters-open]
+  .ticket-detail[data-empty]
+  [data-slot="empty-state"][data-size="hint"] {
   padding-left: calc(24px + 360px);
   padding-bottom: calc(48px + 47px);
 }

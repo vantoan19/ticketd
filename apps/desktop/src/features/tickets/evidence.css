@@ -4,9 +4,6 @@
 .evidence-section [data-slot="section-header"] {
   margin-bottom: 8px;
 }
-.evidence-empty {
-  margin: 0;
-}
 .evidence-label {
   display: flex;
   flex-direction: column;
