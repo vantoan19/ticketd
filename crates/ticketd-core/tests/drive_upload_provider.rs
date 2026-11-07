@@ -214,6 +214,7 @@ fn blob_upload_uses_reserved_identity_chunks_and_transient_pinned_session_only()
         },
         state: DriveUploadState::Uncertain,
         provenance: None,
+        record_removed: false,
     };
     let mut progress = vec![];
     provider
@@ -289,6 +290,7 @@ fn unsafe_sessions_conflicts_and_expiry_never_change_id_or_delete_remote_content
             },
             state: DriveUploadState::Uncertain,
             provenance: None,
+            record_removed: false,
         };
         let result = GoogleDrive::new("connection", &Vault, &http).upload_blob(
             &operation,
@@ -332,6 +334,7 @@ fn cancellation_after_an_acknowledged_chunk_stops_sending_without_remote_compens
         },
         state: DriveUploadState::Uncertain,
         provenance: None,
+        record_removed: false,
     };
     let error = GoogleDrive::new("connection", &Vault, &http)
         .upload_blob(

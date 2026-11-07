@@ -19,7 +19,8 @@ fn removed_uploaded_copy_keeps_provenance_but_old_upload_and_write_receipts_cann
             |_, _| true,
         )
         .unwrap();
-    let provenance = workspace.drive_uploaded_copy(&file.id).unwrap();
+    let mut provenance = workspace.drive_uploaded_copy(&file.id).unwrap();
+    provenance.as_mut().unwrap().record_removed = true;
     let rename = || ticketd_core::WriteRequest::RenameAttachment {
         id: file.id.clone(),
         display_name: "Diagnostic".into(),
@@ -345,6 +346,185 @@ fn selecting_a_completed_item_during_registration_recovery_keeps_the_upload_iden
         workspace.attachment(&selected.id).unwrap().display_name,
         "Authored uploaded copy"
     );
+}
+
+#[test]
+fn removing_a_selected_uncertain_upload_prevents_later_reconciliation_from_registering_it_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let provider = Provider::default();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TRIGGER fail_registration BEFORE INSERT ON drive_references BEGIN SELECT RAISE(ABORT,'disk failure'); END;").unwrap();
+    assert!(
+        workspace
+            .upload_drive_bytes(
+                "remove-uncertain",
+                "trace.log",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .is_err()
+    );
+    faults
+        .execute_batch("DROP TRIGGER fail_registration")
+        .unwrap();
+    let selected = workspace
+        .reference_drive_file(CONNECTION, "reserved-file", None, &provider)
+        .unwrap();
+    assert_eq!(
+        workspace.drive_upload("remove-uncertain").unwrap().state,
+        DriveUploadState::Uncertain
+    );
+    workspace.remove_remote_attachment(&selected.id).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    let _ = workspace.check_drive_upload("remove-uncertain", &provider);
+    assert!(workspace.attachments(10, 0).unwrap().is_empty());
+    assert!(
+        workspace
+            .upload_drive_bytes(
+                "remove-uncertain",
+                "trace.log",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .is_err()
+    );
+    assert_eq!(provider.ids.lock().unwrap().len(), 1);
+    let restored = workspace
+        .reference_drive_file(CONNECTION, "reserved-file", None, &provider)
+        .unwrap();
+    assert_eq!(restored.id, selected.id);
+    assert_eq!(
+        workspace
+            .drive_uploaded_copy(&restored.id)
+            .unwrap()
+            .unwrap()
+            .state,
+        DriveUploadState::Completed
+    );
+}
+
+#[test]
+fn in_flight_cancellation_preserves_removal_when_saving_its_older_journal_observation() {
+    struct Abandon {
+        inner: Provider,
+        path: std::path::PathBuf,
+    }
+    impl DriveUploadProvider for Abandon {
+        fn folder(&self, id: &str, key: Option<&str>) -> Result<DriveFolder, DriveError> {
+            self.inner.folder(id, key)
+        }
+        fn reserve_file_id(&self) -> Result<String, DriveError> {
+            self.inner.reserve_file_id()
+        }
+        fn uploaded_file(&self, _: &str) -> Result<Option<DriveUploadedFile>, DriveError> {
+            Ok(None)
+        }
+        #[allow(clippy::unwrap_used)] // Controlled external transport callback exercises a second real Workspace writer.
+        fn upload_blob(
+            &self,
+            op: &DriveUploadOperation,
+            input: &mut dyn Read,
+            progress: &mut dyn FnMut(u64, u64) -> bool,
+        ) -> Result<(), DriveError> {
+            self.inner.upload_blob(op, input, progress)?;
+            let mut other = Workspace::open(&self.path).unwrap();
+            let selected = other
+                .reference_drive_file(CONNECTION, "reserved-file", None, &self.inner)
+                .unwrap();
+            other.remove_remote_attachment(&selected.id).unwrap();
+            Err(DriveError::new(
+                DriveErrorKind::Cancelled,
+                "Cancellation response raced record removal",
+            ))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let provider = Abandon {
+        inner: Provider::default(),
+        path: path.clone(),
+    };
+    let mut workspace = Workspace::open(path).unwrap();
+    assert!(
+        workspace
+            .upload_drive_bytes(
+                "late-cancel",
+                "trace.log",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .is_err()
+    );
+    let operation = workspace.drive_upload("late-cancel").unwrap();
+    assert_eq!(operation.state, DriveUploadState::Cancelled);
+    assert!(operation.record_removed);
+    assert_eq!(operation.request.destination, destination());
+    assert!(
+        workspace
+            .check_drive_upload("late-cancel", &provider.inner)
+            .is_err()
+    );
+    assert!(workspace.attachments(10, 0).unwrap().is_empty());
+    let reconciled = workspace.drive_upload("late-cancel").unwrap();
+    assert!(reconciled.record_removed);
+    assert_eq!(reconciled.state, DriveUploadState::Completed);
+    assert_eq!(reconciled.attachment_id, operation.attachment_id);
+    assert_eq!(reconciled.request, operation.request);
+    assert_eq!(provider.inner.ids.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn legacy_upload_journal_without_removal_flag_replays_and_supports_deliberate_picker_readd() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let provider = Provider::default();
+    let file = workspace
+        .upload_drive_bytes(
+            "old-json",
+            "trace.log",
+            b"original bytes",
+            &destination(),
+            &provider,
+            |_, _| true,
+        )
+        .unwrap();
+    let original = workspace.drive_upload("old-json").unwrap();
+    // The pre-removal journal wire format had no flag; retain its original data unchanged.
+    rusqlite::Connection::open(&path).unwrap().execute("UPDATE drive_upload_operations SET operation=json_remove(operation,'$.record_removed')",[]).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.drive_upload("old-json").unwrap(), original);
+    assert_eq!(
+        workspace
+            .upload_drive_bytes(
+                "old-json",
+                "trace.log",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true
+            )
+            .unwrap(),
+        file
+    );
+    workspace.remove_remote_attachment(&file.id).unwrap();
+    assert!(workspace.drive_upload("old-json").unwrap().record_removed);
+    let again = workspace
+        .reference_drive_file(CONNECTION, "reserved-file", None, &provider)
+        .unwrap();
+    assert_eq!(again.id, file.id);
+    assert_eq!(workspace.drive_upload("old-json").unwrap(), original);
+    assert_eq!(provider.ids.lock().unwrap().len(), 1);
 }
 
 #[test]

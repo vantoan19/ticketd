@@ -121,6 +121,7 @@ impl Workspace {
         };
         tx.execute("DELETE FROM drive_references WHERE attachment_id=?1", [id])?;
         tx.execute("DELETE FROM attachments WHERE id=?1", [id])?;
+        tx.execute("UPDATE drive_upload_operations SET operation=json_set(operation,'$.record_removed',json('true')) WHERE attachment_id=?1", [id])?;
         tx.commit()?;
         Ok(result)
     }

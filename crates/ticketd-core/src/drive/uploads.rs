@@ -55,6 +55,9 @@ pub struct DriveUploadOperation {
     pub request: DriveUploadRequest,
     pub state: DriveUploadState,
     pub provenance: Option<DriveUploadedFile>,
+    /// Record cleanup must survive late upload reconciliation and stale journal writes.
+    #[serde(default)]
+    pub record_removed: bool,
 }
 
 /// Blob creation only. No overwrite, conversion, deletion or sharing capability.
@@ -200,7 +203,7 @@ impl Workspace {
     }
     fn save_drive_upload(&self, operation: &DriveUploadOperation) -> Result<(), Error> {
         self.connection.execute(
-            "UPDATE drive_upload_operations SET operation=?1 WHERE request_id=?2",
+            "UPDATE drive_upload_operations SET operation=CASE WHEN json_extract(operation,'$.record_removed')=1 THEN json_set(?1,'$.record_removed',json('true')) ELSE ?1 END WHERE request_id=?2",
             params![serde_json::to_string(operation)?, operation.request_id],
         )?;
         Ok(())
@@ -286,6 +289,9 @@ impl Workspace {
             {
                 return Err(Error::RequestConflict(request_id.into()));
             }
+            if operation.record_removed {
+                return self.attachment(&operation.attachment_id);
+            }
             if operation.state == DriveUploadState::Completed {
                 return self.attachment(&operation.attachment_id);
             }
@@ -341,6 +347,7 @@ impl Workspace {
                 request,
                 state: DriveUploadState::Pending,
                 provenance: None,
+                record_removed: false,
             };
             self.connection.execute(
                 "INSERT INTO drive_upload_operations(request_id,attachment_id,operation) VALUES (?1,?2,?3)",
@@ -416,7 +423,15 @@ impl Workspace {
         let tx = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute(
+        let current: String = tx.query_row(
+            "SELECT operation FROM drive_upload_operations WHERE request_id=?1",
+            [&operation.request_id],
+            |row| row.get(0),
+        )?;
+        operation.record_removed =
+            serde_json::from_str::<DriveUploadOperation>(&current)?.record_removed;
+        if !operation.record_removed {
+            tx.execute(
             "INSERT INTO attachments(id,display_name,original_filename,size_bytes,kind,locator,added_at) VALUES (?1,?2,?2,?3,'external_reference',?4,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING",
             params![
                 operation.attachment_id,
@@ -425,7 +440,7 @@ impl Workspace {
                 format!("drive:{}:{id}", operation.request.destination.connection_id)
             ],
         )?;
-        tx.execute(
+            tx.execute(
             "INSERT INTO drive_references(attachment_id,connection_id,file_id,metadata) VALUES (?1,?2,?3,?4) ON CONFLICT(attachment_id) DO UPDATE SET metadata=excluded.metadata",
             params![
                 operation.attachment_id,
@@ -434,6 +449,7 @@ impl Workspace {
                 serde_json::to_string(&file.metadata)?
             ],
         )?;
+        }
         tx.execute(
             "UPDATE drive_upload_operations SET operation=?1 WHERE request_id=?2",
             params![serde_json::to_string(&operation)?, operation.request_id],

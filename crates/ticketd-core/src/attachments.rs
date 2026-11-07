@@ -612,7 +612,7 @@ pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attac
         return Ok(file);
     }
     if version >= 52 {
-        let remote_id: Option<String> = connection.query_row("SELECT json_extract(operation,'$.remote_file_id') FROM drive_upload_operations WHERE attachment_id=?1 AND json_extract(operation,'$.state')='completed'", [id], |row| row.get(0)).optional()?.flatten();
+        let remote_id: Option<String> = connection.query_row("SELECT json_extract(operation,'$.remote_file_id') FROM drive_upload_operations WHERE attachment_id=?1 AND (json_extract(operation,'$.state')='completed' OR json_extract(operation,'$.record_removed')=1)", [id], |row| row.get(0)).optional()?.flatten();
         if let Some(remote_id) = remote_id.filter(|value| crate::drive::valid_file_id(value)) {
             return Err(removed_remote_error(id, &remote_id));
         }

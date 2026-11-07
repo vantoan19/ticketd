@@ -229,7 +229,12 @@ copy operations and immutable provenance remain discoverable. Old attachment
 outcomes resolve current registration before returning success, preserving the
 local purge overlay and refusing removed remote identities. Metadata refresh
 updates only an existing record after its network read, so a concurrent removal
-cannot be silently undone. No workspace schema change is required.
+cannot be silently undone. Upload journals record `record_removed` atomically
+with removal, including selected files whose upload registration is still
+uncertain. Stale cancellation writes and late completion preserve the marker;
+reconciliation can retain verified provenance without recreating the record.
+Only explicit Picker selection clears it. Older journal JSON defaults to a
+registered record. No workspace schema change is required.
 
 Only upgrades with existing attachment records require review of legacy browser
 drafts. Startup imports every recoverable slot in the current profile, including

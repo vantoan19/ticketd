@@ -172,6 +172,8 @@ impl Workspace {
             "UPDATE attachments SET size_bytes=?1 WHERE id=?2",
             params![metadata.size_bytes, id],
         )?;
+        // Only deliberate file selection re-registers a previously removed uploaded copy.
+        tx.execute("UPDATE drive_upload_operations SET operation=json_set(operation,'$.record_removed',json('false')) WHERE attachment_id=?1", [&id])?;
         tx.commit()?;
         self.attachment(&id)
     }
