@@ -2143,3 +2143,13 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
   expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
 });
+
+test("the collapsed sidebar keeps the Projects and Plans manage menus", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await openManageMenu("Manage projects", "All projects");
+  expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+  await openManageMenu("Manage Plans", "All Plans");
+  expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
+});

@@ -291,7 +291,12 @@ it("opens a trashed Document readably and restores it", async () => {
     trashed: false,
   });
   renderEditor(<DocumentEditor initial={original} onClose={vi.fn()} />);
-  expect(screen.getByText("In Trash")).toBeTruthy();
+  // The Trash banner is a status the reader is told about.
+  expect(
+    screen
+      .getAllByRole("status")
+      .some((s) => s.textContent?.includes("In Trash")),
+  ).toBe(true);
   expect(screen.getByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "Edit" }));
   expect(screen.getByLabelText("Title")).toHaveProperty("readOnly", true);

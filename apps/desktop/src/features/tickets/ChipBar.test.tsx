@@ -111,19 +111,18 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   expect(screen.queryByRole("complementary")).toBeNull();
   // Rail order, each chip named by its property and value.
   expect(
-    within(bar)
-      .getAllByRole("button")
-      .concat(within(bar).getAllByRole("combobox"))
-      .map((chip) => chip.getAttribute("aria-label")),
-  ).toEqual(
-    expect.arrayContaining([
-      "Status: In progress",
-      "Project: No project",
-      "Plan: Add to a Plan",
-      "Tags: Edit tags",
-      "Manage reminder",
-    ]),
-  );
+    [...bar.querySelectorAll("button, [role=combobox], [role=switch]")].map(
+      (chip) => chip.getAttribute("aria-label"),
+    ),
+  ).toEqual([
+    "Status: In progress",
+    "Source: Local",
+    "Project: No project",
+    "Plan: Add to a Plan",
+    "Tags: Edit tags",
+    "Follow",
+    "Manage reminder",
+  ]);
   expect(
     within(bar).getByRole("button", { name: "Source: Local" }),
   ).toBeTruthy();

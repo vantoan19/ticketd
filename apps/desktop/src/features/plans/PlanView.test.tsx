@@ -159,6 +159,9 @@ test("shows status counts and members for the Plan, and updates both when a memb
   expect(group.textContent).toContain("Todo1");
   expect(group.textContent).toContain("Duplicate1");
   expect(screen.getByText("1 of 2 done")).toBeTruthy();
+  const progress = screen.getByRole("progressbar", { name: "Plan progress" });
+  expect(progress.getAttribute("aria-valuenow")).toBe("1");
+  expect(progress.getAttribute("aria-valuemax")).toBe("2");
   expect(screen.getByText("Active Plan")).toBeTruthy();
 
   fireEvent.click(
