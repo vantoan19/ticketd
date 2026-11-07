@@ -197,9 +197,14 @@ test("the tooltip carries the detail line the collapsed sidebar hides", () => {
       <SourceStatusFooter />,
     ),
   );
+  // Hidden text in the collapsed sidebar: the accessible description keeps it.
   expect(
-    screen.getByTitle(/3 source issues. GitHub last synced 4 min ago./),
+    screen.getByRole("button", {
+      name: /3 source issues/,
+      description: "GitHub last synced 4 min ago",
+    }),
   ).toBeTruthy();
+  expect(screen.queryByTitle(/3 source issues/)).toBeNull();
 });
 
 test("a rate limit reads as delayed, not unavailable", () => {
