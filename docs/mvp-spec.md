@@ -965,6 +965,16 @@ metadata and authored links survive offline/provider failures. Removing a ticket
 association or an inline link does not delete the Drive file. Local uploads keep
 their configured destination; selecting Drive content never changes it.
 
+Portable Markdown exports retain named provider links and explicit manifest
+entries for Drive references without downloading or converting native files.
+Complete means every requested reference has a local file or provider link;
+recipient permissions and offline remote bytes are not guaranteed. Backups
+preserve remote identity, references and last-known metadata without credentials.
+Inspection explicitly reports that remote bytes are excluded and current access
+is unverified. After restoration, unavailable files need the appropriate account
+and explicit file selection again. Required local bytes remain fully verified;
+remote references never weaken that guarantee.
+
 The independent CLI can inspect/reuse a stored reference with ordinary attachment
 commands. `attachment drive-info <id>` returns last-known metadata and its opaque
 connection handle. `attachment drive-resolve <id>` refreshes current metadata.

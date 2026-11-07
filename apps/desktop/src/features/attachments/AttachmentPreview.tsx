@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/attachments";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
+import { ExportMarkdownButton } from "./ExportMarkdown";
 import { formatSize } from "./format-size";
 import "./attachment-preview.css";
 
@@ -201,6 +202,15 @@ export function AttachmentPreview({
                   <ExternalLink aria-hidden="true" />
                   {external ? "Open in Drive" : "Open file"}
                 </Button>
+                {external && workspace && (
+                  <ExportMarkdownButton
+                    label="Export link"
+                    source={{
+                      kind: "markdown",
+                      body: `<ticketd://attachment/${workspace}/${file.id}>`,
+                    }}
+                  />
+                )}
                 {!external && (
                   <Button
                     variant="ghost"

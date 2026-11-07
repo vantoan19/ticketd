@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { AttachmentLink } from "./AttachmentLink";
 import { AttachmentPreview } from "./AttachmentPreview";
@@ -131,6 +132,7 @@ test("shared picker selects Drive references without changing local upload desti
 test.each(["inline", "library"])(
   "%s native references offer Open in Drive and describe current content without byte export",
   async (entry) => {
+    vi.mocked(open).mockResolvedValue("C:/sharing");
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "attachment_workspace_id") return "drive-test-workspace";
       if (command === "attachment_upload_limit") return 104857600;
@@ -155,6 +157,26 @@ test.each(["inline", "library"])(
             web_url: "https://docs.google.com/document/d/doc-1/edit",
             resource_key: null,
           },
+        };
+      if (command === "export_markdown_with_files")
+        return {
+          format_version: 1,
+          status: "complete",
+          directory: "C:/sharing/export",
+          markdown_path: "content.md",
+          manifest_path: "manifest.json",
+          attachments: [
+            {
+              uri: "ticketd://attachment/drive-test-workspace/drive-1",
+              attachment_id: "drive-1",
+              kind: "external_reference",
+              display_name: "Current plan",
+              original_filename: "Current plan",
+              path: null,
+              external_url: "https://docs.google.com/document/d/doc-1/edit",
+              omission: null,
+            },
+          ],
         };
       return undefined;
     });
@@ -189,6 +211,21 @@ test.each(["inline", "library"])(
     fireEvent.click(screen.getByRole("button", { name: "Open in Drive" }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("open_attachment", { id: "drive-1" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export link" }));
+    await screen.findByRole("dialog", { name: "Export complete" });
+    expect(invoke).toHaveBeenCalledWith("export_markdown_with_files", {
+      source: {
+        kind: "markdown",
+        body: "<ticketd://attachment/drive-test-workspace/drive-1>",
+      },
+      output: "C:/sharing",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Export link" }),
+      ),
     );
   },
 );
