@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EventRow, Timeline } from "@/components/ui/timeline";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -135,11 +136,14 @@ export function SourceConversation({
       </SectionHeader>
       {error && <p role="alert">Could not load the conversation: {error}</p>}
       {entries && entries.length === 0 && !error && (
-        <p className="source-caption">
-          {source.unavailable
-            ? "No comments in the last synced copy."
-            : `No comments on ${name} yet.`}
-        </p>
+        <EmptyState
+          size="inline"
+          description={
+            source.unavailable
+              ? "No comments in the last synced copy."
+              : `No comments on ${name} yet.`
+          }
+        />
       )}
       {entries && entries.length > 0 && (
         <Timeline aria-label="Conversation">

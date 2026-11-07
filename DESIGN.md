@@ -509,7 +509,7 @@ Menus are for short action choices. Popovers are for small, focused edits. Dialo
 
 ## 12. Feedback, motion, and accessibility
 
-Use a small set of observable states rather than transient notifications everywhere. Empty, loading, unavailable, failed, saved, and externally changed data must be distinguishable. Build them from the shared EmptyState, Skeleton, and Alert components.
+Use a small set of observable states rather than transient notifications everywhere. Empty, loading, unavailable, failed, saved, and externally changed data must be distinguishable. Build them from the shared EmptyState, Skeleton, and Alert components. An empty state carries the action that fills it; two have none because the control sits directly beside them: the Activity timeline (its composer is the row above) and a Plan’s Dependencies view (Add tickets is in the Plan header above). An empty Board column says “No <status> tickets” and offers Add ticket; with a search or filter on it says “No matching tickets” and offers Clear filters.
 
 | Situation                       | Presentation                                                             |
 | ------------------------------- | ------------------------------------------------------------------------ |

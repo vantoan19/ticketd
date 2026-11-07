@@ -480,9 +480,8 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
     clientWidth: { configurable: true, value: 560 },
   });
   const column = screen.getByRole("region", { name: "In progress column" });
-  const body = within(column)
-    .getByText("No matching tickets")
-    .closest("[data-slot=empty-state]")!.parentElement!;
+  expect(within(column).getByText("No In progress tickets")).toBeTruthy();
+  const body = column.querySelector<HTMLElement>(".board-column-body")!;
   vi.spyOn(body, "getBoundingClientRect").mockReturnValue(
     new DOMRect(280, 32, 280, 568),
   );
@@ -1158,7 +1157,13 @@ test("List is the default and Board keeps all six columns, including empty statu
   ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByText(
-      "No matching tickets",
+      "No Done tickets",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByRole(
+      "button",
+      { name: "Add ticket" },
     ),
   ).toBeTruthy();
   expect(screen.getByText("Counts reflect current filters.")).toBeTruthy();
@@ -1232,6 +1237,7 @@ test("an obsolete Load more response cannot put tickets back into a different sc
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   expect(screen.getByRole("button", { name: /T-56.*Ticket 56/ })).toBeTruthy();
@@ -1343,6 +1349,7 @@ test("layout preference survives navigation and restart while search and status 
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   expect(
@@ -1357,6 +1364,7 @@ test("layout preference survives navigation and restart while search and status 
   expect(
     within(screen.getByRole("region", { name: "Done column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Inbox" }));

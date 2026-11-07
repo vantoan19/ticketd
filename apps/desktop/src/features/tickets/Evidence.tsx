@@ -171,7 +171,8 @@ export function Evidence({
         title="Evidence"
         count={items.length || undefined}
         actions={
-          !trashed && (
+          !trashed &&
+          items.length > 0 && (
             <Button variant="ghost" size="sm" onClick={startAdding}>
               <Plus data-icon="inline-start" />
               Add evidence
@@ -183,6 +184,14 @@ export function Evidence({
         <EmptyState
           size="inline"
           description="Link a pull request, commit, or verification result."
+          action={
+            !trashed && (
+              <Button variant="outline" size="sm" onClick={startAdding}>
+                <Plus data-icon="inline-start" />
+                Add evidence
+              </Button>
+            )
+          }
         />
       )}
       {error && !composing && <p role="alert">{error}</p>}

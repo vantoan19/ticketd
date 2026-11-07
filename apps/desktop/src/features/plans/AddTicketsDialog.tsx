@@ -128,6 +128,17 @@ export function AddTicketsDialog({
             icon={<SearchX />}
             title="No tickets to add"
             description="Nothing matches this search."
+            action={
+              query && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setQuery("")}
+                >
+                  Clear search
+                </Button>
+              )
+            }
           />
         )}
         <ul className="plan-add-results" aria-label="Tickets to add">

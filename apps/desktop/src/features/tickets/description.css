@@ -54,11 +54,6 @@
 .editor-body:focus-visible {
   outline: 2px solid var(--ring);
 }
-.description-none {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
 .editor-conflict {
   margin-top: 16px;
   padding: 12px;

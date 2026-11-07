@@ -33,11 +33,22 @@ import { Reference } from "@/components/ui/reference";
 export function TicketBoard({
   workspace,
   onOpen,
+  onAdd,
 }: {
   workspace: TicketWorkspace;
   onOpen: (reference: string) => void;
+  /** Starts a ticket in a status; absent where nothing can be added. */
+  onAdd?: ((status: string, trigger: HTMLButtonElement) => void) | undefined;
 }) {
   const { statusAction } = workspace;
+  // Columns are the statuses, so only the other filters can empty one.
+  const narrowed = Boolean(
+    workspace.query ||
+    workspace.tags ||
+    workspace.family ||
+    workspace.plan !== workspace.navigation.plan ||
+    workspace.availability,
+  );
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
   return (
     <>
@@ -285,7 +296,36 @@ export function TicketBoard({
                   />
                 )}
                 {!loading && !error && items.length === 0 && (
-                  <EmptyState size="inline" description="No matching tickets" />
+                  <EmptyState
+                    size="inline"
+                    description={
+                      narrowed ? "No matching tickets" : `No ${status} tickets`
+                    }
+                    action={
+                      narrowed ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={workspace.clearFilters}
+                        >
+                          Clear filters
+                        </Button>
+                      ) : (
+                        onAdd &&
+                        status !== "Duplicate" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) =>
+                              onAdd(status, event.currentTarget)
+                            }
+                          >
+                            Add ticket
+                          </Button>
+                        )
+                      )
+                    }
+                  />
                 )}
                 {total !== null && items.length < total && (
                   <>

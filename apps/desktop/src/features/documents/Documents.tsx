@@ -311,6 +311,11 @@ export function Documents({
     </ul>
   );
   const searching = Boolean(query.trim() || filter.trim());
+  const captureAction = onCapture && (
+    <Button variant="outline" size="sm" onClick={onCapture}>
+      <Plus aria-hidden="true" /> Capture
+    </Button>
+  );
   return (
     <div className="documents-page">
       <div className="documents-list-view" hidden={selected !== null}>
@@ -413,7 +418,11 @@ export function Documents({
         {showTrash ? (
           <section>
             {!trashLoaded ? (
-              <p role="status">Loading Trash…</p>
+              <EmptyState
+                size="inline"
+                role="status"
+                description="Loading Trash…"
+              />
             ) : (
               trash.length === 0 && (
                 <EmptyState
@@ -519,7 +528,11 @@ export function Documents({
               <section>
                 <h2>All documents</h2>
                 {!allLoaded ? (
-                  <p role="status">Loading Documents…</p>
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
                 ) : (
                   all.length === 0 &&
                   allOffset === 0 && (
@@ -527,6 +540,7 @@ export function Documents({
                       icon={<FileText />}
                       title="No Documents yet"
                       description="Capture a thought or create a Document to start."
+                      action={captureAction}
                     />
                   )
                 )}
@@ -552,7 +566,11 @@ export function Documents({
               <section>
                 <h2>Recently opened</h2>
                 {!browseLoaded ? (
-                  <p role="status">Loading Documents…</p>
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
                 ) : (
                   recent.length === 0 &&
                   recentOffset === 0 && (
@@ -560,6 +578,7 @@ export function Documents({
                       icon={<FileText />}
                       title="No recent Documents"
                       description="Your captured thoughts will appear here."
+                      action={captureAction}
                     />
                   )
                 )}

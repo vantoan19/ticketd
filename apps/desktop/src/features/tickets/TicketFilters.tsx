@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconButton } from "@/components/ui/icon-button";
@@ -381,7 +382,7 @@ function TagChips({
     };
   }, [open]);
   const all = [...new Set([...vocabulary, ...selected])];
-  if (all.length === 0) return <p className="filter-hint">No tags yet.</p>;
+  if (all.length === 0) return <EmptyState size="hint" title="No tags yet." />;
   return (
     <div className="toggle-chips tag-chips">
       {all.map((tag) => (

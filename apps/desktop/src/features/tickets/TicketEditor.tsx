@@ -532,7 +532,7 @@ export function TicketEditor({
                   revision={revision}
                 />
               ) : (
-                <p className="description-none">No description.</p>
+                <EmptyState size="hint" title="No description." />
               )}
             </div>
           </div>

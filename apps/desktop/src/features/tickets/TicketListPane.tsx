@@ -296,7 +296,15 @@ export function TicketListPane({
             </p>
           )}
           {workspace.layout === "board" ? (
-            <TicketBoard workspace={workspace} onOpen={onOpen} />
+            <TicketBoard
+              workspace={workspace}
+              onOpen={onOpen}
+              {...(!addDisabled &&
+                !trash && {
+                  onAdd: (status: string, trigger: HTMLButtonElement) =>
+                    onCreate(trigger, status),
+                })}
+            />
           ) : queryError ? (
             <EmptyState
               role="alert"
