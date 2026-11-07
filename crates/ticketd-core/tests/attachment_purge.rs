@@ -68,6 +68,17 @@ fn purged_replays_never_recreate_bytes_and_new_backups_restore_unavailability() 
     assert_eq!(workspace.resolve_attachment_uri(&uri).unwrap().id, file.id);
     let backup = dir.path().join("purged.sqlite3");
     workspace.backup(&backup).unwrap();
+    let content = workspace
+        .inspect_backup(&backup)
+        .unwrap()
+        .attachment_content
+        .unwrap();
+    assert_eq!(
+        content.local_snapshots, 0,
+        "purged metadata must not be counted as backed-up local snapshots"
+    );
+    assert_eq!(content.retained_files, 0);
+    assert_eq!(content.retained_bytes, 0);
     let target = dir.path().join("restored.sqlite3");
     Workspace::restore(&target, &backup).unwrap();
     let restored = Workspace::open(&target).unwrap();

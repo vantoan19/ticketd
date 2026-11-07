@@ -339,7 +339,13 @@ pub(crate) fn unpack_database(connection: &Connection) -> Result<(), Error> {
 pub(crate) fn content(connection: &Connection) -> Result<crate::AttachmentBackupContent, Error> {
     let container_version = container_version(connection)?.and_then(|v| u32::try_from(v).ok());
     let (local_snapshots, remote_references) = if table_exists(connection, "attachments")? {
-        connection.query_row("SELECT COUNT(CASE WHEN kind='local_snapshot' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments", [], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let has_purge =
+            connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))? >= 54;
+        connection.query_row(if has_purge {
+            "SELECT COUNT(CASE WHEN kind='local_snapshot' AND purge_state='retained' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments"
+        } else {
+            "SELECT COUNT(CASE WHEN kind='local_snapshot' THEN 1 END), COUNT(CASE WHEN kind!='local_snapshot' THEN 1 END) FROM attachments"
+        }, [], |r| Ok((r.get(0)?, r.get(1)?)))?
     } else {
         (0, 0)
     };
