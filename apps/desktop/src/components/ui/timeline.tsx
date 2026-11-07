@@ -5,12 +5,18 @@ import type { LucideIcon } from "lucide-react";
 /**
  * The list that joins updates and recorded changes with one 2px line, as on a
  * GitHub issue. Its children are `li`s: an `EventRow`, or a plain `li` that
- * holds a `Card`. The line shows between items and runs behind badges and cards.
+ * holds a `Card`. The line shows between items and runs behind badges and cards;
+ * `plain` leaves it out (only Activity is connected, DESIGN.md section 8).
  */
-function Timeline({ className, ...props }: React.ComponentProps<"ol">) {
+function Timeline({
+  className,
+  plain = false,
+  ...props
+}: React.ComponentProps<"ol"> & { plain?: boolean }) {
   return (
     <ol
       data-slot="timeline"
+      data-plain={plain ? "" : undefined}
       className={cn("ui-timeline", className)}
       {...props}
     />

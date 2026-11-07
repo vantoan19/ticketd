@@ -9,7 +9,6 @@ import type { Ticket } from "@/lib/api/client";
 import { TakeOwnership } from "./TakeOwnership";
 import { useTicketRefresh } from "./useTicketRefresh";
 import { SourceLink } from "./SourceLink";
-import { formatDateTime } from "@/lib/format";
 import { externalSource, unavailableNotice } from "./ticket-source";
 
 /**
@@ -47,13 +46,7 @@ export function SourceUnavailableNotice({
             {index > 0 && <code>{source.display}</code>}
             {part}
           </span>
-        ))}{" "}
-        Since {formatDateTime(source.unavailable!.since)}. You’re reading the
-        last synced copy
-        {source.last_refreshed_at
-          ? ` from ${formatDateTime(source.last_refreshed_at)}`
-          : ""}
-        .
+        ))}
       </AlertDescription>
       <AlertActions>
         <Button

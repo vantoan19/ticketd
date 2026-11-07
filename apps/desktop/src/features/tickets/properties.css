@@ -120,9 +120,6 @@
   flex: 1;
   gap: 6px;
 }
-.rail-tags-picker [data-slot="badge"] {
-  background: var(--surface);
-}
 .rail-tags-chevron {
   flex: none;
   width: 14px;
@@ -267,7 +264,7 @@
   gap: 6px;
   margin: 12px 0 0;
 }
-.chip-bar > :is(small, p) {
+.chip-bar > :is(small, p, section) {
   flex-basis: 100%;
 }
 .chip-bar .rail-follow {

@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Viewport } from "@xyflow/react";
@@ -605,19 +606,28 @@ export function WorkspaceGraph({
           </aside>
         )}
         {graph && graph.nodes.length === 0 && !graph.next_cursor ? (
-          <p role="status" className="context-graph-status">
-            {filtered
-              ? "No items match these filters."
-              : "Nothing to show yet."}{" "}
-            {kind && relationship
-              ? "A connection to an item of another type is not shown while Item type is set. "
-              : ""}
-            {filtered && (
-              <Button variant="outline" size="sm" onClick={clearFilters}>
-                Clear filters
-              </Button>
-            )}
-          </p>
+          <div className="context-graph-status">
+            <EmptyState
+              size="inline"
+              role="status"
+              description={`${
+                filtered
+                  ? "No items match these filters."
+                  : "Nothing to show yet."
+              }${
+                kind && relationship
+                  ? " A connection to an item of another type is not shown while Item type is set."
+                  : ""
+              }`}
+              action={
+                filtered && (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                )
+              }
+            />
+          </div>
         ) : (
           graph && (
             <p

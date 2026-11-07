@@ -116,7 +116,7 @@ function Blockers({
   return (
     <div className="plan-blockers">
       {blockers.length === 0 ? (
-        <p className="plan-note">Nothing blocks {member.reference}.</p>
+        <EmptyState size="hint" title={`Nothing blocks ${member.reference}.`} />
       ) : (
         <ul aria-label={`Blockers of ${member.reference}`}>
           {blockers.map((reference) => {
@@ -334,7 +334,13 @@ export function PlanDependencies({
     <section className="plan-dependencies" aria-label="Plan dependencies">
       {!empty && key}
       {error && <p role="alert">{error}</p>}
-      {!graph && !error && <p role="status">Loading dependencies…</p>}
+      {!graph && !error && (
+        <EmptyState
+          size="inline"
+          role="status"
+          description="Loading dependencies…"
+        />
+      )}
       {graph && members.length === 0 && (
         <EmptyState
           icon={<Layers />}

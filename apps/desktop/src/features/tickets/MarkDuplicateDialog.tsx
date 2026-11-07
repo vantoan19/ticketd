@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -98,7 +99,20 @@ export function MarkDuplicateDialog({
             {error && <FieldError>{error}</FieldError>}
           </Field>
           {query.trim() && results.length === 0 && !error && (
-            <p role="status">No tickets to mark match that search.</p>
+            <EmptyState
+              size="inline"
+              role="status"
+              description="No tickets to mark match that search."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setQuery("")}
+                >
+                  Clear search
+                </Button>
+              }
+            />
           )}
           {results.length > 0 && (
             <ul className="duplicate-pick-results" aria-label="Matches">

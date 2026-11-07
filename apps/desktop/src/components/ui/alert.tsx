@@ -51,21 +51,24 @@ function Alert({
   );
 }
 
+/** The notice’s title; `level` makes it a heading where the notice replaced one. */
 function AlertTitle({
   className,
   children,
+  level,
   ...props
-}: React.ComponentProps<"div">) {
+}: React.ComponentProps<"div"> & { level?: 2 | 3 | 4 }) {
   const tone = React.use(ToneContext);
+  const Title = level ? (`h${level}` as const) : "div";
   return (
-    <div
+    <Title
       data-slot="alert-title"
       className={cn("ui-notice-title", className)}
       {...props}
     >
       {tone === "attention" && <StatusDot tone="attention" size={10} />}
       {children}
-    </div>
+    </Title>
   );
 }
 

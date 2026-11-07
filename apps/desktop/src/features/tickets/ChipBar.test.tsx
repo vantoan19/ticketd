@@ -111,23 +111,27 @@ test("a narrow pane folds the rail into chips that open the same editors", async
   expect(screen.queryByRole("complementary")).toBeNull();
   // Rail order, each chip named by its property and value.
   expect(
-    within(bar)
-      .getAllByRole("button")
-      .concat(within(bar).getAllByRole("combobox"))
-      .map((chip) => chip.getAttribute("aria-label")),
-  ).toEqual(
-    expect.arrayContaining([
-      "Status: In progress",
-      "Project: No project",
-      "Plan: Add to a Plan",
-      "Tags: Edit tags",
-      "Manage reminder",
-    ]),
-  );
+    [...bar.querySelectorAll("button, [role=combobox], [role=switch]")].map(
+      (chip) => chip.getAttribute("aria-label"),
+    ),
+  ).toEqual([
+    "Status: In progress",
+    "Source: Local",
+    "Project: No project",
+    "Plan: Add to a Plan",
+    "Tags: Edit tags",
+    "Follow",
+    "Manage reminder",
+  ]);
   expect(
     within(bar).getByRole("button", { name: "Source: Local" }),
   ).toBeTruthy();
-  expect(within(bar).getByRole("switch", { name: "Follow" })).toBeTruthy();
+  // Follow is a chip that reads Following once on, and keeps its name.
+  const follow = within(bar).getByRole("switch", { name: "Follow" });
+  expect(follow.textContent).toBe("Follow");
+  fireEvent.click(follow);
+  await waitFor(() => expect(follow.textContent).toBe("Following"));
+  expect(follow.getAttribute("aria-checked")).toBe("true");
 
   // The Project chip opens the rail's picker, and choosing saves.
   fireEvent.click(
@@ -161,5 +165,25 @@ test("widening the pane brings the rail back", async () => {
   resizePane(800);
   expect(
     await screen.findByRole("complementary", { name: "Ticket properties" }),
+  ).toBeTruthy();
+});
+
+test("a hidden pane reports no width and keeps its layout", async () => {
+  renderDetails();
+  resizePane(900);
+  await screen.findByRole("complementary", { name: "Ticket properties" });
+  resizePane(0);
+  expect(
+    screen.getByRole("complementary", { name: "Ticket properties" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Ticket properties" })).toBeNull();
+});
+
+test("narrow, an active ticket still shows its Latest update under the chips", async () => {
+  renderDetails();
+  resizePane(500);
+  const bar = await screen.findByRole("group", { name: "Ticket properties" });
+  expect(
+    await within(bar).findByRole("heading", { name: "Latest update" }),
   ).toBeTruthy();
 });

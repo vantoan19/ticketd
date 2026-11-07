@@ -82,6 +82,7 @@
 .path-text {
   display: flex;
   min-width: 0;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: 18px;
@@ -194,7 +195,7 @@
   gap: 16px;
 }
 .project-name-input::placeholder {
-  color: var(--control-boundary);
+  color: var(--disabled-foreground);
 }
 .folder-picker .ui-button {
   padding: 0 10px;

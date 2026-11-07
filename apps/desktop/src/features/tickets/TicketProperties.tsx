@@ -427,15 +427,14 @@ export function TicketProperties({
           )}
         </>,
       )}
-      {!chips &&
-        (ticket.status === "In progress" || ticket.status === "In review") && (
-          <LatestUpdate
-            reference={ticket.reference}
-            active={active}
-            revision={revision}
-            onOpen={onOpenNote}
-          />
-        )}
+      {(ticket.status === "In progress" || ticket.status === "In review") && (
+        <LatestUpdate
+          reference={ticket.reference}
+          active={active}
+          revision={revision}
+          onOpen={onOpenNote}
+        />
+      )}
       <ConfirmLeaveDuplicate
         canonical={ticket.duplicate_of ?? ""}
         status={leaving}
@@ -530,7 +529,9 @@ export function TicketProperties({
                   {ticket.tags.length ? (
                     <span className="rail-tags">
                       {ticket.tags.map((tag) => (
-                        <Badge key={tag}>{tag}</Badge>
+                        <Badge key={tag} tone={chips ? "default" : "raised"}>
+                          {tag}
+                        </Badge>
                       ))}
                     </span>
                   ) : (

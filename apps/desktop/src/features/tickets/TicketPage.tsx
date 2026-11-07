@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Evidence } from "@/features/tickets/Evidence";
 import { Backlinks, type MentionTarget } from "@/features/tickets/Backlinks";
@@ -153,6 +154,7 @@ export function TicketPage({
         key={`follow-${ticket.reference}`}
         reference={ticket.reference}
         revision={revision}
+        chip={narrow}
       />
       <Reminder
         key={`reminder-${ticket.reference}`}
@@ -237,7 +239,7 @@ export function TicketPage({
                         revision={revision}
                       />
                     ) : (
-                      <p className="description-none">No description.</p>
+                      <EmptyState size="hint" title="No description." />
                     )}
                   </div>
                 </>

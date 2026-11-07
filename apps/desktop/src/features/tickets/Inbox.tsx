@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   AlarmClock,
   Check,
+  Eye,
   Circle,
   Link2,
   MessageSquare,
@@ -319,9 +320,12 @@ export function Inbox({
 export function Follow({
   reference,
   revision,
+  chip = false,
 }: {
   reference: string;
   revision: number;
+  /** A chip that reads "Following" when on, for the narrow pane’s chip bar. */
+  chip?: boolean;
 }) {
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState("");
@@ -351,6 +355,23 @@ export function Follow({
       setError(String(e));
     }
   }
+  if (chip)
+    return (
+      <>
+        <Button
+          variant="outline"
+          size="sm"
+          role="switch"
+          aria-checked={following}
+          aria-label="Follow"
+          onClick={() => void toggle()}
+        >
+          <Eye data-icon="inline-start" aria-hidden="true" />
+          {following ? "Following" : "Follow"}
+        </Button>
+        {error && <p role="alert">{error}</p>}
+      </>
+    );
   return (
     <>
       <label className="rail-follow">

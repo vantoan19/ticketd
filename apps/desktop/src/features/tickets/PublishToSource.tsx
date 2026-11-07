@@ -145,7 +145,7 @@ export function PublicationNotice({
       aria-label="Publish outcome unknown"
       className="mb-6"
     >
-      <AlertTitle>Publish outcome unknown</AlertTitle>
+      <AlertTitle level={3}>Publish outcome unknown</AlertTitle>
       <AlertDescription>
         {providerName(attempt.provider)} may have created an issue in{" "}
         <span className="source-number">{attempt.destination}</span> when you

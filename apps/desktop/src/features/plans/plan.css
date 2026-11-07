@@ -9,6 +9,7 @@
   border-bottom: 1px solid var(--header-boundary);
 }
 .plan-workspace {
+  container: plan-workspace / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -33,7 +34,7 @@
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .plan-list-spacer {
-  flex: 1;
+  flex: 1 0 0;
 }
 .ui-button-outline[aria-expanded="true"] {
   box-shadow: var(--shadow-small);
@@ -54,6 +55,9 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .plan-title-spacer {
@@ -531,24 +535,6 @@
 .plan-dependencies-card [data-slot="empty-description"] {
   max-width: 420px;
 }
-.plan-dependencies-card [data-slot="empty-content"] .ui-button {
-  gap: 6px;
-  font-size: var(--text-code);
-}
-.plan-dependencies-card [data-slot="empty-content"] .ui-button svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.75;
-}
-.plan-dependencies-card [data-slot="empty-icon"] svg {
-  stroke: var(--muted-foreground);
-  stroke-width: 1.5;
-}
-/* Board E-2: the "Add blocker…" button is 32px tall; its 1px ring makes the
-   34px outer edge measured in the frame. */
-.plan-dependencies-card [data-slot="empty-content"] .ui-button {
-  height: 32px;
-}
 .plan-dependencies-key-box {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--control-boundary);
@@ -574,4 +560,8 @@
 }
 .plan-counts {
   gap: 4px 16px;
+}
+/* The summary gives way; the controls keep their words. */
+.plan-list-toolbar > :not(.plan-list-summary, .plan-list-spacer) {
+  flex: none;
 }

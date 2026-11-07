@@ -64,13 +64,6 @@
   overflow-y: auto;
   padding: 16px;
 }
-.filters-content [data-slot="section-header"] {
-  flex: none;
-  flex-wrap: nowrap;
-  height: 44px;
-  padding: 0 8px 0 16px;
-  box-shadow: 0 1px 0 0 var(--group-hairline);
-}
 /* The Filter control keeps a filled pill while the panel is open or filters apply. */
 .filter-trigger {
   gap: 6px;
@@ -231,7 +224,7 @@
   padding-inline: 8px 4px;
 }
 .parent-search input::placeholder {
-  color: var(--control-boundary);
+  color: var(--disabled-foreground);
 }
 .parent-search-icon {
   color: var(--control-boundary);

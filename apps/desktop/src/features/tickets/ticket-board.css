@@ -210,7 +210,7 @@
     min-width: 0;
   }
 }
-@media (max-width: 1071px) {
+@container plan-workspace (max-width: 839px) {
   /* !important: beats the panel library's inline flex. */
   .ticket-workspace.board-layout #list {
     flex: 1 1 0 !important;

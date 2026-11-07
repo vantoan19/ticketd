@@ -309,3 +309,13 @@ test("detailed rows show tags and context", () => {
   expect(screen.getByText("checkout")).toBeTruthy();
   expect(screen.getByText("Launch")).toBeTruthy();
 });
+
+test("a simple row's readiness dot is never alone: it has a tooltip and a name", () => {
+  renderList([ticket({})], { simple: true });
+  expect(screen.getByTitle("Ready").textContent).toBe("Ready");
+});
+
+test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {
+  renderList([ticket({})], { simple: true, readyView: true });
+  expect(screen.queryByText("Ready")).toBeNull();
+});

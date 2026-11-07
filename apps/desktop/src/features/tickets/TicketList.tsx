@@ -278,24 +278,26 @@ function RowDetails({
       !singleStatus &&
       !grouped &&
       !context?.label.startsWith("Duplicate"));
+  const simpleTone = unavailable
+    ? "attention"
+    : state.kind === "blocked"
+      ? "blocked"
+      : state.kind === "ready" && !readyView
+        ? "ready"
+        : null;
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">
         {simple ? (
-          // One line: a dot says Ready, Blocked or unavailable; the words are for
-          // assistive technology.
-          (unavailable ||
-            state.kind === "ready" ||
-            state.kind === "blocked") && (
-            <span className="ticket-row-state">
-              <StatusDot
-                tone={
-                  unavailable || state.kind === "status"
-                    ? "attention"
-                    : state.kind
-                }
-                size={10}
-              />
+          // One line: a dot says Ready or Blocked, or that the source is
+          // unavailable. A dot never stands alone, so the words are its name and
+          // its tooltip. The Ready view omits the per-row Ready dot.
+          simpleTone && (
+            <span
+              className="ticket-row-state"
+              title={unavailable ? "Source unavailable" : readinessLabel(state)}
+            >
+              <StatusDot tone={simpleTone} size={10} />
               <span className="sr-only">
                 {unavailable ? "Source unavailable" : readinessLabel(state)}
               </span>

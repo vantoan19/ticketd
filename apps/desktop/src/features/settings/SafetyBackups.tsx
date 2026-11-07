@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { useEffect, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ export function SafetyBackups() {
         backup.
       </p>
       {backups && backups.length === 0 && (
-        <p className="settings-hint">No safety backups yet.</p>
+        <EmptyState size="inline" description="No safety backups yet." />
       )}
       {backups && backups.length > 0 && (
         <ul>

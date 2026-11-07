@@ -12,7 +12,15 @@ import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
 class ResizeObserverStub {
-  observe() {}
+  constructor(private callback: ResizeObserverCallback) {}
+  // The Tickets workspace stacks its panes when the content panel is narrow.
+  observe(target: Element) {
+    if (narrowViewport && target.classList.contains("plan-workspace"))
+      this.callback(
+        [{ contentRect: { width: 500 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+  }
   unobserve() {}
   disconnect() {}
 }
@@ -1960,6 +1968,30 @@ test("the sidebar collapses to named icons, expands again, and remembers the cho
   expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
 });
 
+test("Ctrl+B belongs to the editors and never toggles the sidebar", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  fireEvent.keyDown(window, { key: "b", metaKey: true });
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("a failed save of the sidebar state says so and leaves the sidebar as it was", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  setItem.mockRestore();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Could not save the sidebar state",
+  );
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
 test("a narrow window keeps the sheet and offers no collapse button", async () => {
   narrowViewport = true;
   await renderBulk({});
@@ -2110,4 +2142,14 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
   expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
   expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
+});
+
+test("the collapsed sidebar keeps the Projects and Plans manage menus", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  await openManageMenu("Manage projects", "All projects");
+  expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+  await openManageMenu("Manage Plans", "All Plans");
+  expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
 });
