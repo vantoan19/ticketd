@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { Item } from "@/components/ui/item";
-nafterEach(cleanup);
+afterEach(cleanup);
 
 test("an Item row keeps its children and accessible names", () => {
   render(
