@@ -997,8 +997,9 @@ to newly created operations, without moving existing bytes. Failed folder valida
 offline access or a read-only folder leaves the saved preference unchanged. The
 folder is checked again before upload; provider failure never switches to local.
 
-The shared insertion flow displays the destination and binds each new operation
-before uploading. Each queued, interrupted or completed operation keeps that choice
+The shared insertion flow displays the destination, captures the current workspace
+choice once per file selection, and binds each new operation before uploading.
+Each queued, interrupted or completed operation keeps that choice
 through preference changes, retry and restart, including older local capture queues.
 An explicit per-operation choice does not change the workspace preference.
 

@@ -111,7 +111,7 @@ test("new captures use the current workspace preference while recovered retries 
   );
 });
 
-test("a failed destination binding retries resolution before any upload and never assumes local storage", async () => {
+test("failed destination bindings keep the batch choice through a later preference change", async () => {
   const drive = {
     kind: "google_drive",
     destination: {
@@ -122,14 +122,15 @@ test("a failed destination binding retries resolution before any upload and neve
     folder_name: "Team files",
   };
   let bindingFailed = true;
-  vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
-  vi.mocked(invoke).mockImplementation(async (command) => {
+  let preference: unknown = drive;
+  vi.mocked(open).mockResolvedValue(["C:/trace.log", "C:/queued.log"]);
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "attachment_workspace_id") return "binding-retry";
     if (command === "attachment_upload_limit") return 104857600;
-    if (command === "attachment_upload_destination") return drive;
+    if (command === "attachment_upload_destination") return preference;
     if (command === "begin_attachment_upload") {
       if (bindingFailed) throw new Error("Workspace is temporarily read-only");
-      return drive;
+      return (args as { explicit?: unknown })?.explicit ?? preference;
     }
     if (command === "upload_drive_file") throw new Error("Drive is offline");
     return null;
@@ -140,9 +141,14 @@ test("a failed destination binding retries resolution before any upload and neve
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   const row = await screen.findByRole("listitem", { name: "trace.log" });
   await within(row).findByText(/temporarily read-only/);
+  const queued = await screen.findByRole("listitem", { name: "queued.log" });
+  await within(queued).findByText(/temporarily read-only/);
   bindingFailed = false;
+  preference = { kind: "local" };
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await within(row).findByText(/Drive is offline/);
+  fireEvent.click(within(queued).getByRole("button", { name: "Retry" }));
+  await within(queued).findByText(/Drive is offline/);
   expect(
     vi
       .mocked(invoke)
@@ -152,7 +158,7 @@ test("a failed destination binding retries resolution before any upload and neve
     vi
       .mocked(invoke)
       .mock.calls.filter(([command]) => command === "begin_attachment_upload"),
-  ).toHaveLength(2);
+  ).toHaveLength(4);
 });
 
 test("Drive failures retain their folder and operation; status checks precede retry and local fallback is explicit", async () => {

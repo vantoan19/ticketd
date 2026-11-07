@@ -29,7 +29,7 @@ import { UploadRecovery, type UploadRecord } from "./upload-recovery";
 import { ExistingAttachments } from "./ExistingAttachments";
 
 type UploadAttempt = UploadRecord & {
-  intent?: AttachmentUploadDestination | null;
+  intent?: AttachmentUploadDestination;
   state:
     "queued" | "uploading" | "attaching" | "inserted" | "failed" | "canceled";
   progress: UploadProgress;
@@ -259,6 +259,8 @@ export function AttachmentPicker({
     }
   }
   async function enqueue(sources: CaptureSource[]) {
+    if (!sources.length) return;
+    const currentInsertion = insertion.current;
     if (single && sources.length > 1) {
       setError(
         "Choose one file to replace this reference. No files were uploaded.",
@@ -266,11 +268,17 @@ export function AttachmentPicker({
       return;
     }
     let journal: UploadRecovery | null;
+    let intent: AttachmentUploadDestination;
     try {
       journal = await loadRecovery();
+      // Freeze one core preference snapshot for this selection, including files
+      // queued behind a slow or temporarily failed destination binding.
+      intent = explicitDestination ?? (await attachments.uploadDestination());
+      if (insertion.current !== currentInsertion) return;
+      if (!explicitDestination) setWorkspaceDestination(intent);
     } catch (reason) {
       setError(
-        `Could not preserve upload recovery: ${String(reason)}. No new uploads were started.`,
+        `Could not prepare upload destination and recovery: ${String(reason)}. No new uploads were started.`,
       );
       return;
     }
@@ -285,7 +293,7 @@ export function AttachmentPicker({
       order: started + index++ / 1000,
       requestId: crypto.randomUUID(),
       linkRequestId: crypto.randomUUID(),
-      intent: explicitDestination,
+      intent,
       state: "queued",
       progress: {
         copied: 0,
@@ -313,6 +321,12 @@ export function AttachmentPicker({
         row.error = String(reason).replace(/^Error: /, "");
       }
     }
+    if (insertion.current !== currentInsertion) {
+      for (const row of batch)
+        if (row.state === "queued") row.state = "canceled";
+      update();
+      return;
+    }
     update();
     void run();
   }
@@ -323,7 +337,6 @@ export function AttachmentPicker({
       row.destination = bound.destination;
       row.destinationName = bound.folder_name;
     }
-    if (!row.intent) setWorkspaceDestination(bound);
     delete row.intent;
   }
   const dropFailure = useNativeFileDrop(
