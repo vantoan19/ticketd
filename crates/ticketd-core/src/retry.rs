@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum WriteRequest {
+    RemoveRemoteAttachment {
+        id: String,
+    },
     QuarantineAttachment {
         id: String,
     },
@@ -256,6 +259,7 @@ pub enum WriteRequest {
 // Results are owned at the public boundary; boxing tickets would complicate every caller.
 #[allow(clippy::large_enum_variant)]
 pub enum WriteResult {
+    RemoteAttachmentRemoved(crate::RemoteAttachmentRemoval),
     Attachment(crate::Attachment),
     Document(Document),
     Ticket(Ticket),
@@ -350,6 +354,9 @@ impl Workspace {
     }
     fn execute_write(&mut self, request: WriteRequest) -> Result<WriteResult, Error> {
         Ok(match request {
+            WriteRequest::RemoveRemoteAttachment { id } => {
+                WriteResult::RemoteAttachmentRemoved(self.remove_remote_attachment(&id)?)
+            }
             WriteRequest::QuarantineAttachment { id } => {
                 WriteResult::Attachment(self.quarantine_attachment_locked(&id)?)
             }

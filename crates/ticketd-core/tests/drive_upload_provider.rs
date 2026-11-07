@@ -31,6 +31,161 @@ fn response(status: u16, body: &str, headers: Vec<(String, String)>) -> DriveRes
         headers,
     }
 }
+
+#[derive(Default)]
+struct LifecycleHttp {
+    requests: Mutex<Vec<DriveRequest>>,
+    created: Mutex<Option<serde_json::Value>>,
+    complete: Mutex<bool>,
+}
+#[allow(clippy::unwrap_used)] // Deterministic provider fixture, never production recovery.
+impl DriveTransport for LifecycleHttp {
+    fn send(&self, request: DriveRequest) -> Result<DriveResponse, DriveError> {
+        let url = request.url.clone();
+        let method = request.method;
+        let body = request.body.clone();
+        self.requests.lock().unwrap().push(request);
+        if url == "https://oauth2.googleapis.com/token" {
+            return Ok(response(200, r#"{"access_token":"fixture-only"}"#, vec![]));
+        }
+        if method == "GET" && url.contains("/files/folder?") {
+            return Ok(response(
+                200,
+                r#"{"id":"folder","name":"Uploads","mimeType":"application/vnd.google-apps.folder","capabilities":{"canAddChildren":true}}"#,
+                vec![],
+            ));
+        }
+        if method == "GET" && url.contains("/generateIds?") {
+            return Ok(response(200, r#"{"ids":["reserved"]}"#, vec![]));
+        }
+        if method == "POST" && url.contains("/upload/drive/v3/files?") {
+            *self.created.lock().unwrap() = Some(serde_json::from_slice(&body).unwrap());
+            return Ok(response(200, "", vec![("Location".into(), "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=fixture".into())]));
+        }
+        if method == "PUT" && url.contains("upload_id=fixture") {
+            assert_eq!(body, b"original bytes");
+            *self.complete.lock().unwrap() = true;
+            return Ok(response(200, "{}", vec![]));
+        }
+        if method == "GET" && url.contains("/files/reserved?") {
+            if !*self.complete.lock().unwrap() {
+                return Ok(response(404, "{}", vec![]));
+            }
+            let created = self.created.lock().unwrap();
+            return Ok(response(200, &serde_json::json!({"id":"reserved","name":"diagnostic.zip","mimeType":"application/octet-stream","size":"14","webViewLink":"https://drive.google.com/file/d/reserved/view","sha256Checksum":"52c3935626c104b2cbc9031291a1c4d56614c38f52072a361d658a58a9c48698","version":"1","parents":["folder"],"appProperties":created.as_ref().unwrap()["appProperties"]}).to_string(), vec![]));
+        }
+        if method == "GET" && url.contains("/files/selected?") {
+            return Ok(response(
+                200,
+                r#"{"id":"selected","name":"Runbook","mimeType":"application/vnd.google-apps.document","webViewLink":"https://docs.google.com/document/d/selected/edit"}"#,
+                vec![],
+            ));
+        }
+        Err(DriveError::new(
+            DriveErrorKind::Unsupported,
+            format!("Unexpected fixture request: {method}"),
+        ))
+    }
+}
+
+#[test]
+fn every_record_cleanup_detach_cancel_and_local_fallback_route_leaves_drive_content_and_permissions_intact()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let mut w = ticketd_core::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let http = LifecycleHttp::default();
+    let connection = uuid::Uuid::new_v4().to_string();
+    let provider = GoogleDrive::new(&connection, &Vault, &http);
+    let selected = w
+        .reference_drive_file(&connection, "selected", None, &provider)
+        .unwrap();
+    let ticket = w.create_ticket("Reference only").unwrap();
+    w.set_ticket_attachment(&ticket.reference, &selected.id, true)
+        .unwrap();
+    w.set_ticket_attachment(&ticket.reference, &selected.id, false)
+        .unwrap();
+    let before_cleanup = http.requests.lock().unwrap().len();
+    assert!(w.quarantine_attachment(&selected.id).is_err());
+    assert!(w.restore_attachment(&selected.id).is_err());
+    assert!(w.purge_attachment(&selected.id).is_err());
+    w.remove_remote_attachment(&selected.id).unwrap();
+    assert_eq!(http.requests.lock().unwrap().len(), before_cleanup);
+
+    let destination = DriveUploadDestination {
+        connection_id: connection.clone(),
+        folder_id: "folder".into(),
+        resource_key: None,
+    };
+    assert!(
+        w.upload_drive_bytes(
+            "cancel-before",
+            "diagnostic.zip",
+            b"original bytes",
+            &destination,
+            &provider,
+            |_, _| false
+        )
+        .is_err()
+    );
+    assert!(http.created.lock().unwrap().is_none());
+    // Cancellation after acknowledged completion reconciles into a discoverable copy.
+    let uploaded = w
+        .upload_drive_bytes(
+            "cancel-after",
+            "diagnostic.zip",
+            b"original bytes",
+            &destination,
+            &provider,
+            |copied, _| copied == 0,
+        )
+        .unwrap();
+    assert_eq!(
+        w.drive_upload("cancel-after").unwrap().state,
+        DriveUploadState::Completed
+    );
+    let before_cleanup = http.requests.lock().unwrap().len();
+    let local = w
+        .import_attachment_bytes(
+            "explicit-local",
+            "diagnostic.zip",
+            b"original bytes",
+            |_, _| true,
+        )
+        .unwrap();
+    w.quarantine_attachment(&local.id).unwrap();
+    w.purge_attachment(&local.id).unwrap();
+    assert!(w.quarantine_attachment(&uploaded.id).is_err());
+    assert!(w.restore_attachment(&uploaded.id).is_err());
+    assert!(w.purge_attachment(&uploaded.id).is_err());
+    w.remove_remote_attachment(&uploaded.id).unwrap();
+    w.check_drive_upload("cancel-after", &provider).unwrap();
+    assert!(
+        w.upload_drive_bytes(
+            "cancel-after",
+            "diagnostic.zip",
+            b"original bytes",
+            &destination,
+            &provider,
+            |_, _| true
+        )
+        .is_err()
+    );
+    assert_eq!(http.requests.lock().unwrap().len(), before_cleanup);
+    assert!(*http.complete.lock().unwrap());
+    let requests = http.requests.lock().unwrap();
+    assert!(
+        requests
+            .iter()
+            .all(|r| matches!(r.method, "GET" | "POST" | "PUT") && !r.url.contains("permissions"))
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.method == "POST" && r.url.contains("/upload/"))
+            .count(),
+        1
+    );
+}
 #[test]
 fn blob_upload_uses_reserved_identity_chunks_and_transient_pinned_session_only() {
     let session = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=private-session";

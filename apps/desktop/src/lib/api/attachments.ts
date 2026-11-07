@@ -32,6 +32,7 @@ const cleanupReviewSchema = z.object({
   attachment: attachmentSchema,
   eligible: z.boolean(),
   purge_eligible: z.boolean().optional(),
+  remove_eligible: z.boolean().optional(),
   reason: z.string(),
   usage: attachmentUsageSchema,
 });
@@ -167,6 +168,19 @@ const driveConfigurationSchema = z.object({
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
 export const attachments = {
+  async removeRemote(id: string, requestId: string) {
+    return z
+      .object({
+        id: z.string(),
+        display_name: z.string(),
+        open_url: z.string(),
+        message: z.string(),
+      })
+      .parse(await invoke("remove_remote_attachment", { id, requestId }));
+  },
+  async openRemovedRemote(url: string) {
+    await invoke("open_removed_drive_file", { url });
+  },
   async cleanupReview(id: string) {
     return cleanupReviewSchema.parse(
       await invoke("attachment_cleanup_review", { id }),

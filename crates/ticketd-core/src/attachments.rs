@@ -608,8 +608,24 @@ pub(crate) fn read_attachment(connection: &Connection, id: &str) -> Result<Attac
         53 => "quarantined, added_at, 'retained'",
         _ => "0, NULL, 'retained'",
     };
-    connection.query_row(&format!("SELECT id, display_name, original_filename, size_bytes, locator, kind, {columns} FROM attachments WHERE id=?1"), [id], attachment_row).optional()?
-        .ok_or_else(|| Error::Attachment(format!("'{id}' was not found; use attachment list to find a workspace attachment ID")))
+    if let Some(file) = connection.query_row(&format!("SELECT id, display_name, original_filename, size_bytes, locator, kind, {columns} FROM attachments WHERE id=?1"), [id], attachment_row).optional()? {
+        return Ok(file);
+    }
+    if version >= 52 {
+        let remote_id: Option<String> = connection.query_row("SELECT json_extract(operation,'$.remote_file_id') FROM drive_upload_operations WHERE attachment_id=?1 AND json_extract(operation,'$.state')='completed'", [id], |row| row.get(0)).optional()?.flatten();
+        if let Some(remote_id) = remote_id.filter(|value| crate::drive::valid_file_id(value)) {
+            return Err(removed_remote_error(id, &remote_id));
+        }
+    }
+    Err(Error::Attachment(format!(
+        "'{id}' was not found; use attachment list to find a workspace attachment ID"
+    )))
+}
+
+fn removed_remote_error(id: &str, remote_id: &str) -> Error {
+    Error::Attachment(format!(
+        "'{id}' is no longer registered in ticketd. The file remains in Drive: https://drive.google.com/file/d/{remote_id}/view . Choose it again in the Google Drive picker to re-add it; retrying an old receipt does not restore the record."
+    ))
 }
 
 /// Preserve original replay metadata, but never imply purged bytes are still available.
@@ -617,7 +633,19 @@ pub(crate) fn replay_attachment(
     connection: &Connection,
     mut file: Attachment,
 ) -> Result<Attachment, Error> {
-    let current = read_attachment(connection, &file.id)?;
+    let current = read_attachment(connection, &file.id).map_err(|error| {
+        if matches!(error, Error::Attachment(_))
+            && file.kind == AttachmentKind::ExternalReference
+            && let Some(remote_id) = file
+                .locator
+                .rsplit(':')
+                .next()
+                .filter(|value| crate::drive::valid_file_id(value))
+        {
+            return removed_remote_error(&file.id, remote_id);
+        }
+        error
+    })?;
     file.purge_state = current.purge_state;
     Ok(file)
 }

@@ -1004,6 +1004,27 @@ Picker URL and waits up to three minutes for explicit original-file selection.
 The CLI uses the same OS credential store without a desktop process. No command
 silently broadens `drive.file`, substitutes another file or caches remote bytes.
 
+### Removing from ticketd
+
+Unused Drive records offer **Remove from ticketd** in the attachment library.
+The confirmation explains that the original file remains in Drive, including
+copies uploaded by ticketd; this does not reclaim provider storage. Saved uses,
+recoverable drafts, Undo, Trash and unreviewed legacy drafts protect records.
+Core rechecks those protections when removing the record. Detaching a selected
+association or Markdown link remains independent and preserves other uses.
+
+The standalone CLI provides `attachment remove-from-ticketd <id>
+[--request-id ID]`; `attachment cleanup-review <id>` reports `remove_eligible`
+separately from local quarantine and purge eligibility. Removal returns the
+remaining provider link and re-add guidance. Choose the file again through the
+Google Drive picker to register it deliberately. Upload operations and immutable
+provenance survive record removal for recovery; old upload or metadata-write
+receipts do not recreate a removed record or report it as registered. A metadata
+refresh already in flight cannot recreate it either. Existing backups remain
+unchanged; deliberately restoring an older backup restores its earlier records.
+No removal, cleanup, cancellation or fallback action deletes a remote file or
+changes sharing permissions.
+
 ## 19. Google Drive uploads
 
 In the shared Upload flow, Choose Drive folder opens the system-browser Picker

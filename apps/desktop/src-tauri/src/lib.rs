@@ -1437,6 +1437,8 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::attachment_cleanup_reviews,
             attachment_commands::attachment_cleanup_review,
             attachment_commands::purge_attachment,
+            attachment_commands::remove_remote_attachment,
+            attachment_commands::open_removed_drive_file,
             attachment_commands::quarantine_attachment,
             attachment_commands::restore_attachment,
             attachment_commands::rename_attachment,

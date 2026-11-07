@@ -3,6 +3,35 @@ use ticketd_core::{Attachment, Ticket, WriteRequest, WriteResult};
 
 use super::open_workspace;
 #[tauri::command(async)]
+pub fn remove_remote_attachment(
+    id: String,
+    request_id: String,
+) -> Result<ticketd_core::RemoteAttachmentRemoval, String> {
+    match open_workspace()
+        .and_then(|mut w| {
+            w.write(
+                Some(&request_id),
+                WriteRequest::RemoveRemoteAttachment { id },
+            )
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::RemoteAttachmentRemoved(result) => Ok(result),
+        _ => Err("Unexpected remote removal result".into()),
+    }
+}
+
+#[tauri::command]
+pub fn open_removed_drive_file(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    if !ticketd_core::drive::safe_web_url(&url) {
+        return Err("Only a checked Drive file link can be opened".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|_| "Could not open the retained file in Drive".into())
+}
+
+#[tauri::command(async)]
 pub fn attachment_cleanup_review(
     id: String,
 ) -> Result<ticketd_core::AttachmentCleanupReview, String> {

@@ -11,6 +11,7 @@ import {
 import { formatDateTime, relativeDateTime } from "@/lib/format";
 import { AttachmentCleanup } from "./AttachmentCleanup";
 import { PurgeAttachment } from "./PurgeAttachment";
+import { RemoveRemoteAttachment } from "./RemoveRemoteAttachment";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { useAttachmentSearch } from "./use-attachment-search";
 import { formatSize } from "./format-size";
@@ -33,6 +34,7 @@ export function AttachmentLibrary({
   const [refresh, setRefresh] = useState(0);
   const [cleanup, setCleanup] = useState(false);
   const [purging, setPurging] = useState<Attachment | null>(null);
+  const [removing, setRemoving] = useState<Attachment | null>(null);
   const [restoreError, setRestoreError] = useState("");
   const [restoring, setRestoring] = useState<string | null>(null);
   const { files, loading, error } = useAttachmentSearch(
@@ -185,6 +187,15 @@ export function AttachmentLibrary({
                         )}
                       </td>
                       <td>
+                        {file.kind === "external_reference" && (
+                          <Button
+                            variant="ghost"
+                            aria-label={`Remove ${file.display_name} from ticketd`}
+                            onClick={() => setRemoving(file)}
+                          >
+                            Remove from ticketd
+                          </Button>
+                        )}
                         {file.quarantined &&
                           file.purge_state !== "purged" &&
                           file.purge_state !== "pending" && (
@@ -281,6 +292,13 @@ export function AttachmentLibrary({
           <PurgeAttachment
             file={purging}
             onClose={() => setPurging(null)}
+            onChanged={() => setRefresh((value) => value + 1)}
+          />
+        )}
+        {removing && (
+          <RemoveRemoteAttachment
+            file={removing}
+            onClose={() => setRemoving(null)}
             onChanged={() => setRefresh((value) => value + 1)}
           />
         )}

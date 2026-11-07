@@ -72,6 +72,7 @@ mod activities;
 mod attachment_cleanup;
 mod attachment_library;
 pub use attachment_cleanup::AttachmentCleanupReview;
+pub use attachment_cleanup::RemoteAttachmentRemoval;
 mod attachment_previews;
 mod attachment_retention;
 pub use attachment_library::{AttachmentQuery, AttachmentSearchResult, AttachmentState};

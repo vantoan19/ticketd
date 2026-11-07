@@ -220,6 +220,17 @@ recovery prose and identity remain. Complete backup refuses pending purges and
 preserves completed purges as unavailable identities. Replayed attachment outcomes
 keep original metadata with current purge status. No provider deletion exists.
 
+Remote record removal uses `Workspace::remove_remote_attachment` and the shared
+retryable write interface. It checks the same retention claims under a SQLite
+writer lock, then removes only the unused attachment and Drive reference rows.
+It takes no provider capability and changes no local bytes, credentials or sharing.
+Removal outcomes retain the safe provider link for retry/recovery, while uploaded
+copy operations and immutable provenance remain discoverable. Old attachment
+outcomes resolve current registration before returning success, preserving the
+local purge overlay and refusing removed remote identities. Metadata refresh
+updates only an existing record after its network read, so a concurrent removal
+cannot be silently undone. No workspace schema change is required.
+
 Only upgrades with existing attachment records require review of legacy browser
 drafts. Startup imports every recoverable slot in the current profile, including
 unopened tickets and legacy Activity details/request keys. Other profiles remain

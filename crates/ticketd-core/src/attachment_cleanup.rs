@@ -1,7 +1,7 @@
 use std::fs;
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Attachment, AttachmentKind, AttachmentPurgeState, AttachmentUsage, Error, Workspace,
@@ -13,8 +13,17 @@ pub struct AttachmentCleanupReview {
     pub attachment: Attachment,
     pub eligible: bool,
     pub purge_eligible: bool,
+    pub remove_eligible: bool,
     pub reason: String,
     pub usage: AttachmentUsage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteAttachmentRemoval {
+    pub id: String,
+    pub display_name: String,
+    pub open_url: String,
+    pub message: String,
 }
 
 pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
@@ -76,6 +85,7 @@ fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
                 && usage.eligible
                 && attachments::validate_attachment_bytes(tx, &attachment).is_ok()));
     Ok(AttachmentCleanupReview {
+        remove_eligible: attachment.kind == AttachmentKind::ExternalReference && usage.eligible,
         attachment,
         eligible,
         purge_eligible,
@@ -85,6 +95,36 @@ fn review(tx: &Connection, id: &str) -> Result<AttachmentCleanupReview, Error> {
 }
 
 impl Workspace {
+    /// Record-only cleanup: no provider or credential capability is involved.
+    pub fn remove_remote_attachment(&mut self, id: &str) -> Result<RemoteAttachmentRemoval, Error> {
+        let tx = self.connection.savepoint()?;
+        crate::transaction_write_lock(&tx)?;
+        let current = review(&tx, id)?;
+        if current.attachment.kind != AttachmentKind::ExternalReference {
+            return Err(Error::Attachment("Remove from ticketd is for remote records. Use reversible quarantine for local snapshots.".into()));
+        }
+        if !current.remove_eligible {
+            return Err(Error::Attachment("Protected by saved references, recoverable drafts, Undo, Trash or unreviewed legacy drafts; review usage before removing from ticketd.".into()));
+        }
+        let metadata: String = tx.query_row(
+            "SELECT metadata FROM drive_references WHERE attachment_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        let metadata: crate::drive::DriveMetadata = serde_json::from_str(&metadata)?;
+        crate::drive::validate_metadata(&metadata.id, &metadata)?;
+        let result = RemoteAttachmentRemoval {
+            id: id.into(),
+            display_name: current.attachment.display_name,
+            open_url: metadata.web_url,
+            message: "Removed from ticketd. The file remains in Drive, including copies uploaded by ticketd; no provider storage was reclaimed. Choose it again in the Google Drive picker to re-add it.".into(),
+        };
+        tx.execute("DELETE FROM drive_references WHERE attachment_id=?1", [id])?;
+        tx.execute("DELETE FROM attachments WHERE id=?1", [id])?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     /// The identity itself makes retries idempotent. Never run inside a replay transaction:
     /// intent must commit before irreversible I/O, and completion only after deletion.
     pub fn purge_attachment(&mut self, id: &str) -> Result<Attachment, Error> {

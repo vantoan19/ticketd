@@ -4,6 +4,71 @@ use ticketd_core::{Workspace, drive::*};
 const CONNECTION: &str = "81aa7bfb-05c3-4934-a4e7-5c84e2cb83ec";
 
 #[test]
+fn removed_uploaded_copy_keeps_provenance_but_old_upload_and_write_receipts_cannot_resurrect_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let provider = Provider::default();
+    let file = workspace
+        .upload_drive_bytes(
+            "upload-remove",
+            "diagnostic.zip",
+            b"original bytes",
+            &destination(),
+            &provider,
+            |_, _| true,
+        )
+        .unwrap();
+    let provenance = workspace.drive_uploaded_copy(&file.id).unwrap();
+    let rename = || ticketd_core::WriteRequest::RenameAttachment {
+        id: file.id.clone(),
+        display_name: "Diagnostic".into(),
+    };
+    workspace.write(Some("rename-copy"), rename()).unwrap();
+    workspace.remove_remote_attachment(&file.id).unwrap();
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    for error in [
+        workspace
+            .upload_drive_bytes(
+                "upload-remove",
+                "diagnostic.zip",
+                b"original bytes",
+                &destination(),
+                &provider,
+                |_, _| true,
+            )
+            .unwrap_err(),
+        workspace.write(Some("rename-copy"), rename()).unwrap_err(),
+    ] {
+        assert!(error.to_string().contains("remains in Drive"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("https://drive.google.com/file/d/reserved-file/view"),
+            "{error}"
+        );
+    }
+    workspace
+        .check_drive_upload("upload-remove", &provider)
+        .unwrap();
+    assert!(workspace.attachments(10, 0).unwrap().is_empty());
+    assert_eq!(workspace.drive_uploaded_copy(&file.id).unwrap(), provenance);
+    assert_eq!(provider.ids.lock().unwrap().len(), 1);
+    let backup = dir.path().join("removed.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, backup).unwrap();
+    assert_eq!(
+        Workspace::open(restored)
+            .unwrap()
+            .drive_uploaded_copy(&file.id)
+            .unwrap(),
+        provenance
+    );
+}
+
+#[test]
 #[ignore = "requires the preserved schema51 executable in TICKETD_SCHEMA51_CLI"]
 fn real_schema51_upgrade_preserves_local_receipts_references_and_complete_safety_backup() {
     let dir = tempfile::tempdir().unwrap();

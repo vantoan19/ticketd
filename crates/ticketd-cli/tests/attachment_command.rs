@@ -16,6 +16,75 @@ fn run(dir: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+fn cli_removes_only_unused_remote_records_and_returns_remaining_drive_guidance() {
+    struct Selected;
+    impl ticketd_core::drive::AttachmentProvider for Selected {
+        fn metadata(
+            &self,
+            id: &str,
+            _: Option<&str>,
+        ) -> Result<ticketd_core::drive::DriveMetadata, ticketd_core::drive::DriveError> {
+            Ok(ticketd_core::drive::DriveMetadata {
+                id: id.into(),
+                name: "Runbook".into(),
+                mime_type: "application/vnd.google-apps.document".into(),
+                size_bytes: None,
+                web_url: format!("https://docs.google.com/document/d/{id}/edit"),
+                resource_key: None,
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace =
+        ticketd_core::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let file = workspace
+        .reference_drive_file(
+            "81aa7bfb-05c3-4934-a4e7-5c84e2cb83ec",
+            "plan",
+            None,
+            &Selected,
+        )
+        .unwrap();
+    let ticket = run(dir.path(), &["create", "Retain plan"]);
+    let reference = ticket["reference"].as_str().unwrap();
+    run(dir.path(), &["attachment", "link", &file.id, reference]);
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .args(["attachment", "remove-from-ticketd", &file.id])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Protected"));
+    run(dir.path(), &["attachment", "detach", &file.id, reference]);
+    let args = [
+        "attachment",
+        "remove-from-ticketd",
+        &file.id,
+        "--request-id",
+        "remove-plan",
+    ];
+    let result = run(dir.path(), &args);
+    assert_eq!(
+        result["open_url"],
+        "https://docs.google.com/document/d/plan/edit"
+    );
+    assert!(
+        result["message"]
+            .as_str()
+            .unwrap()
+            .contains("remains in Drive")
+    );
+    assert_eq!(run(dir.path(), &args), result);
+    assert_eq!(
+        run(dir.path(), &["attachment", "list"]),
+        serde_json::json!([])
+    );
+}
+
+#[test]
 fn cli_reviews_quarantines_restores_and_replays_without_a_desktop() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("trace.txt");

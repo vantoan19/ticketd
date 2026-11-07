@@ -201,12 +201,25 @@ impl Workspace {
         provider: &dyn AttachmentProvider,
     ) -> Result<DriveReference, Error> {
         let reference = self.drive_reference(id)?;
-        self.reference_drive_file(
-            &reference.connection_id,
+        let metadata = provider.metadata(
             &reference.metadata.id,
             reference.metadata.resource_key.as_deref(),
-            provider,
         )?;
+        validate_metadata(&reference.metadata.id, &metadata)?;
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // Refresh is not selection: a concurrent removal must not register a new record.
+        crate::attachments::read_attachment(&tx, id)?;
+        tx.execute(
+            "UPDATE drive_references SET metadata=?1 WHERE attachment_id=?2",
+            params![serde_json::to_string(&metadata)?, id],
+        )?;
+        tx.execute(
+            "UPDATE attachments SET size_bytes=?1 WHERE id=?2",
+            params![metadata.size_bytes, id],
+        )?;
+        tx.commit()?;
         self.drive_reference(id)
     }
 }

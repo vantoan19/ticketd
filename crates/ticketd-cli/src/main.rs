@@ -26,6 +26,12 @@ enum ReminderCommand {
 
 #[derive(Subcommand)]
 enum AttachmentCommand {
+    /// Remove an unused remote record from ticketd; the file remains in Drive
+    RemoveFromTicketd {
+        id: String,
+        #[arg(long)]
+        request_id: Option<String>,
+    },
     /// Permanently delete quarantined local bytes; identity remains unavailable. Never deletes remote files.
     Purge {
         id: String,
@@ -2027,6 +2033,13 @@ fn attachment_command(
         AttachmentCommand::Purge { id, confirm: _ } => {
             serde_json::to_string(&workspace.purge_attachment(&id)?)?
         }
+        AttachmentCommand::RemoveFromTicketd { id, request_id } => match workspace.write(
+            request_id.as_deref(),
+            WriteRequest::RemoveRemoteAttachment { id },
+        )? {
+            WriteResult::RemoteAttachmentRemoved(result) => serde_json::to_string(&result)?,
+            _ => return Err("Unexpected remote removal result".into()),
+        },
         AttachmentCommand::CleanupReview { id, limit, offset } => match id {
             Some(id) => serde_json::to_string(&workspace.attachment_cleanup_review(&id)?)?,
             None => serde_json::to_string(&workspace.attachment_cleanup_reviews(limit, offset)?)?,
