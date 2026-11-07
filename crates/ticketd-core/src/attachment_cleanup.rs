@@ -115,7 +115,7 @@ impl Workspace {
             let root = attachments::attachment_directory(&tx)?.canonicalize()?;
             if source != root.join(quarantine_locator(&file.locator)) {
                 return Err(Error::Attachment(
-                    "Quarantine move is incomplete; retry quarantine before permanent purge."
+                    "Quarantine move is incomplete. Restore this attachment, then quarantine it again before permanent purge."
                         .into(),
                 ));
             }

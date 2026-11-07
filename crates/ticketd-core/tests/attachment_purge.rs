@@ -213,6 +213,43 @@ fn deferred_commit_failures_preserve_intent_and_completion_boundaries() {
 }
 
 #[test]
+fn failed_undo_move_explains_how_to_restore_and_quarantine_before_purge() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let file = workspace
+        .import_attachment_bytes("upload", "trace.txt", b"recover this move", |_, _| true)
+        .unwrap();
+    workspace.quarantine_attachment(&file.id).unwrap();
+    let ticket = workspace.create_ticket("Undo failure").unwrap();
+    let faults = rusqlite::Connection::open(&path).unwrap();
+    faults.execute_batch("CREATE TRIGGER fail_undo BEFORE INSERT ON ticket_attachments BEGIN SELECT RAISE(ABORT, 'injected reference failure'); END;").unwrap();
+    assert!(
+        workspace
+            .set_ticket_attachment(&ticket.reference, &file.id, true)
+            .is_err()
+    );
+    assert!(workspace.attachment(&file.id).unwrap().quarantined);
+    let error = workspace
+        .purge_attachment(&file.id)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("Restore this attachment, then quarantine"),
+        "{error}"
+    );
+    let out = dir.path().join("preserved.txt");
+    workspace.export_attachment(&file.id, &out).unwrap();
+    assert_eq!(std::fs::read(out).unwrap(), b"recover this move");
+    workspace.restore_attachment(&file.id).unwrap();
+    workspace.quarantine_attachment(&file.id).unwrap();
+    assert_eq!(
+        workspace.purge_attachment(&file.id).unwrap().purge_state,
+        ticketd_core::AttachmentPurgeState::Purged
+    );
+}
+
+#[test]
 fn purge_rechecks_new_saved_draft_undo_trash_and_legacy_protections() {
     use ticketd_core::{DocumentPatch, DraftRetention};
     let dir = tempfile::tempdir().unwrap();
