@@ -526,3 +526,33 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
+/* Simple rows: one line of status icon, reference, title, source, dot and time. */
+.ticket-list .ticket-row[data-rows="simple"] {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding-block: 8px;
+}
+.ticket-row[data-rows="simple"] .ticket-title {
+  flex: 1 1 0;
+}
+.ticket-row[data-rows="simple"] .ticket-row-meta {
+  flex: none;
+  gap: 6px;
+}
+.ticket-row[data-rows="simple"] .ticket-row-status {
+  width: 16px;
+}
+.ticket-row[data-rows="simple"] [data-slot="reference"] {
+  flex: none;
+  min-width: 36px;
+}
+.ticket-row[data-rows="simple"] > [data-slot="badge"] {
+  flex: none;
+}
+.ticket-row[data-rows="simple"] .ticket-row-meta:has(.ticket-row-time) {
+  flex-wrap: nowrap;
+}
+.ticket-row[data-rows="simple"] .ticket-row-contextual {
+  flex: none;
+}

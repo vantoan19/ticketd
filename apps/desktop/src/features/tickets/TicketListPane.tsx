@@ -8,8 +8,6 @@ import {
   Ticket as TicketIcon,
   Trash2,
   X,
-  Columns3,
-  List,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -23,8 +21,8 @@ import { TicketFilters } from "@/features/tickets/TicketFilters";
 import { SourceFilter, SourceRefresh } from "@/features/tickets/SourceFilter";
 import { TicketList } from "@/features/tickets/TicketList";
 import { TicketBoard } from "./TicketBoard";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { setPreference } from "@/lib/preferences";
+import { DisplayMenu } from "@/features/tickets/DisplayMenu";
+import { usePreferences } from "@/lib/preferences";
 import { TicketRowsSkeleton } from "@/features/tickets/TicketRowsSkeleton";
 import type { BulkEdit } from "@/features/tickets/useBulkEdit";
 import type { Ticket } from "@/lib/api/client";
@@ -49,6 +47,7 @@ export function TicketListPane({
   onOpen: (reference: string) => void;
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
 }) {
+  const { ticketRows } = usePreferences();
   const {
     projects,
     plans,
@@ -226,24 +225,6 @@ export function TicketListPane({
               </span>
             )}
           </p>
-          {!trash && !navigation.plan && (
-            <SegmentedControl
-              className="ticket-layout-switch"
-              compact
-              aria-label="Ticket layout"
-              value={workspace.layout}
-              onValueChange={(value) => {
-                if (!setPreference("ticketLayout", value))
-                  workspace.setError(
-                    "Could not remember ticket layout. Check local storage and try again.",
-                  );
-              }}
-              options={[
-                { value: "list", label: "List", icon: <List /> },
-                { value: "board", label: "Board", icon: <Columns3 /> },
-              ]}
-            />
-          )}
           <IconButton
             className="list-refresh"
             label="Refresh"
@@ -256,6 +237,9 @@ export function TicketListPane({
           </IconButton>
           {!trash && (
             <TicketFilters part="controls" labeledFilter {...filterProps} />
+          )}
+          {!trash && !navigation.plan && (
+            <DisplayMenu onError={workspace.setError} />
           )}
           {configuredSources.length > 0 && (
             <SourceRefresh
@@ -461,6 +445,7 @@ export function TicketListPane({
                 }}
                 selected={selected}
                 readyView={navigation.kind === "ready"}
+                simple={ticketRows === "simple"}
                 // A status filter keeps its group header (board C); only the
                 // dedicated Ready and In progress views drop it.
                 singleStatus={

@@ -284,3 +284,28 @@ test("a single-status view still shows that a ticket is blocked", () => {
   );
   expect(screen.getByText("Blocked by T-9")).toBeTruthy();
 });
+
+test("simple rows keep the reference, title, readiness and time, and hide tags and context", () => {
+  renderList(
+    [
+      ticket({
+        tags: ["checkout"],
+        plan_id: "e1",
+        updated_at: "2026-01-01T00:00:00Z",
+      }),
+    ],
+    { simple: true },
+  );
+  expect(screen.getByText("T-1")).toBeTruthy();
+  expect(screen.getByText("First ticket")).toBeTruthy();
+  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.getByText(/Updated/)).toBeTruthy();
+  expect(screen.queryByText("checkout")).toBeNull();
+  expect(screen.queryByText("Launch")).toBeNull();
+});
+
+test("detailed rows show tags and context", () => {
+  renderList([ticket({ tags: ["checkout"], plan_id: "e1" })]);
+  expect(screen.getByText("checkout")).toBeTruthy();
+  expect(screen.getByText("Launch")).toBeTruthy();
+});
