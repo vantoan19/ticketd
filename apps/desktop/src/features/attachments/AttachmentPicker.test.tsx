@@ -284,6 +284,9 @@ test("a cached Drive upload receipt cannot promise library availability after re
   };
   vi.mocked(open).mockResolvedValue(["C:/trace.log"]);
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_upload_destination") return { kind: "local" };
+    if (command === "begin_attachment_upload")
+      return { kind: "google_drive", destination, folder_name: "Diagnostics" };
     if (command === "attachment_workspace_id") return "removed-drive-replay";
     if (command === "attachment_upload_limit") return 104857600;
     if (command === "drive_configuration")

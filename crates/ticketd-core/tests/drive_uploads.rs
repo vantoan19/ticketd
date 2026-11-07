@@ -38,6 +38,15 @@ fn removed_uploaded_copy_keeps_provenance_but_old_upload_and_write_receipts_cann
     workspace.remove_remote_attachment(&file.id).unwrap();
     drop(workspace);
     let mut workspace = Workspace::open(&path).unwrap();
+    let mut future = destination();
+    future.folder_id = "future-uploads".into();
+    workspace
+        .set_drive_upload_destination(&future, &provider)
+        .unwrap();
+    assert!(
+        matches!(workspace.begin_attachment_upload("upload-remove", None).unwrap(),
+        ticketd_core::AttachmentUploadDestination::GoogleDrive { destination: original, .. } if original == destination())
+    );
     for error in [
         workspace
             .upload_drive_bytes(
@@ -154,10 +163,11 @@ fn real_schema54_upgrade_keeps_legacy_destinations_and_complete_recovery() {
         },
         state: DriveUploadState::Uncertain,
         provenance: None,
+        record_removed: false,
     };
     fixture
         .execute(
-            "INSERT INTO drive_upload_operations VALUES (?1,?2,?3)",
+            "INSERT INTO drive_upload_operations VALUES (?1,?2,json_remove(?3,'$.record_removed'))",
             rusqlite::params![
                 operation.request_id,
                 operation.attachment_id,
