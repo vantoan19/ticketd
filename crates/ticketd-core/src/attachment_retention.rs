@@ -97,7 +97,7 @@ impl Workspace {
     }
 
     /// Atomically persist recovery prose and its derived attachment protections.
-    /// No expiry and no byte movement; missing/foreign links remain recoverable text.
+    /// Never expires or deletes bytes; missing/foreign links remain recoverable text.
     pub fn retain_draft(&mut self, draft: &DraftRetention) -> Result<DraftRetention, Error> {
         if draft.owner.trim().is_empty()
             || draft.owner.len() > 512
