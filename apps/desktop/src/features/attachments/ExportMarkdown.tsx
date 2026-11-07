@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AlertTriangle, Check, Download, ExternalLink } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -29,6 +29,7 @@ export function ExportMarkdownButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<MarkdownExport | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   async function run() {
     setBusy(true);
     setError("");
@@ -58,6 +59,7 @@ export function ExportMarkdownButton({
   return (
     <>
       <Button
+        ref={trigger}
         type="button"
         size={compact ? "icon-sm" : "sm"}
         variant="ghost"
@@ -87,7 +89,10 @@ export function ExportMarkdownButton({
             if (!next) setResult(null);
           }}
         >
-          <DialogContent className="portable-export-dialog">
+          <DialogContent
+            className="portable-export-dialog"
+            returnFocus={trigger}
+          >
             <DialogHeader>
               <DialogTitle>
                 {result.status === "partial"

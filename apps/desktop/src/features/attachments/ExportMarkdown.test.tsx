@@ -105,3 +105,29 @@ test("file-manager failures are announced inside the export result", async () =>
     "File manager unavailable",
   );
 });
+
+test("closing the result returns keyboard focus after the native folder dialog takes it", async () => {
+  vi.mocked(open).mockImplementation(async () => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    return "C:/sharing";
+  });
+  vi.mocked(invoke).mockResolvedValue({
+    format_version: 1,
+    status: "complete",
+    directory: "C:/sharing/export",
+    markdown_path: "content.md",
+    manifest_path: "manifest.json",
+    attachments: [],
+  });
+  render(
+    <ExportMarkdownButton source={{ kind: "markdown", body: "Read me" }} />,
+  );
+  const trigger = screen.getByRole("button", {
+    name: "Export Markdown with files",
+  });
+  trigger.focus();
+  fireEvent.click(trigger);
+  const result = await screen.findByRole("dialog", { name: "Export complete" });
+  fireEvent.click(within(result).getByRole("button", { name: "Done" }));
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+});
