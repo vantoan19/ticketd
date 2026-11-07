@@ -1,13 +1,6 @@
 .source-conversation {
   margin-top: 32px;
 }
-.source-conversation h3 {
-  margin-bottom: 0;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
 .source-card-actions {
   display: flex;
   flex-wrap: nowrap;

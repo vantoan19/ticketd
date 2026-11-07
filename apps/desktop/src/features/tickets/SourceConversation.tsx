@@ -118,6 +118,7 @@ export function SourceConversation({
       aria-label={`Conversation on ${name}`}
     >
       <SectionHeader
+        divided
         title={`${name} conversation`}
         actions={
           owned &&

@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import {
   Popover,
   PopoverContent,
@@ -50,69 +51,71 @@ export function PlanDocuments({
       </>
     );
     return (
-      <li key={doc.id} className="plan-document-row">
-        {!chip && <FileText aria-hidden="true" size={14} />}
-        {chip ? (
-          <Badge variant="doc" asChild>
+      <Item key={doc.id} asChild>
+        <li>
+          {!chip && <FileText aria-hidden="true" size={14} />}
+          {chip ? (
+            <Badge variant="doc" asChild>
+              <button type="button" title={doc.heading} onClick={open}>
+                <FileText aria-hidden="true" size={14} />
+                <span className="plan-spec-label">
+                  {isSpec ? "Spec:" : "Document:"}
+                </span>{" "}
+                <span className="plan-spec-title">{heading}</span>
+              </button>
+            </Badge>
+          ) : (
             <button type="button" title={doc.heading} onClick={open}>
-              <FileText aria-hidden="true" size={14} />
-              <span className="plan-spec-label">
-                {isSpec ? "Spec:" : "Document:"}
-              </span>{" "}
-              <span className="plan-spec-title">{heading}</span>
+              <span>{heading}</span>
             </button>
-          </Badge>
-        ) : (
-          <button type="button" title={doc.heading} onClick={open}>
-            <span>{heading}</span>
-          </button>
-        )}
-        {!readOnly && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                label={`Actions for ${doc.heading}`}
-                disabled={state.pending}
-              >
-                <MoreHorizontal />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
-              {isSpec ? (
+          )}
+          {!readOnly && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  label={`Actions for ${doc.heading}`}
+                  disabled={state.pending}
+                >
+                  <MoreHorizontal />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                {isSpec ? (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      void state.run(() =>
+                        plansClient.setSpec(view.plan.id, null),
+                      )
+                    }
+                  >
+                    Stop using as spec
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    disabled={doc.trashed}
+                    onSelect={() =>
+                      void state.run(() =>
+                        plansClient.setSpec(view.plan.id, doc.id),
+                      )
+                    }
+                  >
+                    Set as spec
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onSelect={() =>
                     void state.run(() =>
-                      plansClient.setSpec(view.plan.id, null),
+                      plansClient.setDocument(view.plan.id, doc.id, false),
                     )
                   }
                 >
-                  Stop using as spec
+                  Remove from Plan
                 </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  disabled={doc.trashed}
-                  onSelect={() =>
-                    void state.run(() =>
-                      plansClient.setSpec(view.plan.id, doc.id),
-                    )
-                  }
-                >
-                  Set as spec
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onSelect={() =>
-                  void state.run(() =>
-                    plansClient.setDocument(view.plan.id, doc.id, false),
-                  )
-                }
-              >
-                Remove from Plan
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </li>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </li>
+      </Item>
     );
   }
   return (

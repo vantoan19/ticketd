@@ -20,11 +20,8 @@
   margin: 0;
   padding: 0;
 }
-.ticket-documents-row {
-  display: flex;
+.ticket-documents [data-slot="item"] {
   flex-wrap: wrap;
-  align-items: center;
-  min-width: 0;
 }
 /* The title takes the row's width; it wraps to two lines before it is cut. */
 .ticket-documents-title {

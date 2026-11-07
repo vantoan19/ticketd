@@ -91,7 +91,7 @@ export function PlanList({
         </form>
       )}
       {error && (
-        <Alert variant="destructive" role="alert">
+        <Alert tone="error" role="alert">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}

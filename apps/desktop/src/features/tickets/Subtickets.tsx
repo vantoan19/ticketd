@@ -6,6 +6,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./subtickets.css";
+import { Item } from "@/components/ui/item";
 import { Reference } from "@/components/ui/reference";
 import { Progress } from "@/components/ui/progress";
 
@@ -42,7 +43,12 @@ export function Subtickets({
   const summary = `${done} of ${total} done`;
   return (
     <section className="subtickets" aria-labelledby={headingId}>
-      <SectionHeader title="Subtickets" titleId={headingId} actions={add}>
+      <SectionHeader
+        divided
+        title="Subtickets"
+        titleId={headingId}
+        actions={add}
+      >
         {total > 0 && (
           <>
             <Progress
@@ -61,29 +67,31 @@ export function Subtickets({
       )}
       <ul className="subtickets-rows">
         {rows.map((row) => (
-          <li key={row.reference} className="subtickets-row">
-            <StatusIcon status={row.status} size={16} decorative />
-            <Reference>{row.reference}</Reference>
-            <Button
-              variant="link"
-              className="subtickets-title"
-              onClick={() => select(row.reference)}
-            >
-              <span className="truncate">{row.title}</span>
-            </Button>
-            <span className="subtickets-status">
-              {row.trashed ? `${row.status} · in trash` : row.status}
-            </span>
-            <IconButton
-              size="icon-xs"
-              className="subtickets-remove"
-              label={`Remove relationship: Subtickets ${row.reference}`}
-              disabled={work.pending}
-              onClick={() => void work.remove(row)}
-            >
-              <X aria-hidden="true" />
-            </IconButton>
-          </li>
+          <Item key={row.reference} asChild>
+            <li>
+              <StatusIcon status={row.status} size={16} decorative />
+              <Reference>{row.reference}</Reference>
+              <Button
+                variant="link"
+                className="subtickets-title"
+                onClick={() => select(row.reference)}
+              >
+                <span className="truncate">{row.title}</span>
+              </Button>
+              <span className="subtickets-status">
+                {row.trashed ? `${row.status} · in trash` : row.status}
+              </span>
+              <IconButton
+                size="icon-xs"
+                className="subtickets-remove"
+                label={`Remove relationship: Subtickets ${row.reference}`}
+                disabled={work.pending}
+                onClick={() => void work.remove(row)}
+              >
+                <X aria-hidden="true" />
+              </IconButton>
+            </li>
+          </Item>
         ))}
       </ul>
       {partial && (

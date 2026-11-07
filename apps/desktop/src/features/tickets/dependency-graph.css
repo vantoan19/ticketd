@@ -31,13 +31,6 @@
   align-items: center;
   gap: 6px;
 }
-.graph-notice {
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--muted);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .graph-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
