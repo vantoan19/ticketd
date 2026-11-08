@@ -20,7 +20,7 @@
   min-height: 32px;
   flex: none;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
 }
@@ -104,12 +104,22 @@
 .settings-column > p {
   margin: 4px 0 0;
 }
-.settings-page .settings-card {
+.settings-page [data-slot="card"] {
   margin-top: 32px;
 }
-.settings-card:focus-visible {
+.settings-page [data-slot="card"]:focus-visible {
   outline: none;
-  box-shadow: var(--shadow-border), var(--focus-ring);
+  box-shadow: var(--shadow-border-base), var(--focus-ring);
+}
+.settings-page [data-slot="card-body"] {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px;
+}
+.settings-page [data-slot="card-body"] section {
+  border: 0;
+  padding: 0;
 }
 .settings-row {
   display: flex;
@@ -214,7 +224,7 @@
   min-width: 0;
   overflow-wrap: anywhere;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   font-size: var(--text-code);
   font-weight: 500;
@@ -235,7 +245,7 @@
   align-items: flex-start;
   gap: 4px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
   text-align: left;
@@ -269,7 +279,7 @@
   flex: none;
   width: 14px;
   height: 14px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1.5px var(--control-boundary);
 }
 .layout-choice[data-state="checked"] .layout-choice-dot {
@@ -281,13 +291,13 @@
   width: 100%;
   height: 56px;
   padding: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
 }
 .layout-preview-list,
 .layout-preview-detail {
-  border-radius: 3px;
+  border-radius: var(--radius-segment);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
 }
@@ -337,7 +347,7 @@
 .workspace-path {
   margin: 12px 0;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   font-family: var(--font-mono);
@@ -390,7 +400,7 @@
 }
 
 .settings-column > h1:focus,
-.settings-card:focus:not(:focus-visible) {
+.settings-page [data-slot="card"]:focus:not(:focus-visible) {
   outline: none;
 }
 .settings-column > p {
@@ -412,22 +422,18 @@
   margin-left: auto;
   font-size: var(--text-caption);
 }
-.settings-card-footer {
+.settings-page [data-slot="card-footer"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 20px -24px -24px;
-  padding: 12px 24px;
-  background: var(--recessed);
-  box-shadow: 0 -1px 0 var(--border);
-  border-radius: 0 0 12px 12px;
+  padding-inline: 24px;
 }
-.settings-card-footer > p {
+.settings-page [data-slot="card-footer"] > p {
   flex: 1 1 280px;
 }
-.settings-card-footer .settings-actions {
+.settings-page [data-slot="card-footer"] .settings-actions {
   margin: 0;
 }
 
@@ -437,26 +443,7 @@
 .settings-page[data-source-active] {
   padding: 40px 24px 64px;
 }
-.source-settings > .settings-card:first-child {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 16px;
-}
-.source-settings > .settings-card:first-child > .settings-card-header {
-  display: contents;
-}
-.source-settings > .settings-card:first-child h2 {
-  grid-column: 1;
-  grid-row: 1;
-}
-.source-settings > .settings-card:first-child .settings-card-header > button {
-  grid-column: 2;
-  grid-row: 1 / 3;
-  align-self: center;
-}
-.source-settings > .settings-card:first-child > .source-connection-health {
-  grid-column: 1;
-  grid-row: 2;
+.source-connection-health {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -466,9 +453,6 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-}
-.source-settings > .settings-card:first-child .settings-card-footer {
-  grid-column: 1 / -1;
 }
 .source-preview-heading > .settings-hint {
   margin-left: auto;
@@ -493,27 +477,11 @@
   white-space: nowrap;
 }
 
-/* Title and sentence on the left, the card's action at the top right. */
-.settings-card-header[data-described] {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-.settings-card-heading {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 .settings-card-description {
   margin: 0;
   font-size: var(--text-ui);
   line-height: 20px;
   color: var(--muted-foreground);
-}
-.settings-card-header[data-described] > button {
-  flex: none;
 }
 
 /* Location row, per board I: 40px path box, 40px copy and reveal controls. */
@@ -526,9 +494,9 @@
 }
 .workspace-location > button {
   height: 40px;
-  box-shadow: 0 0 0 1px #00000024;
+  box-shadow: var(--shadow-border-base);
 }
 .workspace-location > button[aria-label="Copy path"] {
   width: 40px;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }

@@ -36,3 +36,9 @@ test("an empty archive offers a way back to Plans", () => {
   fireEvent.click(screen.getByRole("button", { name: "Back to Plans" }));
   expect(back).toHaveBeenCalled();
 });
+
+test("an empty Plans list offers the action that fills it", () => {
+  list(false);
+  fireEvent.click(screen.getByRole("button", { name: "Name a Plan" }));
+  expect(document.activeElement).toBe(screen.getByLabelText("New Plan name"));
+});

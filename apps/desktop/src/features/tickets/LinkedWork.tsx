@@ -21,6 +21,8 @@ import {
 import { RailSection } from "@/features/tickets/RailSection";
 import type { LinkedWorkState } from "@/features/tickets/useLinkedWork";
 import "./linked-work.css";
+import { Item } from "@/components/ui/item";
+import { Reference } from "@/components/ui/reference";
 
 const isDuplicateKind = (kind: LinkRow["kind"]) =>
   kind === "duplicate_of" || kind === "duplicates";
@@ -162,69 +164,67 @@ export function LinkedWork({
   }
   const split = externalAt < 0 ? rows.length : externalAt;
   const renderRow = (row: LinkRow, index: number) => (
-    <li
-      key={`${row.kind}-${row.reference}`}
-      className="linked-work-row"
-      data-kind={row.kind}
-    >
-      {/* Rows of one kind read as a group: only the first shows its
+    <Item asChild key={`${row.kind}-${row.reference}`}>
+      <li data-kind={row.kind}>
+        {/* Rows of one kind read as a group: only the first shows its
                   label, and screen readers still hear it on every row. */}
-      <span
-        className="linked-work-label"
-        data-repeat={rows[index - 1]?.kind === row.kind || undefined}
-      >
-        {linkLabel(row.kind)}
-      </span>
-      <span
-        className="linked-work-icon"
-        role="img"
-        aria-label={statusText(row)}
-      >
-        <StatusIcon status={row.status} size={16} decorative />
-      </span>
-      <span className="linked-work-reference">{row.reference}</span>
-      <Button
-        variant="link"
-        className="linked-work-title"
-        title={row.title}
-        onClick={() => select(row.reference)}
-      >
-        <span className="truncate">{row.title}</span>
-      </Button>
-      <span
-        className="linked-work-status"
-        aria-hidden="true"
-        data-qualified={
-          (row.kind === "blocked_by" && row.unresolved) ||
-          row.trashed ||
-          undefined
-        }
-      >
-        {statusText(row)}
-      </span>
-      {readOnly ? null : isDuplicateKind(row.kind) &&
-        !externalSource(work.ticket)?.status_locked ? (
-        <RemoveDuplicate
-          row={row}
-          ticket={reference}
-          disabled={pending}
-          onRemove={() => void work.remove(row)}
-          onReview={() => work.setReviewing(true)}
-        />
-      ) : (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="linked-work-remove"
-          title="Remove relationship"
-          aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
-          disabled={pending}
-          onClick={() => void work.remove(row)}
+        <span
+          className="linked-work-label"
+          data-repeat={rows[index - 1]?.kind === row.kind || undefined}
         >
-          <X aria-hidden="true" />
+          {linkLabel(row.kind)}
+        </span>
+        <span
+          className="linked-work-icon"
+          role="img"
+          aria-label={statusText(row)}
+        >
+          <StatusIcon status={row.status} size={16} decorative />
+        </span>
+        <Reference>{row.reference}</Reference>
+        <Button
+          variant="link"
+          className="linked-work-title"
+          title={row.title}
+          onClick={() => select(row.reference)}
+        >
+          <span className="truncate">{row.title}</span>
         </Button>
-      )}
-    </li>
+        <span
+          className="linked-work-status"
+          aria-hidden="true"
+          data-qualified={
+            (row.kind === "blocked_by" && row.unresolved) ||
+            row.trashed ||
+            undefined
+          }
+        >
+          {statusText(row)}
+        </span>
+        {readOnly ? null : isDuplicateKind(row.kind) &&
+          !externalSource(work.ticket)?.status_locked ? (
+          <RemoveDuplicate
+            row={row}
+            ticket={reference}
+            disabled={pending}
+            onRemove={() => void work.remove(row)}
+            onReview={() => work.setReviewing(true)}
+          />
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="linked-work-remove"
+            title="Remove relationship"
+            aria-label={`Remove relationship: ${linkLabel(row.kind)} ${row.reference}`}
+            disabled={pending}
+            onClick={() => void work.remove(row)}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        )}
+      </li>
+    </Item>
   );
   return (
     <RailSection label="Relationships">
@@ -303,32 +303,30 @@ function ExternalTargetRow({
 }) {
   const { label, ticket, note, url } = duplicateTargetParts(target);
   return (
-    <li className="linked-work-row" data-kind="duplicate_of" data-external>
-      <span className="linked-work-label">{linkLabel("duplicate_of")}</span>
-      <span className="linked-work-external">
-        {ticket ? (
-          <Button
-            variant="link"
-            className="linked-work-title"
-            onClick={() => select(ticket)}
-          >
-            {label}
-          </Button>
-        ) : url ? (
-          <SourceLink url={url}>{label}</SourceLink>
-        ) : (
-          // A reference is monospace; "Unknown" is a word.
-          <span
-            className={
-              target.kind === "unknown" ? undefined : "linked-work-reference"
-            }
-          >
-            {label}
-          </span>
-        )}{" "}
-        <span className="linked-work-note">{note}</span>
-      </span>
-    </li>
+    <Item asChild>
+      <li data-kind="duplicate_of" data-external>
+        <span className="linked-work-label">{linkLabel("duplicate_of")}</span>
+        <span className="linked-work-external">
+          {ticket ? (
+            <Button
+              variant="link"
+              className="linked-work-title"
+              onClick={() => select(ticket)}
+            >
+              {label}
+            </Button>
+          ) : url ? (
+            <SourceLink url={url}>{label}</SourceLink>
+          ) : // A reference is monospace; "Unknown" is a word.
+          target.kind === "unknown" ? (
+            <span>{label}</span>
+          ) : (
+            <Reference>{label}</Reference>
+          )}{" "}
+          <span className="linked-work-note">{note}</span>
+        </span>
+      </li>
+    </Item>
   );
 }
 

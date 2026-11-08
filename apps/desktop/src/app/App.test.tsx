@@ -12,7 +12,15 @@ import { App } from "@/app/App";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 
 class ResizeObserverStub {
-  observe() {}
+  constructor(private callback: ResizeObserverCallback) {}
+  // The Tickets workspace stacks its panes when the content panel is narrow.
+  observe(target: Element) {
+    if (narrowViewport && target.classList.contains("plan-workspace"))
+      this.callback(
+        [{ contentRect: { width: 500 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+  }
   unobserve() {}
   disconnect() {}
 }
@@ -1418,6 +1426,23 @@ const counted = (counts: Partial<typeof zeroCounts>) => {
   return merged;
 };
 
+test("the list header stays outside the scroller that holds the rows", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1), bulkTicket(2)],
+    count_tickets: counted({ todo: 120 }),
+  });
+  const scroller = document.querySelector(".ticket-scroll");
+  expect(scroller).toBeTruthy();
+  // Title, toolbar and source tabs stay fixed; rows and paging scroll under them.
+  expect(
+    scroller?.contains(screen.getByRole("heading", { name: "All tickets" })),
+  ).toBe(false);
+  expect(scroller?.contains(document.querySelector(".ticket-rows"))).toBe(true);
+  expect(scroller?.contains(screen.getByRole("button", { name: "Next" }))).toBe(
+    true,
+  );
+});
+
 test("totals and group counts describe the whole result, not the loaded page", async () => {
   await renderBulk({
     find_tickets: () => [
@@ -1942,6 +1967,54 @@ test("a sidebar view leaves an open workspace graph", async () => {
   expect(screen.queryByText("Back to workspace graph")).toBeNull();
 });
 
+test("the sidebar collapses to named icons, expands again, and remembers the choice", async () => {
+  const ticket = bulkTicket(1);
+  const handlers = { find_tickets: () => [ticket], show_ticket: () => ticket };
+  await renderBulk(handlers);
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+  for (const name of ["Documents", "Workspace graph", "Trash", "Settings"])
+    expect(screen.getByRole("button", { name })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "New ticket" })).toBeTruthy();
+  cleanup();
+  render(<App />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("Ctrl+B belongs to the editors and never toggles the sidebar", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+  fireEvent.keyDown(window, { key: "b", metaKey: true });
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("a failed save of the sidebar state says so and leaves the sidebar as it was", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  setItem.mockRestore();
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Could not save the sidebar state",
+  );
+  expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeTruthy();
+});
+
+test("a narrow window keeps the sheet and offers no collapse button", async () => {
+  narrowViewport = true;
+  await renderBulk({});
+  expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
+});
+
 test("opening the workspace graph from Plans does not stack the Plans list", async () => {
   const ticket = bulkTicket(1);
   await renderBulk({
@@ -2069,7 +2142,8 @@ test("the ticket detail bounds its height so the document and rail can scroll on
     await vi.advanceTimersByTimeAsync(0);
   });
   fireEvent.click(screen.getByRole("button", { name: /First/ }));
-  const panel = container.querySelector<HTMLElement>(".detail-panel")!;
+  const panel =
+    container.querySelector<HTMLElement>(".ticket-detail")!.parentElement!;
   // The panel clips; if it scrolled, its child would have no bounded height.
   expect(panel.style.overflow).toBe("hidden");
   expect(panel.style.display).toBe("flex");
@@ -2085,4 +2159,16 @@ test("the ticket detail bounds its height so the document and rail can scroll on
   const content = bounded[0]!.querySelector<HTMLElement>(".detail-content")!;
   expect(content.querySelector(":scope > .detail-document")).toBeTruthy();
   expect(content.querySelector(":scope > .ticket-properties")).toBeTruthy();
+});
+
+test("the folded sidebar opens Projects and Plans as one menu each", async () => {
+  const ticket = bulkTicket(1);
+  await renderBulk({ find_tickets: () => [ticket], show_ticket: () => ticket });
+  fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+  // The rail holds one entry per group, not a row per project or Plan.
+  expect(screen.queryByRole("button", { name: "Manage projects" })).toBeNull();
+  await openManageMenu("Projects", "All projects");
+  expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+  await openManageMenu("Plans", "All Plans");
+  expect(screen.getByRole("heading", { name: "Plans" })).toBeTruthy();
 });

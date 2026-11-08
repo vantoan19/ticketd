@@ -25,7 +25,6 @@
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--background);
-  scrollbar-width: thin;
   overscroll-behavior-x: contain;
 }
 .board-column {
@@ -63,7 +62,6 @@
   min-height: 0;
   flex: 1;
   padding: 8px;
-  scrollbar-width: thin;
 }
 .ui-button.board-card {
   display: flex;
@@ -117,11 +115,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow:
-    var(--shadow-border-base),
-    0 8px 24px #0003;
+  box-shadow: var(--shadow-menu);
   pointer-events: none;
 }
 .ui-button.board-card {
@@ -129,11 +125,6 @@
 }
 .board-card-container .board-card-top {
   padding-right: 24px;
-}
-.board-card-menu {
-  position: absolute;
-  top: 4px;
-  right: 4px;
 }
 .board-card-saving {
   display: block;
@@ -188,30 +179,7 @@
   font-size: var(--text-caption);
   line-height: 16px;
 }
-.board-status-notice {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--recessed);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.board-status-notice > span {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.board-empty {
-  padding: 24px 12px;
-  text-align: center;
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-}
+/* !important: the panel library sets flex inline on the panels (see styles.css). */
 .ticket-workspace.board-layout.board-unselected #list {
   flex: 1 1 0 !important;
 }
@@ -219,31 +187,29 @@
 .ticket-workspace.board-layout.board-unselected .split-handle {
   display: none !important;
 }
-.list-header:has(.ticket-layout-switch) h1 {
+.list-header:has(.list-refresh) h1 {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.list-header:has(.ticket-layout-switch) > p {
+.list-header:has(.list-refresh) > p {
   white-space: nowrap;
 }
 @container (max-width: 480px) {
-  .ticket-layout-switch svg {
-    display: none;
-  }
-  .list-header:has(.ticket-layout-switch):has(.header-search) {
+  .list-header:has(.list-refresh):has(.header-search) {
     flex-wrap: wrap;
     height: auto;
     min-height: 48px;
     padding-block: 8px;
   }
-  .list-header:has(.ticket-layout-switch):has(.header-search) .list-controls {
+  .list-header:has(.list-refresh):has(.header-search) .list-controls {
     flex-basis: 100%;
     min-width: 0;
   }
 }
-@media (max-width: 1071px) {
+@container plan-workspace (max-width: 839px) {
+  /* !important: beats the panel library's inline flex. */
   .ticket-workspace.board-layout #list {
     flex: 1 1 0 !important;
   }

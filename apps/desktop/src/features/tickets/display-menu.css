@@ -1,0 +1,9 @@
+.display-menu {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: var(--text-ui);
+  color: var(--secondary-foreground);
+}

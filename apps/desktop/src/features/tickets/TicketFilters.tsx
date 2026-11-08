@@ -1,3 +1,5 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
@@ -185,12 +187,16 @@ export function TicketFilters(p: Props) {
               avoidCollisions={!dock?.anchor}
               aria-label="Ticket filters"
             >
-              <div className="filters-head">
-                <h2>Filters</h2>
-                <Button variant="ghost" size="sm" onClick={p.clearFilters}>
-                  Clear all
-                </Button>
-              </div>
+              <SectionHeader
+                bar
+                level={2}
+                title="Filters"
+                actions={
+                  <Button variant="ghost" size="sm" onClick={p.clearFilters}>
+                    Clear all
+                  </Button>
+                }
+              />
               <div className="filters-body">
                 {p.navigation.kind !== "progress" && (
                   <FilterSection label="Status">
@@ -377,7 +383,7 @@ function TagChips({
     };
   }, [open]);
   const all = [...new Set([...vocabulary, ...selected])];
-  if (all.length === 0) return <p className="filter-hint">No tags yet.</p>;
+  if (all.length === 0) return <EmptyState size="hint" title="No tags yet." />;
   return (
     <div className="toggle-chips tag-chips">
       {all.map((tag) => (

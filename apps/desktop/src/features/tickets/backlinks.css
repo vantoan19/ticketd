@@ -1,12 +1,8 @@
 .backlinks {
-  margin-top: 24px;
+  margin-top: 40px;
 }
-.backlinks h3 {
+.backlinks [data-slot="section-header"] {
   margin-bottom: 8px;
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 .backlink-list {
   display: flex;
@@ -48,13 +44,6 @@
 .backlink-heading strong {
   font-weight: 500;
 }
-.backlink-ref {
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
-}
 .backlink-where::before {
   content: "· ";
 }
@@ -79,7 +68,7 @@
 }
 .mention-passage mark {
   padding: 0 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-segment);
   background: var(--muted);
   color: var(--foreground);
   font-weight: 500;

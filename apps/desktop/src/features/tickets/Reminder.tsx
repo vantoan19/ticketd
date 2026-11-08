@@ -50,9 +50,11 @@ function offsetLabel(date: Date): string {
 export function Reminder({
   reference,
   revision,
+  variant = "ghost",
 }: {
   reference: string;
   revision: number;
+  variant?: "ghost" | "outline";
 }) {
   const [due, setDue] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -124,7 +126,7 @@ export function Reminder({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant="ghost"
+          variant={variant}
           size="sm"
           aria-label={
             due

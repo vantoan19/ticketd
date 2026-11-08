@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Layers, Link2, Network } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Canvas, SelectionPanel } from "@/features/tickets/DependencyGraph";
@@ -16,6 +18,7 @@ import {
 } from "@/lib/api/client";
 import { plansClient } from "@/lib/api/plans";
 import "@/features/tickets/linked-work.css";
+import { Reference } from "@/components/ui/reference";
 
 type GraphTicket = DependencyGraph["nodes"][number];
 
@@ -113,7 +116,7 @@ function Blockers({
   return (
     <div className="plan-blockers">
       {blockers.length === 0 ? (
-        <p className="plan-note">Nothing blocks {member.reference}.</p>
+        <EmptyState size="hint" title={`Nothing blocks ${member.reference}.`} />
       ) : (
         <ul aria-label={`Blockers of ${member.reference}`}>
           {blockers.map((reference) => {
@@ -130,8 +133,7 @@ function Blockers({
                     <StatusIcon status={node.status} size={14} decorative />
                   )}
                   <button type="button" onClick={() => onOpen(reference)}>
-                    <span className="ticket-ref">{reference}</span>{" "}
-                    {node?.title}
+                    <Reference>{reference}</Reference> {node?.title}
                   </button>
                   {!archived && (
                     <Button
@@ -172,8 +174,7 @@ function Blockers({
                 <div className="plan-blocker-main">
                   <StatusIcon status={item.status} size={14} decorative />
                   <button type="button" onClick={() => onOpen(item.reference)}>
-                    <span className="ticket-ref">{item.reference}</span>{" "}
-                    {item.title}
+                    <Reference>{item.reference}</Reference> {item.title}
                     {projects.find((p) => p.id === item.project_id) &&
                       ` · ${projects.find((p) => p.id === item.project_id)?.name}`}
                     {item.boundary && " · Outside Plan"}
@@ -333,7 +334,13 @@ export function PlanDependencies({
     <section className="plan-dependencies" aria-label="Plan dependencies">
       {!empty && key}
       {error && <p role="alert">{error}</p>}
-      {!graph && !error && <p role="status">Loading dependencies…</p>}
+      {!graph && !error && (
+        <EmptyState
+          size="inline"
+          role="status"
+          description="Loading dependencies…"
+        />
+      )}
       {graph && members.length === 0 && (
         <EmptyState
           icon={<Layers />}
@@ -397,20 +404,24 @@ export function PlanDependencies({
             </>
           )}
           {total > members.length && (
-            <p className="plan-callout" role="status">
-              Showing {members.length} of {total} tickets.{" "}
-              <button type="button" onClick={onClose}>
+            <Alert role="status" size="compact">
+              <AlertDescription>
+                Showing {members.length} of {total} tickets.
+              </AlertDescription>
+              <Button variant="outline" size="sm" onClick={onClose}>
                 See all Plan tickets
-              </button>
-            </p>
+              </Button>
+            </Alert>
           )}
           {outside > 0 && (
-            <p className="plan-callout" role="status">
-              {graph.outside_total && graph.outside_total > outside
-                ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
-                : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
-              · not included in the {total} member tickets
-            </p>
+            <Alert role="status" size="compact">
+              <AlertDescription>
+                {graph.outside_total && graph.outside_total > outside
+                  ? `${outside} of ${graph.outside_total} outside-Plan tickets shown dashed`
+                  : `${outside} outside-Plan ${outside === 1 ? "ticket" : "tickets"} shown dashed`}{" "}
+                · not included in the {total} member tickets
+              </AlertDescription>
+            </Alert>
           )}
           {(graph.edges.length > 0 || members.length > 1 || selected) && (
             <ul className="plan-dependency-rows" aria-label="Plan tickets">
@@ -431,11 +442,10 @@ export function PlanDependencies({
                       : "Add blocker";
                 return (
                   <li key={member.reference}>
-                    <div className="plan-dependency-row">
+                    <Item>
                       <StatusIcon status={member.status} size={14} decorative />
                       <span className="plan-dependency-title">
-                        <span className="ticket-ref">{member.reference}</span>{" "}
-                        {member.title}
+                        <Reference>{member.reference}</Reference> {member.title}
                       </span>
                       <Button
                         variant="secondary"
@@ -449,7 +459,7 @@ export function PlanDependencies({
                         <Link2 aria-hidden="true" />
                         {label}
                       </Button>
-                    </div>
+                    </Item>
                     {open && (
                       <Blockers
                         key={member.reference}

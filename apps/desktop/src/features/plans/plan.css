@@ -9,13 +9,14 @@
   border-bottom: 1px solid var(--header-boundary);
 }
 .plan-workspace {
+  container: plan-workspace / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
 }
 .plan-workspace[hidden] {
-  display: none !important;
+  display: none;
 }
 .plan-rename-hint {
   margin: 0;
@@ -33,7 +34,7 @@
   box-shadow: 0 1px 0 0 var(--header-boundary);
 }
 .plan-list-spacer {
-  flex: 1;
+  flex: 1 0 0;
 }
 .ui-button-outline[aria-expanded="true"] {
   box-shadow: var(--shadow-small);
@@ -54,6 +55,9 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .plan-title-spacer {
@@ -108,18 +112,6 @@
   align-items: center;
   gap: 8px;
   color: var(--foreground);
-}
-.plan-progress-bar {
-  width: 96px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 9999px;
-  background: var(--accent);
-}
-.plan-progress-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--foreground);
 }
 .plan-summary-rule {
   width: 1px;
@@ -222,7 +214,7 @@
   align-items: center;
   gap: 8px;
   padding-left: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .plan-index-list li:hover {
   background: var(--recessed);
@@ -236,7 +228,7 @@
   min-height: 32px;
   padding: 0 8px;
   text-align: left;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
 }
 .plan-index-list li > button:first-child:focus-visible {
@@ -305,19 +297,6 @@
   padding-inline: 6px;
   font-variant-numeric: tabular-nums;
 }
-.plan-spec-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  max-width: 100%;
-  padding: 0 8px;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--foreground);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption-line);
-}
 .plan-spec-label {
   color: var(--muted-foreground);
 }
@@ -336,12 +315,13 @@
   flex: 0 1 auto;
   min-width: 0;
 }
-.plan-document-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+.plan-documents > ul > [data-slot="item"] {
+  min-height: 0;
+  padding: 0;
 }
-.plan-document-row > button:first-child {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-child {
   text-align: left;
   overflow-wrap: anywhere;
 }
@@ -356,20 +336,9 @@
 }
 .plan-graph-canvas {
   height: 440px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);
   overflow: hidden;
-}
-.plan-callout {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--muted);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.plan-callout button {
-  text-decoration: underline;
 }
 .plan-dependency-rows,
 .plan-blockers ul {
@@ -379,7 +348,6 @@
   padding: 0;
   list-style: none;
 }
-.plan-dependency-row,
 .plan-blocker-main {
   display: flex;
   align-items: center;
@@ -401,7 +369,7 @@
   gap: 8px;
   margin: 0 0 8px 22px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--recessed);
 }
 .plan-blocker-form {
@@ -413,14 +381,16 @@
 .plan-blocker-form [data-slot="field"] {
   width: 100%;
 }
-.plan-document-row {
-  gap: 4px 8px;
-}
-.plan-document-row > button:first-of-type {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-of-type {
   flex: 1 1 160px;
   min-width: 0;
 }
-.plan-document-row > button + button {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button
+  + button {
   flex: none;
 }
 .plan-document-choices li {
@@ -452,10 +422,6 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
 }
-.plan-empty-actions {
-  display: flex;
-  gap: 8px;
-}
 .plan-add-done {
   margin: 0;
   color: var(--muted-foreground);
@@ -464,10 +430,9 @@
 }
 
 /* A Document row reads title (left, truncating) then its actions on one line. */
-.plan-document-row {
-  flex-wrap: nowrap;
-}
-.plan-document-row > button:first-of-type {
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  > button:first-of-type {
   flex: 1 1 0;
   overflow: hidden;
   text-align: left;
@@ -496,7 +461,7 @@
 .plan-dependencies-key-box {
   width: 28px;
   height: 14px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   outline: 1px dashed var(--muted-foreground);
   outline-offset: -1px;
 }
@@ -535,9 +500,10 @@
 .ticket-detail[data-empty] .detail-scroll {
   display: flex;
 }
-.ticket-detail[data-empty] .detail-empty {
+.ticket-detail[data-empty] [data-slot="empty-state"][data-size="hint"] {
   flex: 1;
   min-height: 0;
+  padding: 48px 24px;
 }
 
 /* Nothing to draw: legend strip over a centred empty state, in a 760 x 420
@@ -548,7 +514,7 @@
   flex-direction: column;
   width: min(100%, 760px);
   height: 420px;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-border-base);
 }
@@ -569,24 +535,6 @@
 .plan-dependencies-card [data-slot="empty-description"] {
   max-width: 420px;
 }
-.plan-dependencies-card [data-slot="empty-content"] .ui-button {
-  gap: 6px;
-  font-size: var(--text-code);
-}
-.plan-dependencies-card [data-slot="empty-content"] .ui-button svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 1.75;
-}
-.plan-dependencies-card [data-slot="empty-icon"] svg {
-  stroke: var(--muted-foreground);
-  stroke-width: 1.5;
-}
-/* Board E-2: the "Add blocker…" button is 32px tall; its 1px ring makes the
-   34px outer edge measured in the frame. */
-.plan-dependencies-card [data-slot="empty-content"] .ui-button {
-  height: 32px;
-}
 .plan-dependencies-key-box {
   outline: none;
   box-shadow: inset 0 0 0 1px var(--control-boundary);
@@ -603,11 +551,17 @@
 .plan-documents {
   gap: 0;
 }
-.plan-documents .plan-document-row [aria-haspopup="menu"],
+:is(.plan-documents, .plan-documents-popover)
+  [data-slot="item"]
+  [aria-haspopup="menu"],
 .plan-documents .plan-add-context {
   width: 28px;
   height: 28px;
 }
 .plan-counts {
   gap: 4px 16px;
+}
+/* The summary gives way; the controls keep their words. */
+.plan-list-toolbar > :not(.plan-list-summary, .plan-list-spacer) {
+  flex: none;
 }

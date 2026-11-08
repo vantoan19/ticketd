@@ -13,8 +13,7 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.description-document,
-.description-empty {
+.description-document {
   display: block;
   margin-top: 0;
   min-height: 48px;
@@ -37,7 +36,7 @@
   outline-offset: 2px;
 }
 .description-document [data-mention-target] {
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-foreground);
   outline: 2px solid var(--ring);
@@ -55,16 +54,11 @@
 .editor-body:focus-visible {
   outline: 2px solid var(--ring);
 }
-.description-none {
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
 .editor-conflict {
   margin-top: 16px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md, 8px);
+  border-radius: var(--radius);
   background: var(--muted);
   font-size: var(--text-ui);
   line-height: 20px;
@@ -110,7 +104,7 @@
   margin: -4px -12px -12px;
   padding: 12px;
   min-height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .ticket-detail[data-expanded] .description-reading .description-document {
   margin-top: 8px;

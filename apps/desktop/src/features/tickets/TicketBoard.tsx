@@ -1,3 +1,5 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -26,35 +28,49 @@ import { externalSource, ticketStatusChoices } from "./ticket-source";
 import type { TicketWorkspace } from "./useTicketWorkspace";
 import { useBoardDrag } from "./useBoardDrag";
 import "./ticket-board.css";
+import { Reference } from "@/components/ui/reference";
 
 export function TicketBoard({
   workspace,
   onOpen,
+  onAdd,
 }: {
   workspace: TicketWorkspace;
   onOpen: (reference: string) => void;
+  /** Starts a ticket in a status; absent where nothing can be added. */
+  onAdd?: ((status: string, trigger: HTMLButtonElement) => void) | undefined;
 }) {
   const { statusAction } = workspace;
+  // Columns are the statuses, so only the other filters can empty one.
+  const narrowed = Boolean(
+    workspace.query ||
+    workspace.tags ||
+    workspace.family ||
+    workspace.plan !== workspace.navigation.plan ||
+    workspace.availability,
+  );
   const { board: boardRef, drag, start, open } = useBoardDrag(workspace);
   return (
     <>
       <div
-        className={statusAction.notice ? "board-status-notice" : "sr-only"}
+        className={statusAction.notice ? undefined : "sr-only"}
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        <span>{statusAction.notice}</span>
         {statusAction.notice && (
-          <IconButton
-            label="Dismiss status update"
-            onClick={() => {
-              statusAction.dismissNotice();
-              boardRef.current?.focus({ preventScroll: true });
-            }}
-          >
-            <X />
-          </IconButton>
+          <Alert role="none" size="compact">
+            <AlertDescription>{statusAction.notice}</AlertDescription>
+            <IconButton
+              label="Dismiss status update"
+              onClick={() => {
+                statusAction.dismissNotice();
+                boardRef.current?.focus({ preventScroll: true });
+              }}
+            >
+              <X />
+            </IconButton>
+          </Alert>
         )}
       </div>
       {Object.entries(statusAction.failures)
@@ -173,7 +189,7 @@ export function TicketBoard({
                         }}
                       >
                         <span className="board-card-top">
-                          <span className="ticket-ref">{ticket.reference}</span>
+                          <Reference>{ticket.reference}</Reference>
                           <SourcePill ticket={ticket} />
                         </span>
                         <span className="board-card-title" title={ticket.title}>
@@ -220,7 +236,7 @@ export function TicketBoard({
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            className="board-card-menu"
+                            className="absolute top-1 right-1"
                             aria-label={`Change status of ${ticket.reference}`}
                             title={`Change status (saved: ${ticket.status})`}
                             disabled={
@@ -273,10 +289,41 @@ export function TicketBoard({
                   );
                 })}
                 {loading && total === null && (
-                  <p className="board-empty">Loading tickets…</p>
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading tickets…"
+                  />
                 )}
                 {!loading && !error && items.length === 0 && (
-                  <p className="board-empty">No matching tickets</p>
+                  <EmptyState
+                    size="inline"
+                    description={narrowed ? "No matches" : "No tickets"}
+                    action={
+                      narrowed ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={workspace.clearFilters}
+                        >
+                          Clear filters
+                        </Button>
+                      ) : (
+                        onAdd &&
+                        status !== "Duplicate" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) =>
+                              onAdd(status, event.currentTarget)
+                            }
+                          >
+                            Add ticket
+                          </Button>
+                        )
+                      )
+                    }
+                  />
                 )}
                 {total !== null && items.length < total && (
                   <>
@@ -310,7 +357,7 @@ export function TicketBoard({
               width: drag.width,
             }}
           >
-            <span className="ticket-ref">{drag.ticket.reference}</span>
+            <Reference>{drag.ticket.reference}</Reference>
             <span className="board-card-title">{drag.ticket.title}</span>
           </div>
           <p className="sr-only" role="status">

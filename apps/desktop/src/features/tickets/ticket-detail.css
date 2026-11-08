@@ -22,6 +22,9 @@
 }
 /* A narrow detail keeps the header on one line: the reference copy is also in
    Ticket actions, and the reminder keeps its bell and accessible name. */
+.copy-reference {
+  display: inline-flex;
+}
 @container ticket-detail (max-width: 460px) {
   .detail-header .copy-reference,
   .detail-header .reminder-label {
@@ -122,64 +125,14 @@
   text-decoration: underline;
 }
 .source-link:focus-visible {
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   outline: none;
   box-shadow: var(--focus-ring);
 }
-/* Content owned by an external source: a read-only card whose header bar names the owner. */
-.source-card {
-  overflow: hidden;
-  border-radius: 12px;
-  box-shadow: var(--shadow-border-base);
-}
-.source-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
-  gap: 8px;
-  min-height: 40px;
-  padding: 4px 4px 4px 16px;
-  background: var(--background);
-  color: var(--secondary-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
-.source-card .description-document {
+.source-description .description-document {
   margin-top: 0;
   min-height: 0;
   padding: 16px;
-}
-.source-unavailable-notice {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin: 0 0 24px;
-  padding: 16px;
-  border-radius: 6px;
-  box-shadow: var(--shadow-border-base);
-  background: var(--recessed);
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.source-unavailable-notice p {
-  margin: 0;
-}
-.source-unavailable-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--secondary-foreground);
-  font-weight: 500;
-}
-.source-unavailable-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-left: -12px;
-  margin-top: 0;
 }
 .take-ownership-effects {
   display: flex;
@@ -216,7 +169,7 @@
   text-align: left;
   font: inherit;
   letter-spacing: inherit;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .source-title-trigger:focus-visible {
   outline: none;
@@ -232,7 +185,7 @@
 .source-readonly-explanation .source-caption {
   margin: 0;
 }
-.source-card-header .source-link {
+[data-slot="card-header"] .source-link {
   font-size: var(--text-caption);
   white-space: nowrap;
 }

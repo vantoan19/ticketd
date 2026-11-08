@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { Cloud, LaptopMinimal, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
 import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
@@ -20,17 +25,20 @@ import { useTicketRefresh } from "./useTicketRefresh";
 export function SourceRail({
   ticket,
   refresh,
+  chip = false,
 }: {
   ticket: Ticket;
   refresh: () => Promise<void>;
+  /** A chip that opens the section in a popover, for a narrow pane. */
+  chip?: boolean;
 }) {
   const now = useNow();
   const owner = externalSource(ticket);
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
   const ownerName = owner ? owner.provider_name : "";
-  return (
-    <RailSection label="Source">
+  const body = (
+    <>
       {owner ? (
         <div className="rail-source">
           <span className="rail-value rail-source-identity">
@@ -153,7 +161,26 @@ export function SourceRail({
           <LocalPublication ticket={ticket} refresh={refresh} />
         </div>
       )}
-    </RailSection>
+    </>
+  );
+  if (!chip) return <RailSection label="Source">{body}</RailSection>;
+  const name = owner ? owner.display : "Local";
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" aria-label={`Source: ${name}`}>
+          {owner ? (
+            <Cloud data-icon="inline-start" />
+          ) : (
+            <LaptopMinimal data-icon="inline-start" />
+          )}
+          <span className="truncate">{name}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72" aria-label="Source">
+        {body}
+      </PopoverContent>
+    </Popover>
   );
 }
 

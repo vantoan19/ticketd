@@ -3,6 +3,7 @@ import { FileText, Pencil, Plus, X } from "lucide-react";
 import { documents, type DocumentSummary } from "@/features/documents/api";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   Popover,
@@ -97,52 +98,54 @@ export function TicketDocuments({
       <div className="ticket-documents">
         <ul>
           {links.map((link) => (
-            <li key={link.target_id} className="ticket-documents-row">
-              <button
-                type="button"
-                className="ticket-documents-item"
-                title={link.target_label}
-                onClick={() => openDocument?.(link.target_id)}
-              >
-                <FileText aria-hidden="true" />
-                <span className="ticket-documents-title">
-                  {link.target_label}
-                </span>
-                {link.target_trashed && (
-                  <span className="ticket-documents-badge">Trash</span>
+            <Item key={link.target_id} asChild>
+              <li>
+                <button
+                  type="button"
+                  className="ticket-documents-item"
+                  title={link.target_label}
+                  onClick={() => openDocument?.(link.target_id)}
+                >
+                  <FileText aria-hidden="true" />
+                  <span className="ticket-documents-title">
+                    {link.target_label}
+                  </span>
+                  {link.target_trashed && (
+                    <span className="ticket-documents-badge">Trash</span>
+                  )}
+                </button>
+                {link.explicit ? (
+                  <button
+                    type="button"
+                    className="ticket-documents-unlink"
+                    aria-label={`Unlink ${link.target_label}`}
+                    title="Unlink"
+                    onClick={() => void change(link.target_id, false)}
+                  >
+                    <X aria-hidden="true" />
+                  </button>
+                ) : link.activity_id ? null : (
+                  <IconButton
+                    size="icon-xs"
+                    className="ticket-documents-edit"
+                    label={`Edit description to remove ${link.target_label}`}
+                    onClick={() => editDescription(link.target_id)}
+                  >
+                    <Pencil aria-hidden="true" />
+                  </IconButton>
                 )}
-              </button>
-              {link.explicit ? (
-                <button
-                  type="button"
-                  className="ticket-documents-unlink"
-                  aria-label={`Unlink ${link.target_label}`}
-                  title="Unlink"
-                  onClick={() => void change(link.target_id, false)}
-                >
-                  <X aria-hidden="true" />
-                </button>
-              ) : link.activity_id ? null : (
-                <IconButton
-                  size="icon-xs"
-                  className="ticket-documents-edit"
-                  label={`Edit description to remove ${link.target_label}`}
-                  onClick={() => editDescription(link.target_id)}
-                >
-                  <Pencil aria-hidden="true" />
-                </IconButton>
-              )}
-              {!link.explicit && link.activity_id && (
-                <button
-                  type="button"
-                  className="ticket-documents-source"
-                  title="Open the update that mentions this Document"
-                  onClick={() => onOpenUpdate?.(link.activity_id!)}
-                >
-                  From update
-                </button>
-              )}
-            </li>
+                {!link.explicit && link.activity_id && (
+                  <button
+                    type="button"
+                    className="ticket-documents-source"
+                    title="Open the update that mentions this Document"
+                    onClick={() => onOpenUpdate?.(link.activity_id!)}
+                  >
+                    From update
+                  </button>
+                )}
+              </li>
+            </Item>
           ))}
         </ul>
         {error && <p role="alert">{error}</p>}

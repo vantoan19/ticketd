@@ -37,7 +37,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 10px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 .inbox-entry:hover,
 .inbox-entry:focus-within {
@@ -66,18 +66,12 @@
   padding: 0;
   text-align: left;
   color: var(--foreground);
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
 }
 .inbox-title-line {
   display: flex;
   align-items: baseline;
   gap: 8px;
-}
-.inbox-reference {
-  flex: none;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--text-caption);
 }
 .inbox-title {
   min-width: 0;
@@ -142,7 +136,7 @@
   gap: 8px;
   margin: 40px 0 0;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--recessed);
   color: var(--muted-foreground);
 }

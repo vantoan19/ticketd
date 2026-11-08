@@ -1,21 +1,8 @@
 .evidence-section {
-  margin-top: 24px;
+  margin-top: 40px;
 }
-.evidence-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.evidence-section [data-slot="section-header"] {
   margin-bottom: 8px;
-}
-.evidence-heading h3 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
-}
-.evidence-empty {
-  margin: 0;
 }
 .evidence-label {
   display: flex;

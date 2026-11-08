@@ -252,7 +252,10 @@ test("Latest update jumps to its note and tags appear as separate chips", async 
   expect(
     (await screen.findByLabelText("Selected update")).textContent,
   ).toContain("Reported progress");
-  expect(document.querySelectorAll(".rail-tag")).toHaveLength(2);
+  const rail = screen.getByRole("complementary", { name: "Ticket properties" });
+  // Each tag is its own chip, not one joined string.
+  expect(within(rail).getByText("frontend")).toBeTruthy();
+  expect(within(rail).getByText("urgent")).toBeTruthy();
 });
 
 test("Edit is a real button with its shortcut, and E starts editing", async () => {

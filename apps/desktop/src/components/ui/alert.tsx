@@ -1,48 +1,74 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
+import { StatusDot } from "@/components/ui/status-dot";
 
-const alertVariants = cva(
-  "relative grid w-full grid-cols-[0_1fr] items-start gap-y-0.5 rounded-lg border px-4 py-3 text-sm has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] has-[>svg]:gap-x-3 [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current",
-  {
-    variants: {
-      variant: {
-        default: "",
-        destructive:
-          "text-destructive *:data-[slot=alert-description]:text-destructive/90 [&>svg]:text-current",
-      },
+const alertVariants = cva("ui-notice", {
+  variants: {
+    tone: {
+      neutral: "",
+      attention: "",
+      error: "ui-notice-error",
     },
-    defaultVariants: {
-      variant: "default",
+    size: {
+      default: "",
+      compact: "ui-notice-compact",
     },
   },
-);
+  defaultVariants: {
+    tone: "neutral",
+    size: "default",
+  },
+});
 
+type Tone = NonNullable<VariantProps<typeof alertVariants>["tone"]>;
+
+const ToneContext = React.createContext<Tone>("neutral");
+
+/**
+ * The one inline notice: an optional title, one sentence and its actions.
+ * `neutral` is context, `attention` puts a status dot in the title (a source
+ * is unavailable, an outcome is unknown) and `error` is a failure. `compact`
+ * is a single row for a short sentence. It is `role="alert"` unless the
+ * caller passes another role, such as `status` for a calm update.
+ */
 function Alert({
   className,
-  variant,
+  tone = "neutral",
+  size = "default",
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
   return (
-    <div
-      data-slot="alert"
-      role="alert"
-      className={cn(alertVariants({ variant }), className)}
-      {...props}
-    />
+    <ToneContext value={tone ?? "neutral"}>
+      <div
+        data-slot="alert"
+        data-tone={tone}
+        role="alert"
+        className={cn(alertVariants({ tone, size }), className)}
+        {...props}
+      />
+    </ToneContext>
   );
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+/** The notice’s title; `level` makes it a heading where the notice replaced one. */
+function AlertTitle({
+  className,
+  children,
+  level,
+  ...props
+}: React.ComponentProps<"div"> & { level?: 2 | 3 | 4 }) {
+  const tone = React.use(ToneContext);
+  const Title = level ? (`h${level}` as const) : "div";
   return (
-    <div
+    <Title
       data-slot="alert-title"
-      className={cn(
-        "col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight",
-        className,
-      )}
+      className={cn("ui-notice-title", className)}
       {...props}
-    />
+    >
+      {tone === "attention" && <StatusDot tone="attention" size={10} />}
+      {children}
+    </Title>
   );
 }
 
@@ -53,13 +79,21 @@ function AlertDescription({
   return (
     <div
       data-slot="alert-description"
-      className={cn(
-        "col-start-2 grid justify-items-start gap-1 text-sm text-muted-foreground [&_p]:leading-relaxed",
-        className,
-      )}
+      className={cn("ui-notice-description", className)}
       {...props}
     />
   );
 }
 
-export { Alert, AlertTitle, AlertDescription };
+/** The notice's real buttons, in a wrapping row. */
+function AlertActions({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="alert-actions"
+      className={cn("ui-notice-actions", className)}
+      {...props}
+    />
+  );
+}
+
+export { Alert, AlertTitle, AlertDescription, AlertActions };

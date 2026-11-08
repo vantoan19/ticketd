@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/empty-state";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,7 @@ import { Duplicates } from "@/features/tickets/Duplicates";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import type { Ticket } from "@/lib/api/client";
 import { useTicketSearch } from "./useTicketSearch";
+import { Reference } from "@/components/ui/reference";
 
 /**
  * The Duplicate group's Add action. A ticket becomes a Duplicate only through
@@ -97,7 +99,20 @@ export function MarkDuplicateDialog({
             {error && <FieldError>{error}</FieldError>}
           </Field>
           {query.trim() && results.length === 0 && !error && (
-            <p role="status">No tickets to mark match that search.</p>
+            <EmptyState
+              size="inline"
+              role="status"
+              description="No tickets to mark match that search."
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setQuery("")}
+                >
+                  Clear search
+                </Button>
+              }
+            />
           )}
           {results.length > 0 && (
             <ul className="duplicate-pick-results" aria-label="Matches">
@@ -109,7 +124,7 @@ export function MarkDuplicateDialog({
                     onClick={() => setChosen(item)}
                   >
                     <StatusIcon status={item.status} size={14} decorative />
-                    <span className="ticket-ref">{item.reference}</span>
+                    <Reference>{item.reference}</Reference>
                     <span className="truncate">{item.title}</span>
                   </Button>
                 </li>

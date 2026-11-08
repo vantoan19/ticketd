@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   AlarmClock,
   Check,
+  Eye,
   Circle,
   Link2,
   MessageSquare,
@@ -33,6 +34,7 @@ import {
 } from "./inboxModel";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./inbox.css";
+import { Reference } from "@/components/ui/reference";
 
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
@@ -237,7 +239,7 @@ export function Inbox({
                       }}
                     >
                       <span className="inbox-title-line">
-                        <span className="inbox-reference">{e.reference}</span>
+                        <Reference>{e.reference}</Reference>
                         <span className="inbox-title">{e.title}</span>
                         {!e.read && <span className="sr-only">Unread</span>}
                       </span>
@@ -318,9 +320,12 @@ export function Inbox({
 export function Follow({
   reference,
   revision,
+  chip = false,
 }: {
   reference: string;
   revision: number;
+  /** A chip that reads "Following" when on, for the narrow pane’s chip bar. */
+  chip?: boolean;
 }) {
   const [following, setFollowing] = useState(false);
   const [error, setError] = useState("");
@@ -350,6 +355,22 @@ export function Follow({
       setError(String(e));
     }
   }
+  if (chip)
+    return (
+      <>
+        <Button
+          variant="outline"
+          size="sm"
+          role="switch"
+          aria-checked={following}
+          onClick={() => void toggle()}
+        >
+          <Eye data-icon="inline-start" aria-hidden="true" />
+          {following ? "Following" : "Follow"}
+        </Button>
+        {error && <p role="alert">{error}</p>}
+      </>
+    );
   return (
     <>
       <label className="rail-follow">

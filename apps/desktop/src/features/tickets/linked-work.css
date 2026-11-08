@@ -30,11 +30,6 @@
   justify-content: flex-end;
   gap: 8px;
 }
-.linked-work-count {
-  margin-left: 4px;
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
 .linked-work-actions {
   display: flex;
   gap: 4px;
@@ -43,16 +38,13 @@
   display: flex;
   flex-direction: column;
 }
-.linked-work-row {
+.linked-work-rows > [data-slot="item"] {
   position: relative;
   display: grid;
   grid-template-columns: 7.5rem 14px 3rem minmax(0, 1fr) auto 32px;
   grid-auto-flow: row dense;
   align-items: center;
   column-gap: 8px;
-  min-height: 36px;
-  padding: 2px 4px;
-  border-radius: 6px;
 }
 .linked-work-label {
   grid-column: 1;
@@ -60,7 +52,7 @@
 .linked-work-icon {
   grid-column: 2;
 }
-.linked-work-reference {
+.linked-work-rows > [data-slot="item"] > [data-slot="reference"] {
   grid-column: 3;
 }
 .linked-work-title {
@@ -80,10 +72,6 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-.linked-work-row:hover,
-.linked-work-row:focus-within {
-  background: var(--accent);
-}
 .linked-work-label,
 .linked-work-status {
   color: var(--muted-foreground);
@@ -94,11 +82,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.linked-work-reference {
-  color: var(--secondary-foreground);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--text-code);
 }
 .linked-work-title {
   height: auto;
@@ -118,14 +101,14 @@
   opacity: 0;
   pointer-events: none;
 }
-.linked-work-row:hover .linked-work-remove,
-.linked-work-row:focus-within .linked-work-remove {
+.linked-work-rows > [data-slot="item"]:hover .linked-work-remove,
+.linked-work-rows > [data-slot="item"]:focus-within .linked-work-remove {
   opacity: 1;
   pointer-events: auto;
 }
 /* Narrow: the kind becomes a small heading over its group of rows. */
 @container (max-width: 520px) {
-  .linked-work-row {
+  .linked-work-rows > [data-slot="item"] {
     grid-template-columns: 14px 3rem minmax(0, 1fr) auto 32px;
   }
   .linked-work-label {
@@ -135,7 +118,7 @@
   .linked-work-icon {
     grid-column: 1;
   }
-  .linked-work-reference {
+  .linked-work-rows > [data-slot="item"] > [data-slot="reference"] {
     grid-column: 2;
   }
   .linked-work-title {
@@ -150,7 +133,7 @@
 }
 /* Narrowest: the status moves under the title so the title stays readable. */
 @container (max-width: 380px) {
-  .linked-work-row {
+  .linked-work-rows > [data-slot="item"] {
     grid-template-columns: 14px 3rem minmax(0, 1fr) 32px;
   }
   .linked-work-status {
@@ -162,7 +145,7 @@
 }
 /* Compact rail groups: a label followed by one icon/reference/title row. */
 @container (max-width: 260px) {
-  .linked-work-row {
+  .linked-work-rows > [data-slot="item"] {
     /* The reference hugs its text so the title starts beside it and a wrapped
        title lines up under its own first line. */
     grid-template-columns: 16px auto minmax(0, 1fr);
@@ -179,7 +162,7 @@
     grid-column: 1;
     margin-top: 2px;
   }
-  .linked-work-reference {
+  .linked-work-rows > [data-slot="item"] > [data-slot="reference"] {
     grid-column: 2;
     line-height: 20px;
   }
@@ -202,11 +185,13 @@
     right: 0;
     background: var(--background);
   }
-  .linked-work-row:has(.linked-work-label[data-repeat]) .linked-work-remove {
+  .linked-work-rows
+    > [data-slot="item"]:has(.linked-work-label[data-repeat])
+    .linked-work-remove {
     top: 0;
   }
-  .linked-work-row:hover .linked-work-remove,
-  .linked-work-row:focus-within .linked-work-remove {
+  .linked-work-rows > [data-slot="item"]:hover .linked-work-remove,
+  .linked-work-rows > [data-slot="item"]:focus-within .linked-work-remove {
     background: var(--accent);
   }
   .linked-work-status {
@@ -214,8 +199,8 @@
   }
   .linked-work-status[data-qualified],
   /* Blocks and Blocked by always say where the other ticket stands. */
-  .linked-work-row[data-kind="blocked_by"] .linked-work-status,
-  .linked-work-row[data-kind="blocks"] .linked-work-status {
+  .linked-work-rows > [data-slot="item"][data-kind="blocked_by"] .linked-work-status,
+  .linked-work-rows > [data-slot="item"][data-kind="blocks"] .linked-work-status {
     display: block;
     /* Same column as the title, never under the reference. */
     grid-column: 3;
@@ -251,7 +236,7 @@
   margin-top: 4px;
   max-height: 220px;
   overflow-y: auto;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border-base);
 }
 .link-ticket-results button {

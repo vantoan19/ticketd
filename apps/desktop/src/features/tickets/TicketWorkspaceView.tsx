@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   useDefaultLayout,
   useGroupRef,
@@ -21,6 +14,7 @@ import { cn } from "cn";
 import { setPreference, usePreferences } from "@/lib/preferences";
 import { PlanDependencies } from "@/features/plans/PlanDependencies";
 import { PlanHeader } from "@/features/plans/PlanHeader";
+import { useNarrowPane } from "@/features/tickets/useNarrowPane";
 import { usePlanView } from "@/features/plans/usePlanView";
 import { TicketDetailPane } from "@/features/tickets/TicketDetailPane";
 import { FilterDockContext } from "@/features/tickets/filter-dock";
@@ -33,22 +27,9 @@ const DETAIL_PANEL_STYLE = {
   flexDirection: "column",
   overflow: "hidden",
 } as const;
-const NARROW_QUERY = "(max-width: 1071px)";
+/** The list pane’s 360px plus the detail pane’s 480px: below this the panes stack. */
+const STACK_MIN_WIDTH = 840;
 const BOARD_SPLIT: Layout = { list: 44, detail: 56 };
-
-function subscribeNarrow(callback: () => void) {
-  const media = window.matchMedia(NARROW_QUERY);
-  media.addEventListener("change", callback);
-  return () => media.removeEventListener("change", callback);
-}
-
-function useNarrow() {
-  return useSyncExternalStore(
-    subscribeNarrow,
-    () => window.matchMedia(NARROW_QUERY).matches,
-    () => false,
-  );
-}
 
 /**
  * Arranges the list and detail panes and the split, expanded, and narrow
@@ -77,6 +58,7 @@ export function TicketWorkspaceView({
   const [expanded, setExpanded] = useState(false);
   const [narrowDetail, setNarrowDetail] = useState(false);
   const listRef = useRef<HTMLElement>(null);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   // The Filters panel docks beside the list, so the detail pane makes room.
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterDock = useMemo(
@@ -115,6 +97,9 @@ export function TicketWorkspaceView({
       node = node.parentElement
     )
       node.scrollTop = 0;
+    // The rows scroll in their own element inside the list pane.
+    const rows = listRef.current?.querySelector(".ticket-scroll");
+    if (rows) rows.scrollTop = 0;
   }, [planScope]);
   const planState = usePlanView(
     planScope,
@@ -185,15 +170,13 @@ export function TicketWorkspaceView({
     }
     focusPane.current = null;
   });
-  const narrow = useNarrow();
-  useEffect(() => {
-    const media = window.matchMedia(NARROW_QUERY);
-    const showSelected = (event: MediaQueryListEvent) => {
-      if (event.matches && selected) setNarrowDetail(true);
-    };
-    media.addEventListener("change", showSelected);
-    return () => media.removeEventListener("change", showSelected);
-  }, [selected]);
+  // The content panel’s width, not the window’s: collapsing the sidebar gives it back.
+  const narrow = useNarrowPane(workspaceRef, STACK_MIN_WIDTH);
+  const [previousNarrow, setPreviousNarrow] = useState(narrow);
+  if (previousNarrow !== narrow) {
+    setPreviousNarrow(narrow);
+    if (narrow && selected) setNarrowDetail(true);
+  }
   const [previousSelection, setPreviousSelection] = useState(selected);
   if (previousSelection !== selected) {
     setPreviousSelection(selected);
@@ -212,6 +195,7 @@ export function TicketWorkspaceView({
   return (
     <FilterDockContext.Provider value={filterDock}>
       <div
+        ref={workspaceRef}
         className="plan-workspace"
         hidden={hidden}
         data-plan={scopedPlan ? "" : undefined}
@@ -280,7 +264,6 @@ export function TicketWorkspaceView({
             panelRef={listPanelRef}
             minSize={360}
             defaultSize={384}
-            className="list-panel"
           >
             <TicketListPane
               workspace={workspace}
@@ -299,7 +282,6 @@ export function TicketWorkspaceView({
                 setShowDependencies(false);
                 setSelected(reference);
                 setNarrowDetail(true);
-                const narrow = window.matchMedia(NARROW_QUERY).matches;
                 if (narrow) focusPane.current = "detail";
                 // The Open tickets preference: a ticket opened from the list may
                 // take the full width. Narrow windows already show it that way.
@@ -317,7 +299,6 @@ export function TicketWorkspaceView({
           <ResizablePanel
             id="detail"
             minSize={480}
-            className="detail-panel"
             // The panel library makes its content box `overflow: auto` with an
             // auto height, so a percentage-height child never gets a bound and the
             // wheel scrolls nothing. Bound it here; `.detail-scroll` is the scroller.

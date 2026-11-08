@@ -8,32 +8,13 @@ import { expect, it } from "vitest";
 
 const srcDir = join(__dirname, "..");
 
+// Every remaining entry has its reason in the stylesheet. The !important ones
+// beat the panel library's inline flex and display on the ticket workspace, or
+// implement reduced motion. The #000 of a mask is alpha, not a color.
 const KNOWN: Record<string, number> = {
-  "features/documents/context-graph.css": 12,
-  "features/documents/documents.css": 8,
-  "features/markdown/markdown-editor.css": 5,
-  "features/plans/plan.css": 10,
-  "features/projects/projects.css": 7,
-  "features/settings/restore-review.css": 6,
-  "features/settings/settings.css": 10,
-  "features/settings/sources/sources.css": 8,
-  "features/tickets/activity.css": 3,
-  "features/tickets/backlinks.css": 1,
-  "features/tickets/create-ticket.css": 3,
-  "features/tickets/dependency-graph.css": 6,
-  "features/tickets/description.css": 1,
-  "features/tickets/duplicate-review.css": 3,
-  "features/tickets/inbox.css": 3,
-  "features/tickets/linked-work.css": 2,
-  "features/tickets/properties.css": 2,
-  "features/tickets/publication.css": 3,
-  "features/tickets/subtickets.css": 2,
-  "features/tickets/ticket-board.css": 7,
-  "features/tickets/ticket-detail.css": 4,
-  "features/tickets/ticket-documents.css": 3,
-  "features/tickets/ticket-filters.css": 6,
-  "features/tickets/ticket-list.css": 7,
-  "styles.css": 35,
+  "features/documents/context-graph.css": 2,
+  "features/tickets/ticket-board.css": 4,
+  "styles.css": 11,
 };
 
 function filesUnder(dir: string): string[] {
@@ -59,7 +40,9 @@ function findings(css: string): string[] {
         /radius$/.test(name) &&
         /\d(?:px|rem)\b/.test(value) &&
         !value.includes("var(");
-      if (rawColor.test(value) || literalRadius)
+      // A literal fallback, var(--radius-md, 8px), hides a raw value inside a token.
+      const literalFallback = /var[(][^)]*, *[^)]*(?:#[0-9a-f]{3,8}|[0-9]px)/i;
+      if (rawColor.test(value) || literalRadius || literalFallback.test(value))
         found.push(`${name}: ${value}`);
       if (value.includes("!important")) found.push(`${name}: ${value}`);
     }
@@ -86,4 +69,67 @@ it("stylesheets take colors and radii from the design tokens", () => {
       ...added,
     ].join("\n"),
   ).toEqual(KNOWN);
+});
+
+it("no custom property is defined in terms of itself", () => {
+  // A self-reference is invalid at computed-value time, so every use of the
+  // token silently computes to its initial value (border-radius: 0).
+  const cyclic: string[] = [];
+  for (const file of filesUnder(srcDir)) {
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of css.matchAll(/(--[\w-]+)\s*:\s*([^;{}]*)/g)) {
+      const [, name = "", value = ""] = m;
+      if (new RegExp("var[(] *" + name + " *[,)]").test(value))
+        cyclic.push(`${relative(srcDir, file)}: ${name}: ${value.trim()}`);
+    }
+  }
+  expect(cyclic).toEqual([]);
+});
+
+it("the radius tokens match DESIGN.md section 4", () => {
+  const css = readFileSync(join(srcDir, "styles.css"), "utf8");
+  const root = css.slice(0, css.indexOf("}", css.indexOf(":root")));
+  const radius = (name: string) =>
+    new RegExp(name + ": *([^;]+);").exec(root)?.[1]?.trim();
+  expect(radius("--radius")).toBe("6px");
+  expect(radius("--radius-segment")).toBe("4px");
+  expect(radius("--radius-panel")).toBe("12px");
+  expect(radius("--radius-pill")).toBe("9999px");
+});
+
+it("feature stylesheets do not restyle a shared part's colour, type or fill", () => {
+  // docs/agents/ui.md step 1: a change to colour, type, size or shape of a
+  // shared part is a variant on the part, not a selector in a feature file.
+  const restyled: string[] = [];
+  for (const file of filesUnder(srcDir)) {
+    const key = relative(srcDir, file).replaceAll("\\", "/");
+    if (key === "styles.css") continue;
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = (rule[1] ?? "").trim();
+      const last = selector.split(/[\s>+~,]+/).at(-1) ?? "";
+      if (
+        /\[data-(?:slot="(?:badge|section-header-actions|section-header-caption)"|variant="(?:source|tag|doc)")\]/.test(
+          last,
+        ) &&
+        /(?:^|[;\s])(?:background|color|font-size|line-height)\s*:/.test(
+          rule[2] ?? "",
+        )
+      )
+        restyled.push(`${key}: ${selector}`);
+    }
+  }
+  expect(restyled).toEqual([]);
+});
+
+it("the utility radii that shadcn parts use resolve to the one --radius", () => {
+  // `rounded-md` and `rounded-lg` come from the Tailwind theme; a literal there
+  // (Tailwind's own lg is 8px) puts an 8px corner beside the 6px of everything else.
+  const css = readFileSync(join(srcDir, "styles.css"), "utf8");
+  const theme = css.slice(css.indexOf("@theme inline"));
+  for (const name of ["--radius-md", "--radius-lg"])
+    expect(
+      new RegExp(name + ": *([^;]+);").exec(theme)?.[1]?.trim(),
+      name,
+    ).toBe("var(--radius)");
 });

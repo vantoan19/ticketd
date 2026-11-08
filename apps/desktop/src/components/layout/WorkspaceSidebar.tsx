@@ -12,6 +12,8 @@ import {
   Archive,
   FileText,
   Network,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,14 +29,22 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Project } from "@/lib/api/client";
 import type { SidebarCounts } from "@/lib/api/counts";
-import { useContext, useRef, type RefObject } from "react";
+import { useContext, useRef, type ComponentType, type RefObject } from "react";
 import { ContextGraphNavigation } from "@/features/documents/navigation";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SourceStatusFooter } from "@/components/layout/SourceStatusFooter";
 
@@ -72,6 +82,65 @@ function ManageMenu({
   );
 }
 
+type GroupEntry = {
+  key: string;
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+};
+
+/**
+ * A group on the folded rail: one icon that opens a menu of the group's
+ * entries, so the rail holds a few fixed destinations and never scrolls.
+ */
+function GroupMenu({
+  label,
+  icon: Icon,
+  entries,
+  manage,
+}: {
+  label: string;
+  icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
+  entries: GroupEntry[];
+  manage: { label: string; onSelect: () => void };
+}) {
+  const current = entries.find((entry) => entry.active);
+  const name = current ? `${label}, ${current.label}` : label;
+  return (
+    <SidebarMenuItem>
+      <DropdownMenu>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton isActive={!!current} aria-label={name}>
+                  <Icon size={16} aria-hidden />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="right">{name}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <DropdownMenuContent side="right" align="start">
+          {entries.map((entry) => (
+            <DropdownMenuItem
+              key={entry.key}
+              onSelect={entry.onSelect}
+              aria-current={entry.active ? "page" : undefined}
+            >
+              {entry.label}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={manage.onSelect}>
+            {manage.label}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuItem>
+  );
+}
+
 type View =
   | "tickets"
   | "projects"
@@ -93,6 +162,7 @@ export function WorkspaceSidebar({
   setCreating,
   createTriggerRef,
   navigation,
+  onError,
 }: {
   navigation: {
     kind: "all" | "ready" | "progress" | "trash";
@@ -116,10 +186,14 @@ export function WorkspaceSidebar({
   ) => void;
   setCreating: (value: boolean) => void;
   createTriggerRef: RefObject<HTMLButtonElement | null>;
+  onError: (message: string) => void;
 }) {
   // While the workspace graph is open no other entry reads as current.
   const view: View | null = workspaceGraphOpen ? null : viewName;
   const isMobile = useIsMobile();
+  const { sidebarCollapsed } = usePreferences();
+  // The sheet below 768px is never collapsed to icons.
+  const collapsed = !isMobile && sidebarCollapsed;
   const newTrigger = useRef<HTMLButtonElement>(null);
   // Choosing an item moves focus on its own; dismissing the menu returns it to New.
   const chose = useRef(false);
@@ -130,11 +204,29 @@ export function WorkspaceSidebar({
     <Sidebar
       collapsible={isMobile ? "offcanvas" : "none"}
       className="sidebar"
+      data-collapsed={collapsed || undefined}
       closeOnAction
     >
       <SidebarHeader className="sidebar-header">
         <div className="brand">
           <strong>ticketd</strong>
+          {!isMobile && (
+            <IconButton
+              label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => {
+                if (!setPreference("sidebarCollapsed", !collapsed))
+                  onError(
+                    "Could not save the sidebar state. Check local storage and try again.",
+                  );
+              }}
+            >
+              {collapsed ? (
+                <PanelLeftOpen aria-hidden="true" />
+              ) : (
+                <PanelLeftClose aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <IconButton
@@ -181,6 +273,9 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "inbox"}
+                tooltip={
+                  unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
+                }
                 aria-label={
                   unread ? `Inbox, ${counts?.unread_inbox} unread` : "Inbox"
                 }
@@ -203,6 +298,7 @@ export function WorkspaceSidebar({
                   !navigation.plan &&
                   view === "tickets"
                 }
+                tooltip="All tickets"
                 onClick={() => scope("all")}
               >
                 <ListTodo size={16} /> All tickets
@@ -214,6 +310,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "ready" && view === "tickets"}
+                tooltip="Ready"
                 onClick={() => scope("ready")}
               >
                 <CirclePlay size={16} /> Ready
@@ -223,6 +320,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "progress" && view === "tickets"}
+                tooltip="In progress"
                 onClick={() => scope("progress")}
               >
                 <CircleDot size={16} /> In progress
@@ -236,56 +334,99 @@ export function WorkspaceSidebar({
         </span>
         <div className="sidebar-scroll">
           <SidebarGroup className="sidebar-group">
-            <div
-              className="sidebar-heading"
-              data-active={view === "projects" || undefined}
-            >
-              Projects{" "}
-              <ManageMenu
-                label="Manage projects"
-                item="All projects"
-                onSelect={() => setView("projects")}
-              />
-            </div>
-            <nav aria-label="Project scopes" className="sidebar-nav">
-              <SidebarMenu>
-                {projects.map((p) => (
-                  <SidebarMenuItem key={p.id}>
-                    <SidebarMenuButton
-                      isActive={
-                        navigation.project === p.id && view === "tickets"
-                      }
-                      onClick={() => scope("all", p.id)}
-                    >
-                      <Folder size={16} /> <span title={p.name}>{p.name}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={
-                      navigation.project === "unlinked" && view === "tickets"
-                    }
-                    onClick={() => scope("all", "unlinked")}
-                  >
-                    {/* Dashed: not a project, the tickets that have none. */}
-                    <Folder
-                      size={16}
-                      style={{ strokeDasharray: "2.5 2.5" }}
-                    />{" "}
-                    No project
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </nav>
+            {collapsed ? (
+              <>
+                {/* One line on the rail between the ticket views and the rest. */}
+                <div className="sidebar-heading" aria-hidden="true" />
+                <nav aria-label="Projects" className="sidebar-nav">
+                  <SidebarMenu>
+                    <GroupMenu
+                      label="Projects"
+                      icon={Folder}
+                      entries={[
+                        ...projects.map((p) => ({
+                          key: p.id,
+                          label: p.name,
+                          active:
+                            navigation.project === p.id && view === "tickets",
+                          onSelect: () => scope("all", p.id),
+                        })),
+                        {
+                          key: "unlinked",
+                          label: "No project",
+                          active:
+                            navigation.project === "unlinked" &&
+                            view === "tickets",
+                          onSelect: () => scope("all", "unlinked"),
+                        },
+                      ]}
+                      manage={{
+                        label: "All projects",
+                        onSelect: () => setView("projects"),
+                      }}
+                    />
+                  </SidebarMenu>
+                </nav>
+              </>
+            ) : (
+              <>
+                <div
+                  className="sidebar-heading"
+                  data-active={view === "projects" || undefined}
+                >
+                  Projects{" "}
+                  <ManageMenu
+                    label="Manage projects"
+                    item="All projects"
+                    onSelect={() => setView("projects")}
+                  />
+                </div>
+                <nav aria-label="Project scopes" className="sidebar-nav">
+                  <SidebarMenu>
+                    {projects.map((p) => (
+                      <SidebarMenuItem key={p.id}>
+                        <SidebarMenuButton
+                          isActive={
+                            navigation.project === p.id && view === "tickets"
+                          }
+                          tooltip={p.name}
+                          onClick={() => scope("all", p.id)}
+                        >
+                          <Folder size={16} />{" "}
+                          <span title={p.name}>{p.name}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={
+                          navigation.project === "unlinked" &&
+                          view === "tickets"
+                        }
+                        tooltip="No project"
+                        onClick={() => scope("all", "unlinked")}
+                      >
+                        {/* Dashed: not a project, the tickets that have none. */}
+                        <Folder
+                          size={16}
+                          style={{ strokeDasharray: "2.5 2.5" }}
+                        />{" "}
+                        No project
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                </nav>
+              </>
+            )}
           </SidebarGroup>
           <SidebarGroup className="sidebar-group">
-            <div className="sidebar-heading">Context</div>
+            {!collapsed && <div className="sidebar-heading">Context</div>}
             <nav aria-label="Context" className="sidebar-nav">
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={view === "documents"}
+                    tooltip="Documents"
                     onClick={() => setView("documents")}
                   >
                     <FileText size={16} /> Documents
@@ -294,6 +435,7 @@ export function WorkspaceSidebar({
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={workspaceGraphOpen}
+                    tooltip="Workspace graph"
                     onClick={() => openGraph?.("__workspace__")}
                   >
                     <Network size={16} /> Workspace graph
@@ -303,49 +445,85 @@ export function WorkspaceSidebar({
             </nav>
           </SidebarGroup>
           <SidebarGroup className="sidebar-group">
-            <div className="sidebar-heading">
-              Plans{" "}
-              <ManageMenu
-                label="Manage Plans"
-                item="All Plans"
-                onSelect={() => setView("plans")}
-              />
-            </div>
-            <nav aria-label="Plan scopes" className="sidebar-nav">
-              <SidebarMenu>
-                {plans
-                  .filter((e) => !e.archived)
-                  .map((e) => (
-                    <SidebarMenuItem key={e.id}>
+            {collapsed ? (
+              <nav aria-label="Plans" className="sidebar-nav">
+                <SidebarMenu>
+                  <GroupMenu
+                    label="Plans"
+                    icon={Layers}
+                    entries={[
+                      ...plans
+                        .filter((e) => !e.archived)
+                        .map((e) => ({
+                          key: e.id,
+                          label: e.name,
+                          active:
+                            navigation.plan === e.id && view === "tickets",
+                          onSelect: () => scope("all", "all", e.id),
+                        })),
+                      {
+                        key: "archived",
+                        label: "Archived Plans",
+                        active: view === "archived-plans",
+                        onSelect: () => setView("archived-plans"),
+                      },
+                    ]}
+                    manage={{
+                      label: "All Plans",
+                      onSelect: () => setView("plans"),
+                    }}
+                  />
+                </SidebarMenu>
+              </nav>
+            ) : (
+              <>
+                <div className="sidebar-heading">
+                  Plans{" "}
+                  <ManageMenu
+                    label="Manage Plans"
+                    item="All Plans"
+                    onSelect={() => setView("plans")}
+                  />
+                </div>
+                <nav aria-label="Plan scopes" className="sidebar-nav">
+                  <SidebarMenu>
+                    {plans
+                      .filter((e) => !e.archived)
+                      .map((e) => (
+                        <SidebarMenuItem key={e.id}>
+                          <SidebarMenuButton
+                            isActive={
+                              navigation.plan === e.id && view === "tickets"
+                            }
+                            tooltip={e.name}
+                            onClick={() => scope("all", "all", e.id)}
+                          >
+                            <Layers size={16} />{" "}
+                            <span title={e.name}>{e.name}</span>
+                            {navigation.plan === e.id &&
+                              view === "tickets" &&
+                              activePlanCount !== undefined && (
+                                <SidebarCount value={activePlanCount} />
+                              )}
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    <SidebarMenuItem>
                       <SidebarMenuButton
-                        isActive={
-                          navigation.plan === e.id && view === "tickets"
-                        }
-                        onClick={() => scope("all", "all", e.id)}
+                        isActive={view === "archived-plans"}
+                        tooltip="Archived Plans"
+                        onClick={() => setView("archived-plans")}
                       >
-                        <Layers size={16} />{" "}
-                        <span title={e.name}>{e.name}</span>
-                        {navigation.plan === e.id &&
-                          view === "tickets" &&
-                          activePlanCount !== undefined && (
-                            <SidebarCount value={activePlanCount} />
-                          )}
+                        <Archive size={16} /> Archived Plans
+                        {archivedPlans > 0 && (
+                          <SidebarCount value={archivedPlans} />
+                        )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
-                  ))}
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    isActive={view === "archived-plans"}
-                    onClick={() => setView("archived-plans")}
-                  >
-                    <Archive size={16} /> Archived Plans
-                    {archivedPlans > 0 && (
-                      <SidebarCount value={archivedPlans} />
-                    )}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </nav>
+                  </SidebarMenu>
+                </nav>
+              </>
+            )}
           </SidebarGroup>
         </div>
       </SidebarContent>
@@ -356,6 +534,7 @@ export function WorkspaceSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={navigation.kind === "trash" && view === "tickets"}
+                tooltip="Trash"
                 onClick={() => scope("trash")}
               >
                 <Trash2 size={16} /> Trash
@@ -365,6 +544,7 @@ export function WorkspaceSidebar({
               <SidebarMenuButton
                 id="sidebar-settings"
                 isActive={view === "settings"}
+                tooltip="Settings"
                 onClick={() => setView("settings")}
               >
                 <Settings size={16} /> Settings

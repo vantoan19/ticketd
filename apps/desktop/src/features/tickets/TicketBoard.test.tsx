@@ -230,8 +230,17 @@ async function settle(ms = 0) {
     await vi.advanceTimersByTimeAsync(ms);
   });
 }
+/** The Layout choice lives in the Display menu; open it when it is closed. */
+function layoutRadio(name: "List" | "Board") {
+  if (!screen.queryByRole("radio", { name }))
+    fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  return screen.getByRole("radio", { name });
+}
+function chooseLayout(name: "List" | "Board") {
+  fireEvent.click(layoutRadio(name));
+}
 async function showBoard() {
-  fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+  chooseLayout("Board");
   await settle();
 }
 async function chooseStatus(reference: string, status: string) {
@@ -244,6 +253,24 @@ async function chooseStatus(reference: string, status: string) {
   fireEvent.click(screen.getByRole("menuitemradio", { name: status }));
   await settle();
 }
+
+test("Display holds Layout and Rows; both persist and the header carries no toggles", async () => {
+  render(<App />);
+  await settle();
+  expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  expect(layoutRadio("List").getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(screen.getByRole("radio", { name: "Simple" }));
+  expect(
+    JSON.parse(localStorage.getItem("ticketd.preferences")!).ticketRows,
+  ).toBe("simple");
+  expect(
+    screen.getByRole("radio", { name: "Simple" }).getAttribute("aria-checked"),
+  ).toBe("true");
+  chooseLayout("Board");
+  await settle();
+  expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
+});
 
 test("Board and List resizing retain independent pane widths without replacing the detail draft", async () => {
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(1000);
@@ -265,7 +292,7 @@ test("Board and List resizing retain independent pane widths without replacing t
   await settle();
   const boardSize = size();
   expect(boardSize).toBeGreaterThan(44);
-  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  chooseLayout("List");
   await settle();
   expect(size()).toBeCloseTo(listSize);
   await showBoard();
@@ -281,7 +308,7 @@ test("Board and List resizing retain independent pane widths without replacing t
   await settle();
   separator = screen.getByRole("separator", { name: "Resize ticket list" });
   expect(size()).toBeCloseTo(boardSize);
-  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  chooseLayout("List");
   await settle();
   expect(size()).toBeCloseTo(listSize);
 });
@@ -453,7 +480,10 @@ test("a pointer held at the board edge scrolls to offscreen destinations and col
     clientWidth: { configurable: true, value: 560 },
   });
   const column = screen.getByRole("region", { name: "In progress column" });
-  const body = within(column).getByText("No matching tickets").parentElement!;
+  // The column header names the status, so every empty column reads alike and
+  // the copy never wraps beside its action.
+  expect(within(column).getByText("No tickets")).toBeTruthy();
+  const body = column.querySelector<HTMLElement>(".board-column-body")!;
   vi.spyOn(body, "getBoundingClientRect").mockReturnValue(
     new DOMRect(280, 32, 280, 568),
   );
@@ -576,7 +606,7 @@ test("a column empty because of Ready filtering accepts a drag and explains the 
       screen.getByRole("region", { name: "Ticket status board" }),
     ).queryByText("Ticket 1"),
   ).toBeNull();
-  expect(screen.getAllByText("No matching tickets")).toHaveLength(6);
+  expect(screen.getAllByText("No matches")).toHaveLength(6);
 });
 
 test("choosing the saved status does not write, and a pending card cannot submit another move", async () => {
@@ -983,7 +1013,7 @@ test("switching layouts preserves a pending card request and its protection", as
   await settle();
   await showBoard();
   await chooseStatus("T-1", "Done");
-  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  chooseLayout("List");
   await settle();
   await showBoard();
   expect(
@@ -1100,9 +1130,7 @@ test("a card status action changes only that ticket and leaves the selected deta
 test("List is the default and Board keeps all six columns, including empty statuses", async () => {
   render(<App />);
   await settle();
-  expect(
-    screen.getByRole("radio", { name: "List" }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(layoutRadio("List").getAttribute("aria-checked")).toBe("true");
   await showBoard();
   const board = screen.getByRole("region", { name: "Ticket status board" });
   expect(
@@ -1131,7 +1159,13 @@ test("List is the default and Board keeps all six columns, including empty statu
   ).toBeTruthy();
   expect(
     within(screen.getByRole("region", { name: "Done column" })).getByText(
-      "No matching tickets",
+      "No tickets",
+    ),
+  ).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Done column" })).getByRole(
+      "button",
+      { name: "Add ticket" },
     ),
   ).toBeTruthy();
   expect(screen.getByText("Counts reflect current filters.")).toBeTruthy();
@@ -1205,6 +1239,7 @@ test("an obsolete Load more response cannot put tickets back into a different sc
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   expect(screen.getByRole("button", { name: /T-56.*Ticket 56/ })).toBeTruthy();
@@ -1274,7 +1309,7 @@ test("a card outside the List page opens existing detail, preserves its draft ac
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Unpublished draft" },
   });
-  fireEvent.click(screen.getByRole("radio", { name: "List" }));
+  chooseLayout("List");
   await settle();
   await showBoard();
   expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty(
@@ -1316,6 +1351,7 @@ test("layout preference survives navigation and restart while search and status 
   expect(
     within(screen.getByRole("region", { name: "Todo column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   expect(
@@ -1326,30 +1362,23 @@ test("layout preference survives navigation and restart while search and status 
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /^Ready/ }));
   await settle();
-  expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
   expect(
     within(screen.getByRole("region", { name: "Done column" })).queryByRole(
       "button",
+      { name: /^T-d+/ },
     ),
   ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
   await settle();
-  expect(
-    screen.queryByRole("radiogroup", { name: "Ticket layout" }),
-  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "Display" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "All tickets" }));
   await settle();
-  expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
   first.unmount();
   render(<App />);
   await settle();
-  expect(
-    screen.getByRole("radio", { name: "Board" }).getAttribute("aria-checked"),
-  ).toBe("true");
+  expect(layoutRadio("Board").getAttribute("aria-checked")).toBe("true");
 });
 
 test("cards retain source, project, Plan and core readiness context; project and No project scopes reuse the board", async () => {
@@ -1443,7 +1472,8 @@ test("cards retain source, project, Plan and core readiness context; project and
   expect(screen.getByRole("button", { name: /T-3.*Ticket 3/ })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Release plan" }));
   await settle();
-  expect(
-    screen.queryByRole("radiogroup", { name: "Ticket layout" }),
-  ).toBeNull();
+  // A Plan takes its layout from its header, so Display offers only Rows.
+  fireEvent.click(screen.getByRole("button", { name: "Display" }));
+  expect(screen.getByRole("radiogroup", { name: "Rows" })).toBeTruthy();
+  expect(screen.queryByRole("radiogroup", { name: "Layout" })).toBeNull();
 });
