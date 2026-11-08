@@ -90,7 +90,7 @@ export function ExportMarkdownButton({
           }}
         >
           <DialogContent
-            className="portable-export-dialog"
+            className="sm:max-w-170 max-h-dvh overflow-y-auto"
             returnFocus={trigger}
           >
             <DialogHeader>

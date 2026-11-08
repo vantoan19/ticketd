@@ -181,7 +181,7 @@
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
 }
 .upload-destination-choice[data-state="checked"] {

@@ -111,13 +111,6 @@
 .attachment-library footer {
   margin-top: 16px;
 }
-.attachment-cleanup-dialog {
-  width: min(680px, calc(100vw - 32px));
-  max-width: min(680px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  font-size: var(--text-ui);
-}
 .attachment-cleanup-files {
   min-height: 0;
   max-height: 45dvh;

@@ -145,7 +145,7 @@ export function AttachmentCleanup({
       }}
     >
       <DialogContent
-        className="attachment-cleanup-dialog"
+        className="sm:max-w-170 max-h-dvh overflow-y-auto"
         showCloseButton={!busy}
       >
         <DialogHeader>

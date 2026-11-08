@@ -91,7 +91,12 @@ import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import {
   Popover,
   PopoverContent,
@@ -1257,14 +1262,16 @@ export function MarkdownEditor({
       }}
     >
       {recoveryError && (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertTitle>Could not protect recoverable drafts</AlertTitle>
           <AlertDescription>
             Keep this window open. {recoveryError}
+          </AlertDescription>
+          <AlertActions>
             <Button type="button" onClick={recovery.retry}>
               Retry draft recovery
             </Button>
-          </AlertDescription>
+          </AlertActions>
         </Alert>
       )}
       {recovery.active &&

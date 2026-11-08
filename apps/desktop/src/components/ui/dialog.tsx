@@ -47,12 +47,18 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  variant = "default",
   returnFocus,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
+  /**
+   * `flush` drops the padding and gap so the content draws its own
+   * full-width header, body and footer bands, as the attachment preview does.
+   */
+  variant?: "default" | "flush";
   /** Where focus goes on close when the opener no longer exists. */
   returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
@@ -66,7 +72,8 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "ui-dialog fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 p-6 outline-none sm:max-w-lg",
+          "ui-dialog fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 outline-none sm:max-w-lg",
+          variant === "flush" ? "gap-0 overflow-hidden p-0" : "gap-4 p-6",
           className,
         )}
         {...props}

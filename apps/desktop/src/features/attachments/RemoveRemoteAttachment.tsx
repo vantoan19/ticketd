@@ -67,7 +67,7 @@ export function RemoveRemoteAttachment({
       }}
     >
       <DialogContent
-        className="attachment-cleanup-dialog"
+        className="sm:max-w-170 max-h-dvh overflow-y-auto"
         showCloseButton={!busy}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
@@ -81,7 +81,7 @@ export function RemoveRemoteAttachment({
         }}
       >
         <DialogHeader>
-          <DialogTitle className="pr-6">
+          <DialogTitle className="mr-6">
             {result ? "Removed from ticketd" : "Remove from ticketd?"}
           </DialogTitle>
           <DialogDescription>

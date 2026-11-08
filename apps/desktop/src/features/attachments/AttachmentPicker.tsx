@@ -442,7 +442,10 @@ export function AttachmentPicker({
   const existingInsertion = insertion.current;
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent ref={dropTarget} className="attachment-picker">
+      <DialogContent
+        ref={dropTarget}
+        className="sm:max-w-170 max-h-dvh overflow-y-auto"
+      >
         <DialogHeader>
           <DialogTitle>
             {purpose === "store" ? "Add files" : "Attach file"}
