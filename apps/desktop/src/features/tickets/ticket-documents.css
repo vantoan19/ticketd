@@ -20,11 +20,8 @@
   margin: 0;
   padding: 0;
 }
-.ticket-documents-row {
-  display: flex;
+.ticket-documents [data-slot="item"] {
   flex-wrap: wrap;
-  align-items: center;
-  min-width: 0;
 }
 /* The title takes the row's width; it wraps to two lines before it is cut. */
 .ticket-documents-title {
@@ -57,7 +54,7 @@
 .ticket-documents-badge {
   flex: none;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   background: var(--accent);
   color: var(--secondary-foreground);
   font-size: var(--text-caption);
@@ -68,7 +65,7 @@
   place-items: center;
   width: 20px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
 }
 .ticket-documents-unlink:hover,
@@ -93,7 +90,7 @@
   min-width: 0;
   min-height: 32px;
   padding: 0 4px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   font-size: var(--text-ui);
 }
@@ -131,11 +128,6 @@
 .document-picker-list {
   max-height: 14rem;
   overflow-y: auto;
-}
-.document-picker-empty {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
 }
 
 .ticket-documents-edit {

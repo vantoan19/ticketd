@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useEffect, useId, useState } from "react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FileText } from "lucide-react";
@@ -92,7 +93,7 @@ export function DocumentPicker({
       </ul>
       {results !== null && shown.length === 0 && !error && (
         <EmptyState
-          inline
+          size="inline"
           role="status"
           icon={<FileText />}
           title={
@@ -106,6 +107,13 @@ export function DocumentPicker({
             query.trim()
               ? "Try a different search."
               : "Documents you create appear here."
+          }
+          action={
+            query.trim() && (
+              <Button variant="outline" size="sm" onClick={() => setQuery("")}>
+                Clear search
+              </Button>
+            )
           }
         />
       )}

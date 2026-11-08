@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StatusDot } from "@/components/ui/status-dot";
 import type { Ticket } from "@/lib/api/client";
 import {
@@ -143,21 +144,20 @@ export function PublicationNotice({
     );
   if (!attempt || attempt.state !== "unresolved") return null;
   return (
-    <section
-      className="publication-notice"
+    <Alert
+      tone="attention"
+      role="region"
       aria-label="Publish outcome unknown"
+      className="mb-6"
     >
-      <h3>
-        <StatusDot tone="attention" size={10} />
-        Publish outcome unknown
-      </h3>
-      <p>
+      <AlertTitle level={3}>Publish outcome unknown</AlertTitle>
+      <AlertDescription>
         {providerName(attempt.provider)} may have created an issue in{" "}
         <span className="source-number">{attempt.destination}</span> when you
         published <span className="source-number">{attempt.reference}</span> at{" "}
         {formatDateTime(attempt.started_at)}. This ticket stays Local until the
         outcome is settled.
-      </p>
+      </AlertDescription>
       <ReviewBody
         inline
         attempt={attempt}
@@ -166,7 +166,7 @@ export function PublicationNotice({
         }}
         refresh={refresh}
       />
-    </section>
+    </Alert>
   );
 }
 

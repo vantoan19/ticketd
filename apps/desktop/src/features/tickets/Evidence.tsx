@@ -1,3 +1,5 @@
+import { EmptyState } from "@/components/ui/empty-state";
+import { SectionHeader } from "@/components/ui/section-header";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, FieldGroup } from "@/components/ui/field";
@@ -164,22 +166,24 @@ export function Evidence({
   }
   return (
     <section aria-label="Evidence" className="evidence-section">
-      <div className="evidence-heading">
-        <h3>
-          Evidence{" "}
-          <span className="text-muted-foreground">{items.length || ""}</span>
-        </h3>
-        {!trashed && (
-          <Button variant="ghost" size="sm" onClick={startAdding}>
-            <Plus data-icon="inline-start" />
-            Add evidence
-          </Button>
-        )}
-      </div>
+      <SectionHeader
+        title="Evidence"
+        count={items.length || undefined}
+        actions={
+          !trashed && (
+            <Button variant="ghost" size="sm" onClick={startAdding}>
+              <Plus data-icon="inline-start" />
+              Add evidence
+            </Button>
+          )
+        }
+      />
       {!items.length && (
-        <p className="evidence-empty text-muted-foreground text-xs">
-          Link a pull request, commit, or verification result.
-        </p>
+        <EmptyState
+          size="inline"
+          plain
+          description="Link a pull request, commit, or verification result."
+        />
       )}
       {error && !composing && <p role="alert">{error}</p>}
       {confirmDelete && (

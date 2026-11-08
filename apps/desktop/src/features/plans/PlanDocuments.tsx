@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import {
   Popover,
   PopoverContent,
@@ -18,6 +19,7 @@ import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { plansClient, type View } from "@/lib/api/plans";
 import type { PlanViewState } from "./usePlanView";
 import "@/features/tickets/ticket-documents.css";
+import { Badge } from "@/components/ui/badge";
 
 export function PlanDocuments({
   view,
@@ -41,74 +43,79 @@ export function PlanDocuments({
   const rest = supporting.filter((doc) => doc.id !== featured?.id);
   function documentRow(doc: View["documents"][number], chip = false) {
     const isSpec = doc.id === spec?.id;
+    const open = () => openDocument?.(doc.id, `Back to ${view.plan.name}`);
+    const heading = (
+      <>
+        {doc.heading}
+        {doc.trashed && " (Trashed)"}
+      </>
+    );
     return (
-      <li key={doc.id} className="plan-document-row">
-        {!chip && <FileText aria-hidden="true" size={14} />}
-        <button
-          type="button"
-          className={chip ? "plan-spec-chip" : undefined}
-          title={doc.heading}
-          onClick={() => openDocument?.(doc.id, `Back to ${view.plan.name}`)}
-        >
-          {chip && (
-            <>
-              <FileText aria-hidden="true" size={14} />
-              <span className="plan-spec-label">
-                {isSpec ? "Spec:" : "Document:"}
-              </span>{" "}
-            </>
+      <Item key={doc.id} asChild>
+        <li>
+          {!chip && <FileText aria-hidden="true" size={14} />}
+          {chip ? (
+            <Badge variant="doc" asChild>
+              <button type="button" title={doc.heading} onClick={open}>
+                <FileText aria-hidden="true" size={14} />
+                <span className="plan-spec-label">
+                  {isSpec ? "Spec:" : "Document:"}
+                </span>{" "}
+                <span className="plan-spec-title">{heading}</span>
+              </button>
+            </Badge>
+          ) : (
+            <button type="button" title={doc.heading} onClick={open}>
+              <span>{heading}</span>
+            </button>
           )}
-          <span className={chip ? "plan-spec-title" : undefined}>
-            {doc.heading}
-            {doc.trashed && " (Trashed)"}
-          </span>
-        </button>
-        {!readOnly && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <IconButton
-                label={`Actions for ${doc.heading}`}
-                disabled={state.pending}
-              >
-                <MoreHorizontal />
-              </IconButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
-              {isSpec ? (
+          {!readOnly && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton
+                  label={`Actions for ${doc.heading}`}
+                  disabled={state.pending}
+                >
+                  <MoreHorizontal />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                {isSpec ? (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      void state.run(() =>
+                        plansClient.setSpec(view.plan.id, null),
+                      )
+                    }
+                  >
+                    Stop using as spec
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    disabled={doc.trashed}
+                    onSelect={() =>
+                      void state.run(() =>
+                        plansClient.setSpec(view.plan.id, doc.id),
+                      )
+                    }
+                  >
+                    Set as spec
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onSelect={() =>
                     void state.run(() =>
-                      plansClient.setSpec(view.plan.id, null),
+                      plansClient.setDocument(view.plan.id, doc.id, false),
                     )
                   }
                 >
-                  Stop using as spec
+                  Remove from Plan
                 </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  disabled={doc.trashed}
-                  onSelect={() =>
-                    void state.run(() =>
-                      plansClient.setSpec(view.plan.id, doc.id),
-                    )
-                  }
-                >
-                  Set as spec
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onSelect={() =>
-                  void state.run(() =>
-                    plansClient.setDocument(view.plan.id, doc.id, false),
-                  )
-                }
-              >
-                Remove from Plan
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </li>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </li>
+      </Item>
     );
   }
   return (

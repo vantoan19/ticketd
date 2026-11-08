@@ -181,6 +181,32 @@ test("an unavailable source shows the failure, the last good sync and a working 
   expect(refreshAll).toHaveBeenCalled();
 });
 
+test("the tooltip carries the detail line the collapsed sidebar hides", () => {
+  render(
+    withActivity(
+      {
+        sources: [
+          status({
+            health: "unavailable",
+            error: { code: "unavailable", message: "Network is down." },
+            failing_since: minutesAgo(12),
+            unavailable_tickets: 3,
+          }),
+        ],
+      },
+      <SourceStatusFooter />,
+    ),
+  );
+  // Hidden text in the collapsed sidebar: the accessible description keeps it.
+  expect(
+    screen.getByRole("button", {
+      name: /3 source issues/,
+      description: "GitHub last synced 4 min ago",
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByTitle(/3 source issues/)).toBeNull();
+});
+
 test("a rate limit reads as delayed, not unavailable", () => {
   render(
     withActivity(
@@ -239,9 +265,8 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   const notice = screen.getByRole("region", { name: "Source unavailable" });
   expect(within(notice).getByText(/Source unavailable/)).toBeTruthy();
   expect(notice.textContent).toContain(
-    "Nothing in ticketd was deleted or completed.",
+    "and nothing in ticketd was deleted or completed.",
   );
-  expect(notice.textContent).toContain("the last synced copy from");
   expect(notice.querySelector("code")?.textContent).toBe("acme/api#98");
   expect(
     within(notice).getByRole("button", { name: /Take ownership/ }),

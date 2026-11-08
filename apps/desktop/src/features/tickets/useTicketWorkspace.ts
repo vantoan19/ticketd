@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTicketBoard } from "./useTicketBoard";
+import { useBoardStatus } from "./useBoardStatus";
 import {
   client,
   type FindFilter,
@@ -13,7 +15,7 @@ import {
   type SourceEntry,
   type SourceHealth,
 } from "@/lib/api/sources";
-import { loadPreferences } from "@/lib/preferences";
+import { loadPreferences, usePreferences } from "@/lib/preferences";
 import {
   useOnWorkspaceChange,
   useWorkspaceChange,
@@ -40,6 +42,7 @@ export function useTicketWorkspace(
   setView: (view: View) => void,
   setCreating: (value: boolean) => void,
 ) {
+  const { ticketLayout } = usePreferences();
   const [projects, setProjects] = useState<Project[]>([]);
   const [plans, setPlans] = useState<
     { id: string; name: string; archived: boolean; purpose: string }[]
@@ -116,7 +119,8 @@ export function useTicketWorkspace(
   // The list only changes when a listed ticket does, but a Document, Activity or
   // another ticket can change what the open ticket's page shows. Pages key their
   // reads on this revision, so it also moves with every workspace change.
-  const revision = listRevision + useWorkspaceChange();
+  const workspaceChange = useWorkspaceChange();
+  const revision = listRevision + workspaceChange;
   // Advances on every successful poll, changed data or not, for views that poll their own sources.
   const [pollTick, setPollTick] = useState(0);
   const generation = useRef(0);
@@ -125,34 +129,40 @@ export function useTicketWorkspace(
   // refetch whenever the same scope is chosen again.
   const scopeKind = navigation.kind;
   const scopePlan = navigation.plan;
+  const layout = !trash ? ticketLayout : "list";
+  const filterArgs = useMemo<FindFilter>(
+    () => ({
+      query,
+      project: filter === "all" || filter === "unlinked" ? null : filter,
+      unlinked: filter === "unlinked",
+      plan: plan || null,
+      status: status || null,
+      tags: tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      availability: availability || null,
+      family: family || null,
+      source:
+        source === "all"
+          ? null
+          : source === "local"
+            ? "Local"
+            : { Provider: source },
+      order: query ? "Newest" : "Workflow",
+      limit: PAGE_SIZE,
+      offset,
+    }),
+    [query, filter, plan, status, tags, availability, family, source, offset],
+  );
+  const board = useTicketBoard(filterArgs, layout === "board", workspaceChange);
+  const refreshBoard = board.refresh;
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     let timeout = 0;
     try {
       // A search lists newest first, like Trash; every other list is grouped by
       // status, so it pages through workflow order.
-      const filterArgs: FindFilter = {
-        query,
-        project: filter === "all" || filter === "unlinked" ? null : filter,
-        unlinked: filter === "unlinked",
-        plan: plan || null,
-        status: status || null,
-        tags: tags
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        availability: availability || null,
-        family: family || null,
-        source:
-          source === "all"
-            ? null
-            : source === "local"
-              ? "Local"
-              : { Provider: source },
-        order: query ? "Newest" : "Workflow",
-        limit: PAGE_SIZE,
-        offset,
-      };
       // What the scope alone would list, so a filtered list can say "N of M".
       const unfiltered: FindFilter = {
         ...filterArgs,
@@ -180,6 +190,7 @@ export function useTicketWorkspace(
           trash || scoped
             ? Promise.resolve(null)
             : client.countTickets(unfiltered).catch(() => null),
+          layout === "board" ? refreshBoard() : Promise.resolve(),
         ]),
         new Promise<never>((_, reject) => {
           timeout = window.setTimeout(
@@ -232,20 +243,7 @@ export function useTicketWorkspace(
       window.clearTimeout(timeout);
       if (request === generation.current) setLoading(false);
     }
-  }, [
-    trash,
-    query,
-    filter,
-    offset,
-    plan,
-    status,
-    tags,
-    availability,
-    family,
-    source,
-    scopeKind,
-    scopePlan,
-  ]);
+  }, [trash, offset, scopeKind, scopePlan, filterArgs, layout, refreshBoard]);
   useEffect(() => {
     let active = true;
     void sourcesClient.list().then(
@@ -394,6 +392,7 @@ export function useTicketWorkspace(
       }),
     );
   }, []);
+  const statusAction = useBoardStatus({ board, refresh, updateTicket });
   const total = counts ? counts.total : tickets.length;
   const selectedIndex = tickets.findIndex(
     (item) => item.reference === selected,
@@ -476,6 +475,9 @@ export function useTicketWorkspace(
     setOffset(0);
   }
   return {
+    layout,
+    board,
+    statusAction,
     source,
     setSource,
     sourceCounts,

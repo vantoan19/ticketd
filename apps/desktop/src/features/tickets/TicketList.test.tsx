@@ -284,3 +284,60 @@ test("a single-status view still shows that a ticket is blocked", () => {
   );
   expect(screen.getByText("Blocked by T-9")).toBeTruthy();
 });
+
+test("simple rows keep the reference, title, readiness and time, and hide tags and context", () => {
+  renderList(
+    [
+      ticket({
+        tags: ["checkout"],
+        plan_id: "e1",
+        updated_at: "2026-01-01T00:00:00Z",
+      }),
+    ],
+    { simple: true },
+  );
+  expect(screen.getByText("T-1")).toBeTruthy();
+  expect(screen.getByText("First ticket")).toBeTruthy();
+  expect(screen.getByText("Ready")).toBeTruthy();
+  expect(screen.getByText(/Updated/)).toBeTruthy();
+  expect(screen.queryByText("checkout")).toBeNull();
+  expect(screen.queryByText("Launch")).toBeNull();
+});
+
+test("detailed rows show tags and context", () => {
+  renderList([ticket({ tags: ["checkout"], plan_id: "e1" })]);
+  expect(screen.getByText("checkout")).toBeTruthy();
+  expect(screen.getByText("Launch")).toBeTruthy();
+});
+
+test("a simple row's readiness dot is never alone: it has a tooltip and a name", () => {
+  renderList([ticket({})], { simple: true });
+  expect(screen.getByTitle("Ready").textContent).toBe("Ready");
+});
+
+test("the Ready view leaves out the per-row Ready dot, simple rows too", () => {
+  renderList([ticket({})], { simple: true, readyView: true });
+  expect(screen.queryByText("Ready")).toBeNull();
+});
+
+test("a simple row's name carries its Ready and Blocked words", () => {
+  renderList(
+    [
+      ticket({}),
+      ticket({
+        id: "t2",
+        reference: "T-2",
+        title: "Second ticket",
+        availability: "Blocked",
+        prerequisites: [prerequisite("T-9", "Todo")],
+      }),
+    ],
+    { simple: true },
+  );
+  expect(
+    screen.getByRole("button", { name: /First ticket.*Ready/ }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: /Second ticket.*Blocked/ }),
+  ).toBeTruthy();
+});

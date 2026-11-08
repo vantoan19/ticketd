@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { cn } from "cn";
 import { RadioGroup } from "radix-ui";
+import { Count } from "./count";
 
 export type SegmentedOption<T extends string> = {
   value: T;
@@ -50,15 +51,13 @@ export function SegmentedControl<T extends string>({
           disabled={option.disabled ?? false}
           title={option.title}
           className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-[4px] px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
+            "inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-sm text-secondary-foreground outline-none focus-visible:shadow-(--focus-ring) enabled:hover:text-foreground data-[state=checked]:bg-(--surface) data-[state=checked]:text-foreground data-[state=checked]:shadow-(--shadow-small) disabled:cursor-not-allowed disabled:text-(--disabled-foreground) [&_svg]:size-4 [&_svg]:shrink-0",
             compact && "h-6 px-2 text-xs",
           )}
         >
           {option.icon}
           {option.label}{" "}
-          {option.count !== undefined && (
-            <span className="segmented-count">{option.count}</span>
-          )}
+          {option.count !== undefined && <Count>{option.count}</Count>}
         </RadioGroup.Item>
       ))}
     </RadioGroup.Root>

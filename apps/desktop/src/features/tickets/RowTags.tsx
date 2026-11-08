@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { fittingTags } from "./ticket-row";
+import { Badge } from "@/components/ui/badge";
 
 /**
  * Line two's tag pills: as many whole pills as the line has room for (half of
@@ -48,17 +49,14 @@ export function RowTags({ tags }: { tags: readonly string[] }) {
   return (
     <span className="ticket-row-tags" ref={box}>
       {tags.slice(0, visible).map((tag) => (
-        <span className="ticket-tag" data-tag key={tag}>
+        <Badge size="sm" data-tag key={tag}>
           {tag}
-        </span>
+        </Badge>
       ))}
       {more > 0 && (
-        <span
-          className="ticket-tag ticket-tag-more"
-          title={tags.slice(visible).join(", ")}
-        >
+        <Badge size="sm" data-more title={tags.slice(visible).join(", ")}>
           +{more}
-        </span>
+        </Badge>
       )}
     </span>
   );

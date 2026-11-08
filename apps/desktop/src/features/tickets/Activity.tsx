@@ -1,3 +1,4 @@
+import { SectionHeader } from "@/components/ui/section-header";
 import { documents } from "@/features/documents/api";
 import { DocumentPicker } from "./DocumentPicker";
 import { hasVisibleText } from "./brief-text";
@@ -18,7 +19,7 @@ import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   DropdownMenu,
@@ -26,7 +27,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Bot, FileText, MoreHorizontal, Plus, History } from "lucide-react";
+import {
+  Bot,
+  FileText,
+  MessageSquare,
+  MoreHorizontal,
+  Plus,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
 import {
   client,
   type AuthoredActivity,
@@ -34,7 +43,13 @@ import {
   type Project,
 } from "@/lib/api/client";
 import type { Plan } from "@/lib/api/plans";
-import { historySentence } from "./history-sentence";
+import {
+  describeAdditions,
+  historySentence,
+  isAddition,
+} from "./history-sentence";
+import type { Entry } from "@/lib/api/history";
+import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
 import { relativeDateTime, formatDateTime } from "@/lib/format";
 import { revealInDetail } from "./detail-scroll";
@@ -229,9 +244,23 @@ export function Activity({
   const notes = feed.flatMap((item) =>
     item.type === "authored" ? [item.activity] : [],
   );
-  const history = feed.flatMap((item) =>
-    item.type === "automatic" ? [item.event] : [],
-  );
+  // Additions of one kind by one agent in the same second share one row.
+  const history = feed
+    .flatMap((item) => (item.type === "automatic" ? [item.event] : []))
+    .reduce<{ entry: Entry; values: string[] }[]>((rows, entry) => {
+      const together = isAddition(entry)
+        ? rows.find(
+            (row) =>
+              isAddition(row.entry) &&
+              row.entry.kind === entry.kind &&
+              row.entry.editing_agent === entry.editing_agent &&
+              row.entry.timestamp.slice(0, 19) === entry.timestamp.slice(0, 19),
+          )
+        : undefined;
+      if (together) together.values.push(entry.to_value);
+      else rows.push({ entry, values: [entry.to_value] });
+      return rows;
+    }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<Draft>(
@@ -605,10 +634,11 @@ export function Activity({
       timestamp: note.reported_at,
       note,
     })),
-    ...history.map((entry, index) => ({
+    ...history.map(({ entry, values }, index) => ({
       type: "history" as const,
       timestamp: entry.timestamp,
       entry,
+      values,
       index,
     })),
   ]
@@ -628,8 +658,13 @@ export function Activity({
   const draftText = edit ? edit.content : draft;
   return (
     <section className="activity" aria-label="Activity">
-      <div className="activity-heading">
-        <h3>Activity</h3>
+      {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
+      <SectionHeader
+        title="Activity"
+        caption={
+          sourceName && <>Only in ticketd · never sent to {sourceName}</>
+        }
+      >
         <SegmentedControl
           aria-label="Show activity"
           value={view}
@@ -639,11 +674,7 @@ export function Activity({
             { value: "updates", label: "Updates" },
           ]}
         />
-        {/* Only worth saying where a source owns the ticket and could be confused for the destination. */}
-        {sourceName && (
-          <span>Only in ticketd · never sent to {sourceName}</span>
-        )}
-      </div>
+      </SectionHeader>
       {feedback && (
         <p role="status" className="activity-muted">
           {feedback}
@@ -668,7 +699,7 @@ export function Activity({
         </Alert>
       )}
       {(error || loadError) && (
-        <Alert variant="destructive">
+        <Alert tone="error">
           <AlertDescription>{error || loadError}</AlertDescription>
         </Alert>
       )}
@@ -937,20 +968,19 @@ export function Activity({
           Loading activity…
         </p>
       ) : entries.length === 0 && !error && !loadError ? (
-        <Empty className="activity-empty">
-          <EmptyHeader>
-            <EmptyDescription>
-              No updates or recorded changes yet.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <EmptyState
+          size="inline"
+          plain
+          description="No updates or recorded changes yet."
+        />
       ) : (
-        <ol className="activity-list">
+        <Timeline aria-label="Activity timeline">
           {entries.map((item) =>
             item.type === "note" ? (
-              <li
+              <CommentRow
                 key={`note-${item.note.id}`}
-                className="activity-entry"
+                icon={item.note.editing_agent ? Bot : MessageSquare}
+                label={`Update by ${item.note.editing_agent ?? "you"}`}
                 ref={
                   active &&
                   item.note.id === targetId &&
@@ -972,77 +1002,81 @@ export function Activity({
                     ? "Selected update"
                     : undefined
                 }
-              >
-                <div className="activity-meta">
-                  <Bot aria-hidden="true" className="activity-author-icon" />
-                  <strong>{item.note.editing_agent ?? "You"}</strong>
-                  <span>
-                    update ·{" "}
-                    <time
-                      dateTime={item.note.reported_at}
-                      title={formatDateTime(item.note.reported_at)}
-                    >
-                      {relativeDateTime(item.note.reported_at, now)}
-                    </time>
-                  </span>
-                  {item.note.id === (newestNoteId ?? latestNoteId) && (
-                    <span className="activity-latest">Latest</span>
-                  )}
-                  {item.note.updated_at !== item.note.reported_at && (
-                    <span>Edited {formatDateTime(item.note.updated_at)}</span>
-                  )}
-                  {!trashed && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="activity-menu"
-                          disabled={pending}
-                          aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
-                        >
-                          <MoreHorizontal />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        onCloseAutoFocus={(event) => {
-                          // Focus goes to the composer, not back to the menu button.
-                          if (replied.current) {
-                            event.preventDefault();
-                            replied.current = false;
-                            setFocusUpdate((count) => count + 1);
-                          }
-                        }}
+                header={
+                  <span className="activity-author">
+                    <strong>{item.note.editing_agent ?? "You"}</strong>
+                    <span>
+                      update ·{" "}
+                      <time
+                        dateTime={item.note.reported_at}
+                        title={formatDateTime(item.note.reported_at)}
                       >
-                        <DropdownMenuItem
-                          disabled={!!edit}
-                          onSelect={() => reply(item.note.brief)}
+                        {relativeDateTime(item.note.reported_at, now)}
+                      </time>
+                    </span>
+                  </span>
+                }
+                actions={
+                  <span className="activity-header-end">
+                    {item.note.id === (newestNoteId ?? latestNoteId) && (
+                      <Badge size="sm">Latest</Badge>
+                    )}
+                    {item.note.updated_at !== item.note.reported_at && (
+                      <span>Edited {formatDateTime(item.note.updated_at)}</span>
+                    )}
+                    {!trashed && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={pending}
+                            aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          onCloseAutoFocus={(event) => {
+                            // Focus goes to the composer, not back to the menu button.
+                            if (replied.current) {
+                              event.preventDefault();
+                              replied.current = false;
+                              setFocusUpdate((count) => count + 1);
+                            }
+                          }}
                         >
-                          Reply
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            setEdit({
-                              id: item.note.id,
-                              original: item.note.brief,
-                              content: item.note.brief,
-                            })
-                          }
-                        >
-                          Edit update
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onSelect={() => setConfirmDelete(item.note.id)}
-                        >
-                          Delete update
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
+                          <DropdownMenuItem
+                            disabled={!!edit}
+                            onSelect={() => reply(item.note.brief)}
+                          >
+                            Reply
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              setEdit({
+                                id: item.note.id,
+                                original: item.note.brief,
+                                content: item.note.brief,
+                              })
+                            }
+                          >
+                            Edit update
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setConfirmDelete(item.note.id)}
+                          >
+                            Delete update
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </span>
+                }
+              >
                 {confirmDelete === item.note.id && (
                   <p role="alertdialog" className="activity-confirm">
                     {item.note.supporting_document_id
@@ -1067,39 +1101,55 @@ export function Activity({
                     </Button>
                   </p>
                 )}
-                <ClampedBrief>
-                  <MarkdownDocument
-                    source={item.note.brief}
-                    select={select}
-                    revision={revision}
-                  />
-                </ClampedBrief>
+                <div>
+                  <ClampedBrief>
+                    <MarkdownDocument
+                      source={item.note.brief}
+                      select={select}
+                      revision={revision}
+                    />
+                  </ClampedBrief>
+                </div>
                 {item.note.supporting_document_id && (
-                  <DetailsLink
-                    info={detailDocuments[item.note.supporting_document_id]}
-                    open={() =>
-                      openDocument?.(item.note.supporting_document_id!)
-                    }
-                  />
+                  <div>
+                    <DetailsLink
+                      info={detailDocuments[item.note.supporting_document_id]}
+                      open={() =>
+                        openDocument?.(item.note.supporting_document_id!)
+                      }
+                    />
+                  </div>
                 )}
-              </li>
+              </CommentRow>
             ) : (
-              <li key={`history-${item.index}`} className="activity-history">
-                <History aria-hidden="true" className="activity-history-icon" />
-                <span>{historySentence(item.entry, lookups)}</span>
-                <time
-                  dateTime={item.entry.timestamp}
-                  title={formatDateTime(item.entry.timestamp)}
-                >
-                  {relativeDateTime(item.entry.timestamp, now)}
-                </time>
-                {item.entry.editing_agent && (
-                  <span>{attribution(item.entry.editing_agent)}</span>
-                )}
-              </li>
+              <EventRow
+                key={`history-${item.index}`}
+                icon={historyIcon(item.entry.kind, item.entry.to_value)}
+                meta={
+                  <>
+                    ·{" "}
+                    <time
+                      dateTime={item.entry.timestamp}
+                      title={formatDateTime(item.entry.timestamp)}
+                    >
+                      {relativeDateTime(item.entry.timestamp, now)}
+                    </time>
+                    {item.entry.editing_agent && (
+                      <>
+                        {" "}
+                        · <span>{attribution(item.entry.editing_agent)}</span>
+                      </>
+                    )}
+                  </>
+                }
+              >
+                {item.values.length > 1
+                  ? describeAdditions(item.entry.kind, item.values)
+                  : historySentence(item.entry, lookups)}
+              </EventRow>
             ),
           )}
-        </ol>
+        </Timeline>
       )}
       {more && (
         <Button

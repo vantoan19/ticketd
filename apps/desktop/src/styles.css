@@ -77,11 +77,17 @@
   --interactive: #0072f5;
   --link-foreground: #005fcc;
   --destructive: #991b1b;
+  /* The red of the Windows close button, which the in-app title bar repeats. */
+  --window-close: #c42b1c;
+  --window-close-foreground: #ffffff;
   --error-surface: #fef2f2;
   --error-foreground: #991b1b;
   --popover: var(--surface);
   --popover-foreground: var(--foreground);
   --radius: 6px;
+  --radius-segment: 4px;
+  --radius-panel: 12px;
+  --radius-pill: 9999px;
   --font-mono:
     "Geist Mono", ui-monospace, SFMono-Regular, "Roboto Mono", monospace;
   --shadow-border-base: 0 0 0 1px #00000014;
@@ -189,7 +195,13 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-destructive: var(--destructive);
-  --radius-md: 6px;
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --color-status-ready: var(--status-ready);
+  --color-status-checked: var(--status-checked);
+  --color-status-blocked: var(--status-blocked);
+  --color-status-unread: var(--status-unread);
+  --color-status-neutral: var(--status-neutral);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -259,7 +271,7 @@
     color: var(--foreground);
     background: var(--surface);
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius);
     box-shadow: var(--shadow-border);
     font-size: var(--text-ui);
     line-height: 20px;
@@ -288,7 +300,7 @@
 
 .ui-button {
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: var(--text-ui);
   font-weight: 400;
   line-height: 14px;
@@ -320,6 +332,8 @@
 .ui-button-secondary {
   color: var(--foreground);
   background: var(--recessed);
+  /* Recessed matches a dark card surface, so the edge keeps it visible. */
+  box-shadow: var(--shadow-border-base);
 }
 .ui-button-ghost {
   color: var(--muted-foreground);
@@ -366,7 +380,7 @@
   color: var(--foreground);
   background: var(--surface);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border);
   font-size: var(--text-ui);
   font-weight: 400;
@@ -377,11 +391,12 @@
   outline: 1px solid var(--input-focus);
   outline-offset: 0;
 }
-/* Every Picker wears the same outline wherever it sits (board D: #00000024).
+/* Every Picker wears the same outline wherever it sits (board D, drawn with
+   --shadow-border-base: 8% in light, 14% in dark).
    :where() keeps this at the specificity of .ui-select, so the focus ring and
    the invalid ring below still win by order. */
 .ui-select.ui-picker:where(:not([aria-invalid="true"], :disabled)) {
-  box-shadow: inset 0 0 0 1px #00000024;
+  box-shadow: inset var(--shadow-border-base);
 }
 /* Label, value, chevron: the value follows the label rather than centring when
    the picker is stretched. */
@@ -421,7 +436,7 @@
   color: var(--popover-foreground);
   background: var(--popover);
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
 }
 .ui-popover {
   max-width: calc(100vw - 32px);
@@ -440,16 +455,17 @@
   box-shadow: var(--shadow-modal);
 }
 .ui-sheet[data-side="left"] {
-  border-radius: 0 12px 12px 0;
+  border-radius: 0 var(--radius-panel) var(--radius-panel) 0;
 }
 .ui-sheet[data-side="right"] {
-  border-radius: 12px 0 0 12px;
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .ui-overlay {
   background: color-mix(in srgb, var(--background) 80%, transparent);
 }
 /* Design frame D shows nothing of the empty detail behind a modal scrim. */
-body:has([data-slot="dialog-overlay"]) .detail-empty {
+body:has([data-slot="dialog-overlay"])
+  [data-slot="empty-state"][data-size="hint"] {
   visibility: hidden;
 }
 .ui-popover[data-state="open"],
@@ -503,15 +519,443 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 [data-slot="dropdown-menu-item"] {
   min-height: 32px;
   font-size: var(--text-ui);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
+/* Notice (components/ui/alert.tsx): one inline message with a tone. */
+.ui-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--recessed);
+  box-shadow: var(--shadow-border-base);
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-notice-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.ui-notice-description {
+  color: var(--muted-foreground);
+}
+.ui-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.ui-notice-error {
+  background: var(--error-surface);
+  box-shadow: none;
+}
+.ui-notice-error .ui-notice-title,
+.ui-notice-error .ui-notice-description {
+  color: var(--error-foreground);
+}
+.ui-notice-compact {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.ui-notice-compact .ui-notice-description {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Card: surface, header band, body and recessed footer. */
+.ui-card {
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+}
+.ui-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 16px;
+  background: var(--background);
+  box-shadow: inset 0 -1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.ui-card-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-card-header :is(h2, h3) {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  letter-spacing: -0.28px;
+}
+.ui-card-body {
+  padding: 12px 16px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-card-footer {
+  padding: 12px 16px;
+  background: var(--recessed);
+  box-shadow: inset 0 1px 0 0 var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+
+/* Timeline: one 2px line behind the badges and cards of an activity list. */
+.ui-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ui-timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 14px;
+  left: 13px;
+  width: 2px;
+  background: var(--control-boundary);
+  opacity: 0.35;
+}
+.ui-timeline > li {
+  position: relative;
+  z-index: 1;
+}
+.ui-event-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  overflow-wrap: anywhere;
+}
+.ui-event-row-badge {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.ui-event-row-badge svg {
+  width: 14px;
+  height: 14px;
+}
+.ui-event-row strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-event-row-text {
+  min-width: 0;
+}
+.ui-event-row-meta {
+  margin-inline-start: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  white-space: nowrap;
+}
+/* A comment: badge on the line, a header like an event row, the body beneath. No card. */
+.ui-comment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ui-comment-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-comment-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-comment-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-comment-row-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-comment-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Marks shared by every feature: tags, references, counts and progress. */
+.ui-badge {
+  display: inline-block;
+  flex: none;
+  gap: 4px;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--input);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A badge with an icon lays the icon and its text out in a row. */
+.ui-badge:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+}
+.ui-badge:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.ui-badge svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.ui-badge-sm {
+  height: 18px;
+  padding: 0 6px;
+  line-height: 18px;
+}
+.ui-badge-raised {
+  background: var(--surface);
+}
+.ui-badge-source {
+  font-family: var(--font-mono);
+}
+.ui-badge-doc {
+  gap: 6px;
+  height: 28px;
+  line-height: 28px;
+  border-radius: var(--radius);
+  color: var(--foreground);
+}
+.ui-badge-doc svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+}
+.ui-item {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+}
+.ui-item:hover,
+.ui-item:focus-within {
+  background: var(--accent);
+}
+.ui-reference {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-weight: 500;
+  line-height: var(--text-ui-line);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.ui-count {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-variant-numeric: tabular-nums;
+}
+.ui-section-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 28px;
+}
+.ui-section-header [data-slot="count"] {
+  margin-inline-start: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+.ui-section-header > :is(h1, h2, h3) {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.28px;
+}
+.ui-section-header > h1 {
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.6px;
+}
+/* bar: the panel header, 44px with a hairline under it. */
+.ui-section-header[data-bar] {
+  flex: none;
+  flex-wrap: nowrap;
+  height: 44px;
+  padding: 0 8px 0 16px;
+  box-shadow: 0 1px 0 0 var(--group-hairline);
+}
+[data-slot="section-header-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+}
+[data-slot="section-header-caption"] {
+  flex-basis: 100%;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.ui-progress {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--control-boundary);
+}
+.ui-progress-indicator {
+  height: 100%;
+  background: var(--foreground);
+}
+/* Forced colours drop backgrounds: the track gets an edge and the fill a system colour. */
+@media (forced-colors: active) {
+  .ui-progress {
+    border: 1px solid CanvasText;
+  }
+  .ui-progress-indicator {
+    background: Highlight;
+  }
+}
+
+/* Scrollbars: a slim rounded thumb on no track and no arrows, tinted from the
+   text colour so it sits quietly in both themes and widens a little on hover.
+   (scrollbar-width or scrollbar-color would switch these rules off.) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 16%, transparent) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: color-mix(in srgb, var(--foreground) 32%, transparent);
+}
+/* The in-app title bar (WindowBar), where the native one is off: it sits on
+   the canvas above the shell, which gives up its height. */
+:root {
+  --window-bar: 0px;
+}
+html[data-window-bar] {
+  --window-bar: 32px;
+}
+.window-bar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  height: var(--window-bar);
+  background: var(--background);
+}
+.window-controls {
+  display: flex;
+}
+.window-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: var(--window-bar);
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.window-controls button:hover {
+  background: var(--recessed);
+  color: var(--foreground);
+}
+.window-controls button[data-close]:hover {
+  background: var(--window-close);
+  color: var(--window-close-foreground);
+}
+.window-controls button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.window-controls svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
 .workspace {
   display: flex;
   width: 100%;
-  height: 100dvh;
+  height: calc(100dvh - var(--window-bar));
+  margin-top: var(--window-bar);
   min-height: 0;
-  overflow: hidden;
+  /* The shell is locked to the window. It is the containing block of every
+     absolutely positioned descendant (sr-only text deep in a pane included),
+     so none of them can extend the document or scroll the shell. */
+  position: relative;
+  overflow: clip;
   background: var(--background);
 }
 .skip-link {
@@ -520,7 +964,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   left: 8px;
   z-index: 100;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--foreground);
   box-shadow: var(--shadow-menu);
@@ -601,7 +1045,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   text-underline-offset: 2px;
 }
 .sidebar-source-line:focus-visible {
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -618,8 +1062,10 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   line-height: 20px;
   letter-spacing: -0.3px;
 }
-.new-ticket {
+.brand strong + button {
   margin-left: auto;
+}
+.new-ticket {
   width: 32px;
   padding: 0;
 }
@@ -644,7 +1090,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   width: 100%;
   height: 32px;
   padding: 0 10px 0 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   text-align: left;
   color: var(--muted-foreground);
   overflow: hidden;
@@ -695,7 +1141,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .sidebar-heading[data-active] {
   height: 28px;
   padding-left: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--sidebar-accent);
   color: var(--foreground);
 }
@@ -704,7 +1150,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
 }
 .sidebar-heading button:hover {
@@ -714,6 +1160,81 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .sidebar-heading + .sidebar-nav {
   margin-top: 0;
 }
+/* Collapsed: a 52px icon column. Names stay on the buttons as tooltips and
+   accessible names; counts give way to the unread dot at the icon's corner. */
+.sidebar[data-collapsed] {
+  width: 52px;
+}
+/* The folded rail holds a few fixed destinations (Projects and Plans fold into
+   one menu each) and does not scroll; the window's minimum height fits it. */
+.sidebar[data-collapsed] [data-sidebar="content"] {
+  overflow: hidden;
+}
+.sidebar[data-collapsed] .brand {
+  flex-direction: column;
+  height: auto;
+  padding: 8px 0;
+}
+.sidebar[data-collapsed] .brand strong {
+  display: none;
+}
+.sidebar[data-collapsed] .brand strong + button {
+  margin-left: 0;
+}
+.sidebar[data-collapsed] .sidebar-nav button {
+  position: relative;
+  justify-content: center;
+  width: 36px;
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-count {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  margin: 0;
+  gap: 0;
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-count > :not([data-slot="status-dot"]) {
+  display: none;
+}
+/* A heading becomes a divider. One that carries a manage menu keeps its button,
+   so the Projects and Plans pages stay one click away. */
+.sidebar[data-collapsed] .sidebar-heading {
+  justify-content: center;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-heading:not(:has(button)) {
+  height: 1px;
+  margin: 10px 8px;
+  background: var(--border);
+}
+.sidebar[data-collapsed] .sidebar-sources {
+  align-items: center;
+  padding: 0 0 8px;
+}
+/* The dot stands for the line, which keeps its name and tooltip; Retry stays. */
+.sidebar[data-collapsed] .sidebar-source-line {
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-source-label {
+  font-size: 0;
+}
+.sidebar[data-collapsed] .sidebar-source-line small {
+  display: none;
+}
+.sidebar[data-collapsed] .sidebar-source > button:not(.sidebar-source-line) {
+  width: 36px;
+  padding-inline: 0;
+}
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {
   display: flex;
@@ -722,8 +1243,9 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   min-height: 0;
   flex-direction: column;
   margin: 8px 8px 8px 0;
-  border-radius: 12px;
-  overflow: hidden;
+  border-radius: var(--radius-panel);
+  position: relative;
+  overflow: clip;
   background: var(--surface);
   box-shadow: var(--shadow-small);
 }
@@ -744,7 +1266,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   width: 32px;
   height: 32px;
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
 }
 .icon-button:hover {
@@ -760,6 +1282,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   flex: 1;
   min-height: 0;
 }
+/* !important: the panel group sets display inline, which only !important beats. */
 .ticket-workspace[hidden] {
   display: none !important;
 }
@@ -767,10 +1290,23 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .ticket-workspace #detail {
   min-width: 0;
 }
+/* The pane clips; it is not the scroller. Title, toolbar, source tabs and chips
+   stay put and only .ticket-scroll (the rows and paging) scrolls beneath them. */
 .ticket-list {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   min-width: 0;
+  overflow: hidden;
+}
+.ticket-list > :not(.ticket-scroll) {
+  flex-shrink: 0;
+}
+.ticket-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 .list-header {
@@ -821,7 +1357,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   padding: 0 8px;
   color: var(--muted-foreground);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .search input {
   padding: 0;
@@ -910,8 +1446,8 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   align-items: center;
   gap: 4px;
 }
-/* The reading column and the property rail. The rail moves below the column
-   when the detail pane is narrower than 652px; see properties.css. */
+/* The reading column and the property rail. Below 652px the rail is
+   replaced by a chip bar under the title; see properties.css. */
 .detail-content {
   min-height: 100%;
   display: grid;
@@ -945,41 +1481,11 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
     overflow-y: auto;
   }
 }
-.detail-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 320px;
-  margin: 0;
-  padding: 48px 24px;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.detail-empty p {
-  margin: 0;
-}
-.detail-empty-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .ticket-personal-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
-}
-.ticket-ref {
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-  font-weight: 500;
-  line-height: 20px;
-  color: var(--muted-foreground);
 }
 .editor-title {
   display: block;
@@ -1005,7 +1511,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .editor-title textarea:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
 }
 .editor-save-state {
   margin-top: 12px;
@@ -1022,20 +1528,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
-}
-.detail-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.detail-section-heading h3 {
-  font-size: var(--text-ui);
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: -0.28px;
 }
 .reminder-popover {
   display: flex;
@@ -1056,6 +1548,11 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 .return-to-list {
   display: none;
 }
+.expand-ticket {
+  display: inline-flex;
+}
+/* !important here and in the narrow block: the panel library sets flex and
+   size inline on #list and #detail, so only !important wins. */
 .ticket-workspace.expanded #list,
 .ticket-workspace.expanded .split-handle {
   display: none !important;
@@ -1106,20 +1603,6 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   font-weight: 500;
   line-height: 20px;
   letter-spacing: -0.28px;
-}
-.settings-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 24px;
-  background: var(--surface);
-  box-shadow: var(--shadow-border);
-  border-radius: 12px;
-}
-.settings-card section {
-  border: 0;
-  padding: 0;
 }
 .create-panel {
   width: min(720px, calc(100vw - 32px));
@@ -1248,7 +1731,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 }
 .markdown-document :not(pre) > code {
   background: var(--recessed);
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   padding: 4px;
 }
 .markdown-document pre,
@@ -1280,7 +1763,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   min-width: 0;
   overflow: hidden;
   box-shadow: var(--shadow-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .markdown-code-block {
   /* The frame's hairline sits inside the 64px box, not around it (+2px). */
@@ -1370,7 +1853,9 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   max-height: 320px;
 }
 
-@media (max-width: 1071px) {
+/* Measured on the content panel (plan-workspace), so a collapsed sidebar keeps
+   the split for longer. 840px is useNarrowPane’s STACK_MIN_WIDTH. */
+@container plan-workspace (max-width: 839px) {
   .ticket-workspace #list {
     flex: 1 1 0 !important;
   }
@@ -1426,6 +1911,8 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
     flex-wrap: wrap;
   }
 }
+/* !important is the point: reduced motion must beat every component's own
+   transition and animation timing. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1448,7 +1935,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
 }
 #detail-heading:focus-visible {
   outline: none;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--focus-ring);
 }
 .pagination {
@@ -1462,7 +1949,7 @@ body:has([data-slot="dialog-overlay"]) .detail-empty {
   gap: 4px;
   padding: 8px;
   width: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .sidebar-source-line:hover {
   background: var(--accent);
@@ -1538,7 +2025,7 @@ html[data-input="pointer"]
   .ui-select.ui-picker:focus-visible:where(
     :not([aria-invalid="true"], :disabled)
   ) {
-  box-shadow: inset 0 0 0 1px #00000024;
+  box-shadow: inset var(--shadow-border-base);
 }
 html[data-theme="dark"][data-input="pointer"]
   .ui-select.ui-picker:focus-visible:where(
@@ -1551,7 +2038,7 @@ html[data-theme="dark"][data-input="pointer"]
   gap: 8px;
   margin: 0 0 12px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--recessed);
   box-shadow: var(--shadow-border-base);
   color: var(--muted-foreground);
@@ -1600,7 +2087,9 @@ html[data-theme="dark"][data-input="pointer"]
 /* Filters panel open (board C): the panel covers the left of the detail pane,
    so the empty state centres in the space to its right (centre x 1120) and sits
    23.5px higher, as the frame draws it. */
-.ticket-workspace[data-filters-open] .ticket-detail[data-empty] .detail-empty {
+.ticket-workspace[data-filters-open]
+  .ticket-detail[data-empty]
+  [data-slot="empty-state"][data-size="hint"] {
   padding-left: calc(24px + 360px);
   padding-bottom: calc(48px + 47px);
 }

@@ -354,6 +354,7 @@ function BackupsCard({ onRestore }: { onRestore: () => Promise<void> }) {
       actions={
         <Button
           type="button"
+          variant="outline"
           size="sm"
           disabled={busy}
           onClick={() => void backUp()}

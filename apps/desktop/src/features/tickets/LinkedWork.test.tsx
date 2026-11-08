@@ -389,8 +389,8 @@ test("subtickets read under the description with local progress, not in the rail
   const progress = screen.getByRole("progressbar", {
     name: "Subticket progress",
   });
-  expect(progress.getAttribute("max")).toBe("2");
-  expect(progress.getAttribute("value")).toBe("1");
+  expect(progress.getAttribute("aria-valuemax")).toBe("2");
+  expect(progress.getAttribute("aria-valuenow")).toBe("1");
   // The rail's Relationships holds no subtickets, so it collapses to its action.
   expect(screen.getByRole("button", { name: "Add relationship" })).toBeTruthy();
   expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual(

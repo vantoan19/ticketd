@@ -21,16 +21,16 @@ import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
-import { useThemeSync } from "@/lib/preferences";
+import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { WindowBar } from "@/components/layout/WindowBar";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
 import { Projects } from "@/features/projects/Projects";
 import { useEffect, useRef, useState } from "react";
 import {
-  useOnWorkspaceChange,
   useWorkspaceChangePoll,
   WorkspaceChangeProvider,
 } from "@/lib/workspace-change";
@@ -95,6 +95,7 @@ function AppContent() {
     id: string;
     key: number;
   } | null>(null);
+  const { sidebarCollapsed } = usePreferences();
   const [counts, setCounts] = useState<SidebarCounts | null>(null);
   const loadCounts = useRef(() => {});
   useEffect(() => {
@@ -111,7 +112,6 @@ function AppContent() {
       active = false;
     };
   }, []);
-  useOnWorkspaceChange(() => loadCounts.current());
   const [graphOrigin, setGraphOrigin] = useState<string | null>(null);
   const [localGraphOrigin, setLocalGraphOrigin] = useState<string | null>(null);
   const [workspaceGraphOpen, setWorkspaceGraphOpen] = useState(false);
@@ -211,6 +211,7 @@ function AppContent() {
     scope,
     navigation,
   } = workspace;
+  useEffect(() => loadCounts.current(), [revision]);
   const openGraphItem = (node: GraphData["nodes"][number]) => {
     keepGraph.current = true;
     try {
@@ -275,7 +276,7 @@ function AppContent() {
               refreshAll: () => refreshSources(),
             }}
           >
-            <SidebarProvider>
+            <SidebarProvider open={!sidebarCollapsed}>
               <a
                 className="skip-link"
                 href="#main-content"
@@ -286,6 +287,7 @@ function AppContent() {
               >
                 Skip to content
               </a>
+              <WindowBar />
               <div
                 className={
                   view === "settings" ? "workspace settings-open" : "workspace"
@@ -322,6 +324,7 @@ function AppContent() {
                       scope(...args);
                     }}
                     navigation={navigation}
+                    onError={workspace.setError}
                     setCreating={(value) => {
                       if (value) setCreateStatus(undefined);
                       setCreating(value);
@@ -333,7 +336,6 @@ function AppContent() {
                   {isMobile && view !== "settings" && (
                     <div className="mobile-nav-bar">
                       <SidebarTrigger
-                        className="mobile-nav-trigger"
                         variant="ghost"
                         size="sm"
                         aria-label="Open navigation"

@@ -251,3 +251,26 @@ it("offers Browse Documents from an empty Trash", async () => {
       .getAttribute("aria-pressed"),
   ).toBe("true");
 });
+
+it("an empty Documents list offers Capture inside the empty state", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([]);
+  vi.mocked(documents.trash).mockResolvedValue([]);
+  const onCapture = vi.fn();
+  render(
+    <Documents
+      active
+      capture={false}
+      onCapture={onCapture}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  await screen.findByText("No recent Documents");
+  const captures = screen.getAllByRole("button", { name: "Capture" });
+  expect(captures).toHaveLength(2);
+  fireEvent.click(captures[1]!);
+  expect(onCapture).toHaveBeenCalled();
+});

@@ -605,10 +605,23 @@ fn bulk_status(
 }
 
 #[tauri::command]
-fn change_ticket(reference: String, patch: TicketPatch) -> Result<Ticket, String> {
-    open_workspace()
-        .and_then(|mut workspace| workspace.change_ticket(&reference, patch))
-        .map_err(|error| error.to_string())
+fn change_ticket(
+    reference: String,
+    patch: TicketPatch,
+    request_id: Option<String>,
+) -> Result<Ticket, String> {
+    match open_workspace()
+        .and_then(|mut workspace| {
+            workspace.write(
+                request_id.as_deref(),
+                WriteRequest::ChangeTicket { reference, patch },
+            )
+        })
+        .map_err(|error| error.to_string())?
+    {
+        WriteResult::Ticket(ticket) => Ok(ticket),
+        _ => Err("Unexpected ticket result".into()),
+    }
 }
 
 #[tauri::command]

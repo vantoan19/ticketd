@@ -34,7 +34,7 @@
   min-height: 52px;
   padding: 8px 6px 6px 0;
   text-align: left;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
 }
 .ticket-row-status {
@@ -45,9 +45,6 @@
 }
 .ticket-row-status svg {
   flex: none;
-}
-.ticket-ref {
-  line-height: 20px;
 }
 .ticket-title {
   min-width: 0;
@@ -104,16 +101,9 @@
   overflow: clip;
   overflow-clip-margin: 1px;
 }
-.ticket-tag {
-  flex: none;
-  height: 18px;
+/* Row tags are 18px on a 16px line; the negative margin keeps the line 16px. */
+.ticket-row-tags [data-slot="badge"] {
   margin-block: -1px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--border);
-  line-height: 18px;
-  white-space: nowrap;
 }
 .ticket-list .ticket-row:focus-visible {
   position: relative;
@@ -144,23 +134,8 @@
   align-self: center;
   width: 16px;
   height: 16px;
-  border-radius: 999px;
-}
-.ticket-skeleton-ref {
-  align-self: center;
-  width: 36px;
-  height: 12px;
-}
-.ticket-skeleton-title {
-  align-self: center;
-  height: 14px;
-}
-.ticket-skeleton-meta {
-  grid-column: 3;
-  align-self: center;
-  width: 96px;
-  height: 10px;
-  margin-block: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
 }
 .bulk-controls {
   position: sticky;
@@ -194,7 +169,7 @@
   align-items: center;
   height: 18px;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   box-shadow: inset 0 0 0 1px var(--border);
   font-family: var(--font-mono, ui-monospace, Menlo, monospace);
   font-size: var(--text-caption);
@@ -302,7 +277,7 @@
 }
 .bulk-tag-combobox {
   height: auto;
-  border-radius: 8px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border);
 }
 .bulk-tag-combobox [cmdk-list][hidden] {
@@ -400,40 +375,10 @@
   line-height: 20px;
   letter-spacing: -0.28px;
 }
-.ticket-group-count {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .ticket-group-add {
   margin-left: auto;
 }
 
-/* The owner of an externally owned ticket, after its title: source mark and number. */
-.ticket-source-pill {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: var(--shadow-border-base);
-  color: var(--secondary-foreground);
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  line-height: 16px;
-  white-space: nowrap;
-}
-.ticket-source-pill svg {
-  width: 12px;
-  height: 12px;
-}
-.ticket-rows li:hover .ticket-source-pill,
-.ticket-rows li:has(.ticket-row[aria-pressed="true"]) .ticket-source-pill {
-  background: var(--surface);
-}
 /* Source filter follows the inset canvas composition. */
 .source-filter {
   padding: 8px 8px 0;
@@ -445,7 +390,7 @@
 }
 .source-filter [role="radio"] {
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .source-filter [role="radio"][data-state="checked"] {
   background: var(--accent);
@@ -453,11 +398,6 @@
 }
 .source-filter [role="radio"]:hover {
   background: var(--recessed);
-}
-.segmented-count {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 .source-refresh {
   color: var(--muted-foreground);
@@ -511,11 +451,9 @@
   min-width: 4ch;
   height: auto;
 }
-.ticket-row-contextual .ticket-tag {
+.ticket-row-contextual [data-slot="badge"] {
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 /* The first tag keeps its whole name (up to a cap); only "+N" is fixed. */
 .ticket-row-contextual .ticket-row-tags {
@@ -524,11 +462,11 @@
   max-width: 50%;
 }
 /* The first tag is never the part that gives: the context name truncates first. */
-.ticket-row-contextual .ticket-tag:first-child {
+.ticket-row-contextual [data-slot="badge"]:first-child {
   flex: none;
   max-width: 100%;
 }
-.ticket-row-contextual .ticket-tag-more {
+.ticket-row-contextual [data-slot="badge"][data-more] {
   flex: none;
 }
 /* The context item carries its type icon: layers for a Plan, a folder for a
@@ -567,4 +505,34 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: 16px;
+}
+/* Simple rows: one line of status icon, reference, title, source, dot and time. */
+.ticket-list .ticket-row[data-rows="simple"] {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  padding-block: 8px;
+}
+.ticket-row[data-rows="simple"] .ticket-title {
+  flex: 1 1 0;
+}
+.ticket-row[data-rows="simple"] .ticket-row-meta {
+  flex: none;
+  gap: 6px;
+}
+.ticket-row[data-rows="simple"] .ticket-row-status {
+  width: 16px;
+}
+.ticket-row[data-rows="simple"] [data-slot="reference"] {
+  flex: none;
+  min-width: 36px;
+}
+.ticket-row[data-rows="simple"] > [data-slot="badge"] {
+  flex: none;
+}
+.ticket-row[data-rows="simple"] .ticket-row-meta:has(.ticket-row-time) {
+  flex-wrap: nowrap;
+}
+.ticket-row[data-rows="simple"] .ticket-row-contextual {
+  flex: none;
 }

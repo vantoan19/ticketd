@@ -132,13 +132,11 @@ export function TicketHeader({
           </>
         )}
         {selected && !expanded && (
-          <IconButton
-            className="return-to-list"
-            label="Return to ticket list"
-            onClick={onReturn}
-          >
-            <ArrowLeft size={16} />
-          </IconButton>
+          <span className="return-to-list">
+            <IconButton label="Return to ticket list" onClick={onReturn}>
+              <ArrowLeft size={16} />
+            </IconButton>
+          </span>
         )}
         <h2
           id="detail-heading"
@@ -148,13 +146,14 @@ export function TicketHeader({
           {selected ?? "Ticket details"}
         </h2>
         {selected && (
-          <IconButton
-            className="copy-reference"
-            label="Copy reference"
-            onClick={() => void copy("Reference", selected)}
-          >
-            {copied === "Reference" ? <Check /> : <Copy />}
-          </IconButton>
+          <span className="copy-reference">
+            <IconButton
+              label="Copy reference"
+              onClick={() => void copy("Reference", selected)}
+            >
+              {copied === "Reference" ? <Check /> : <Copy />}
+            </IconButton>
+          </span>
         )}
         {owner && (
           <SourceLink url={owner.url} className="header-source-link">
@@ -301,13 +300,11 @@ export function TicketHeader({
               <Minimize2 />
             </IconButton>
           ) : (
-            <IconButton
-              className="expand-ticket"
-              label="Expand ticket"
-              onClick={onExpand}
-            >
-              <Maximize2 />
-            </IconButton>
+            <span className="expand-ticket">
+              <IconButton label="Expand ticket" onClick={onExpand}>
+                <Maximize2 />
+              </IconButton>
+            </span>
           )}
           <IconButton label="Close ticket details" onClick={onClose}>
             <X />

@@ -1,7 +1,7 @@
 .markdown-editor {
   position: relative;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-border);
   background: var(--surface);
   color: var(--foreground);
@@ -23,7 +23,7 @@
 /* A toolbar that appears on focus is docked inside the frame's top edge and grows the frame, so it
    can never cover a neighbour. While idle it takes no space: the frame stays tight. */
 .rich-toolbar[data-floating] {
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   box-shadow: 0 1px 0 var(--border);
 }
 .rich-toolbar[data-floating][data-visible="false"] {
@@ -163,7 +163,7 @@
 .rich-document code {
   background: var(--recessed);
   padding-inline: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   font-family: var(--font-mono);
   font-size: var(--text-code);
   font-weight: 500;
@@ -210,7 +210,7 @@
   margin-left: 16px;
   background: var(--popover);
   color: var(--popover-foreground);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-menu);
 }
 .slash-menu button {
@@ -219,7 +219,7 @@
 .markdown-editor .cm-editor {
   background: var(--surface);
   color: var(--foreground);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 .markdown-editor .cm-scroller {
   font-family: var(--font-mono);

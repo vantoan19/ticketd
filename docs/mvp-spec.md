@@ -212,15 +212,28 @@ Trash preserves relationships under section 4.6; permanent ticket deletion is no
 | View             | Purpose                                                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | List             | Flat stream, search, filtering, and quick operations; surface important relationships                                    |
+| Status board     | Side-by-side ticket statuses, independent bounded columns, and the existing ticket detail experience                     |
 | Ticket detail    | Read/edit content, checklist, authored activities, project/Plan links, parent/subtickets, and dependencies; read history |
-| Plan view        | Flat member-ticket list, counts by status, membership management, and archive/reactivation                               |
+| Plan view        | Member-ticket List or Board, Dependencies, counts by status, membership management, and archive/reactivation             |
 | Dependency graph | Understand dependency direction, blocked work, and relationships around a selected ticket                                |
 
 Initial layout direction: navigation for projects and Plans, including unlinked tickets, main list/graph surface, and ticket detail in a panel or dedicated page appropriate to window size. Validate through prototyping rather than treating this as a fixed pixel layout.
 
 The graph needs clear edge direction or a legend and ticket selection. Creating edges by dragging is optional if adding dependencies from ticket details is already easy.
 
-A board view and an agent/chat panel are outside the MVP.
+An agent/chat panel is outside the MVP.
+
+### Ticket status board
+
+- List and Board are alternative ticket layouts for All tickets, project and No project, Ready, In progress, and Plan ticket collections. Plan Dependencies remains available. Inbox, Documents, graphs, and Trash keep their specialized layouts.
+- List is the initial default. Remember the chosen ticket layout locally across navigation and restart. Switching layout preserves search, project, Plan, tags, status, availability, parent/family, source, selected ticket identity, and detail drafts.
+- Show six fixed columns in order: Todo, In progress, In review, Done, Canceled, Duplicate. Empty columns remain visible, including those made empty by contradictory filters. Counts describe matching tickets under the current filters; a column status intersects rather than replaces those filters.
+- Each column reads an independent bounded batch, shows its total matching count, and offers Load more with loaded/total information while incomplete. Use the core's deterministic ordering; there is no manual rank or Board domain entity. Parent tickets and subtickets match independently, with no automatic status roll-up.
+- Cards show reference, external source identity when applicable, full accessible titles wrapping up to three lines, relevant project/Plan context, and core-derived Ready or Blocked indicators only for Todo. Source-unavailable cards show the existing unavailable indication instead of claiming current readiness.
+- Use readable card widths with horizontal board scrolling, independently scrolling column bodies, and persistent headers. The unselected board uses the available workspace width. Cards open the existing responsive split or expanded detail experience; returning preserves board scroll and meaningful focus.
+- Refresh cards, counts, source information, readiness, and selected detail after workspace changes, source refresh, and detail edits. Discard obsolete scope/filter and Load more responses. Failed reads retain displayed information with stale feedback and retry.
+- Board status actions follow existing core validation, source authority, duplicate review, and retry behavior. Dragging is optional: an accessible Change status action offers the same permitted choices. Empty columns remain usable destinations; a drop changes status only, with no implied within-column ordering. Save failure restores saved state, and a successful move out of the current filters is explained.
+- Custom columns, manual ranking, swimlanes, WIP limits, configurable card properties, multi-card dragging, and board bulk editing are outside scope. Existing List pagination and bulk editing remain available.
 
 ### Document reading and editing
 
@@ -399,7 +412,7 @@ These are draft verification criteria for review, not individually approved requ
 - Highlight/comment feedback delivered directly to an agent session.
 - Branch, worktree, commit, PR, or CI-check synchronization.
 - GitHub/Jira integrations, Slack/Google Chat capture, and browser extension.
-- Board, roadmap, calendar, time tracking, reporting, and gamification.
+- Roadmap, calendar, time tracking, reporting, and gamification.
 - Full web/mobile clients, cloud hosting, account/auth, collaboration, and multi-device sync.
 - Plugin system, custom workflow engine, vector database, and MCP server.
 - Project archiving, permanent ticket/project deletion, full ticket body revision history, and record-version conflict detection.
@@ -687,7 +700,10 @@ may recreate the schema. This is not an instruction to erase a live workspace.
 
 A Plan requires only a name. Initially show its name, optional short purpose, and
 tickets; empty context sections stay behind Add context. One page contains linked
-Documents, progress, and tickets with a List / Dependencies switch. Set as spec
+Documents, progress, and tickets with a List / Board / Dependencies switch.
+List and Board share the locally remembered ticket layout; Dependencies does not
+change that preference. Header counts describe all non-trashed Plan members,
+while Board column counts reflect the current filters. Set as spec
 selects an existing Document as the optional primary spec; it creates no copy or
 separate document type. The spec is the principal long-form entry point; the Plan
 purpose should not duplicate it. Other supporting Documents use ordinary associations.

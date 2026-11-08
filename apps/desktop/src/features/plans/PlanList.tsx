@@ -91,7 +91,7 @@ export function PlanList({
         </form>
       )}
       {error && (
-        <Alert variant="destructive" role="alert">
+        <Alert tone="error" role="alert">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
@@ -105,11 +105,23 @@ export function PlanList({
               : "A Plan groups tickets toward one goal. Create one above."
           }
           action={
-            archived && onBrowsePlans ? (
-              <Button variant="outline" size="sm" onClick={onBrowsePlans}>
-                Back to Plans
+            archived ? (
+              onBrowsePlans && (
+                <Button variant="outline" size="sm" onClick={onBrowsePlans}>
+                  Back to Plans
+                </Button>
+              )
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  document.getElementById("plan-create-name")?.focus()
+                }
+              >
+                Name a Plan
               </Button>
-            ) : undefined
+            )
           }
         />
       ) : (

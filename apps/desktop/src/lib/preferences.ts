@@ -6,6 +6,9 @@ import { z } from "zod";
 const preferencesSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).catch("system"),
   openTickets: z.enum(["split", "expanded"]).catch("split"),
+  ticketLayout: z.enum(["list", "board"]).catch("list"),
+  sidebarCollapsed: z.boolean().catch(false),
+  ticketRows: z.enum(["detailed", "simple"]).catch("detailed"),
   followCreated: z.boolean().catch(true),
   notifyReminders: z.boolean().catch(false),
 });
@@ -18,6 +21,9 @@ const STORAGE_KEY = "ticketd.preferences";
 const DEFAULTS: Preferences = {
   theme: "system",
   openTickets: "split",
+  ticketLayout: "list",
+  sidebarCollapsed: false,
+  ticketRows: "detailed",
   followCreated: true,
   notifyReminders: false,
 };

@@ -560,6 +560,42 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
 }
 
 #[test]
+fn replayable_status_changes_validate_current_source_authority() {
+    use ticketd_core::{WriteRequest, WriteResult};
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Owned"), true);
+    f.refresh();
+    let request = |status| WriteRequest::ChangeTicket {
+        reference: "T-1".into(),
+        patch: progress(status),
+    };
+    let original = f
+        .workspace
+        .write(Some("board-progress"), request(Status::InProgress))
+        .unwrap();
+    assert!(
+        matches!(&original, WriteResult::Ticket(ticket) if ticket.status == Status::InProgress)
+    );
+    f.set_state(1, closed(ClosureReason::Completed));
+    f.refresh();
+    let current = f.ticket(1);
+    let history = f.workspace.ticket_history("T-1").unwrap();
+    assert!(matches!(
+        f.workspace
+            .write(Some("board-new-change"), request(Status::Todo)),
+        Err(Error::ExternalStatus { open: false, .. })
+    ));
+    assert_eq!(
+        f.workspace
+            .write(Some("board-progress"), request(Status::InProgress))
+            .unwrap(),
+        original
+    );
+    assert_eq!(f.ticket(1), current);
+    assert_eq!(f.workspace.ticket_history("T-1").unwrap(), history);
+}
+
+#[test]
 fn tracked_issues_refresh_after_leaving_the_discovery_rules_and_closure_is_observed() {
     let mut f = Fixture::new();
     f.publish(issue(1, "Reassigned"), true);

@@ -1,4 +1,10 @@
 import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
+import { ticketStatuses } from "@/lib/statuses";
+
+/** External choices come from the core; retained provenance does not imply ownership. */
+export function ticketStatusChoices(ticket: Ticket): readonly string[] {
+  return externalSource(ticket)?.status_choices ?? ticketStatuses;
+}
 
 export function providerName(provider: string): string {
   return provider === "github" ? "GitHub" : provider;
@@ -78,15 +84,16 @@ export function unavailableNotice(
   // Worded by what failed, once: the provider's own text is not chained on.
   const cause =
     unavailable.code === "not_found"
-      ? `${name} says ${source.display} was deleted or is not visible to your account.`
+      ? `${name} says ${source.display} was deleted or is not visible to your account`
       : unavailable.code === "unauthenticated"
-        ? `${name} rejected the sign-in, so ${source.display} could not be refreshed.`
+        ? `${name} rejected the sign-in, so ${source.display} could not be refreshed`
         : unavailable.code === "forbidden"
-          ? `${name} refused access to ${source.display}.`
-          : `${name} could not be reached for ${source.display}.`;
+          ? `${name} refused access to ${source.display}`
+          : `${name} could not be reached for ${source.display}`;
   return {
     title: "Source unavailable",
-    detail: `${cause} Nothing in ticketd was deleted or completed.`,
+    // One sentence: the state line and the Source rail say since when.
+    detail: `${cause}, and nothing in ticketd was deleted or completed.`,
     since: `Since ${since}`,
   };
 }

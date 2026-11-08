@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { client } from "@/lib/api/client";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IconButton } from "@/components/ui/icon-button";
@@ -860,8 +861,8 @@ export function DocumentEditor({
           </header>
         )}
         {trashed && (
-          <div role="status" className="document-trash-banner">
-            <span>In Trash</span>
+          <Alert role="status" size="compact">
+            <AlertDescription>In Trash</AlertDescription>
             <Button
               variant="outline"
               disabled={transitioning}
@@ -869,7 +870,7 @@ export function DocumentEditor({
             >
               Restore
             </Button>
-          </div>
+          </Alert>
         )}
         {initial &&
           (writing ? (

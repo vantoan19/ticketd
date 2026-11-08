@@ -45,6 +45,7 @@ import { PlanDocuments } from "./PlanDocuments";
 import { AddTicketsDialog } from "./AddTicketsDialog";
 import type { PlanViewState } from "./usePlanView";
 import "./plan.css";
+import { Progress } from "@/components/ui/progress";
 
 /**
  * The Plan's name and state, view toggle, actions, purpose, and status counts,
@@ -60,8 +61,8 @@ export function PlanHeader({
   plan: Plan;
   plans: Plan[];
   state: PlanViewState;
-  mode: "list" | "dependencies";
-  onModeChange: (mode: "list" | "dependencies") => void;
+  mode: "list" | "board" | "dependencies";
+  onModeChange: (mode: "list" | "board" | "dependencies") => void;
 }) {
   const { view, loadError, pending, actionError, run } = state;
   const openGraph = useContext(ContextGraphNavigation);
@@ -176,6 +177,7 @@ export function PlanHeader({
             onValueChange={onModeChange}
             options={[
               { value: "list", label: "List" },
+              { value: "board", label: "Board" },
               { value: "dependencies", label: "Dependencies" },
             ]}
           />
@@ -302,18 +304,18 @@ export function PlanHeader({
         </div>
       )}
       {(actionError || loadError) && (
-        <Alert variant="destructive" role="alert">
+        <Alert tone="error" role="alert">
           <AlertDescription>{actionError || loadError}</AlertDescription>
         </Alert>
       )}
       {view && (
         <div className="plan-summary">
           <span className="plan-progress">
-            <span className="plan-progress-bar" aria-hidden="true">
-              <span
-                style={{ width: `${counted ? (done / counted) * 100 : 0}%` }}
-              />
-            </span>
+            <Progress
+              aria-label="Plan progress"
+              value={done}
+              max={counted || 1}
+            />
             {done} of {counted} done
           </span>
           <span className="plan-summary-rule" aria-hidden="true" />

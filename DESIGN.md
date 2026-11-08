@@ -2,7 +2,7 @@
 
 ## Purpose and authority
 
-This document defines the target visual and interaction design for ticketd's desktop application. It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
+This document defines the target visual and interaction design for ticketd's desktop application and the design system it is built from (section 11). It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
 Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product specification](docs/mvp-spec.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, a board, or a chat panel. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
 
@@ -12,7 +12,7 @@ The visual reference is the third-party [Vercel design language analysis by desi
 
 Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
 
-The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, and an external issue’s description and comments shown as read-only source cards with compact event rows. Borrow these structures, not those products’ styling or branding.
+The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, an external issue’s description shown as a read-only source card, and its comments and events on one connected timeline. Borrow these structures, not those products’ styling or branding.
 
 ## 1. Visual character and hierarchy
 
@@ -29,7 +29,7 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 ### Composition rules
 
 - Establish grouping with alignment and spacing first. Use a shadow boundary where navigation or independently scrolling planes meet. Separate document sections with spacing.
-- Use flat document sections. Do not wrap each property, update, empty state, or relationship type in its own card. The one exception is content owned by an external source, which sits in read-only source cards (see Documents and activity).
+- Use flat document sections. Do not wrap each property, empty state, or relationship type in its own card. Use cards sparingly: the read-only description from an external source is the one card on a ticket. Comments, updates and evidence are rows on the page, not cards (see Documents and activity).
 - Give each action surface one primary action. The workspace's New ticket action and a focused dialog's submit action may coexist.
 - Keep headings, body text, inputs, and section actions on consistent left and right edges.
 - Keep small supporting text readable. Do not use low contrast, tiny text, or excessive truncation to make a screen seem cleaner.
@@ -45,17 +45,17 @@ These values come directly from the linked reference. The semantic names map the
 | --------------------------------------------- | --------------------- | ------------------------------------------- |
 | Canvas / `--background`                       | `#FAFAFA`             | Workspace canvas and navigation             |
 | Elevated / `--surface`, `--popover`           | `#FFFFFF`             | Content panel, menus, dialogs               |
-| Recessed / `--muted`, `--secondary`           | `#F2F2F2`             | Quiet control surfaces and placeholders     |
+| Recessed / `--recessed`                       | `#F2F2F2`             | Quiet control surfaces and placeholders     |
 | Primary text / `--foreground`                 | `#171717`             | Titles, authored content, active values     |
-| Secondary text / `--secondary-foreground`     | `#4D4D4D`             | Navigation, labels, readable captions       |
+| Secondary text / `--muted-foreground`         | `#4D4D4D`             | Navigation, labels, readable captions       |
 | Decorative/disabled / `--disabled-foreground` | `#8F8F8F`             | Inactive decoration and disabled states     |
 | Hover / `--accent`                            | `#EBEBEB`             | Navigation and row hover/selection          |
 | Interactive / `--interactive`, `--ring`       | `#0072F5`             | Focus, link decoration, interactive accents |
 | Input focus / `--input-focus`                 | `#005FCC`             | Input focus outline                         |
-| Boundary / `--ds-shadow-border-base`          | `0 0 0 1px #00000014` | Shadow-based surface boundary               |
-| Header boundary                               | `0 1px 0 0 #0000001A` | Pane header separator                       |
+| Boundary / `--shadow-border-base`             | `0 0 0 1px #00000014` | Shadow-based surface boundary               |
+| Header boundary / `--header-boundary`         | `0 1px 0 0 #0000001A` | Pane header separator                       |
 
-Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
+`--muted` and `--secondary` are shadcn aliases of `--recessed`, `--secondary-foreground` of `--muted-foreground`, and `--popover` of `--surface`; new code uses the semantic names. Use `#4D4D4D` for necessary small text, including timestamps. The reference’s `#8F8F8F` is not a readable-body-text substitute. If shared components use `muted-foreground` for captions, map it to the secondary text role and keep the decorative/disabled role separate.
 
 Primary actions invert the existing primary/elevated pair: `#171717` fill and `#FFFFFF` text. Ghost actions begin transparent with secondary text and promote to primary text on `#EBEBEB` hover. Standard prose links may retain primary text with an underline, as in the reference’s standard-link treatment; use the blue token for focus and link decoration. Never reduce contrast merely to make all links blue. Source links use the accessible text-link role `--link-foreground`: `#005FCC` in light and `#52AEFF` in dark; focus and decorative interactive accents keep their existing tokens. Recessed notices and footer bands retain a shadow boundary when their fill alone is too close to the surrounding surface.
 
@@ -164,20 +164,23 @@ Use 8px label-to-input spacing, 4px input-to-hint spacing, 16px between fields, 
 
 ### Reference sizes and corners
 
-| Element                | Value  | Application                                           |
-| ---------------------- | ------ | ----------------------------------------------------- |
-| Small control          | 32px   | Header actions, property pickers, compact menus       |
-| Default control        | 40px   | Search, form inputs, primary form actions             |
-| Large control          | 48px   | Deliberately prominent actions / coarse-pointer forms |
-| Default radius         | 6px    | Inputs, buttons, small controls                       |
-| Marketing radius       | 8px    | Reserved; not a replacement control radius            |
-| Elevated panel radius  | 12px   | Content panel, Settings cards, menus, dialogs, sheets |
-| Pill radius            | 9999px | Tags or compact badges only                           |
-| Header height          | 48px   | List pane header and detail pane header               |
-| Sub-navigation height  | 46px   | Compact pane/header row                               |
-| Page gutter            | 24px   | Workspace and management content gutters              |
-| Standard content width | 1200px | Management content maximum                            |
-| Wide content width     | 1400px | Wide content views where useful                       |
+| Element                                | Value  | Application                                           |
+| -------------------------------------- | ------ | ----------------------------------------------------- |
+| Small control                          | 32px   | Header actions, property pickers, compact menus       |
+| Default control                        | 40px   | Search, form inputs, primary form actions             |
+| Large control                          | 48px   | Deliberately prominent actions / coarse-pointer forms |
+| Default radius `--radius`              | 6px    | Inputs, buttons, small controls                       |
+| Segment radius `--radius-segment`      | 4px    | Segments, keys and other small inner shapes           |
+| Marketing radius                       | 8px    | Reserved; not a replacement control radius            |
+| Elevated panel radius `--radius-panel` | 12px   | Content panel, cards, menus, dialogs, sheets          |
+| Pill radius `--radius-pill`            | 9999px | Tags or compact badges only                           |
+| Header height                          | 48px   | List pane header and detail pane header               |
+| Sub-navigation height                  | 46px   | Compact pane/header row                               |
+| Page gutter                            | 24px   | Workspace and management content gutters              |
+| Standard content width                 | 1200px | Management content maximum                            |
+| Wide content width                     | 1400px | Wide content views where useful                       |
+
+Stylesheets hold no literal radii or raw colors; they map to tokens as follows. Literal 6px is `--radius`, 12px is `--radius-panel`, and 999px and 9999px are `--radius-pill`. Literal 2px, 3px and 4px are `--radius-segment`. The reserved 8px maps to `--radius` and 10px to `--radius-panel`, whichever is nearer. Control outlines drawn at `#00000024` use `--shadow-border-base` (8% in light, 14% in dark), which is a lighter outline in light than the literal was. A dialog keeps its ring from `--shadow-modal` and has no border of its own. A placeholder is text and uses `--disabled-foreground`; `--control-boundary` is for outlines and empty tracks. Hairlines at `#0000000f` use `--group-hairline`, and the dialog shadow `0 8px 32px #0003` uses `--shadow-modal`, and the board drag preview shadow uses `--shadow-menu`. The only `!important` left beats inline styles from the panel library on the ticket workspace, or implements reduced motion; each has a comment.
 
 Pane widths and row columns are ticketd geometry, defined below. The application shell fills the window; the reference’s page-width limits apply to content views, not to the combined navigation/content-panel shell. Use the supplied 48px size for coarse-pointer targets rather than inventing a new control size.
 
@@ -185,7 +188,7 @@ Lucide icons remain 16px inside ordinary controls, with consistent stroke weight
 
 ### Boundaries, shadows, and focus
 
-Use shadow-based boundaries on surfaces. Keep layout dimensions stable with `box-sizing: border-box`; do not draw both a CSS border and a matching shadow ring. Native checkboxes, semantic table grids, and graph edges may retain their necessary line treatment. Do not use horizontal rules to divide every document section.
+Use shadow-based boundaries on surfaces. Keep layout dimensions stable with `box-sizing: border-box`; do not draw both a CSS border and a matching shadow ring. Native checkboxes, semantic table grids, and graph edges may retain their necessary line treatment. Scrollbars are a slim rounded thumb on no track and without arrows, tinted from the text color, so they sit quietly in both themes. Do not use horizontal rules between document blocks or sections; space and the section heading set sections apart (see Ticket detail).
 
 Use the source’s light-theme definitions, composed with the theme’s boundary role:
 
@@ -234,21 +237,21 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 
 The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
-| Region          | Geometry and behavior                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------- |
-| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups |
-| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                           |
-| List header     | 48px: view title, Refresh, then search and Filters (32px small controls)                                |
-| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                   |
-| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                     |
-| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                            |
-| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                     |
-| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters           |
-| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                     |
-| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                          |
-| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context         |
+| Region          | Geometry and behavior                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups; collapsible to a 52px icon rail that does not scroll |
+| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                                                                                 |
+| List header     | 48px: view title, Refresh, then Search, Filters, and Display (32px small controls)                                                                            |
+| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                                                                         |
+| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                                                                           |
+| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                                                  |
+| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                                           |
+| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                                                 |
+| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                                           |
+| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                                                |
+| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                                               |
 
-List and detail scroll independently. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
+List and detail scroll independently, and the window itself never scrolls. In the list pane only the rows (and paging) scroll: the title, toolbar, source tabs and filter chips stay fixed above them. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
 
 ### Responsive rules
 
@@ -260,7 +263,7 @@ Measure the available content panel width after navigation, not just the screen 
 | Content width below 840px    | Selecting a ticket replaces the list in the content area; explicit Back returns to its prior position |
 | Window below 768px           | Navigation moves into a sheet; retain a labeled navigation trigger                                    |
 | Window near 390px            | One content column, 16px gutters, wrapping property values, full-width action forms where needed      |
-| Detail pane below 652px      | The property rail moves below the document column and keeps its section order                         |
+| Detail pane below 652px      | The property rail folds into a chip bar under the title (see Ticket detail)                           |
 
 A navigation sheet is at most 280px or viewport width minus 32px. Popovers retain 16px viewport clearance and collide away from edges. Forms that cannot fit a popover use a sheet/dialog with a scrollable body. At short heights, keep form actions reachable without clipping the body.
 
@@ -276,6 +279,8 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count.
 - **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
+- **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
+- **Collapse:** a button beside New ticket collapses the sidebar to a 52px rail of icons. Like a navigation rail, it holds a few fixed destinations and never scrolls. Inbox, the three ticket views, Documents and Workspace graph keep their icons. Projects and Plans each fold into one icon that opens a menu of the group's entries and its manage action. Each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner. The window's minimum size, 480 by 600, keeps the rail whole.
 
 Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
@@ -295,7 +300,8 @@ Use stable columns: selection, status, reference, title, then the source pill of
 - Group rows by status in workflow order: In progress, In review, Todo, Done, Canceled, Duplicate. Each group has a 32px header on the recessed surface (`#F2F2F2` light, `#1A1A1A` dark) with a hairline above and below (`#0000000D` light, `#FFFFFF14` dark) with the status icon, the status name in the subsection role, a 12px count, and an Add ticket action for that status. Omit empty groups. A status change moves the ticket to its new group without animating the reorder.
 - Once an external source is configured, a source filter below the list header offers All, GitHub, and Local with counts. It narrows the groups; it does not regroup the list by source.
 - Checkbox hit areas occupy a reserved 32px column. With a mouse, reveal unchecked controls on row hover or keyboard focus; show all controls during bulk selection. On touch devices keep them visible. Selection never shifts the row or creates an extra row of controls inside it.
-- Rows have two lines. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. In a single-status view the Todo row keeps its Ready or Blocked word and dot; only the Ready view, where every row is Ready, omits the per-row Ready dot. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
+- The list header's Display button opens a menu that holds the layout choices: Layout (List or Board) and Rows (Detailed or Simple). Layout choices never sit in the header as a row of toggles.
+- Detailed rows, the default, have two lines. Simple rows keep only line one, ending with the Ready or Blocked dot and the updated time. Line one: 16px status icon (with an accessible name), monospace ticket reference, the title, then, for an externally owned ticket, a trailing pill with the source mark and its external number (#98). Line two: for Todo tickets a small status dot with Ready or "Blocked by T-n", "Source unavailable" when the source cannot be reached, or "Duplicate of T-n"; then one context item (parent, project, or Plan relevant to the current view), tag pills, and the 12px updated time. In a single-status view the Todo row keeps its Ready or Blocked word and dot; only the Ready view, where every row is Ready, omits the per-row Ready dot. Group headers carry the status, so line two omits the status word; views that are not grouped by status, such as search results, begin line two with it. Do not repeat the current project on every row.
 - Status color appears only as the small dot beside a word, never as an icon tint or fill.
 - Metadata that does not fit moves to details; the title keeps its useful width. Long titles must not overlap trailing actions.
 - An open ticket uses a neutral selected fill without a decorative leading stripe. Bulk selection is communicated separately by checkboxes. Keyboard focus uses the focus ring.
@@ -318,13 +324,13 @@ Search retains its query while opening details. Filter controls show active cons
 7. **Source conversation:** tickets that have an external source. The source’s comments and events, read-only, with a link to comment at the source. After ownership is taken the retrieved conversation stays, as the history of the source; it is no longer refreshed.
 8. **Activity:** authored updates, distinguishable recorded changes, and explicit update submission, with an All | Updates toggle. Activity follows the description; empty relationship sections are folded away. On an externally owned ticket, a caption states that updates stay in ticketd and are never sent to the source.
 
-For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored update, with its relative reporting time and supplied editing agent, and opens that update; with none it says “No update reported”. Editing an older update does not make it the latest report.
+For In progress and In review tickets, a Latest update section follows Status in the rail. It uses the core’s latest authored update, with its relative reporting time and supplied editing agent, and opens that update; with none it says “No update reported”. Editing an older update does not make it the latest report. In the chip bar it fills its own line under the chips.
 
-The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel.
+The **property rail** sits beside the document column on the canvas surface, in this order: Status, Source, Project, Plan, Tags, Relationships, and Attention (Follow and the reminder). Each section has a 12px secondary label above its value; values are 32px ghost controls with identifying icons and no outlined boxes, aligned to the label’s left edge. Hover and keyboard focus reveal interactivity. Separate sections with 20px spacing, not dividers or cards. Outlined, labeled fields remain the creation form’s treatment. A picker opened from the rail aligns to the rail’s right edge so it stays inside the content panel. When the detail pane is too narrow for the rail beside the document column, the rail folds into a wrapping chip bar under the title, in rail order; each chip shows its value and opens the same editor, and Relationships follow the description as a section.
 
 In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
 
-Use 8px from title to state line and 24px from state line to the description. Use 24px between major reading sections and 32px before the source conversation and Activity. Use section spacing instead of divider lines; shadow boundaries belong to pane edges, floating surfaces, and source cards.
+Use 8px from title to state line and 24px from state line to the description. Use 40px between major sections. The ticket stays one scrolling page, without tabs or an outline. Each major section (Subtickets, Evidence, Backlinks, Source conversation, Activity) opens with a section header: one row holding the section's title, count, and actions. Space sets sections apart, not divider lines or cards; shadow boundaries belong to pane edges, floating surfaces, and the source description card. An empty section is one muted line with its action in the header, not a filled box.
 
 A save state belongs next to the edited content, in 12px supporting text. Stable Saved feedback must not take an entire standalone section. Pending save, Saving, and failures remain visible and accessible. Never hide a failure to achieve a cleaner screenshot.
 
@@ -372,9 +378,9 @@ Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with
 - Tables stay within a labeled horizontal scroll region. Preserve cell readability instead of shrinking the whole table.
 - Mermaid diagrams fit the reading column and provide source and expand actions. Rendering errors stay beside the diagram; source remains editable and savable.
 - An update is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
-- Content owned by an external source is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The card is the provenance signal; locally authored updates stay unboxed.
-- The source conversation shows the source’s comments as source cards and its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, as compact rows: a 28px circular icon, the actor, the event, and the time.
-- Automatic history is visually quieter than authored updates. Group its label, changed values, and time into a compact row.
+- An external source’s description is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The header’s source name and Read-only mark are the provenance signal.
+- The source conversation is one connected timeline, like Activity. A comment is a comment row with no card: a 28px badge on the line, a caption header naming the author, “commented on GitHub”, the time, Read-only, and a View link, then the comment body. Its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, are compact rows: a 28px circular icon, the actor, the event, and the time.
+- Activity is one timeline under its composer, joined by a single 2px line as on a GitHub issue. Updates are comment rows on the line, with no card, whose header names the supplied agent and the time. Recorded changes are compact event rows, visually quieter than updates, with their 28px icon on the line; changes made together share one row. All | Updates hides the event rows.
 - The empty update composer begins as a one-line “Write an update…” affordance. Once opened, keep the draft available until submission or explicit discard, with “Add details” and “Attach Document” in one row and “Draft kept on this device” beside Post; blur is not submission. Whitespace-only text cannot be posted. Details are the Document that explains an update; attaching a Document uses a title-search picker, never a raw ID.
 
 Description autosave and explicit Post update submission remain different interactions. External CLI updates refresh saved values while preserving drafts. A conflict notice offers Reload saved content and Save my draft, with enough text to explain the overwrite. Do not move the notice out of view when a refresh occurs.
@@ -432,9 +438,68 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 - **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
 - **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
 
-## 11. Shared control and state recipes
+## 11. Design system and shared components
 
-Use the existing shadcn/Radix components and shared variants. Compose a control before inventing another. Inputs, buttons, menus, fields, alerts, and dialogs must have one visual contract across views.
+ticketd's interface is assembled from one design system: the tokens in `apps/desktop/src/styles.css`, the bundled Geist fonts, and the shared React components in `apps/desktop/src/components/ui`, which are shadcn/ui copies restyled with the tokens. A web client can reuse them by building the same source; a separate package earns its place only once a second app imports the components.
+
+### Levels
+
+Build from the bottom up. A piece may use anything from a lower level, never from a higher one.
+
+| Level                    | What lives there                                               | Where                            | Examples                                                                                                                                                |
+| ------------------------ | -------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 · Tokens               | Named decisions; the only place raw values live                | `apps/desktop/src/styles.css`    | `surface`, `muted-foreground`, `radius-panel`, `shadow-menu`, `text-ui`                                                                                 |
+| 1 · Base components      | One job each, no ticketd words, tokens only                    | `apps/desktop/src/components/ui` | Button, IconButton, Input, Select, Switch, SegmentedControl, StatusDot, Badge, Reference, Count, Progress, Kbd, Tooltip, Skeleton                       |
+| 2 · Composite components | Content-agnostic compositions with slots                       | `apps/desktop/src/components/ui` | Field, Picker, TokenField, Menu, Popover, Dialog, Sheet, Command, ListHeader, EmptyState, Alert, SectionHeader, Card, Item, Timeline, EventRow, Sidebar |
+| 3 · Product components   | ticketd recipes that know tickets, statuses, sources and Plans | `apps/desktop/src/features`      | StatusIcon, TicketRow, property rail, Activity, source card, Filters and Display, bulk bar                                                              |
+| 4 · Layouts              | Page structures that place components                          | `apps/desktop/src`               | App shell, split view, ticket page, management page, Settings                                                                                           |
+| 5 · Screens              | Real screens with real content                                 | `apps/desktop/src`               | All tickets, a ticket, Inbox, a Plan                                                                                                                    |
+
+Levels 0–2 live in `components/ui` and `styles.css`; levels 3–5 live with their features. Interactive components wrap a Radix primitive (Select, Popover, Dialog, DropdownMenu, Switch, Tooltip) that supplies keyboard, focus, and ARIA behavior; features use the wrapping component and never style a Radix part directly. Recurring combinations of components are patterns, written in this document rather than coded: empty, loading, and failure states (section 12) and the choice between menu, popover, and dialog (below).
+
+### Catalogue notes
+
+What the shared pieces do and which variants exist; each has a JSDoc summary in its file.
+
+- **Badge** labels a tag (`tag`), an external source reference such as #98 (`source`) or a Document chip (`doc`, 28px). `size="sm"` fits ticket rows and `tone="raised"` sits on a recessed control. **Reference** is a ticket or Plan reference in the mono face, **Count** a caption-size tabular number beside its label, and **Progress** a 64px bar that is named with `aria-label` and has its words beside it; it keeps an edge and a system fill under forced colours.
+- **SectionHeader** is the heading row of every section: a heading (`level` 1 to 3) that holds the optional count, so the name reads “Evidence 2”, then controls (`children`) and `actions` pushed to the end. `caption` is a muted note on its own line under the row. `bar` makes the 44px header that opens a panel.
+- **Card** has a header band, body and recessed footer for a source description card or a management card, not for comments, updates or evidence; `asChild` lends it to a `section` or `article`. **Item** is one 36px row for a small list inside a section, with a leading icon, a Reference, a truncating title and trailing meta; `asChild` lends it to an `li`.
+- **Timeline** joins comments, updates and recorded changes with one 2px line, in Activity and the source conversation alike. A **CommentRow** is a comment or update with no card: a 28px badge on the line, a caption header with actions at the end, and the body beneath. An **EventRow** is one recorded change, a 28px badge with the change’s icon, the sentence and caption-size meta. A status change shows its new status icon, so Canceled and Duplicate never look completed.
+- **Alert** is the one inline notice: a short title (`level` makes it a heading where the notice replaced one), one sentence and real buttons. Tones are `neutral`, `attention` (a status dot in the title) and `error`; size `compact` is the single-row form for transient confirmations such as “In Trash”. It defaults to `role="alert"`; pass `status` for a calm update.
+- **EmptyState** comes in `block` (an empty view: icon, title, one sentence and the action that fills it), `inline` (a row inside a card or section, the action at its end) and `hint` (a quiet pane with one line and an optional footnote; it carries no icon, description or action).
+
+### Tokens
+
+Primitive values, such as hex colors and pixel sizes, belong only in the token blocks of `apps/desktop/src/styles.css`. Components use the semantic tokens of sections 2–4, such as `background`, `surface`, `recessed`, `foreground`, `muted-foreground`, `accent`, `border`, `link-foreground`, `error-surface`, `status-ready`, `text-ui`, `radius-panel`, `shadow-menu`, and `focus-ring`. Component tokens exist only where a part needs its own role (`sidebar-*`). Light values sit on `:root` and dark values on `:root[data-theme="dark"]`. Tailwind's theme maps the color tokens to utilities such as `bg-accent`; spacing and control sizes use Tailwind's 4px steps with the values in section 4.
+
+### Rules that keep the system small
+
+- Check the catalog first. Extend an existing component before adding a near-duplicate, and never give two components one name.
+- Build a new piece inside the screen that needs it. Promote it to level 3 on its second real use with the same meaning, and into `components/ui` only when it carries no ticketd words.
+- A variant keeps the component's anatomy and behavior and differs in function; otherwise make a separate component or a recipe.
+- Put content in children or named slots. Use typed props only for design-decided options such as `variant`, `size`, or a leading icon, and start them narrow: opening an API later is easier than closing it.
+- Reference semantic tokens only: no hex values, no magic numbers, and no `!important` overrides of a shared control from a feature stylesheet.
+- Stay on Radix. When adopting a shadcn/ui component, copy its Radix variant and restyle it with the tokens.
+
+### Checks
+
+`./scripts/check` enforces the tokens and components mechanically, and every count it keeps may only fall:
+
+- ESLint runs `@shadcn/lint` on app components. It reports raw palette colors, arbitrary values, restyling a shared component beyond layout classes, and classes it cannot read, and its messages name the variant, size, or token to use instead. Findings that predate these rules are recorded in `apps/desktop/eslint-suppressions.json`; after fixing one, run `npx eslint --prune-suppressions` in `apps/desktop`.
+- `src/test/design-tokens.test.ts` counts raw colors, literal radii, and `!important` in each stylesheet; `src/test/type-scale.test.ts` keeps font sizes on the type scale.
+
+### Recorded lint findings
+
+`apps/desktop/eslint-suppressions.json` holds the findings that remain; each group below says why it stays. Fix them by the route given, and prune the entry in the same change.
+
+- **Feature class on a shared component** (the `no-restyle` entries in `src/features` and `WorkspaceSidebar.tsx`, such as `board-card`, `filters-content`, `linked-work-title`, `plan-actions-menu`). The feature stylesheet gives the component its own height, padding, font size, background or width, and many of the components render in a portal, so no parent element exists to carry the class. Each needs a variant or size on the shared component that the design names; moving the class to a wrapper would only hide the restyle. Do them one component at a time, with the screen open in both themes.
+- **Overrides inside `components/ui`** (`dialog-shell`, `command`, `empty-state`, `field`, `picker`, `resizable`, `sidebar`). The composite passes spacing, type or color classes to the primitive it wraps (`DialogContent p-0 gap-0`, `DialogTitle text-2xl`, `Label font-normal`). Each becomes a variant on the primitive (`dialog`, `label`, `separator`, `sheet`, `input`).
+- **Arbitrary values with no scale equivalent** (`dialog.tsx`, `sidebar.tsx`, `switch.tsx`, `tooltip.tsx`, `dialog-shell.tsx`, `empty-state.tsx`, `DocumentEditor.tsx`): `calc()` widths and offsets, `transition-[...]` property lists, `0_0_0_1px` ring shadows, `tracking-[-0.6px]`, `stroke-[1.75]`. They need a new token or utility, which the design has not decided.
+- **Toggled state color** (`Activity.tsx` `bg-accent` on a ghost Button): needs a pressed treatment for ghost buttons, which would change every ghost trigger that opens a menu.
+
+### Control and state recipes
+
+Compose a control before inventing another. Inputs, buttons, menus, fields, notices, and dialogs must have one visual contract across views.
 
 | State          | Required treatment                                                                            |
 | -------------- | --------------------------------------------------------------------------------------------- |
@@ -456,7 +521,7 @@ Menus are for short action choices. Popovers are for small, focused edits. Dialo
 
 ## 12. Feedback, motion, and accessibility
 
-Use a small set of observable states rather than transient notifications everywhere. Empty, loading, unavailable, failed, saved, and externally changed data must be distinguishable.
+Use a small set of observable states rather than transient notifications everywhere. Empty, loading, unavailable, failed, saved, and externally changed data must be distinguishable. Build them from the shared EmptyState, Skeleton, and Alert components. An empty state carries the action that fills it; two have none because the control sits directly beside them: the Activity timeline (its composer is the row above) and a Plan’s Dependencies view (Add tickets is in the Plan header above). An empty Board column says “No tickets” (its header names the status, so every column reads alike and the line never wraps) and offers Add ticket; with a search or filter on it says “No matches” and offers Clear filters.
 
 | Situation                       | Presentation                                                             |
 | ------------------------------- | ------------------------------------------------------------------------ |

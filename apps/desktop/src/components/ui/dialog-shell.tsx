@@ -31,6 +31,7 @@ export function DialogShell({
   footerNote,
   primaryHint,
   children,
+  busy = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -52,11 +53,18 @@ export function DialogShell({
   /** A shortcut shown inside the primary button. */
   primaryHint?: string;
   children: ReactNode;
+  /** A submitted write is still in flight, so dismissing must wait for its result. */
+  busy?: boolean;
 }) {
   const reasonId = useId();
   const blocked = blockedReason !== null;
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
       <DialogContent
         className="gap-0 overflow-hidden p-0"
         style={{ maxWidth: `min(${width}px, calc(100vw - 32px))`, width }}
@@ -70,7 +78,7 @@ export function DialogShell({
             if (!blocked) onSubmit();
           }}
         >
-          <div className="flex items-start gap-3 pt-5 pr-[60px] pl-6">
+          <div className="flex items-start gap-3 pt-5 pr-15 pl-6">
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <DialogTitle className="text-2xl leading-8 font-semibold tracking-[-0.6px]">
                 {title}
@@ -83,7 +91,7 @@ export function DialogShell({
           <div className="dialog-shell-body flex flex-col gap-2 px-6 pt-5 pb-6">
             {children}
           </div>
-          <div className="dialog-shell-footer flex h-[60px] items-center gap-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
+          <div className="dialog-shell-footer flex h-15 items-center gap-2 bg-(--background) pr-4 pl-6 shadow-[0_-1px_0_0_var(--border)]">
             {footerLeading}
             <p
               id={reasonId}
@@ -97,6 +105,7 @@ export function DialogShell({
                 variant="ghost"
                 size="sm"
                 onClick={onCancel}
+                disabled={busy}
               >
                 Cancel
               </Button>
@@ -123,6 +132,7 @@ export function DialogShell({
                 variant="ghost"
                 size="icon-sm"
                 {...(onCancel && { onClick: onCancel })}
+                disabled={busy}
               >
                 <XIcon />
                 <span className="sr-only">Close</span>

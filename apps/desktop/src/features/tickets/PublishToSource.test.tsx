@@ -847,6 +847,12 @@ test("the inline unresolved panel keeps retry disabled after dismissing a candid
     />,
   );
   const panel = screen.getByRole("region", { name: "Publish outcome unknown" });
+  expect(
+    within(panel).getByRole("heading", {
+      level: 3,
+      name: "Publish outcome unknown",
+    }),
+  ).toBeTruthy();
   expect(await within(panel).findByText("Possible result")).toBeTruthy();
   const retry = within(panel).getByRole("button", { name: "Publish again" });
   expect(retry).toHaveProperty("disabled", true);

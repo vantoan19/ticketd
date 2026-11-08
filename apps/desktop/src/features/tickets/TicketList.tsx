@@ -31,6 +31,9 @@ import {
 import { compactAgo, formatDateTime } from "@/lib/format";
 import type { StatusCounts, Ticket } from "@/lib/api/client";
 import "./ticket-list.css";
+import { Badge } from "@/components/ui/badge";
+import { Count } from "@/components/ui/count";
+import { Reference } from "@/components/ui/reference";
 
 export function TicketList({
   tickets,
@@ -45,6 +48,7 @@ export function TicketList({
   grouping,
   singleStatus = false,
   readyView = false,
+  simple = false,
 }: {
   tickets: Ticket[];
   selected: string | null;
@@ -73,6 +77,8 @@ export function TicketList({
   singleStatus?: boolean;
   /** Every row is Ready (the Ready view), so the per-row Ready dot is omitted. */
   readyView?: boolean;
+  /** Simple rows: one line, ending with the Ready or Blocked dot and the time. */
+  simple?: boolean;
 }) {
   const rows = useRef(new Map<string, HTMLButtonElement>());
   // Groups and rows share one list so a row that changes group keeps its
@@ -103,13 +109,13 @@ export function TicketList({
               >
                 <StatusIcon status={status} decorative />
                 <h2>{status}</h2>
-                <span className="ticket-group-count">
+                <Count>
                   {shown.length < count ? `${shown.length} of ${count}` : count}
                   <span className="sr-only">
                     {" "}
                     {count === 1 ? "ticket" : "tickets"}
                   </span>
-                </span>
+                </Count>
                 {grouping?.onAdd && (
                   <IconButton
                     className="ticket-group-add"
@@ -153,6 +159,7 @@ export function TicketList({
                 }}
                 type="button"
                 className="ticket-row"
+                data-rows={simple ? "simple" : undefined}
                 aria-pressed={ticket.reference === selected}
                 onClick={() => onOpen(ticket.reference)}
                 onFocus={(event) =>
@@ -192,7 +199,7 @@ export function TicketList({
                   </TooltipTrigger>
                   <TooltipContent>{ticket.status}</TooltipContent>
                 </Tooltip>
-                <span className="ticket-ref">{ticket.reference}</span>
+                <Reference>{ticket.reference}</Reference>
                 <span className="ticket-title" title={ticket.title}>
                   {ticket.title}
                 </span>
@@ -203,6 +210,7 @@ export function TicketList({
                   grouped={grouping !== undefined}
                   singleStatus={singleStatus}
                   readyView={readyView}
+                  simple={simple}
                 />
               </button>
               {rowAction && (
@@ -217,12 +225,14 @@ export function TicketList({
 }
 
 /** The owner of an externally owned ticket; a local ticket has no pill. */
-function SourcePill({ ticket }: { ticket: Ticket }) {
+export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
   return (
-    <span
-      className="ticket-source-pill"
+    <Badge
+      variant="source"
+      // Raised: the pill keeps its fill when the row is hovered or selected.
+      tone="raised"
       title={`Owned by ${source.provider_name}: ${source.display}`}
     >
       <span className="sr-only">
@@ -230,7 +240,7 @@ function SourcePill({ ticket }: { ticket: Ticket }) {
       </span>
       <Cloud aria-hidden="true" />
       <span aria-hidden="true">{source.number}</span>
-    </span>
+    </Badge>
   );
 }
 
@@ -248,12 +258,14 @@ function RowDetails({
   grouped,
   singleStatus,
   readyView,
+  simple,
 }: {
   ticket: Ticket;
   scope: RowScope;
   grouped: boolean;
   singleStatus: boolean;
   readyView: boolean;
+  simple: boolean;
 }) {
   const now = useNow();
   const state = readiness(ticket);
@@ -268,10 +280,32 @@ function RowDetails({
       !singleStatus &&
       !grouped &&
       !context?.label.startsWith("Duplicate"));
+  const simpleTone = unavailable
+    ? "attention"
+    : state.kind === "blocked"
+      ? "blocked"
+      : state.kind === "ready" && !readyView
+        ? "ready"
+        : null;
   return (
     <span className="ticket-row-meta">
       <span className="ticket-row-contextual">
-        {unavailable ? (
+        {simple ? (
+          // One line: a dot says Ready or Blocked, or that the source is
+          // unavailable. A dot never stands alone, so the words are its name and
+          // its tooltip. The Ready view omits the per-row Ready dot.
+          simpleTone && (
+            <span
+              className="ticket-row-state"
+              title={unavailable ? "Source unavailable" : readinessLabel(state)}
+            >
+              <StatusDot tone={simpleTone} size={10} />
+              <span className="sr-only">
+                {unavailable ? "Source unavailable" : readinessLabel(state)}
+              </span>
+            </span>
+          )
+        ) : unavailable ? (
           // The source cannot be read: say so in place of Ready or Blocked, which
           // would describe content that may no longer be current.
           <span className="ticket-row-state">
@@ -302,13 +336,13 @@ function RowDetails({
             </span>
           )
         )}
-        {context && (
+        {!simple && context && (
           <span className="ticket-row-context" data-kind={context.kind}>
             <ContextIcon kind={context.kind} />
             <span className="ticket-row-context-label">{context.label}</span>
           </span>
         )}
-        <RowTags tags={ticket.tags} />
+        {!simple && <RowTags tags={ticket.tags} />}
       </span>
       <span className="ticket-row-time">
         {ticket.updated_at ? (

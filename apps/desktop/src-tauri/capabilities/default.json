@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window; may reveal a file in the file manager, open ticketd's GitHub pages and linked GitHub issues, show native save and open dialogs, and follow the Light or Dark choice for the title bar and window color, and send system notifications for due reminders, with no filesystem or shell access.",
+  "description": "Main window; may reveal a file in the file manager, open ticketd's GitHub pages and linked GitHub issues, show native save and open dialogs, and follow the Light or Dark choice for the title bar and window color, draw its own title bar (drag, minimize, maximize, close), read its own size and scale and resize itself to redraw a webview that lost its display scale, and send system notifications for due reminders, with no filesystem or shell access.",
   "windows": ["main"],
   "permissions": [
     "core:event:allow-listen",
@@ -9,6 +9,20 @@
     "opener:allow-reveal-item-in-dir",
     "core:window:allow-set-theme",
     "core:window:allow-set-background-color",
+    "core:window:allow-scale-factor",
+    "core:window:allow-inner-size",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-size",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-is-decorated",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "dialog:allow-save",
     "dialog:allow-open",
     "notification:allow-is-permission-granted",
@@ -19,10 +33,18 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://github.com/vantoan19/ticketd" },
-        { "url": "https://github.com/vantoan19/ticketd#*" },
-        { "url": "https://github.com/vantoan19/ticketd/*" },
-        { "url": "https://github.com/*/*/issues/*" }
+        {
+          "url": "https://github.com/vantoan19/ticketd"
+        },
+        {
+          "url": "https://github.com/vantoan19/ticketd#*"
+        },
+        {
+          "url": "https://github.com/vantoan19/ticketd/*"
+        },
+        {
+          "url": "https://github.com/*/*/issues/*"
+        }
       ]
     }
   ]

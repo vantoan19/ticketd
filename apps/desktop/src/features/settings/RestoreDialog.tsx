@@ -270,7 +270,7 @@ export function RestoreDialog({
       }}
     >
       <DialogContent
-        className="restore-dialog sm:max-w-[640px]"
+        className="restore-dialog sm:max-w-160"
         showCloseButton={phase.name !== "restoring"}
         onInteractOutside={(event) => event.preventDefault()}
       >
