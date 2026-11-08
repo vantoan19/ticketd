@@ -3,20 +3,14 @@ import { cn } from "cn";
 import type { LucideIcon } from "lucide-react";
 
 /**
- * The list that joins updates and recorded changes with one 2px line, as on a
- * GitHub issue. Its children are `li`s: an `EventRow`, or a plain `li` that
- * holds a `Card`. The line shows between items and runs behind badges and cards;
- * `plain` leaves it out (only Activity is connected, DESIGN.md section 8).
+ * The list that joins comments, updates and recorded changes with one 2px
+ * line, as on a GitHub issue. Its children are `CommentRow`s and `EventRow`s;
+ * the line runs behind their badges.
  */
-function Timeline({
-  className,
-  plain = false,
-  ...props
-}: React.ComponentProps<"ol"> & { plain?: boolean }) {
+function Timeline({ className, ...props }: React.ComponentProps<"ol">) {
   return (
     <ol
       data-slot="timeline"
-      data-plain={plain ? "" : undefined}
       className={cn("ui-timeline", className)}
       {...props}
     />
@@ -55,4 +49,44 @@ function EventRow({
   );
 }
 
-export { Timeline, EventRow };
+/**
+ * A comment or update on a `Timeline`, with no card: the badge sits on the
+ * line, `header` names who and when, as an event row does, with `actions` at the
+ * end, and the body (children) reads beneath it. `label` names the article.
+ */
+function CommentRow({
+  icon: Icon,
+  header,
+  actions,
+  label,
+  className,
+  children,
+  ...props
+}: Omit<React.ComponentProps<"li">, "children"> & {
+  icon: LucideIcon;
+  header: React.ReactNode;
+  actions?: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <li
+      data-slot="comment-row"
+      className={cn("ui-comment-row", className)}
+      {...props}
+    >
+      <span data-slot="event-row-badge" className="ui-event-row-badge">
+        <Icon aria-hidden="true" />
+      </span>
+      <article aria-label={label} className="ui-comment-row-main">
+        <div className="ui-comment-row-header">
+          <span className="ui-comment-row-meta">{header}</span>
+          {actions && <span className="ui-comment-row-actions">{actions}</span>}
+        </div>
+        {children}
+      </article>
+    </li>
+  );
+}
+
+export { Timeline, EventRow, CommentRow };

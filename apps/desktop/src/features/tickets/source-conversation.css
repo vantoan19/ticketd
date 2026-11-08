@@ -1,5 +1,5 @@
 .source-conversation {
-  margin-top: 32px;
+  margin-top: 40px;
 }
 .source-card-actions {
   display: flex;
@@ -17,12 +17,6 @@
 .source-conversation [data-slot="section-header"] .source-link {
   font-size: var(--text-caption);
 }
-.source-comment-meta {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .source-card-actions {
   flex: none;
 }
@@ -37,7 +31,7 @@
   height: 12px;
 }
 .source-conversation .description-document {
-  padding: 12px 16px;
+  padding: 0;
   margin-top: 0;
   min-height: 0;
 }

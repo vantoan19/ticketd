@@ -20,7 +20,7 @@ const headerOf = (name: RegExp | string) =>
     .getByRole("heading", { name })
     .closest<HTMLElement>('[data-slot="section-header"]');
 
-test("each major ticket section opens with a divided header", async () => {
+test("each major ticket section opens with its heading row, set apart by space alone", async () => {
   bridge.invoke.mockImplementation(async (command: string) =>
     command === "ticket_backlinks"
       ? [
@@ -66,7 +66,7 @@ test("each major ticket section opens with a divided header", async () => {
   );
   await screen.findByText("Cache layer");
   for (const name of ["Subtickets", "Evidence", /^Mentioned in/, "Activity"])
-    expect(headerOf(name)?.hasAttribute("data-divided")).toBe(true);
+    expect(headerOf(name)).not.toBeNull();
   // The count sits in the same header as the title.
   expect(headerOf(/^Mentioned in/)?.textContent).toBe("Mentioned in 1");
 });

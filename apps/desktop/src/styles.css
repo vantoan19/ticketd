@@ -618,7 +618,7 @@ body:has([data-slot="dialog-overlay"])
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -632,9 +632,6 @@ body:has([data-slot="dialog-overlay"])
   width: 2px;
   background: var(--control-boundary);
   opacity: 0.35;
-}
-.ui-timeline[data-plain]::before {
-  display: none;
 }
 .ui-timeline > li {
   position: relative;
@@ -680,6 +677,48 @@ body:has([data-slot="dialog-overlay"])
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   white-space: nowrap;
+}
+/* A comment: badge on the line, a header like an event row, the body beneath. No card. */
+.ui-comment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ui-comment-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-comment-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-comment-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-comment-row-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-comment-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Marks shared by every feature: tags, references, counts and progress. */
@@ -789,10 +828,6 @@ body:has([data-slot="dialog-overlay"])
   font-weight: 600;
   line-height: 32px;
   letter-spacing: -0.6px;
-}
-.ui-section-header[data-divided] {
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 /* bar: the panel header, 44px with a hairline under it. */
 .ui-section-header[data-bar] {

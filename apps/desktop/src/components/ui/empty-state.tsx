@@ -14,7 +14,8 @@ import {
  * appear, and the one action that fills it (`action`, usually a secondary
  * Button; several sit side by side). Sizes: `block` for an empty view,
  * `inline` for a row inside a card or section (the action sits at the end),
- * `hint` for a quiet pane: one line and an optional footnote, no icon or
+ * `plain` drops the inline surface for a section that already has a heading,
+ * such as Evidence on a ticket. `hint` for a quiet pane: one line and an optional footnote, no icon or
  * action. Icon, title and description are optional where a size does not
  * need them.
  */
@@ -25,6 +26,7 @@ export function EmptyState({
   action,
   footnote,
   size = "block",
+  plain = false,
   className,
   role,
 }: {
@@ -35,6 +37,8 @@ export function EmptyState({
   /** Optional small hint under the action. */
   footnote?: ReactNode;
   size?: "block" | "inline" | "hint";
+  /** Inline only: no recessed surface, just the line and its action. */
+  plain?: boolean;
   className?: string;
   role?: "alert" | "status";
 }) {
@@ -62,9 +66,12 @@ export function EmptyState({
       <div
         data-slot="empty-state"
         data-size="inline"
+        data-plain={plain || undefined}
         role={role}
         className={cn(
-          "flex items-center gap-3 rounded-lg bg-(--recessed) px-3.5 py-3 text-sm text-muted-foreground shadow-(--shadow-border-base) [&_svg]:size-4 [&_svg]:shrink-0",
+          "flex items-center gap-3 text-sm text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0",
+          !plain &&
+            "rounded-lg bg-(--recessed) px-3.5 py-3 shadow-(--shadow-border-base)",
           className,
         )}
       >

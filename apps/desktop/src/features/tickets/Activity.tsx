@@ -27,10 +27,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Bot, FileText, MoreHorizontal, Plus } from "lucide-react";
+import {
+  Bot,
+  FileText,
+  MessageSquare,
+  MoreHorizontal,
+  Plus,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { EventRow, Timeline } from "@/components/ui/timeline";
+import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
 import {
   client,
   type AuthoredActivity,
@@ -605,7 +610,6 @@ export function Activity({
     <section className="activity" aria-label="Activity">
       {/* The note is only worth saying where a source owns the ticket and could be confused for the destination. */}
       <SectionHeader
-        divided
         title="Activity"
         caption={
           sourceName && <>Only in ticketd · never sent to {sourceName}</>
@@ -910,14 +914,17 @@ export function Activity({
       ) : entries.length === 0 && !error && !loadError ? (
         <EmptyState
           size="inline"
+          plain
           description="No updates or recorded changes yet."
         />
       ) : (
         <Timeline aria-label="Activity timeline">
           {entries.map((item) =>
             item.type === "note" ? (
-              <li
+              <CommentRow
                 key={`note-${item.note.id}`}
+                icon={item.note.editing_agent ? Bot : MessageSquare}
+                label={`Update by ${item.note.editing_agent ?? "you"}`}
                 ref={
                   active &&
                   item.note.id === targetId &&
@@ -939,130 +946,125 @@ export function Activity({
                     ? "Selected update"
                     : undefined
                 }
-              >
-                <Card>
-                  <CardHeader>
-                    <span className="activity-author">
-                      <Bot aria-hidden="true" size={14} />
-                      <strong>{item.note.editing_agent ?? "You"}</strong>
-                      <span>
-                        update ·{" "}
-                        <time
-                          dateTime={item.note.reported_at}
-                          title={formatDateTime(item.note.reported_at)}
-                        >
-                          {relativeDateTime(item.note.reported_at, now)}
-                        </time>
-                      </span>
+                header={
+                  <span className="activity-author">
+                    <strong>{item.note.editing_agent ?? "You"}</strong>
+                    <span>
+                      update ·{" "}
+                      <time
+                        dateTime={item.note.reported_at}
+                        title={formatDateTime(item.note.reported_at)}
+                      >
+                        {relativeDateTime(item.note.reported_at, now)}
+                      </time>
                     </span>
-                    <span className="activity-header-end">
-                      {item.note.id === (newestNoteId ?? latestNoteId) && (
-                        <Badge size="sm">Latest</Badge>
-                      )}
-                      {item.note.updated_at !== item.note.reported_at && (
-                        <span>
-                          Edited {formatDateTime(item.note.updated_at)}
-                        </span>
-                      )}
-                      {!trashed && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              disabled={pending}
-                              aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
-                            >
-                              <MoreHorizontal />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="end"
-                            onCloseAutoFocus={(event) => {
-                              // Focus goes to the composer, not back to the menu button.
-                              if (replied.current) {
-                                event.preventDefault();
-                                replied.current = false;
-                                setFocusUpdate((count) => count + 1);
-                              }
-                            }}
+                  </span>
+                }
+                actions={
+                  <span className="activity-header-end">
+                    {item.note.id === (newestNoteId ?? latestNoteId) && (
+                      <Badge size="sm">Latest</Badge>
+                    )}
+                    {item.note.updated_at !== item.note.reported_at && (
+                      <span>Edited {formatDateTime(item.note.updated_at)}</span>
+                    )}
+                    {!trashed && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={pending}
+                            aria-label={`Actions for update from ${formatDateTime(item.note.reported_at)}`}
                           >
-                            <DropdownMenuItem
-                              disabled={!!edit}
-                              onSelect={() => reply(item.note.brief)}
-                            >
-                              Reply
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onSelect={() =>
-                                setEdit({
-                                  id: item.note.id,
-                                  original: item.note.brief,
-                                  content: item.note.brief,
-                                })
-                              }
-                            >
-                              Edit update
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onSelect={() => setConfirmDelete(item.note.id)}
-                            >
-                              Delete update
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </span>
-                  </CardHeader>
-                  {confirmDelete === item.note.id && (
-                    <CardBody asChild>
-                      <p role="alertdialog" className="activity-confirm">
-                        {item.note.supporting_document_id
-                          ? "Delete update? Its details stay in Documents."
-                          : "Delete update?"}
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          disabled={pending}
-                          onClick={() => void remove(item.note.id)}
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          onCloseAutoFocus={(event) => {
+                            // Focus goes to the composer, not back to the menu button.
+                            if (replied.current) {
+                              event.preventDefault();
+                              replied.current = false;
+                              setFocusUpdate((count) => count + 1);
+                            }
+                          }}
                         >
-                          Delete update
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setConfirmDelete(null)}
-                        >
-                          Keep update
-                        </Button>
-                      </p>
-                    </CardBody>
-                  )}
-                  <CardBody>
-                    <ClampedBrief>
-                      <MarkdownDocument
-                        source={item.note.brief}
-                        select={select}
-                        revision={revision}
-                      />
-                    </ClampedBrief>
-                  </CardBody>
-                  {item.note.supporting_document_id && (
-                    <CardBody>
-                      <DetailsLink
-                        info={detailDocuments[item.note.supporting_document_id]}
-                        open={() =>
-                          openDocument?.(item.note.supporting_document_id!)
-                        }
-                      />
-                    </CardBody>
-                  )}
-                </Card>
-              </li>
+                          <DropdownMenuItem
+                            disabled={!!edit}
+                            onSelect={() => reply(item.note.brief)}
+                          >
+                            Reply
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              setEdit({
+                                id: item.note.id,
+                                original: item.note.brief,
+                                content: item.note.brief,
+                              })
+                            }
+                          >
+                            Edit update
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setConfirmDelete(item.note.id)}
+                          >
+                            Delete update
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </span>
+                }
+              >
+                {confirmDelete === item.note.id && (
+                  <p role="alertdialog" className="activity-confirm">
+                    {item.note.supporting_document_id
+                      ? "Delete update? Its details stay in Documents."
+                      : "Delete update?"}
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => void remove(item.note.id)}
+                    >
+                      Delete update
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(null)}
+                    >
+                      Keep update
+                    </Button>
+                  </p>
+                )}
+                <div>
+                  <ClampedBrief>
+                    <MarkdownDocument
+                      source={item.note.brief}
+                      select={select}
+                      revision={revision}
+                    />
+                  </ClampedBrief>
+                </div>
+                {item.note.supporting_document_id && (
+                  <div>
+                    <DetailsLink
+                      info={detailDocuments[item.note.supporting_document_id]}
+                      open={() =>
+                        openDocument?.(item.note.supporting_document_id!)
+                      }
+                    />
+                  </div>
+                )}
+              </CommentRow>
             ) : (
               <EventRow
                 key={`history-${item.index}`}
