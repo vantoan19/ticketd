@@ -25,7 +25,6 @@
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--background);
-  scrollbar-width: thin;
   overscroll-behavior-x: contain;
 }
 .board-column {
@@ -63,7 +62,6 @@
   min-height: 0;
   flex: 1;
   padding: 8px;
-  scrollbar-width: thin;
 }
 .ui-button.board-card {
   display: flex;

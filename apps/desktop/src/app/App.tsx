@@ -21,6 +21,7 @@ import { useReminderNotifications } from "@/features/tickets/useReminderNotifica
 import { usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { WindowBar } from "@/components/layout/WindowBar";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { PlanList } from "@/features/plans/PlanList";
@@ -277,6 +278,7 @@ function AppContent() {
               >
                 Skip to content
               </a>
+              <WindowBar />
               <div
                 className={
                   view === "settings" ? "workspace settings-open" : "workspace"
