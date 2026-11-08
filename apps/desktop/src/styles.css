@@ -1091,6 +1091,11 @@ body:has([data-slot="dialog-overlay"])
 .sidebar[data-collapsed] {
   width: 52px;
 }
+/* The folded rail holds a few fixed destinations (Projects and Plans fold into
+   one menu each) and does not scroll; the window's minimum height fits it. */
+.sidebar[data-collapsed] [data-sidebar="content"] {
+  overflow: hidden;
+}
 .sidebar[data-collapsed] .brand {
   flex-direction: column;
   height: auto;

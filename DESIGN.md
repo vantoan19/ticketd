@@ -237,19 +237,19 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 
 The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
-| Region          | Geometry and behavior                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups; collapsible to a 52px icon column |
-| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                                                              |
-| List header     | 48px: view title, Refresh, then Search, Filters, and Display (32px small controls)                                                         |
-| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                                                      |
-| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                                                        |
-| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                               |
-| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                        |
-| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                              |
-| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                        |
-| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                             |
-| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                            |
+| Region          | Geometry and behavior                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups; collapsible to a 52px icon rail that does not scroll |
+| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                                                                                 |
+| List header     | 48px: view title, Refresh, then Search, Filters, and Display (32px small controls)                                                                            |
+| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                                                                         |
+| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                                                                           |
+| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                                                  |
+| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                                           |
+| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                                                 |
+| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                                           |
+| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                                                |
+| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                                               |
 
 List and detail scroll independently, and the window itself never scrolls. In the list pane only the rows (and paging) scroll: the title, toolbar, source tabs and filter chips stay fixed above them. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
 
@@ -279,7 +279,8 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count.
 - **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
-- **Collapse:** a button beside New ticket collapses the sidebar to a 52px column of icons. Every destination stays one click away: each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner.
+- **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
+- **Collapse:** a button beside New ticket collapses the sidebar to a 52px rail of icons. Like a navigation rail, it holds a few fixed destinations and never scrolls. Inbox, the three ticket views, Documents and Workspace graph keep their icons. Projects and Plans each fold into one icon that opens a menu of the group's entries and its manage action. Each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner. The window's minimum size, 480 by 600, keeps the rail whole.
 
 Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
