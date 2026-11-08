@@ -1,12 +1,12 @@
 import { EmptyState } from "@/components/ui/empty-state";
-import { Card, CardHeader } from "@/components/ui/card";
-import { EventRow, Timeline } from "@/components/ui/timeline";
+import { CommentRow, EventRow, Timeline } from "@/components/ui/timeline";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useEffect, useState } from "react";
 import {
   CircleAlert,
   CircleCheck,
   LockKeyhole,
+  MessageSquare,
   CircleEqual,
   Circle,
   CircleSlash,
@@ -71,9 +71,9 @@ function describeEvent(entry: EventEntry): {
 }
 
 /**
- * The source's comments and timeline events for a ticket, read-only. Comments
- * are source cards (the card is the provenance signal) and events are quiet
- * icon rows; locally authored notes are not shown here and nothing in this
+ * The source's comments and timeline events for a ticket, read-only, joined on
+ * one connected timeline like Activity; the Read-only mark on each comment is
+ * the provenance signal. Locally authored notes are not shown here and nothing in this
  * section can be edited or composed. Reloading keeps the rows in place, and a
  * failed reload keeps whatever was retrieved before.
  */
@@ -119,7 +119,6 @@ export function SourceConversation({
       aria-label={`Conversation on ${name}`}
     >
       <SectionHeader
-        divided
         title={`${name} conversation`}
         actions={
           owned &&
@@ -138,6 +137,7 @@ export function SourceConversation({
       {entries && entries.length === 0 && !error && (
         <EmptyState
           size="inline"
+          plain
           description={
             source.unavailable
               ? "No comments in the last synced copy."
@@ -146,48 +146,48 @@ export function SourceConversation({
         />
       )}
       {entries && entries.length > 0 && (
-        <Timeline plain aria-label="Conversation">
+        <Timeline aria-label="Conversation">
           {entries.map((entry) =>
             entry.type === "comment" ? (
-              <li key={`${entry.type}-${entry.id}`}>
-                <Card asChild>
-                  <article
-                    aria-label={`Comment by ${entry.author} on ${name}, read-only`}
-                  >
-                    <CardHeader>
-                      <span className="source-comment-meta">
-                        <strong>{entry.author}</strong> commented on {name} ·{" "}
-                        <time
-                          dateTime={entry.created_at}
-                          title={formatDateTime(entry.created_at)}
-                        >
-                          {relativeDateTime(entry.created_at, now)}
-                        </time>
-                        {entry.edited_at && (
-                          <>
-                            {" "}
-                            · <span>edited</span>
-                          </>
-                        )}
-                      </span>
-                      <span className="source-card-actions">
-                        <span className="source-readonly-label">
-                          <LockKeyhole aria-hidden="true" />
-                          Read-only
-                        </span>
-                        <SourceLink url={entry.url}>View on {name}</SourceLink>
-                      </span>
-                    </CardHeader>
-                    <div className="markdown-preview description-document">
-                      <MarkdownDocument
-                        source={entry.body}
-                        select={select}
-                        revision={revision}
-                      />
-                    </div>
-                  </article>
-                </Card>
-              </li>
+              <CommentRow
+                key={`${entry.type}-${entry.id}`}
+                icon={MessageSquare}
+                label={`Comment by ${entry.author} on ${name}, read-only`}
+                header={
+                  <span>
+                    <strong>{entry.author}</strong> commented on {name} ·{" "}
+                    <time
+                      dateTime={entry.created_at}
+                      title={formatDateTime(entry.created_at)}
+                    >
+                      {relativeDateTime(entry.created_at, now)}
+                    </time>
+                    {entry.edited_at && (
+                      <>
+                        {" "}
+                        · <span>edited</span>
+                      </>
+                    )}
+                  </span>
+                }
+                actions={
+                  <span className="source-card-actions">
+                    <span className="source-readonly-label">
+                      <LockKeyhole aria-hidden="true" />
+                      Read-only
+                    </span>
+                    <SourceLink url={entry.url}>View on {name}</SourceLink>
+                  </span>
+                }
+              >
+                <div className="markdown-preview description-document">
+                  <MarkdownDocument
+                    source={entry.body}
+                    select={select}
+                    revision={revision}
+                  />
+                </div>
+              </CommentRow>
             ) : (
               <SourceEvent
                 key={`${entry.type}-${entry.id}`}

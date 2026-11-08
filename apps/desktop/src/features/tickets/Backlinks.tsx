@@ -116,7 +116,6 @@ export function Backlinks({
   return (
     <section className="backlinks" aria-label="Mentioned in">
       <SectionHeader
-        divided
         title="Mentioned in"
         count={
           offset === 0

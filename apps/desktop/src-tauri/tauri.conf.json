@@ -15,6 +15,8 @@
         "title": "ticketd",
         "width": 1280,
         "height": 772,
+        "minWidth": 480,
+        "minHeight": 600,
         "titleBarStyle": "Transparent",
         "backgroundColor": "#FAFAFA"
       }

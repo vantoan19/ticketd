@@ -12,7 +12,7 @@ The visual reference is the third-party [Vercel design language analysis by desi
 
 Use a Linear-style issue workspace with the Vercel palette and components. Ticketd needs its own application composition: a persistent workspace, a scan-friendly ticket list, a readable document, and reliable editing feedback. Map the reference roles onto these application surfaces without inventing replacement token values. Ticketd uses an explicit compact application heading of 24px/32px with weight 600 and -0.6px tracking. This is a ticketd density adaptation, not a value copied from the reference. The 48px display role remains available for genuine display content and is not applied to every ticket. Workspace pane widths and responsive transitions are ticketd layout decisions. Vercel branding does not belong in this workspace. Use the reference’s shadow boundaries and spacing-led grouping.
 
-The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, and an external issue’s description and comments shown as read-only source cards with compact event rows. Borrow these structures, not those products’ styling or branding.
+The workspace structure also borrows interaction patterns that Linear, GitHub Issues, and Orca share: a ticket list grouped by status, a labeled property rail beside the document, an external issue’s description shown as a read-only source card, and its comments and events on one connected timeline. Borrow these structures, not those products’ styling or branding.
 
 ## 1. Visual character and hierarchy
 
@@ -29,7 +29,7 @@ Visual simplicity must not erase useful information. Existing prerequisites, dup
 ### Composition rules
 
 - Establish grouping with alignment and spacing first. Use a shadow boundary where navigation or independently scrolling planes meet. Separate document sections with spacing.
-- Use flat document sections. Do not wrap each property, empty state, or relationship type in its own card. Cards hold the entries of a conversation: content owned by an external source, which sits in read-only source cards, and the updates on the Activity timeline (see Documents and activity).
+- Use flat document sections. Do not wrap each property, empty state, or relationship type in its own card. Use cards sparingly: the read-only description from an external source is the one card on a ticket. Comments, updates and evidence are rows on the page, not cards (see Documents and activity).
 - Give each action surface one primary action. The workspace's New ticket action and a focused dialog's submit action may coexist.
 - Keep headings, body text, inputs, and section actions on consistent left and right edges.
 - Keep small supporting text readable. Do not use low contrast, tiny text, or excessive truncation to make a screen seem cleaner.
@@ -188,7 +188,7 @@ Lucide icons remain 16px inside ordinary controls, with consistent stroke weight
 
 ### Boundaries, shadows, and focus
 
-Use shadow-based boundaries on surfaces. Keep layout dimensions stable with `box-sizing: border-box`; do not draw both a CSS border and a matching shadow ring. Native checkboxes, semantic table grids, and graph edges may retain their necessary line treatment. Do not use horizontal rules between document blocks; the ticket page's only rule is the hairline that opens each major section (see Ticket detail).
+Use shadow-based boundaries on surfaces. Keep layout dimensions stable with `box-sizing: border-box`; do not draw both a CSS border and a matching shadow ring. Native checkboxes, semantic table grids, and graph edges may retain their necessary line treatment. Scrollbars are a slim rounded thumb on no track and without arrows, tinted from the text color, so they sit quietly in both themes. Do not use horizontal rules between document blocks or sections; space and the section heading set sections apart (see Ticket detail).
 
 Use the source’s light-theme definitions, composed with the theme’s boundary role:
 
@@ -237,19 +237,19 @@ Navigation stays on the canvas surface. Every view sits in one inset, elevated c
 
 The drawing describes hierarchy, not additional duplicate search fields. Search belongs in the list pane header. Unread attention lives in the sidebar Inbox count, not in a top bar. The sidebar footer shows each configured source’s sync state and opens its settings.
 
-| Region          | Geometry and behavior                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups; collapsible to a 52px icon column |
-| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                                                              |
-| List header     | 48px: view title, Refresh, then Search, Filters, and Display (32px small controls)                                                         |
-| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                                                      |
-| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                                                        |
-| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                               |
-| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                        |
-| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                              |
-| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                        |
-| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                             |
-| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                            |
+| Region          | Geometry and behavior                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Navigation      | 208px navigation allocation plus 16px shell inset/gap before the panel; independently scrollable groups; collapsible to a 52px icon rail that does not scroll |
+| Content panel   | One elevated panel, 12px radius, small shadow ring, 8px from the window edges                                                                                 |
+| List header     | 48px: view title, Refresh, then Search, Filters, and Display (32px small controls)                                                                            |
+| Source filter   | Below the list header once a source is configured: All, GitHub, and Local with counts                                                                         |
+| Detail header   | 48px: ticket reference, source link, list position, and actions (see Ticket detail)                                                                           |
+| List pane       | At least 360px in split mode; remaining width allocated with the detail pane                                                                                  |
+| Detail pane     | At least 480px in split mode; start near 55% of content panel width                                                                                           |
+| Document column | 32px desktop gutters, 16px on narrow windows; at least 420px, at most 800px including gutters                                                                 |
+| Property rail   | At least 232px beside the document column, on the canvas surface, with 20px padding                                                                           |
+| Resize handle   | 1px visual separator with an 8px hit area; visible focus and keyboard resizing                                                                                |
+| Expanded detail | Centered column of at most 800px with 16px description text; keep navigation and return context                                                               |
 
 List and detail scroll independently, and the window itself never scrolls. In the list pane only the rows (and paging) scroll: the title, toolbar, source tabs and filter chips stay fixed above them. Sticky chrome has an opaque surface and must not cover focused fields or anchor targets. The first detail viewport should show the title, properties, and the beginning of the description. Reminders, evidence forms, and an empty update editor must not push the title down.
 
@@ -279,7 +279,8 @@ The sidebar sits on the canvas surface, top to bottom:
 - **Work views:** Inbox, All tickets, Ready, and In progress, each with a distinct icon (Ready does not reuse the Done icon) and a trailing count.
 - **Projects and Plans:** two groups, each with manage actions in its heading, plus an Archived Plans entry under Plans.
 - **Pinned bottom:** Trash and Settings stay at the bottom without forcing other items off-screen.
-- **Collapse:** a button beside New ticket collapses the sidebar to a 52px column of icons. Every destination stays one click away: each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner.
+- **Title bar:** on Windows the app draws its own 32px title bar on the canvas in place of the native one. It is the window's drag handle, and double-clicking it maximizes; Minimize, Maximize or Restore, and Close sit at its end, and Close turns the system red on hover. The window keeps its native resize edges and shadow. macOS keeps its transparent native bar.
+- **Collapse:** a button beside New ticket collapses the sidebar to a 52px rail of icons. Like a navigation rail, it holds a few fixed destinations and never scrolls. Inbox, the three ticket views, Documents and Workspace graph keep their icons. Projects and Plans each fold into one icon that opens a menu of the group's entries and its manage action. Each label becomes its icon's tooltip, counts hide, and an unread dot moves to the icon's corner. The window's minimum size, 480 by 600, keeps the rail whole.
 
 Group headings (Projects, Context, Plans) are 12px secondary-text labels in both themes, not primary-weight headings. Use 20px between groups and 8px between a group heading and its rows. Active navigation uses a neutral fill and primary text, plus semantic current-state markup. Inactive rows use secondary text. Hover does not change row size. Counts align at the trailing edge and remain secondary. Unread attention appears as the Inbox count or a status dot beside its label; there is no top-bar indicator and no permanent high-contrast banner.
 
@@ -329,7 +330,7 @@ The **property rail** sits beside the document column on the canvas surface, in 
 
 In split view, description text is 14px. In the full-width (expanded) view, the document column is centered at no more than 800px, the property rail stays beside it, and description text is 16px.
 
-Use 8px from title to state line and 24px from state line to the description. Use 24px between major reading sections and 32px before the source conversation and Activity. The ticket stays one scrolling page, without tabs or an outline. Each major section (Subtickets, Evidence, Backlinks, Source conversation, Activity) opens with a divided section header: a hairline above one row holding the section's title, count, and actions, so sections are easy to tell apart. Add no other divider lines; shadow boundaries belong to pane edges, floating surfaces, and cards.
+Use 8px from title to state line and 24px from state line to the description. Use 40px between major sections. The ticket stays one scrolling page, without tabs or an outline. Each major section (Subtickets, Evidence, Backlinks, Source conversation, Activity) opens with a section header: one row holding the section's title, count, and actions. Space sets sections apart, not divider lines or cards; shadow boundaries belong to pane edges, floating surfaces, and the source description card. An empty section is one muted line with its action in the header, not a filled box.
 
 A save state belongs next to the edited content, in 12px supporting text. Stable Saved feedback must not take an entire standalone section. Pending save, Saving, and failures remain visible and accessible. Never hide a failure to achieve a cleaner screenshot.
 
@@ -377,9 +378,9 @@ Follow the [canonical Markdown editing decision](docs/adr/0005-plate-editor-with
 - Tables stay within a labeled horizontal scroll region. Preserve cell readability instead of shrinking the whole table.
 - Mermaid diagrams fit the reading column and provide source and expand actions. Rendering errors stay beside the diagram; source remains editable and savable.
 - An update is a content entry, not a chat bubble. Show timestamp and supplied editing-agent attribution without inventing human identity.
-- Content owned by an external source is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The header’s source name and Read-only mark are the provenance signal.
-- The source conversation shows the source’s comments as source cards and its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, as compact rows: a 28px circular icon, the actor, the event, and the time.
-- Activity is one timeline under its composer, joined by a single 2px line as on a GitHub issue. Updates are cards on the line whose header names the supplied agent and the time. Recorded changes are compact event rows, visually quieter than updates, with their 28px icon on the line; changes made together share one row. All | Updates hides the event rows.
+- An external source’s description is read-only and sits in a source card: 12px radius, the boundary ring, and a 40px header bar on the canvas surface naming the author and action (“vantoan19 opened this issue on GitHub · Oct 31”), Read-only, and a link to edit or view it at the source. The header’s source name and Read-only mark are the provenance signal.
+- The source conversation is one connected timeline, like Activity. A comment is a comment row with no card: a 28px badge on the line, a caption header naming the author, “commented on GitHub”, the time, Read-only, and a View link, then the comment body. Its events, such as closed as completed, closed as a duplicate, reopened, or an assignment change, are compact rows: a 28px circular icon, the actor, the event, and the time.
+- Activity is one timeline under its composer, joined by a single 2px line as on a GitHub issue. Updates are comment rows on the line, with no card, whose header names the supplied agent and the time. Recorded changes are compact event rows, visually quieter than updates, with their 28px icon on the line; changes made together share one row. All | Updates hides the event rows.
 - The empty update composer begins as a one-line “Write an update…” affordance. Once opened, keep the draft available until submission or explicit discard, with “Add details” and “Attach Document” in one row and “Draft kept on this device” beside Post; blur is not submission. Whitespace-only text cannot be posted. Details are the Document that explains an update; attaching a Document uses a title-search picker, never a raw ID.
 
 Description autosave and explicit Post update submission remain different interactions. External CLI updates refresh saved values while preserving drafts. A conflict notice offers Reload saved content and Save my draft, with enough text to explain the overwrite. Do not move the notice out of view when a refresh occurs.
@@ -461,9 +462,9 @@ Levels 0–2 live in `components/ui` and `styles.css`; levels 3–5 live with th
 What the shared pieces do and which variants exist; each has a JSDoc summary in its file.
 
 - **Badge** labels a tag (`tag`), an external source reference such as #98 (`source`) or a Document chip (`doc`, 28px). `size="sm"` fits ticket rows and `tone="raised"` sits on a recessed control. **Reference** is a ticket or Plan reference in the mono face, **Count** a caption-size tabular number beside its label, and **Progress** a 64px bar that is named with `aria-label` and has its words beside it; it keeps an edge and a system fill under forced colours.
-- **SectionHeader** is the heading row of every section: a heading (`level` 1 to 3) that holds the optional count, so the name reads “Evidence 2”, then controls (`children`) and `actions` pushed to the end. `caption` is a muted note on its own line under the row. `divided` draws the hairline above a major ticket section and `bar` makes the 44px header that opens a panel.
-- **Card** has a header band, body and recessed footer for the entries of a conversation, a source card or a management card; `asChild` lends it to a `section` or `article`. **Item** is one 36px row for a small list inside a section, with a leading icon, a Reference, a truncating title and trailing meta; `asChild` lends it to an `li`.
-- **Timeline** joins updates and recorded changes with one 2px line, and only Activity is connected: `plain` leaves the line out, as the source conversation does. An **EventRow** is one recorded change, a 28px badge with the change’s icon, the sentence and caption-size meta. A status change shows its new status icon, so Canceled and Duplicate never look completed.
+- **SectionHeader** is the heading row of every section: a heading (`level` 1 to 3) that holds the optional count, so the name reads “Evidence 2”, then controls (`children`) and `actions` pushed to the end. `caption` is a muted note on its own line under the row. `bar` makes the 44px header that opens a panel.
+- **Card** has a header band, body and recessed footer for a source description card or a management card, not for comments, updates or evidence; `asChild` lends it to a `section` or `article`. **Item** is one 36px row for a small list inside a section, with a leading icon, a Reference, a truncating title and trailing meta; `asChild` lends it to an `li`.
+- **Timeline** joins comments, updates and recorded changes with one 2px line, in Activity and the source conversation alike. A **CommentRow** is a comment or update with no card: a 28px badge on the line, a caption header with actions at the end, and the body beneath. An **EventRow** is one recorded change, a 28px badge with the change’s icon, the sentence and caption-size meta. A status change shows its new status icon, so Canceled and Duplicate never look completed.
 - **Alert** is the one inline notice: a short title (`level` makes it a heading where the notice replaced one), one sentence and real buttons. Tones are `neutral`, `attention` (a status dot in the title) and `error`; size `compact` is the single-row form for transient confirmations such as “In Trash”. It defaults to `role="alert"`; pass `status` for a calm update.
 - **EmptyState** comes in `block` (an empty view: icon, title, one sentence and the action that fills it), `inline` (a row inside a card or section, the action at its end) and `hint` (a quiet pane with one line and an optional footnote; it carries no icon, description or action).
 

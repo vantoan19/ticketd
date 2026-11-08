@@ -167,12 +167,10 @@ export function Evidence({
   return (
     <section aria-label="Evidence" className="evidence-section">
       <SectionHeader
-        divided
         title="Evidence"
         count={items.length || undefined}
         actions={
-          !trashed &&
-          items.length > 0 && (
+          !trashed && (
             <Button variant="ghost" size="sm" onClick={startAdding}>
               <Plus data-icon="inline-start" />
               Add evidence
@@ -183,15 +181,8 @@ export function Evidence({
       {!items.length && (
         <EmptyState
           size="inline"
+          plain
           description="Link a pull request, commit, or verification result."
-          action={
-            !trashed && (
-              <Button variant="outline" size="sm" onClick={startAdding}>
-                <Plus data-icon="inline-start" />
-                Add evidence
-              </Button>
-            )
-          }
         />
       )}
       {error && !composing && <p role="alert">{error}</p>}

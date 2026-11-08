@@ -95,7 +95,7 @@ function view(value: TicketSource, revision = 0) {
   );
 }
 
-test("comments are read-only source cards and events are quiet rows in source order", async () => {
+test("comments and events share one connected timeline in source order, all read-only", async () => {
   conversation([
     comment("501", "alice", "Please **take** a look", {
       edited_at: "2026-01-02T05:00:00Z",

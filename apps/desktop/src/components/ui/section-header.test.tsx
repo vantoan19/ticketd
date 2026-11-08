@@ -43,15 +43,6 @@ it("defaults to h3 and omits a missing count", () => {
   expect(container.querySelector('[data-slot="count"]')).toBeNull();
 });
 
-it("marks the divided option", () => {
-  const { container } = render(<SectionHeader title="Notes" divided />);
-  expect(
-    container
-      .querySelector('[data-slot="section-header"]')
-      ?.hasAttribute("data-divided"),
-  ).toBe(true);
-});
-
 it("puts a caption in its own slot after the controls, apart from the actions", () => {
   const { container } = render(
     <SectionHeader

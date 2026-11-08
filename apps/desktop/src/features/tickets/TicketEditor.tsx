@@ -586,6 +586,7 @@ export function TicketEditor({
           ) : (
             <EmptyState
               size="inline"
+              plain
               description="No description yet."
               action={
                 <Button

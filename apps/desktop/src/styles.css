@@ -77,6 +77,9 @@
   --interactive: #0072f5;
   --link-foreground: #005fcc;
   --destructive: #991b1b;
+  /* The red of the Windows close button, which the in-app title bar repeats. */
+  --window-close: #c42b1c;
+  --window-close-foreground: #ffffff;
   --error-surface: #fef2f2;
   --error-foreground: #991b1b;
   --popover: var(--surface);
@@ -618,7 +621,7 @@ body:has([data-slot="dialog-overlay"])
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -632,9 +635,6 @@ body:has([data-slot="dialog-overlay"])
   width: 2px;
   background: var(--control-boundary);
   opacity: 0.35;
-}
-.ui-timeline[data-plain]::before {
-  display: none;
 }
 .ui-timeline > li {
   position: relative;
@@ -680,6 +680,48 @@ body:has([data-slot="dialog-overlay"])
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   white-space: nowrap;
+}
+/* A comment: badge on the line, a header like an event row, the body beneath. No card. */
+.ui-comment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.ui-comment-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-comment-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.ui-comment-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-comment-row-header strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ui-comment-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Marks shared by every feature: tags, references, counts and progress. */
@@ -790,10 +832,6 @@ body:has([data-slot="dialog-overlay"])
   line-height: 32px;
   letter-spacing: -0.6px;
 }
-.ui-section-header[data-divided] {
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
 /* bar: the panel header, 44px with a hairline under it. */
 .ui-section-header[data-bar] {
   flex: none;
@@ -837,10 +875,81 @@ body:has([data-slot="dialog-overlay"])
   }
 }
 
+/* Scrollbars: a slim rounded thumb on no track and no arrows, tinted from the
+   text colour so it sits quietly in both themes and widens a little on hover.
+   (scrollbar-width or scrollbar-color would switch these rules off.) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 16%, transparent) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 2px;
+  background-color: color-mix(in srgb, var(--foreground) 32%, transparent);
+}
+/* The in-app title bar (WindowBar), where the native one is off: it sits on
+   the canvas above the shell, which gives up its height. */
+:root {
+  --window-bar: 0px;
+}
+html[data-window-bar] {
+  --window-bar: 32px;
+}
+.window-bar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  height: var(--window-bar);
+  background: var(--background);
+}
+.window-controls {
+  display: flex;
+}
+.window-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: var(--window-bar);
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.window-controls button:hover {
+  background: var(--recessed);
+  color: var(--foreground);
+}
+.window-controls button[data-close]:hover {
+  background: var(--window-close);
+  color: var(--window-close-foreground);
+}
+.window-controls button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.window-controls svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+}
 .workspace {
   display: flex;
   width: 100%;
-  height: 100dvh;
+  height: calc(100dvh - var(--window-bar));
+  margin-top: var(--window-bar);
   min-height: 0;
   /* The shell is locked to the window. It is the containing block of every
      absolutely positioned descendant (sr-only text deep in a pane included),
@@ -1055,6 +1164,11 @@ body:has([data-slot="dialog-overlay"])
    accessible names; counts give way to the unread dot at the icon's corner. */
 .sidebar[data-collapsed] {
   width: 52px;
+}
+/* The folded rail holds a few fixed destinations (Projects and Plans fold into
+   one menu each) and does not scroll; the window's minimum height fits it. */
+.sidebar[data-collapsed] [data-sidebar="content"] {
+  overflow: hidden;
 }
 .sidebar[data-collapsed] .brand {
   flex-direction: column;
