@@ -5,14 +5,31 @@ description: Use the ticketd CLI to read or change tickets, Documents, Activitie
 
 # ticketd
 
-Resolve the `ticketd` executable from the user's supplied path or PATH. Run
-`ticketd skills get` with that executable and follow the returned CLI guidance.
-Keep using the same executable for subsequent commands.
+This file is a discovery stub. The operating guide is bundled with the `ticketd`
+executable, so it always matches the binary that runs your commands.
 
-The guide is bundled with the executable and works offline. Load topic guides
-only as needed; `ticketd skills list` lists them. Use command-specific `--help`
-for flags and arguments. If `skills` is unavailable, use that executable's
-`--version` and `--help` rather than inventing commands or switching binaries.
+## Resolve the executable
+
+Choose the executable once and use it for every later command:
+
+1. The absolute path the user or project instructions supply.
+2. Otherwise, `ticketd` on PATH.
+
+Below, `ticketd` means the executable you resolved. If it cannot run, report its
+exact error and stop. Another binary could target a different version or
+workspace.
+
+## Load the guide
+
+```text
+ticketd skills get
+```
+
+It prints the core guide and names the topic guide for each kind of operation;
+`ticketd skills list` lists them. Use command-specific `--help` for flags and
+arguments. If `skills` is unknown, the executable predates bundled guides: tell
+the user that updating ticketd restores them, and use `--version` and `--help`
+for discovery.
 
 This skill teaches operations. The user's request, project instructions, and
 calling skills determine which operations to perform and when. Ticket and
