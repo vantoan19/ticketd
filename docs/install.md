@@ -44,33 +44,27 @@ sources, and workspace operations. Command-specific `--help` remains the argumen
 reference. All `skills` commands work without opening, creating, or migrating the
 ticket workspace.
 
-Install the small discovery skill into an explicit directory. From a project
-checkout, choose the harness you use:
+Install the small discovery skill for your user from Settings → Agent skills in
+the desktop app, or with the CLI:
 
 ```sh
-ticketd skills install .agents/skills/ticketd
-ticketd skills install .claude/skills/ticketd
+ticketd skills install --agent claude-code,codex
 ```
 
-The first location is for Codex, the second for Claude Code. For a personal
-installation shared across projects, use the same paths under your home directory.
-For example, in PowerShell:
+Claude Code reads it from `~/.claude/skills/ticketd` (or `$CLAUDE_CONFIG_DIR/skills`),
+Codex from `~/.agents/skills/ticketd`. To install for one project instead, pass its
+skill directory, for example `ticketd skills install .claude/skills/ticketd` or
+`.agents/skills/ticketd`. Other harnesses can use the same portable `SKILL.md` in
+their skill directory, or load the guide directly with `ticketd skills get`.
 
-```powershell
-ticketd skills install "$env:USERPROFILE/.agents/skills/ticketd"
-ticketd skills install "$env:USERPROFILE/.claude/skills/ticketd"
-```
-
-In a POSIX shell, use `~/.agents/skills/ticketd` or `~/.claude/skills/ticketd`.
-Other harnesses can use the same portable `SKILL.md` in their skill directory,
-or load the guide directly with `ticketd skills get`.
-
-Re-running installation is harmless when the file is identical. If it differs,
-the command reports a conflict and leaves it intact. Review the existing file,
-then pass `--replace` to refresh it from this executable. Only `SKILL.md` is
-managed; adjacent files and project instructions are preserved. Restart or reload
-the harness if needed to discover an installed skill. Keep `ticketd` on that
-harness's PATH or supply its absolute executable path.
+ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs.
+Re-running installation updates a copy ticketd wrote and nobody changed, and leaves
+an identical one alone. A copy edited after installation, or one ticketd did not
+write, is reported and left intact. Review it, then choose Replace in Settings or
+pass `--replace`: the existing `SKILL.md` is saved beside the new one as
+`SKILL.md.backup-<seconds>`. Adjacent files and project instructions are preserved.
+Restart or reload the harness if needed to discover an installed skill. Keep
+`ticketd` on that harness's PATH or supply its absolute executable path.
 
 The skill teaches CLI operations. It does not select a tracker, automatically
 create tickets, or impose a work lifecycle. If useful, add this capability pointer

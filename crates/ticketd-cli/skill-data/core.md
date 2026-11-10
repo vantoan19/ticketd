@@ -27,13 +27,13 @@ references and entity IDs; names and directory names are not substitutes for IDs
 This guide covers connecting and the shared contracts below. Before the action
 in a row, load that row's guide; load only the guides your task reaches.
 
-| Before you…                                                                                  | Load                           |
-| -------------------------------------------------------------------------------------------- | ------------------------------ |
-| Find, create, edit, or relate a ticket; register a project; attach evidence                   | `ticketd skills get tickets`   |
-| Retrieve context; read or write a Document, Activity, or Plan; browse a graph                 | `ticketd skills get context`   |
+| Before you…                                                                                    | Load                           |
+| ---------------------------------------------------------------------------------------------- | ------------------------------ |
+| Find, create, edit, or relate a ticket; register a project; attach evidence                    | `ticketd skills get tickets`   |
+| Retrieve context; read or write a Document, Activity, or Plan; browse a graph                  | `ticketd skills get context`   |
 | Send a write that must survive a retry, replace shared text, or change several tickets at once | `ticketd skills get writes`    |
-| Touch a ticket an external source owns, change source settings, refresh, or publish           | `ticketd skills get sources`   |
-| Move, back up, restore, or export the workspace; use reminders or the personal inbox          | `ticketd skills get workspace` |
+| Touch a ticket an external source owns, change source settings, refresh, or publish            | `ticketd skills get sources`   |
+| Move, back up, restore, or export the workspace; use reminders or the personal inbox           | `ticketd skills get workspace` |
 
 `ticketd COMMAND --help` and `ticketd GROUP COMMAND --help` describe current
 arguments and flags. Examples use placeholders such as PROJECT_ID and DOCUMENT_ID; substitute actual

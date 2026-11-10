@@ -1,7 +1,6 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
-
-const DISCOVERY_SKILL: &str = include_str!("../../../skills/ticketd/SKILL.md");
+use std::path::PathBuf;
+use ticketd_core::agent_skills::{self, AGENTS, Agent, InstallOutcome};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -13,11 +12,16 @@ pub enum Command {
         #[arg(default_value = "core")]
         name: String,
     },
-    /// Install or refresh SKILL.md in an explicit skill directory
+    /// Install or update SKILL.md for agents (per user) or in an explicit skill directory
+    #[command(group = clap::ArgGroup::new("target").required(true))]
     Install {
         /// Destination containing SKILL.md, e.g. .agents/skills/ticketd or .claude/skills/ticketd
-        directory: PathBuf,
-        /// Replace a differing SKILL.md after reviewing it; other files are preserved
+        #[arg(group = "target")]
+        directory: Option<PathBuf>,
+        /// Install into these agents' per-user skill folders: claude-code, codex
+        #[arg(long, value_delimiter = ',', group = "target")]
+        agent: Vec<String>,
+        /// Replace an edited or foreign SKILL.md after reviewing it; it is saved as a backup first
         #[arg(long)]
         replace: bool,
     },
@@ -93,51 +97,63 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
             )?;
             write!(output, "{}", guide.content)?;
         }
-        Command::Install { directory, replace } => {
-            let path = directory.join("SKILL.md");
-            install(&directory, &path, replace)
-                .map_err(|error| format!("cannot install {}: {error}", path.display()))?;
-            writeln!(output, "Installed {}", path.display())?;
+        Command::Install {
+            directory,
+            agent,
+            replace,
+        } => {
+            let directories = match directory {
+                Some(directory) => vec![directory],
+                None => {
+                    let home = agent_skills::user_home()?;
+                    agent
+                        .iter()
+                        .map(|id| {
+                            Agent::find(id)
+                                .map(|agent| agent.skill_directory(&home))
+                                .ok_or_else(|| {
+                                    let known: Vec<_> =
+                                        AGENTS.iter().map(|agent| agent.id).collect();
+                                    format!(
+                                        "unknown agent '{id}'; choose from {}",
+                                        known.join(", ")
+                                    )
+                                })
+                        })
+                        .collect::<Result<_, _>>()?
+                }
+            };
+            // Install every target before reporting a failure, so one conflict
+            // does not leave the other agents without the skill.
+            let mut failed = Vec::new();
+            for directory in directories {
+                let path = directory.join("SKILL.md");
+                match agent_skills::install_skill(&directory, replace) {
+                    Ok(outcome) => {
+                        let message = match outcome {
+                            InstallOutcome::Unchanged => "Up to date".to_owned(),
+                            InstallOutcome::Installed => "Installed".to_owned(),
+                            InstallOutcome::Updated => "Updated".to_owned(),
+                            InstallOutcome::Replaced { backup } => {
+                                format!("Replaced (previous copy saved as {})", backup.display())
+                            }
+                        };
+                        writeln!(output, "{message}: {}", path.display())?;
+                    }
+                    Err(error) => {
+                        let hint = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                            " (use --replace)"
+                        } else {
+                            ""
+                        };
+                        failed.push(format!("cannot install {}: {error}{hint}", path.display()));
+                    }
+                }
+            }
+            if !failed.is_empty() {
+                return Err(failed.join("\n").into());
+            }
         }
-    }
-    Ok(())
-}
-
-fn install(directory: &Path, path: &Path, replace: bool) -> std::io::Result<()> {
-    use std::io::{Error, ErrorKind};
-
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            if !metadata.is_file() {
-                return Err(Error::other(
-                    "SKILL.md must be a regular file, not a directory or link",
-                ));
-            }
-            if std::fs::read(path)? == DISCOVERY_SKILL.as_bytes() {
-                return Ok(());
-            }
-            if !replace {
-                return Err(Error::new(
-                    ErrorKind::AlreadyExists,
-                    "SKILL.md differs from the bundled skill; review it, then use --replace to overwrite it",
-                ));
-            }
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    std::fs::create_dir_all(directory)?;
-    // Stage beside the destination so a failed write never leaves a partial skill.
-    let mut staged = tempfile::NamedTempFile::new_in(directory)?;
-    staged.write_all(DISCOVERY_SKILL.as_bytes())?;
-    staged.flush()?;
-    if replace {
-        staged.persist(path).map_err(|error| error.error)?;
-    } else {
-        staged
-            .persist_noclobber(path)
-            .map_err(|error| error.error)?;
     }
     Ok(())
 }

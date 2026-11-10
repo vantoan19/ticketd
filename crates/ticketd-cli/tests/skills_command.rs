@@ -100,17 +100,41 @@ fn installation_is_repeatable_and_preserves_differing_files_until_explicit_repla
         "user-edited skill"
     );
 
-    run(dir.path(), &["skills", "install", destination, "--replace"]);
+    let replaced = run(dir.path(), &["skills", "install", destination, "--replace"]);
     assert_eq!(std::fs::read(&skill).unwrap(), bundled);
     assert_eq!(
         std::fs::read_to_string(&other).unwrap(),
         "keep this context"
     );
+    // The replaced copy is saved beside the new one; the output names it.
+    let backup = std::fs::read_dir(skill.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.to_string_lossy().contains("SKILL.md.backup-"))
+        .unwrap();
     assert_eq!(
-        std::fs::read_dir(skill.parent().unwrap()).unwrap().count(),
-        2
+        std::fs::read_to_string(&backup).unwrap(),
+        "user-edited skill"
     );
+    let backup_name = backup.file_name().unwrap().to_string_lossy();
+    assert!(replaced.contains(backup_name.as_ref()));
     assert!(!dir.path().join("workspace.sqlite3").exists());
+}
+
+#[test]
+fn agent_installation_needs_a_known_agent_and_exactly_one_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let unknown = invoke(dir.path(), &["skills", "install", "--agent", "nope"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    let message = String::from_utf8_lossy(&unknown.stderr);
+    assert!(message.contains("claude-code") && message.contains("codex"));
+    assert!(!invoke(dir.path(), &["skills", "install"]).status.success());
+    assert!(
+        !invoke(dir.path(), &["skills", "install", "x", "--agent", "codex"])
+            .status
+            .success()
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
 
 #[test]

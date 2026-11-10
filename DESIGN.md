@@ -423,12 +423,12 @@ Settings are described in the next section.
 
 Settings is a dedicated page. It replaces the sidebar with its own section list and a Back to tickets action; the content panel keeps the same inset and shadow ring.
 
-| Group       | Sections                                  |
-| ----------- | ----------------------------------------- |
-| Preferences | Appearance, Attention                     |
-| Workspace   | Location, Backups, Export, Command line   |
-| Sources     | One section per available source (GitHub) |
-| Help        | Keyboard shortcuts, About                 |
+| Group       | Sections                                              |
+| ----------- | ----------------------------------------------------- |
+| Preferences | Appearance, Attention                                 |
+| Workspace   | Location, Backups, Export, Command line, Agent skills |
+| Sources     | One section per available source (GitHub)             |
+| Help        | Keyboard shortcuts, About                             |
 
 - **Page:** one centered column of cards. Each card has a 12px radius and the shadow ring (no separate border), with 32px between cards.
 - **Card footer:** a card may end with a recessed footer (recessed surface) for explanations and secondary actions. Keep export and backup explanations in the footer beside their actions.
@@ -436,6 +436,7 @@ Settings is a dedicated page. It replaces the sidebar with its own section list 
 - **Applying changes:** changes apply immediately. There is no Save button for preferences; show a failure beside the control if one cannot be applied.
 - **Sources:** one section per available source, added only when its connector exists. Its card is the exception to immediate application: it shows Saved configuration or Unsaved changes, and Save stays unavailable until Preview matches has run for the current rules. Saving turns discovery on and says that matching issues are imported on the next refresh. A saved source also shows its refresh schedule and its last refresh.
 - **Theme:** Appearance offers System, Light, and Dark as a segmented control. System is the default and follows the operating system live; the choice applies without reloading.
+- **Agent skills:** one row per supported agent with its skill folder, a status (Installed, Update available, Not installed, Needs attention) and the one action that state allows. Replacing a copy ticketd did not write or that was edited goes through a review dialog that says the current file is saved as a backup.
 - **Restore:** restoring a workspace backup always goes through a review dialog that states what will be replaced. Never use a browser confirmation.
 
 ## 11. Design system and shared components

@@ -1,4 +1,5 @@
 //! Desktop adapter for the shared ticketd core.
+mod agent_skills;
 mod cli_status;
 
 use ticketd_core::{
@@ -1453,6 +1454,8 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan_purpose,
             set_plan,
             cli_status::check_cli,
+            agent_skills::agent_skills,
+            agent_skills::install_agent_skill,
             list_projects,
             register_checkout,
             remove_checkout,

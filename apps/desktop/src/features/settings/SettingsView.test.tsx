@@ -112,6 +112,7 @@ test("the section list only offers sections that have cards", () => {
     "Backups",
     "Export",
     "Command line",
+    "Agent skills",
     "Keyboard shortcuts",
     "About",
   ]);
