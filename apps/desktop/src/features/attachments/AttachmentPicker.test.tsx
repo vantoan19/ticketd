@@ -527,6 +527,11 @@ test("explicit local fallback uses a new operation and retains the original Driv
   await screen.findByText(/Destination: Google Drive/);
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
   await screen.findByText("Drive offline");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Upload locally instead" }),
+    ).toHaveProperty("disabled", false),
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "Upload locally instead" }),
   );
@@ -599,6 +604,11 @@ test("explicit local fallback inserts at its original selection position", async
   const alpha = await screen.findByRole("listitem", { name: "alpha.txt" });
   await within(alpha).findByText(/Drive offline for Alpha/);
   await waitFor(() => expect(picked).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(
+      within(alpha).getByRole("button", { name: "Upload locally instead" }),
+    ).toHaveProperty("disabled", false),
+  );
   fireEvent.click(
     within(alpha).getByRole("button", { name: "Upload locally instead" }),
   );
