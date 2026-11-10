@@ -14,7 +14,9 @@ pub struct AgentSkill {
     pub path: String,
     /// Whether the harness's own folder exists for this user.
     pub detected: bool,
-    pub state: SkillState,
+    /// None when the folder could not be read; `error` then says why.
+    pub state: Option<SkillState>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,17 +32,21 @@ fn display(path: &Path, home: &Path) -> String {
     }
 }
 
-fn describe(agent: &'static Agent, home: &Path) -> Result<AgentSkill, String> {
+/// One agent's row; a folder that cannot be read affects only its own row.
+fn describe(agent: &'static Agent, home: &Path) -> AgentSkill {
     let directory = agent.skill_directory(home);
-    let state = agent_skills::skill_state(&directory)
-        .map_err(|error| format!("cannot read {}: {error}", display(&directory, home)))?;
-    Ok(AgentSkill {
+    let (state, error) = match agent_skills::skill_state(&directory) {
+        Ok(state) => (Some(state), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    AgentSkill {
         id: agent.id,
         name: agent.name,
         path: display(&directory, home),
         detected: agent.detected(home),
         state,
-    })
+        error,
+    }
 }
 
 /// Reports the ticketd skill's state for every supported agent.
@@ -48,7 +54,7 @@ fn describe(agent: &'static Agent, home: &Path) -> Result<AgentSkill, String> {
 pub async fn agent_skills() -> Result<Vec<AgentSkill>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let home = agent_skills::user_home().map_err(|error| error.to_string())?;
-        AGENTS.iter().map(|agent| describe(agent, &home)).collect()
+        Ok(AGENTS.iter().map(|agent| describe(agent, &home)).collect())
     })
     .await
     .map_err(|error| error.to_string())?

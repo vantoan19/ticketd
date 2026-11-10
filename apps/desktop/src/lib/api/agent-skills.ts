@@ -6,13 +6,18 @@ const agentSkillSchema = z.object({
   name: z.string(),
   path: z.string(),
   detected: z.boolean(),
-  state: z.enum([
-    "installed",
-    "update_available",
-    "not_installed",
-    "edited",
-    "other",
-  ]),
+  /** Null when the folder could not be read; `error` says why. */
+  state: z
+    .enum([
+      "installed",
+      "update_available",
+      "not_installed",
+      "edited",
+      "other",
+      "not_a_file",
+    ])
+    .nullable(),
+  error: z.string().nullable(),
 });
 
 const installSchema = z.object({ backup: z.string().nullable() });

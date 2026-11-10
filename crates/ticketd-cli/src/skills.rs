@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::PathBuf;
-use ticketd_core::agent_skills::{self, AGENTS, Agent, InstallOutcome};
+use ticketd_core::agent_skills::{self, AGENTS, Agent, InstallError, InstallOutcome};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -12,15 +12,15 @@ pub enum Command {
         #[arg(default_value = "core")]
         name: String,
     },
-    /// Install or update SKILL.md for agents (per user) or in an explicit skill directory
+    /// Install or update SKILL.md for coding agents (per user) or in an explicit skill directory
     #[command(group = clap::ArgGroup::new("target").required(true))]
     Install {
         /// Destination containing SKILL.md, e.g. .agents/skills/ticketd or .claude/skills/ticketd
         #[arg(group = "target")]
         directory: Option<PathBuf>,
-        /// Install into these agents' per-user skill folders: claude-code, codex
+        /// Install into these harnesses' per-user skill folders: claude-code, codex
         #[arg(long, value_delimiter = ',', group = "target")]
-        agent: Vec<String>,
+        harness: Vec<String>,
         /// Replace an edited or foreign SKILL.md after reviewing it; it is saved as a backup first
         #[arg(long)]
         replace: bool,
@@ -99,14 +99,14 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
         }
         Command::Install {
             directory,
-            agent,
+            harness,
             replace,
         } => {
             let directories = match directory {
                 Some(directory) => vec![directory],
                 None => {
                     let home = agent_skills::user_home()?;
-                    agent
+                    harness
                         .iter()
                         .map(|id| {
                             Agent::find(id)
@@ -115,7 +115,7 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
                                     let known: Vec<_> =
                                         AGENTS.iter().map(|agent| agent.id).collect();
                                     format!(
-                                        "unknown agent '{id}'; choose from {}",
+                                        "unknown harness '{id}'; choose from {}",
                                         known.join(", ")
                                     )
                                 })
@@ -141,7 +141,7 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
                         writeln!(output, "{message}: {}", path.display())?;
                     }
                     Err(error) => {
-                        let hint = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        let hint = if matches!(error, InstallError::Conflict(_)) {
                             " (use --replace)"
                         } else {
                             ""

@@ -122,19 +122,53 @@ fn installation_is_repeatable_and_preserves_differing_files_until_explicit_repla
 }
 
 #[test]
-fn agent_installation_needs_a_known_agent_and_exactly_one_target() {
+fn harness_installation_needs_a_known_harness_and_exactly_one_target() {
     let dir = tempfile::tempdir().unwrap();
-    let unknown = invoke(dir.path(), &["skills", "install", "--agent", "nope"]);
+    let unknown = invoke(dir.path(), &["skills", "install", "--harness", "nope"]);
     assert_eq!(unknown.status.code(), Some(1));
     let message = String::from_utf8_lossy(&unknown.stderr);
     assert!(message.contains("claude-code") && message.contains("codex"));
     assert!(!invoke(dir.path(), &["skills", "install"]).status.success());
     assert!(
-        !invoke(dir.path(), &["skills", "install", "x", "--agent", "codex"])
-            .status
-            .success()
+        !invoke(
+            dir.path(),
+            &["skills", "install", "x", "--harness", "codex"]
+        )
+        .status
+        .success()
     );
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn claude_code_installation_follows_its_config_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("claude profile");
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["skills", "install", "--harness", "claude-code"])
+        .current_dir(dir.path())
+        .env("CLAUDE_CONFIG_DIR", &profile)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(profile.join("skills/ticketd/SKILL.md")).unwrap(),
+        include_bytes!("../../../skills/ticketd/SKILL.md")
+    );
+}
+
+#[test]
+fn the_replace_hint_appears_only_for_a_skill_conflict() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "not a folder").unwrap();
+    let result = invoke(dir.path(), &["skills", "install", "notes.txt"]);
+    assert_eq!(result.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("--replace"));
 }
 
 #[test]

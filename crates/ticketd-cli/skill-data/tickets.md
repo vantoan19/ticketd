@@ -14,8 +14,9 @@ ticketd context T-1 --relationships --latest-update
 family, source, and availability. Use `--unlinked` for tickets with no project.
 Neither command infers a project from the working directory. Search is a literal
 substring over saved ticket titles, bodies, and authored Activities, with ASCII
-case-insensitive matching. Empty search returns no matches. Normal results exclude
-trash. Page arrays with `--limit` and `--offset` until a shorter page is returned.
+case-insensitive matching. An empty query applies only the filters, like `list`.
+Normal results exclude trash. A page holds at most 100 tickets whatever `--limit`
+asks for: advance `--offset` by the number returned and stop at an empty page.
 
 `show` returns full ticket content, relationships, and source ownership metadata.
 `context` returns bounded, explicitly selected scopes; see `skills get context`.

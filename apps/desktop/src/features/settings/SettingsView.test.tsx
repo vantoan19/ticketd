@@ -28,6 +28,9 @@ vi.mock("@/lib/api/workspace", () => ({
   },
 }));
 vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
+vi.mock("@/lib/api/agent-skills", () => ({
+  agentSkillsClient: { list: vi.fn(async () => []), install: vi.fn() },
+}));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
     permitted: vi.fn(),

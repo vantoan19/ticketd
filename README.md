@@ -19,8 +19,8 @@ Read the [quality guidelines](docs/agents/quality.md) before implementing change
 ## Agent CLI skill
 
 Run `ticketd skills get` for the CLI's bundled operating guide and `ticketd skills
-list` for focused topic guides. A small discovery skill can be installed for
-Codex or Claude Code with `ticketd skills install DIRECTORY`; see
+list` for focused topic guides. Install the small discovery skill for Claude Code
+and Codex from Settings → Agent skills or with `ticketd skills install --harness`; see
 [agent skill installation](docs/install.md#agent-cli-skill). It teaches CLI use
 while leaving workflows to users and their other skills.
 

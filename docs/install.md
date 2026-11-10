@@ -48,7 +48,7 @@ Install the small discovery skill for your user from Settings → Agent skills i
 the desktop app, or with the CLI:
 
 ```sh
-ticketd skills install --agent claude-code,codex
+ticketd skills install --harness claude-code,codex
 ```
 
 Claude Code reads it from `~/.claude/skills/ticketd` (or `$CLAUDE_CONFIG_DIR/skills`),
