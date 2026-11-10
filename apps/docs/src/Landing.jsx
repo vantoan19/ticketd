@@ -1,7 +1,7 @@
 import { Component, Fragment } from "react";
 import { links } from "./links";
 import markup from "./Landing.markup.json";
-import lineMachines from "./LineMachines.markup.json";
+import LineScene from "./LineScene";
 import AppReady from "./screens/AppReady";
 import AppLine from "./screens/AppLine";
 import AppMonitor from "./screens/AppMonitor";
@@ -1406,11 +1406,9 @@ export default class Landing extends Component {
         name: m.name,
         cmd: m.cmdHint,
         on: i === Math.max(0, idx),
-        done: done(i),
         label: m.num + " " + m.name + ": " + m.cmdHint,
         pick: () => this.pickStep(i),
         hot: () => this.setHot("line", String(i)),
-        art: lineMachines[i],
       })),
       hot: (s.hot || {}).line || "",
       cold: () => this.setHot("line", ""),
@@ -2243,47 +2241,7 @@ export default class Landing extends Component {
                   }
                 </p>
               </div>
-              <div
-                className={"st-line"}
-                role={"group"}
-                aria-label={"Machines on the line"}
-              >
-                {v.line.stations.map((m) => (
-                  <button
-                    key={m.num}
-                    type={"button"}
-                    className={"st-line-station"}
-                    aria-label={m.label}
-                    aria-pressed={m.on}
-                    data-done={m.done}
-                    onClick={m.pick}
-                    onMouseEnter={m.hot}
-                    onFocus={m.hot}
-                    onMouseLeave={v.line.cold}
-                    onBlur={v.line.cold}
-                  >
-                    <span className={"st-line-number"}>{m.num}</span>
-                    <span className={"st-line-label"}>
-                      <b>{m.name}</b>
-                      <small>{m.cmd}</small>
-                    </span>
-                    <svg
-                      className={"x-art"}
-                      viewBox={m.art.viewBox}
-                      data-hot={v.line.hot}
-                      data-step={v.line.step}
-                      data-run={v.line.running}
-                      data-d0={v.line.d0}
-                      data-d1={v.line.d1}
-                      data-d2={v.line.d2}
-                      data-d3={v.line.d3}
-                      data-d4={v.line.d4}
-                      aria-hidden={"true"}
-                      dangerouslySetInnerHTML={{ __html: m.art.markup }}
-                    />
-                  </button>
-                ))}
-              </div>
+              <LineScene line={v.line} />
               <div className={"st-bar"}>
                 <button
                   type={"button"}
@@ -2406,8 +2364,8 @@ export default class Landing extends Component {
                     <li>
                       <b>{"3"}</b>
                       <span>
-                        <em>{"App screen."}</em>
-                        {" Shows the result of the selected command."}
+                        <em>{"Conveyor."}</em>
+                        {" Carries T-12 down the line as each command runs."}
                       </span>
                     </li>
                     <li>
