@@ -16,6 +16,14 @@ The Matt Pocock engineering skills are configured through `docs/agents/`. The sk
 
 Read the [quality guidelines](docs/agents/quality.md) before implementing changes.
 
+## Agent CLI skill
+
+Run `ticketd skills get` for the CLI's bundled operating guide and `ticketd skills
+list` for focused topic guides. Install the small discovery skill for Claude Code
+and Codex from Settings → Agent skills or with `ticketd skills install --harness`; see
+[agent skill installation](docs/install.md#agent-cli-skill). It teaches CLI use
+while leaving workflows to users and their other skills.
+
 ## Layout
 
 ```text

@@ -5,11 +5,24 @@ use ticketd_core::{
     EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
 };
 
+mod skills;
+
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
 struct Arguments {
     #[command(subcommand)]
-    command: Command,
+    command: CliCommand,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Read bundled CLI guides or install the agent discovery skill (no workspace access)
+    Skills {
+        #[command(subcommand)]
+        command: skills::Command,
+    },
+    #[command(flatten)]
+    Workspace(Command),
 }
 
 #[derive(Subcommand)]
@@ -1110,7 +1123,11 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     use clap::{CommandFactory, FromArgMatches};
     let args = Arguments::from_arg_matches(&describe(Arguments::command(), &[]).get_matches())
         .unwrap_or_else(|error| error.exit());
-    if let Command::RestoreWorkspace { path, target } = &args.command {
+    let command = match args.command {
+        CliCommand::Skills { command } => return skills::run(command, output),
+        CliCommand::Workspace(command) => command,
+    };
+    if let Command::RestoreWorkspace { path, target } = &command {
         let destination = target
             .as_ref()
             .map(std::path::PathBuf::from)
@@ -1128,7 +1145,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     }
     // A status probe reads the file as it is. Opening the workspace would create
     // a missing one or migrate an older one past the version the desktop app supports.
-    if matches!(args.command, Command::Workspace) {
+    if matches!(command, Command::Workspace) {
         let file = match std::env::var_os("TICKETD_TEST_WORKSPACE") {
             Some(workspace) => ticketd_core::workspace_file(workspace)?,
             None => ticketd_core::default_workspace_file()?,
@@ -1150,7 +1167,7 @@ fn run(output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Workspace::open(path)?,
         None => Workspace::open_default()?,
     };
-    let text = match args.command {
+    let text = match command {
         Command::Attachment { command } => attachment_command(&mut workspace, command)?,
         Command::Document { command } => match command {
             DocumentCommand::References { id, offset } => {

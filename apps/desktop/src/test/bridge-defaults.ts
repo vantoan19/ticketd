@@ -102,6 +102,8 @@ export function bridgeDefault(
         app_workspace_path: null,
         suggested_directory: "~/.local/bin",
       };
+    case "agent_skills":
+      return [];
     case "show_plan":
       return {
         plan: { id: args?.id ?? "", name: "Plan", archived: false },

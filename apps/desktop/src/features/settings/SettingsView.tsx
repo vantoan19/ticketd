@@ -37,6 +37,7 @@ import { CommandText } from "@/features/settings/CommandText";
 import { revealFile } from "@/lib/reveal";
 import { SettingsCard } from "@/features/settings/SettingsCard";
 import { AttentionCard } from "@/features/settings/AttentionCard";
+import { AgentSkillsCard } from "@/features/settings/AgentSkillsCard";
 import { CommandLineCard } from "@/features/settings/CommandLineCard";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
@@ -727,6 +728,7 @@ export function SettingsView({
           />
           <ExportCard />
           <CommandLineCard />
+          <AgentSkillsCard />
         </div>
       )}
       {sources.map((entry) => {

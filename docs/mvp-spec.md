@@ -50,6 +50,12 @@ Ticket management must not become a bottleneck in the AI workflow. Optimize UI r
 
 ticketd provides shared storage, visualization, and context. Users keep their preferred harnesses and skills. The CLI is the primary agent interface; MCP is not required.
 
+The CLI bundles version-matched operating guidance, available offline through
+`ticketd skills get`, and can install a portable discovery skill for external
+harnesses. Guidance teaches commands, data semantics, and recovery. It does not
+prescribe ticket creation, status transitions, reporting cadence, or a development
+workflow; those remain the user's and calling skills' decisions.
+
 ### 2.5. Expand from real use cases
 
 First make ticket management, visualization, and context retrieval work well. Add capabilities when actual usage demonstrates a clear need.
