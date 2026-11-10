@@ -23,10 +23,10 @@ The drawings and scoped stylesheet implement the approved November 10, 2026 desi
 `Landing.jsx` ports the design's interactions to React. `landing.css` owns the
 page's paper, ink, accent and motion tokens, independently of the desktop app.
 
-`Landing.markup.json` contains static SVG artwork; `LineMachines.markup.json`
-contains the five individual machines. `LineScene.jsx` assembles them around a
-vertical conveyor, using `LineScene.markup.json` for its frame and station positions.
-The ticket carrier follows the selected station; reduced motion skips its travel.
+`Landing.markup.json` contains static SVG artwork. `LineScene.jsx` displays the
+five-machine horizontal conveyor from `LineScene.markup.json`, including its
+station positions. The ticket carrier follows the selected station; reduced
+motion skips its travel. Narrow screens scroll the drawing to the selected machine.
 The files under `src/screens` contain captured app markup and the app stylesheet,
 from desktop/CLI revision
 `5c1a242`. These are trusted, checked-in fixtures, never user-supplied HTML. The app

@@ -2242,87 +2242,89 @@ export default class Landing extends Component {
                 </p>
               </div>
               <LineScene line={v.line} />
-              <div className={"st-bar"}>
-                <button
-                  type={"button"}
-                  className={"st-btn st-btn-primary"}
-                  onClick={v.line.runAll}
-                >
-                  {v.line.runLabel}
-                </button>
-                <div
-                  className={"st-seg"}
-                  role={"group"}
-                  aria-label={"Who runs the machines"}
-                >
-                  <button
-                    type={"button"}
-                    aria-pressed={v.line.isAgent}
-                    onClick={v.line.setAgent}
-                  >
-                    {"your agent"}
-                  </button>
-                  <button
-                    type={"button"}
-                    aria-pressed={v.line.isYou}
-                    onClick={v.line.setYou}
-                  >
-                    {"you, in the app"}
-                  </button>
-                </div>
-                <p aria-live={"polite"}>
-                  <b>{v.line.title}</b>
-                  {v.line.say}
-                </p>
-              </div>
               <div className={"st-stage"}>
-                <figure className={"st-win st-term"}>
-                  <div className={"st-win-bar"} aria-hidden={"true"}>
-                    <span>{v.line.termTitle}</span>
-                    <em>
-                      <i></i>
-                    </em>
+                <div className={"st-line-console"}>
+                  <div className={"st-bar"}>
+                    <button
+                      type={"button"}
+                      className={"st-btn st-btn-primary"}
+                      onClick={v.line.runAll}
+                    >
+                      {v.line.runLabel}
+                    </button>
+                    <div
+                      className={"st-seg"}
+                      role={"group"}
+                      aria-label={"Who runs the machines"}
+                    >
+                      <button
+                        type={"button"}
+                        aria-pressed={v.line.isAgent}
+                        onClick={v.line.setAgent}
+                      >
+                        {"your agent"}
+                      </button>
+                      <button
+                        type={"button"}
+                        aria-pressed={v.line.isYou}
+                        onClick={v.line.setYou}
+                      >
+                        {"you, in the app"}
+                      </button>
+                    </div>
+                    <p aria-live={"polite"}>
+                      <b>{v.line.title}</b>
+                      {v.line.say}
+                    </p>
                   </div>
-                  <div
-                    className={"st-tbody"}
-                    tabIndex={0}
-                    role={"region"}
-                    aria-label={"Line command and output"}
-                  >
-                    {v.line.lines.map((ln, index) => (
-                      <Fragment key={index}>
-                        <div className={ln.cls} data-new={ln.isNew}>
-                          <span className={"st-prompt"} aria-hidden={"true"}>
-                            {ln.prompt}
-                          </span>
-                          {ln.text}
-                          {ln.copy ? (
-                            <>
-                              <button
-                                type={"button"}
-                                className={"st-copy"}
-                                aria-label={"Copy this command"}
-                                onClick={ln.copyIt}
-                              >
-                                {ln.copyText}
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      </Fragment>
-                    ))}
-                    {v.line.cursor ? (
-                      <>
-                        <div className={"st-tl st-tl-cmd"}>
-                          <span className={"st-prompt"} aria-hidden={"true"}>
-                            {"$ "}
-                          </span>
-                          <span className={"st-cursor"}></span>
-                        </div>
-                      </>
-                    ) : null}
-                  </div>
-                </figure>
+                  <figure className={"st-win st-term"}>
+                    <div className={"st-win-bar"} aria-hidden={"true"}>
+                      <span>{v.line.termTitle}</span>
+                      <em>
+                        <i></i>
+                      </em>
+                    </div>
+                    <div
+                      className={"st-tbody"}
+                      tabIndex={0}
+                      role={"region"}
+                      aria-label={"Line command and output"}
+                    >
+                      {v.line.lines.map((ln, index) => (
+                        <Fragment key={index}>
+                          <div className={ln.cls} data-new={ln.isNew}>
+                            <span className={"st-prompt"} aria-hidden={"true"}>
+                              {ln.prompt}
+                            </span>
+                            {ln.text}
+                            {ln.copy ? (
+                              <>
+                                <button
+                                  type={"button"}
+                                  className={"st-copy"}
+                                  aria-label={"Copy this command"}
+                                  onClick={ln.copyIt}
+                                >
+                                  {ln.copyText}
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </Fragment>
+                      ))}
+                      {v.line.cursor ? (
+                        <>
+                          <div className={"st-tl st-tl-cmd"}>
+                            <span className={"st-prompt"} aria-hidden={"true"}>
+                              {"$ "}
+                            </span>
+                            <span className={"st-cursor"}></span>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  </figure>
+                </div>
                 <figure className={"st-win"} data-pulse={v.pulse.line}>
                   <div className={"st-win-bar"} aria-hidden={"true"}>
                     <span>{"ticketd desktop app · " + v.line.appTitle}</span>
@@ -2350,7 +2352,7 @@ export default class Landing extends Component {
                       <span>
                         <em>{"Stations."}</em>
                         {
-                          " Follow the line from top to bottom, or pick any machine to inspect its command."
+                          " Follow the line from left to right, or pick any machine to inspect its command."
                         }
                       </span>
                     </li>
@@ -2365,7 +2367,7 @@ export default class Landing extends Component {
                       <b>{"3"}</b>
                       <span>
                         <em>{"Conveyor."}</em>
-                        {" Carries T-12 down the line as each command runs."}
+                        {" Carries T-12 along the line as each command runs."}
                       </span>
                     </li>
                     <li>

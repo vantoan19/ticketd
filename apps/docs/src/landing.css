@@ -650,25 +650,38 @@ path.x-sa {
   gap: 16px;
 }
 .st-line {
-  position: relative;
   width: 100%;
-  max-width: 600px;
-  margin-inline: auto;
+  overflow-x: auto;
 }
-.ln-v-rider {
-  transform: translateY(var(--line-y));
+.st-line-track {
+  position: relative;
+  min-width: 900px;
+}
+.st-line .st-tip {
+  bottom: 0;
+}
+.st-line-console {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.st-line-console .st-bar {
+  gap: 8px 12px;
+  margin: 0;
+}
+.st-line-console .st-bar p {
+  flex-basis: 100%;
+  font-size: 14px;
+  line-height: 20px;
+}
+.st-line-console > .st-term {
+  min-height: 0;
+  height: 200px;
+}
+.ln-rider {
+  transform: translateX(var(--rx, 0px));
   transition: transform 900ms steps(9);
-}
-.ln-v-port[data-on="true"] {
-  fill: var(--accent);
-}
-.x-art[data-run="true"] .ln-v-slats {
-  animation: st-belt-down 480ms linear infinite;
-}
-@keyframes st-belt-down {
-  to {
-    transform: translateY(12px);
-  }
 }
 .st-stn {
   position: absolute;
@@ -838,7 +851,8 @@ path.x-sa {
   transition: none;
 }
 .x-art[data-run="make"] .h-belt-a,
-.x-art[data-run="read"] .h-belt-b {
+.x-art[data-run="read"] .h-belt-b,
+.x-art[data-run="true"] .ln-belt {
   animation: st-belt 420ms steps(5) infinite;
 }
 @keyframes st-belt {
@@ -3521,8 +3535,8 @@ path.x-sa {
   }
 }
 
-/* Keep a demonstration's controls, command and result together in the viewport.
-   Drawing notes expand in the document flow so zoom and long content can still scroll. */
+/* Desktop demos use up to 40% more height than the compact viewport layout to
+   enlarge the drawings. Notes and narrow layouts expand in the document flow. */
 .st-sec {
   padding-block: 32px;
 }
@@ -3647,31 +3661,65 @@ path.x-sa {
     flex-shrink: 0;
   }
   #line {
-    grid-template-rows: auto auto auto minmax(140px, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      "head head"
-      "drawing controls"
-      "drawing app"
-      "drawing terminal"
-      "notes notes";
+      "head"
+      "drawing"
+      "result"
+      "notes";
+  }
+  #line > .st-stage {
+    grid-area: result;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 28px;
+    margin: 0;
+    align-items: stretch;
+  }
+  #line > .st-line {
+    overflow: visible;
   }
   #line .st-stage > .st-win:not(.st-term) {
+    grid-area: auto;
     align-self: start;
   }
-  #line .st-stage > .st-term {
+  #line .st-term {
+    flex: 1;
+    contain: size;
     height: auto;
+  }
+  #assembly {
+    grid-template-rows: auto auto auto auto 1fr auto;
+    grid-template-areas:
+      "head head"
+      "drawing drawing"
+      "tabs app"
+      "controls app"
+      "terminal app"
+      "notes notes";
+  }
+  #assembly > .as2 {
+    width: 75%;
+    justify-self: center;
+  }
+  #assembly .st-stage > .st-term,
+  #dock .st-stage > .st-term {
+    height: auto;
+    min-height: 140px;
     align-self: stretch;
   }
   #dock {
+    grid-template-rows: auto auto auto 1fr auto;
     grid-template-areas:
       "head head"
-      "drawing app"
+      "drawing drawing"
       "tabs app"
       "terminal app"
       "notes notes";
   }
-  #dock .st-stage > .st-term {
-    height: clamp(200px, 28svh, 280px);
+  #dock > .dk2 {
+    width: 80%;
+    justify-self: center;
   }
   #dock .dk2-soon {
     min-height: 0;
@@ -3700,7 +3748,7 @@ path.x-sa {
   #monitor .mo2-stage {
     grid-area: drawing;
     justify-self: center;
-    width: min(100%, max(380px, (100svh - 430px) * 900 / 620));
+    width: min(100%, max(380px, (100svh - 430px) * 1.6 * 900 / 620));
   }
   #monitor .mo2-side {
     grid-area: log;
@@ -3723,11 +3771,11 @@ path.x-sa {
     display: grid;
     grid-template-columns:
       minmax(0, 1.6fr) minmax(0, 1fr)
-      clamp(220px, 22cqi, 300px);
+      clamp(320px, 30cqi, 400px);
     grid-template-areas:
       "head head head"
       "blockers tray app"
-      "blockers terminal app"
+      "terminal terminal app"
       "notes notes notes";
     gap: 12px 24px;
     align-items: start;
@@ -3748,7 +3796,7 @@ path.x-sa {
   #dispatch .st-term {
     grid-area: terminal;
     min-height: 0;
-    height: 160px;
+    height: 200px;
   }
   #dispatch .st-stage > .st-win:not(.st-term) {
     grid-area: app;
